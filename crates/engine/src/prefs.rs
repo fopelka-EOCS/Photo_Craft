@@ -295,6 +295,11 @@ pub struct Interface {
     pub notification_auto_hide: bool,
     /// Seconds a notice stays on screen before it hides itself (Auto Hide Notifications).
     pub notification_duration_seconds: u32,
+    /// Linux: while a global-menu host (Canonical AppMenu/dbusmenu registrar) serves the
+    /// menus, the in-window menu bar hides — except in full-screen modes, where the shell's
+    /// bar may be hidden too (the OS window is fullscreen). Off, PhotoCraft keeps its
+    /// in-window menu bar and exports nothing (Interface › Use Global Menu Bar).
+    pub global_menu_bar: bool,
 }
 
 impl Default for Interface {
@@ -324,6 +329,7 @@ impl Default for Interface {
             show_file_name_in_title: true,
             notification_auto_hide: true,
             notification_duration_seconds: 6,
+            global_menu_bar: true,
         }
     }
 }
