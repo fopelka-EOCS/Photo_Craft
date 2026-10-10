@@ -1002,3 +1002,9 @@ fn a_wrongly_typed_section_or_colour_setting_resets_only_that_part() {
     assert!(s.load_prefs_json(&deep).is_ok());
     assert!(s.load_prefs_json(r#"{"interface": {"theme": 3, "uiScale": [1]}, "workspaces": {"x": 1}, "menus": 1}"#).is_ok());
 }
+
+#[test]
+fn global_menu_preference_shows_on_linux_and_the_bsds_only() {
+    assert_eq!(is_hidden("interface.globalMenuBar"), !cfg!(all(unix, not(target_os = "macos"))));
+    assert!(X11_DESKTOP_ONLY.iter().all(|p| !HIDDEN_UNTIL_IMPLEMENTED.contains(p)));
+}

@@ -1141,6 +1141,10 @@ fn humanize(key: &str) -> String {
     if key == "webpQuality" {
         return "Quality".into();
     }
+    // Interface › Use global menu bar: an explicit label, not a string replace on the humanized key.
+    if key == "globalMenuBar" {
+        return "Use global menu bar".into();
+    }
     // The auto-hide notice settings read best with their own labels (Interface › Notification, #2022).
     if key == "notificationAutoHide" {
         return "Auto Hide Notifications".into();
@@ -1175,10 +1179,7 @@ fn humanize(key: &str) -> String {
             s.push(ch);
         }
     }
-    s = s.replace("Psd", "PSD").replace("Gpu", "GPU").replace("Ui ", "UI ").replace("Mb", "(MB)").replace("Exif", "EXIF").replace("Hud", "HUD");
-    // Interface › Use global menu bar: the plain humanization would read like a checkbox about
-    // existing menu bars; the setting switches the *use* of the global (shell) one on or off.
-    s.replace("Global menu bar", "Use global menu bar")
+    s.replace("Psd", "PSD").replace("Gpu", "GPU").replace("Ui ", "UI ").replace("Mb", "(MB)").replace("Exif", "EXIF").replace("Hud", "HUD")
 }
 
 fn choice_label(v: &str) -> String {
