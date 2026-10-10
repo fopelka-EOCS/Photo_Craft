@@ -3938,3 +3938,13 @@ curves	Smooth	Згладити
 	This shape layer must be rasterized before proceeding. It will no longer be editable as a shape. Rasterize the shape?	Щоб продовжити, потрібно растеризувати цей шар фігури. Після цього його більше не можна буде редагувати як фігуру. Растеризувати фігуру?
 	This Smart Object must be rasterized before proceeding. Its contents will no longer be editable. Rasterize the Smart Object?	Щоб продовжити, потрібно растеризувати цей смартоб’єкт. Після цього його вміст більше не можна буде редагувати. Растеризувати смартоб’єкт?
 	This fill layer must be rasterized before proceeding. Its fill content will no longer be editable. Rasterize the layer?	Щоб продовжити, потрібно растеризувати цей шар заливки. Після цього його заливку більше не можна буде редагувати. Растеризувати шар?
+# Software Updates (#2316)
+	Check for Updates	Перевірити оновлення
+	Check for Updates…	Перевірити оновлення…
+	Checking for updates…	Перевірка оновлень…
+	Download Update	Завантажити оновлення
+	Software Updates	Оновлення програми
+	Automatically Check for Updates at Startup	Автоматично перевіряти оновлення під час запуску
+	Automatic checks run at most once a day. Available updates appear after you close other dialogs.	Автоматична перевірка виконується не частіше одного разу на день. Доступні оновлення з’являться після закриття інших діалогів.
+	Download the update and save your work before installing the new version.	Завантажте оновлення та збережіть роботу перед встановленням нової версії.
+	For package-managed installations, update PhotoCraft through your package manager. Other downloads are on the release page.	Якщо програму встановлено через менеджер пакунків, оновіть PhotoCraft за його допомогою. Інші завантаження доступні на сторінці випуску.

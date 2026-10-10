@@ -4020,3 +4020,13 @@ layerLabel	No Color	Sem cor
 	Increase Brush Size	Aumentar tamanho do pincel
 	Decrease Brush Hardness	Diminuir dureza do pincel
 	Increase Brush Hardness	Aumentar dureza do pincel
+# Software Updates (#2316)
+	Check for Updates…	Verificar atualizações…
+	Checking for updates…	Verificando atualizações…
+	Download Update	Baixar atualização
+	Software Updates	Atualizações de software
+	Automatically Check for Updates at Startup	Verificar atualizações automaticamente ao iniciar
+	You're up to date	Você está atualizado
+	Automatic checks run at most once a day. Available updates appear after you close other dialogs.	As verificações automáticas ocorrem no máximo uma vez por dia. As atualizações disponíveis aparecem após fechar as outras caixas de diálogo.
+	Download the update and save your work before installing the new version.	Baixe a atualização e salve seu trabalho antes de instalar a nova versão.
+	For package-managed installations, update PhotoCraft through your package manager. Other downloads are on the release page.	Para instalações gerenciadas por pacotes, atualize o PhotoCraft pelo gerenciador de pacotes. Outros downloads estão na página da versão.

@@ -3230,3 +3230,13 @@ curves	Smooth	Glätten
 	GPU Memory (MB, 0 = Automatic)	GPU-Speicher (MB, 0 = Automatisch)
 	{name} was changed by another app after it was opened or saved here.	{name} wurde von einer anderen App geändert, nachdem es hier geöffnet oder gespeichert wurde.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Ersetze die Datei durch dieses Dokument oder brich ab und nutze Datei › Speichern unter, um beide zu behalten.
+# Software Updates (#2316)
+	Check for Updates	Nach Updates suchen
+	Check for Updates…	Nach Updates suchen…
+	Checking for updates…	Updates werden gesucht…
+	Download Update	Update herunterladen
+	Software Updates	Software-Updates
+	Automatically Check for Updates at Startup	Beim Start automatisch nach Updates suchen
+	Automatic checks run at most once a day. Available updates appear after you close other dialogs.	Automatische Prüfungen erfolgen höchstens einmal täglich. Verfügbare Updates erscheinen, nachdem Sie andere Dialoge geschlossen haben.
+	Download the update and save your work before installing the new version.	Laden Sie das Update herunter und speichern Sie Ihre Arbeit, bevor Sie die neue Version installieren.
+	For package-managed installations, update PhotoCraft through your package manager. Other downloads are on the release page.	Bei paketverwalteten Installationen aktualisieren Sie PhotoCraft über Ihren Paketmanager. Weitere Downloads finden Sie auf der Versionsseite.

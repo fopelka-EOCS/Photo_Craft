@@ -3829,3 +3829,13 @@ curves	Smooth	Wygładź
 	Increase Brush Size	Zwiększ rozmiar pędzla
 	Decrease Brush Hardness	Zmniejsz twardość pędzla
 	Increase Brush Hardness	Zwiększ twardość pędzla
+# Software Updates (#2316)
+	Check for Updates	Sprawdź aktualizacje
+	Check for Updates…	Sprawdź aktualizacje…
+	Checking for updates…	Sprawdzanie aktualizacji…
+	Download Update	Pobierz aktualizację
+	Software Updates	Aktualizacje oprogramowania
+	Automatically Check for Updates at Startup	Automatycznie sprawdzaj aktualizacje przy uruchomieniu
+	Automatic checks run at most once a day. Available updates appear after you close other dialogs.	Automatyczne sprawdzanie odbywa się najwyżej raz dziennie. Dostępne aktualizacje pojawią się po zamknięciu pozostałych okien dialogowych.
+	Download the update and save your work before installing the new version.	Pobierz aktualizację i zapisz pracę przed instalacją nowej wersji.
+	For package-managed installations, update PhotoCraft through your package manager. Other downloads are on the release page.	W przypadku instalacji zarządzanych przez pakiety zaktualizuj PhotoCraft za pomocą menedżera pakietów. Inne pliki są na stronie wydania.
