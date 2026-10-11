@@ -129,8 +129,9 @@ fn show_modal<T>(
             ui.disable();
         }
         if let Some(size) = resizable {
-            let max = (ctx.content_rect().size() - egui::vec2(40.0, 40.0)).max(egui::vec2(560.0, 400.0));
-            egui::Resize::default().id(id.with("resize")).default_size(size.min(max)).min_size(egui::vec2(560.0, 400.0)).max_size(max).show(ui, contents)
+            let max = (ctx.content_rect().size() - egui::vec2(40.0, 40.0)).max(egui::Vec2::splat(1.0));
+            let min = egui::vec2(560.0, 400.0).min(max);
+            egui::Resize::default().id(id.with("resize")).default_size(size.min(max)).min_size(min).max_size(max).show(ui, contents)
         } else {
             contents(ui)
         }
@@ -248,6 +249,13 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             } else {
                 440.0
             }));
+            if crate::prefs_ui::is_shortcuts(&fields) {
+                if let Some(w) = wide {
+                    ui.set_width(w);
+                }
+                // Keep OK/Cancel inside the viewport when the list is taller than the window.
+                ui.set_height((ctx.content_rect().height() - 40.0).clamp(1.0, 640.0));
+            }
             if web {
                 ui.set_max_width(available.x);
                 ui.set_min_size(available);
@@ -345,6 +353,13 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     }
                 }
                 DialogKind::Command if crate::color_range_ui::owns(&fields) => crate::color_range_ui::body(app, ui, &mut fields),
+                DialogKind::Command if crate::prefs_ui::is_shortcuts(&fields) => {
+                    let height = crate::prefs_ui::settings_height(ui.available_height(), ui.spacing().item_spacing.y, crate::widgets::button_height(ui.ctx()));
+                    ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), height), egui::Layout::top_down(egui::Align::Min), |ui| {
+                        ui.set_min_height(height);
+                        crate::prefs_ui::body(app, ui, &mut fields);
+                    });
+                }
                 DialogKind::Command if crate::prefs_ui::owns(&fields) => crate::prefs_ui::body(app, ui, &mut fields),
                 DialogKind::Command if fields.contains_key("__export") => crate::export_dialog::body(app, ui, &mut fields),
                 // Image Size and Canvas Size open on Width, selected (#2329).
@@ -492,7 +507,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         // The picker has a larger frame margin; include that whole frame in the canvas hit guard.
         shown.push(if color_picker { modal.response.rect } else { modal.inner });
         // Pin once laid out at its real size (the first frame is an invisible sizing pass).
-        if !sizing && (web || pinned.is_none() || drag != egui::Vec2::ZERO) {
+        if !sizing && (web || crate::prefs_ui::owns(&fields) || pinned.is_none() || drag != egui::Vec2::ZERO) {
             let screen = ctx.content_rect();
             // Keep the whole dialog (and so its title bar) on screen.
             let room = (screen.size() - modal.response.rect.size()).max(egui::Vec2::ZERO);
@@ -1208,3 +1223,6 @@ mod preference_resize_tests {
         assert_eq!(frame(&h), smaller);
     }
 }
+
+#[cfg(test)]
+mod layout_tests;

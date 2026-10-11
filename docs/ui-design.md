@@ -165,6 +165,22 @@ On Windows and Linux, System Title Bar displays “Applies at next launch.” be
 including before editing and after Apply. Saving this preference does not restart the app or
 change the current window's decorations; the next launch reads the saved choice.
 
+Preferences and Keyboard Shortcuts keep their confirmation buttons outside the scrolling content.
+Preferences gives its section list and settings the same height budget, so a long section list
+cannot push Apply, OK or Cancel below the window. Its contents continue to follow the user's
+resized dialog. Interface's checkbox groups retain their left alignment.
+
+Keyboard Shortcuts, Menus and Toolbar keep a stable dialog width. Each tab has its own grid and
+scroll state; command names and bindings have bounded cells with full-text hover help. Additional
+bindings remain individually removable and stack inside their column. Set controls and action
+rows wrap when necessary; the list receives the space left after those controls and the
+confirmation row. Measurement Log keys its grid state by its ordered column set.
+
+`dialogs::layout_tests` covers tab-switch frames, column positions, independent scroll offsets,
+alternate binding interactions, conflict actions, saved sets, and small-window button geometry.
+Its geometry matrix includes every theme, fractional display scaling, large UI text and translated
+labels. These offscreen tests do not establish native platform input acceptance.
+
 ## High DPI and 4K displays
 
 Edit → Preferences → Interface → UI Scale applies immediately. Auto follows the operating
