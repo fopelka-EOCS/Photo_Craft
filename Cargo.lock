@@ -4734,6 +4734,7 @@ version = "0.14.0"
 dependencies = [
  "photocraft-automation",
  "photocraft-codecs",
+ "photocraft-doc",
  "photocraft-engine",
  "photocraft-format",
  "photocraft-io",
@@ -4834,6 +4835,7 @@ dependencies = [
  "photocraft-raw",
  "photocraft-text",
  "photocraft-vector",
+ "proptest",
  "rayon",
  "roxmltree 0.20.0",
  "same-file",
