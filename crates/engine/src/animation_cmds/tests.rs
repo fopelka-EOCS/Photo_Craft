@@ -534,3 +534,41 @@ fn selecting_a_frame_reports_the_pixels_of_the_layers_that_change() {
     s.execute("animation.selectFrame", json!({"frame": 2})).unwrap();
     assert!(s.active().unwrap().last_damage.is_some_and(|d| d.is_empty()), "{:?}", s.active().unwrap().last_damage);
 }
+
+#[test]
+fn pasted_frames_go_after_the_selection_and_undo() {
+    let mut s = session(&["A", "B"]);
+    s.execute("animation.makeFramesFromLayers", json!({"delayMs": 100})).unwrap();
+    let b = id_of(&s, "B");
+    s.execute("animation.pasteFrames", json!({"frames": [{"delayMs": 250, "hidden": [b.0]}, {"delayMs": 300}], "after": 0})).unwrap();
+    assert_eq!(delays(&s), [100, 250, 300, 100, 100]);
+    assert_eq!(current(&s), 2, "the last pasted frame is selected");
+    assert!(doc(&s).layers.iter().all(|l| l.visible), "the selected pasted frame hides nothing");
+    s.execute("animation.selectFrame", json!({"frame": 1})).unwrap();
+    assert!(!doc(&s).layers.iter().find(|l| l.id == b).unwrap().visible);
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(delays(&s), [100, 100, 100]);
+}
+
+#[test]
+fn pasting_drops_layers_the_document_lacks_and_rejects_bad_params() {
+    let mut s = session(&["A"]);
+    s.execute("animation.create", json!({})).unwrap();
+    s.execute("animation.pasteFrames", json!({"frames": [{"delayMs": 50, "hidden": [999_999]}]})).unwrap();
+    let a = doc(&s).frame_animation.as_ref().unwrap();
+    assert!(a.frames[1].hidden.is_empty());
+    for bad in [
+        json!({}),
+        json!({"frames": []}),
+        json!({"frames": [{"hidden": "x"}]}),
+        json!({"frames": [{"delayMs": -1}]}),
+        json!({"frames": [{}], "after": 9}),
+        json!({"frames": [5]}),
+        json!({"frames": ["x"]}),
+        json!({"frames": [[1]]}),
+        json!({"frames": [{}, 7]}),
+    ] {
+        assert!(s.execute("animation.pasteFrames", bad).is_err());
+    }
+    assert_eq!(delays(&s).len(), 2);
+}
