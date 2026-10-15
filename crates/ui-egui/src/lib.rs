@@ -881,9 +881,6 @@ pub struct PhotocraftApp {
     pub(crate) targa_options: Option<targa_options_ui::Prompt>,
     /// A save to a DDS texture parked behind the DDS Options prompt (see `dds_options_ui`).
     pub(crate) dds_options: Option<dds_options_ui::Prompt>,
-    /// Files read but not opened yet: the first waits on its profile prompt, the rest behind it
-    /// (see `open_prompt`).
-    pub(crate) held_opens: std::collections::VecDeque<open_prompt::Held>,
     /// Open and Save against cloud storage ([`cloud`]). Nothing cloud-shaped is offered until the
     /// host connects a backend, so a build with no service configured is the app as it was.
     pub cloud: cloud::CloudFiles,
@@ -1049,7 +1046,6 @@ impl PhotocraftApp {
             disk_stamps: HashMap::new(),
             targa_options: None,
             dds_options: None,
-            held_opens: Default::default(),
             cloud: cloud::CloudFiles::new(),
             cloud_sent: cloud::Sent::new(),
             cloud_urls: std::cell::RefCell::new(Vec::new()),
