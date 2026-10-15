@@ -2853,7 +2853,10 @@ fn start_screen(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         if cfg!(target_arch = "wasm32") || !show_recent { Vec::new() } else { app.ui.recent_files.iter().take(HOME_RECENT).cloned().collect() };
     let recent_h = if recent.is_empty() { 0.0 } else { 34.0 + recent.len() as f32 * HOME_RECENT_ROW };
     // A tiling window manager can give the canvas less room than the card wants: shrink the card
-    // to fit, and stack the buttons when they don't fit side by side.
+    // to fit, and stack the buttons when they don't fit side by side. The Cloud section is two
+    // lists side by side, so a build with a service wants extra height below Recent.
+    let cloud = crate::cloud::available(app);
+    let cloud_h = if cloud { 360.0 } else { 0.0 };
     let new_label = crate::shortcuts::command_label(app, "New document…", "file.new");
     let open_label = crate::shortcuts::command_label(app, "Open…", "file.open");
     let card_width = HOME_CARD_WIDTH.min(area.width());
@@ -2861,7 +2864,7 @@ fn start_screen(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let side_by_side = 2.0 * button_width + HOME_BUTTON_GAP <= card_width;
     // Stacked buttons take one more row.
     let stacked_h = if side_by_side { 0.0 } else { 44.0 };
-    let card = Rect::from_center_size(area.center(), egui::vec2(card_width, 330.0 + recent_h + stacked_h));
+    let card = Rect::from_center_size(area.center(), egui::vec2(card_width, 330.0 + recent_h + stacked_h + cloud_h));
     ui.scope_builder(egui::UiBuilder::new().max_rect(card), |ui| {
         ui.vertical_centered(|ui| {
             ui.horizontal(|ui| {
@@ -2909,6 +2912,10 @@ fn start_screen(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             if !recent.is_empty() {
                 ui.add_space(22.0);
                 home_recent(app, ui, &recent);
+            }
+            if cloud {
+                ui.add_space(22.0);
+                crate::cloud::home_section(app, ui);
             }
             ui.add_space(26.0);
             crate::links::discord_button(app, ui, 190.0);
