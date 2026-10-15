@@ -2867,3 +2867,7 @@ curves	Smooth	平滑
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	GPU 介面卡
+
+# PNG export compression (#5409)
+	Fast	快速
+	Best	最佳
