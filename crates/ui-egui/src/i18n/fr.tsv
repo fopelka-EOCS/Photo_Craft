@@ -3265,3 +3265,8 @@ curves	Smooth	Lisser
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Adaptateur GPU
+
+# Hue Curves (#6241)
+	Hue Curves	Courbes de teinte
+	Hue Curves…	Courbes de teinte…
+	Curve:	Courbe :

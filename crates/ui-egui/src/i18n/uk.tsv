@@ -3965,3 +3965,8 @@ curves	Smooth	Згладити
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Адаптер GPU
+
+# Hue Curves (#6241)
+	Hue Curves	Криві тону
+	Hue Curves…	Криві тону…
+	Curve:	Крива:

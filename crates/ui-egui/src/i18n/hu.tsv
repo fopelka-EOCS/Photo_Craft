@@ -4175,3 +4175,8 @@ cameraRaw	Yellow	Sárga
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	GPU-adapter
+
+# Hue Curves (#6241)
+	Hue Curves	Színárnyalat-görbék
+	Hue Curves…	Színárnyalat-görbék…
+	Curve:	Görbe:

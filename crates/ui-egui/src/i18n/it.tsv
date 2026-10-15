@@ -4373,3 +4373,8 @@ shape	Appearance	Aspetto
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Adattatore GPU
+
+# Hue Curves (#6241)
+	Hue Curves	Curve di tonalità
+	Hue Curves…	Curve di tonalità…
+	Curve:	Curva:
