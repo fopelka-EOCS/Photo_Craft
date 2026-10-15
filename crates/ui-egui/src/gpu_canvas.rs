@@ -290,6 +290,21 @@ impl GpuCanvas {
         }
     }
 
+    /// A transform box's moving layer (`photocraft_compose::live`): composites of that document
+    /// draw it through the mesh (on the CPU too, when the GPU can't). `None` once no box is open.
+    pub fn set_live(&self, live: Option<(photocraft_doc::DocId, photocraft_compose::live::LiveTransform)>) {
+        let mut r = self.rs.renderer.write();
+        if let Some(res) = r.callback_resources.get_mut::<Resources>() {
+            res.live = live;
+        }
+    }
+
+    /// The live transform set for document `doc`.
+    fn live_for(&self, doc: photocraft_doc::DocId) -> Option<photocraft_compose::live::LiveTransform> {
+        let r = self.rs.renderer.read();
+        r.callback_resources.get::<Resources>()?.live.as_ref().filter(|(d, _)| *d == doc).map(|(_, l)| l.clone())
+    }
+
     /// The document area the view shows: full refreshes composite it last, so its layer pages
     /// are the ones still resident for the edits that follow.
     pub fn set_focus(&self, focus: Option<photocraft_geom::Rect>) {
@@ -494,6 +509,7 @@ impl GpuCanvas {
             comp.set_composite_cache_budget(b);
         }
         comp.set_focus(res.compositor_focus);
+        comp.set_live(res.live.clone());
         let key = doc.id.0;
         let format = self.format_for(doc.depth, size);
         let fresh = res.docs.get(&key).is_none_or(|d| d.size != size || d.format != format);
@@ -659,6 +675,11 @@ impl GpuCanvas {
             }
             Err(e) => out.fallback = Some(e.0),
         }
+        // A transform box's moving layer, which the CPU draws into the document.
+        let live = self.live_for(doc.id);
+        let applied = live.as_ref().map(|l| photocraft_compose::live::apply(doc, l));
+        let defer = defer && applied.is_none();
+        let doc = applied.as_ref().unwrap_or(doc);
         let px = region.width() as u64 * region.height() as u64;
         if defer && px >= DEFER_PX && self.prepare_texture(key, doc).is_some() {
             out.kind = REFRESH_DEFERRED;
@@ -1581,6 +1602,8 @@ struct Resources {
     compositor_failed: Option<photocraft_gpu::Unsupported>,
     /// The device's health: the paint callback issues no GPU work once it's lost.
     health: photocraft_gpu::DeviceHealth,
+    /// A transform box's moving layer, drawn into every composite of its document.
+    live: Option<(photocraft_doc::DocId, photocraft_compose::live::LiveTransform)>,
     /// GPU memory the compositor may hold (`None`: its default), and the document area the
     /// view shows; applied before every composite.
     compositor_budget: Option<u64>,
@@ -1916,6 +1939,7 @@ impl Resources {
             layer_fit: None,
             compositor_cache_budget: None,
             compositor_focus: None,
+            live: None,
             canvas_budget: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(canvas_budget(physical_memory(), None))),
             encode_bgl,
             encode_pipeline,

@@ -1187,7 +1187,9 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> (std::sync::Ar
         && app.session.active_index() == Some(idx)
         && st.doc.layer(photocraft_doc::LayerId(t.layer)).is_some()
     {
-        return (pv.doc.clone(), (1 << 40) + pv.session);
+        let fixed = (pv.doc.clone(), (1 << 40) + pv.session);
+        // A layer's box: the moving pixels composited in the layer's place.
+        return crate::transform_live::display_doc(app, idx).unwrap_or(fixed);
     }
     // Layer Style dialog: show its effects live (Cancel just drops the preview).
     let style = app.ui.dialogs.iter().find(|d| d.kind == crate::state::DialogKind::LayerStyle);
@@ -1338,6 +1340,8 @@ pub fn navigator_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usiz
     let (snapshot, id, revision, last_damage) =
         app.session.documents().get(idx).map(|st| (std::sync::Arc::downgrade(&st.doc), st.doc.id, st.revision, st.last_damage))?;
     let (doc, preview_key) = display_doc(app, idx);
+    // Drawn on the CPU: a transform box's moving pixels in place.
+    let doc = crate::transform_live::cpu_doc(app, doc, preview_key);
     let (display, display_key) = canvas_display(app, &doc, None);
     let preview_key = preview_key ^ display_key;
     let cached = app.navigator_textures.get(&id).cloned();
@@ -1414,6 +1418,8 @@ pub fn ensure_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize, 
         (st.revision, st.last_damage.map(|r| if r.is_empty() { r } else { r.inflate(effect_reach(&st.doc.layers)) }), st.doc.id)
     };
     let (mut doc, mut preview_key) = display_doc(app, idx);
+    // Drawn on the CPU: a transform box's moving pixels in place.
+    doc = crate::transform_live::cpu_doc(app, doc, preview_key);
     // A flipped view draws a GPU machine's canvas through here: an adjustment dialog's preview of
     // a large document (taken by the GPU path) would cost a full-size CPU composite per change.
     if crate::adjust_preview::shown_key(app) == Some(preview_key)
@@ -1530,6 +1536,13 @@ pub(crate) fn damage_since(app: &PhotocraftApp, idx: usize, seen: (u64, u64), no
     {
         return Some(if r.is_empty() { r } else { r.inflate(effect_reach(&st.doc.layers)) });
     }
+    // Between a transform box's previews (and the document): where the moving layer was and is.
+    if seen.0 == now.0
+        && let Some(st) = app.session.documents().get(idx)
+        && let Some(r) = crate::transform_live::damage(app, st.doc.id, now.0, seen.1 ^ display_key, now.1)
+    {
+        return Some(if r.is_empty() { r } else { r.inflate(effect_reach(&st.doc.layers)) });
+    }
     // Between hovered blend modes (and the document): where the layer's blending shows.
     if seen.0 == now.0
         && let Some(st) = app.session.documents().get(idx)
@@ -1607,6 +1620,8 @@ fn ensure_gpu(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize, visible:
         return false;
     };
     let (doc, raw_key) = display_doc(app, idx);
+    // A transform box's moving layer: the compositor draws it through the mesh.
+    gpu.set_live(crate::transform_live::current(app, id));
     let (display, _) = canvas_display(app, &doc, None);
     // Repeated pattern tiles sample the same texture, including pixels outside the unwrapped
     // viewport. Refresh the affected document region while Pattern Preview is enabled.
@@ -4726,6 +4741,7 @@ fn draw_beyond_canvas(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &Vie
         return false;
     };
     let (doc, preview_key) = display_doc(app, idx);
+    let doc = crate::transform_live::cpu_doc(app, doc, preview_key);
     if doc.has_artboards() {
         return false;
     }
@@ -8148,8 +8164,8 @@ mod tests {
     #[test]
     fn guides_draw_over_the_transform_preview_and_under_its_box() {
         // #5086: a guide crossing a layer under Free Transform was hidden behind the preview of
-        // the moving pixels. The preview is image content, drawn before the grid and guides like
-        // the document is; the box and handles still go over them, as in Photoshop.
+        // the moving pixels. The preview is image content, part of the document's own image, drawn
+        // before the grid and guides; the box and handles still go over them, as in Photoshop.
         let ctx = egui::Context::default();
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
         app.run("file.new", json!({"width": 400, "height": 300})).unwrap();
@@ -8177,8 +8193,9 @@ mod tests {
         let layer = Rect::from_min_max(pos2(100.0, 100.0), pos2(200.0, 160.0));
         let near = |r: Rect| (r.min - layer.min).length() < 1.0 && (r.max - layer.max).length() < 1.0;
         let position = |pred: &dyn Fn(&egui::Shape) -> bool| out.shapes.iter().position(|s| pred(&s.shape));
-        // The moving pixels: the mesh that spans the layer's box.
-        let preview = position(&|s| matches!(s, egui::Shape::Mesh(m) if near(m.calc_bounds())));
+        // The moving pixels are composited into the canvas image (`transform_live`): the mesh
+        // that covers the layer's box.
+        let preview = position(&|s| matches!(s, egui::Shape::Mesh(m) if m.calc_bounds().contains_rect(layer)));
         // The guide: a vertical line at x = 150.
         let guide = position(&|s| matches!(s, egui::Shape::LineSegment { points, .. } if points.iter().all(|p| (p.x - 150.0).abs() < 0.01)));
         // The box: the closed four-point outline round the layer.

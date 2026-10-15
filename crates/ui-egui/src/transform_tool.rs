@@ -65,9 +65,6 @@ pub struct TransformPreview {
     pub opacity: f32,
     /// The layers stacked over the moving one, drawn over its pixels ([`Above`]).
     above: Option<Above>,
-    /// A layer with a style: its pixels composited with the style as the box has them now,
-    /// drawn instead of the bare pixels (transform_fx.rs, #3653).
-    styled: Option<crate::transform_fx::StyledPreview>,
     gesture: Option<Gesture>,
     /// Warp-mode drag in progress.
     warp_drag: Option<WarpDrag>,
@@ -91,6 +88,9 @@ pub struct TransformPreview {
     committing: Option<JobId>,
     /// Content-Aware Scale's live preview (cas_transform.rs).
     pub(crate) content_aware: Option<crate::cas_transform::Live>,
+    /// A layer's live preview, composited in its place (transform_live.rs). While it is set the
+    /// canvas shows the moving pixels and nothing is drawn over it but the box.
+    pub(crate) live: Option<crate::transform_live::LiveSession>,
 }
 
 /// What [`follow_edits`] needs to rebuild the preview document.
@@ -236,21 +236,29 @@ pub fn begin(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String>
     }
     // egui reports the renderer's limit in the app; offscreen harnesses only through the device.
     let max_side = ctx.input(|i| i.max_texture_side).max(app.gpu.as_ref().map_or(1, |g| g.max_texture_side()));
-    // The layers covering the moving pixels draw over them instead of under them.
-    let above = Above::new(ctx, format!("transform-{session}-above"), &doc, id, max_side);
-    above.hide_in(&mut pd.layers);
-    // A style is drawn again from the pixels as the box moves them, so they are read without it.
-    // Not for the selected part of a layer: its style belongs to that part and the rest together.
-    let styled = lifted.is_none() && photocraft_compose::effects::has_effects(layer);
-    let (image, uv) = preview_image(&doc, id, lifted.as_ref(), b, max_side, styled);
+    // The canvas composites the moving pixels in the layer's place, with the layers above it on
+    // top (transform_live.rs).
+    let rest = lifted.as_ref().and_then(|_| pd.layer(id)).and_then(|l| l.surface()).cloned();
+    let live = crate::transform_live::LiveSession::start(&doc, revision, id, lifted.as_ref(), rest.as_ref());
+    // Otherwise (an adjustment layer's mask) the layers covering the moving pixels draw over them
+    // instead of under them.
+    let above = live.is_none().then(|| Above::new(ctx, format!("transform-{session}-above"), &doc, id, max_side));
+    if let Some(a) = &above {
+        a.hide_in(&mut pd.layers);
+    }
+    // The texels drawn over the canvas when nothing composites the layer live (the canvas does
+    // for a live preview, which needs none).
+    let (image, uv) = match live {
+        Some(_) => (egui::ColorImage::new([1, 1], vec![Color32::TRANSPARENT]), [1.0, 1.0]),
+        None => preview_image(&doc, id, lifted.as_ref(), b, max_side, false),
+    };
     let texture = crate::transform_tex::PreviewTextures::new(ctx, format!("transform-{session}"), image, uv);
     app.transform_preview = Some(TransformPreview {
         session,
         doc: Arc::new(pd),
         texture,
         opacity: layer.opacity * layer.fill_opacity,
-        above: Some(above),
-        styled: styled.then(|| crate::transform_fx::StyledPreview::new(format!("transform-{session}-styled"))),
+        above,
         follow: Some(Follow { revision, hidden: lifted.is_none() }),
         committing: None,
         gesture: None,
@@ -263,6 +271,7 @@ pub fn begin(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String>
         tool: app.ui.tool,
         path: None,
         content_aware: None,
+        live,
     });
     app.ui.transform = Some(TransformSession {
         session,
@@ -363,7 +372,7 @@ pub(crate) fn begin_content_aware(
         tool: app.ui.tool,
         path: None,
         content_aware: Some(live),
-        styled: None,
+        live: None,
     });
     app.ui.transform = Some(TransformSession {
         session,
@@ -472,7 +481,6 @@ fn begin_lone(
         texture,
         opacity: 0.6,
         above: None,
-        styled: None,
         follow: None,
         committing: None,
         gesture: None,
@@ -485,6 +493,7 @@ fn begin_lone(
         tool: app.ui.tool,
         path: None,
         content_aware: None,
+        live: None,
     });
     app.ui.transform = Some(TransformSession {
         session,
@@ -524,7 +533,6 @@ fn begin_path(app: &mut PhotocraftApp, ctx: &egui::Context, params: serde_json::
         doc,
         texture,
         opacity: 1.0,
-        styled: None,
         gesture: None,
         warp_drag: None,
         split_tool: None,
@@ -535,6 +543,7 @@ fn begin_path(app: &mut PhotocraftApp, ctx: &egui::Context, params: serde_json::
         tool: app.ui.tool,
         path: Some(path),
         content_aware: None,
+        live: None,
         above: None,
         follow: None,
         committing: None,
@@ -610,7 +619,6 @@ pub fn begin_selection(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(
         texture,
         opacity: 1.0,
         above: None,
-        styled: None,
         follow: None,
         committing: None,
         gesture: None,
@@ -623,6 +631,7 @@ pub fn begin_selection(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(
         tool: app.ui.tool,
         path: None,
         content_aware: None,
+        live: None,
     });
     app.ui.transform = Some(TransformSession {
         session,
@@ -735,9 +744,12 @@ fn enter_type_warp(app: &mut PhotocraftApp, ctx: &egui::Context) {
         && let Some(pv) = app.transform_preview.as_mut()
     {
         let max_side = ctx.input(|i| i.max_texture_side).max(app.gpu.as_ref().map_or(1, |g| g.max_texture_side()));
-        // Read as the session's texels were: without the style when the box draws it itself.
-        let (image, uv) = preview_image(&plain, id, None, b, max_side, pv.styled.is_some());
+        let (image, uv) = preview_image(&plain, id, None, b, max_side, false);
         pv.texture = crate::transform_tex::PreviewTextures::new(ctx, format!("transform-{session}"), image, uv);
+        // The warp starts from the type without its Warp Text.
+        if let Some(live) = pv.live.as_mut() {
+            live.restart_from(&plain, id);
+        }
     }
     let warp =
         current.as_ref().and_then(|w| WarpStyle::parse(&w.style).filter(|s| s.is_preset()).map(|s| (w, s))).map_or(Warp::none(rect), |(w, style)| Warp {
@@ -2149,16 +2161,9 @@ pub fn draw_content(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform
         draw_warp_content(painter, xf, t, w, pv);
         return;
     }
-    let ctx = painter.ctx();
-    let styled = styled_frame(app, xf.zoom * ctx.pixels_per_point(), ctx.input(|i| i.pointer.any_down())).and_then(|(s, frame)| s.texture(ctx, &frame));
-    if let Some((tex, r)) = styled {
-        let mut mesh = egui::Mesh::with_texture(tex);
-        for (x, y, u, v) in [(r[0], r[1], 0.0, 0.0), (r[2], r[1], 1.0, 0.0), (r[2], r[3], 1.0, 1.0), (r[0], r[3], 0.0, 1.0)] {
-            mesh.vertices.push(egui::epaint::Vertex { pos: pos2(x, y), uv: pos2(u, v), color: Color32::WHITE });
-        }
-        mesh.add_triangle(0, 1, 2);
-        mesh.add_triangle(0, 2, 3);
-        painter.add(clip_to_canvas(mesh, canvas_size(pv), |p| xf.to_screen(p.x, p.y)));
+    if pv.live.is_some() && pv.content_aware.is_none() {
+        // The canvas composites the moving layer itself, in its place in the stack with its
+        // blend mode and style (transform_live.rs): only the box is drawn here.
     } else if let Some(h) = Homography::rect_to_quad([0.0, 0.0, 1.0, 1.0], t.quad) {
         // A 24×24 grid keeps perspective previews straight.
         let n = 24;
@@ -2191,7 +2196,7 @@ pub fn draw_content(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform
         }
         painter.add(clip_to_canvas(mesh, canvas_size(pv), |p| xf.to_screen(p.x, p.y)));
     }
-    if let Some(a) = &pv.above {
+    if let Some(a) = pv.above.as_ref().filter(|_| pv.live.is_none()) {
         a.draw(painter, xf);
     }
 }
@@ -2326,29 +2331,6 @@ pub(crate) fn draw_selection(
         crate::canvas::marching_ants_lines(painter, lines, time);
     }
     true
-}
-
-/// What the styled preview of the moving layer is drawn from (transform_fx.rs), at `zoom` screen
-/// pixels per document pixel. `None` for a layer without a style (also once it is switched off
-/// while the box is open) or a hidden one: the bare pixels are drawn instead. The style, opacity
-/// and fill are the layer's as they are now, so edits made while the box is open show.
-pub(crate) fn styled_frame(app: &PhotocraftApp, zoom: f32, dragging: bool) -> Option<(&crate::transform_fx::StyledPreview, crate::transform_fx::Frame<'_>)> {
-    let (t, pv) = (app.ui.transform.as_ref()?, app.transform_preview.as_ref()?);
-    let styled = pv.styled.as_ref().filter(|_| t.warp.is_none())?;
-    let st = app.session.active().filter(|st| st.doc.id == pv.doc.id)?;
-    let layer = st.doc.layer(LayerId(t.layer)).filter(|l| l.visible && photocraft_compose::effects::has_effects(l))?;
-    let frame = crate::transform_fx::Frame {
-        doc: &st.doc,
-        layer,
-        revision: st.revision,
-        texels: &pv.texture,
-        quad: t.quad,
-        quad_scale: quad_scale(t),
-        nearest: t.interpolation == "nearest",
-        zoom,
-        dragging,
-    };
-    Some((styled, frame))
 }
 
 /// The value shown beside the pointer while the box is dragged, like Photoshop's Show
@@ -2517,22 +2499,27 @@ fn draw_warp_points(painter: &egui::Painter, m: &BezierMesh, scr: impl Fn([f64; 
 fn draw_warp_content(painter: &egui::Painter, xf: &ViewXform, t: &TransformSession, w: &Warp, pv: &TransformPreview) {
     let r = t.rect;
     let m = w.to_mesh(1, 1);
-    let (us, vs) = crate::warp_preview::samples(&m, xf.zoom as f64);
-    let (tex, uv) = pv.texture.pick(painter.ctx(), xf.zoom * painter.ctx().pixels_per_point(), 1.0, t.interpolation == "nearest");
-    let mut mesh = egui::Mesh::with_texture(tex);
-    let tint = Color32::from_white_alpha((pv.opacity.clamp(0.0, 1.0) * 255.0) as u8);
-    for v in &vs {
-        for u in &us {
-            let (x, y) = w.map(r[0] + u * (r[2] - r[0]), r[1] + v * (r[3] - r[1]));
-            mesh.vertices.push(egui::epaint::Vertex { pos: pos2(x as f32, y as f32), uv: pos2(*u as f32 * uv[0], *v as f32 * uv[1]), color: tint });
+    // A layer's live preview is composited on the canvas (transform_live.rs): only the mesh lines
+    // are drawn here. Lone masks and channels still preview over it.
+    if pv.live.is_none() {
+        let (us, vs) = crate::warp_preview::samples(&m, xf.zoom as f64);
+        let (tex, uv) = pv.texture.pick(painter.ctx(), xf.zoom * painter.ctx().pixels_per_point(), 1.0, t.interpolation == "nearest");
+        let mut mesh = egui::Mesh::with_texture(tex);
+        let tint = Color32::from_white_alpha((pv.opacity.clamp(0.0, 1.0) * 255.0) as u8);
+        for v in &vs {
+            for u in &us {
+                let (x, y) = w.map(r[0] + u * (r[2] - r[0]), r[1] + v * (r[3] - r[1]));
+                mesh.vertices.push(egui::epaint::Vertex { pos: pos2(x as f32, y as f32), uv: pos2(*u as f32 * uv[0], *v as f32 * uv[1]), color: tint });
+            }
         }
-    }
-    let pos: Vec<[f32; 2]> = mesh.vertices.iter().map(|v| [v.pos.x, v.pos.y]).collect();
-    let rest: Vec<[f32; 2]> = vs.iter().flat_map(|v| us.iter().map(move |u| [(r[0] + u * (r[2] - r[0])) as f32, (r[1] + v * (r[3] - r[1])) as f32])).collect();
-    mesh.indices = crate::warp_preview::triangle_order(&pos, &rest, us.len());
-    painter.add(clip_to_canvas(mesh, canvas_size(pv), |p| xf.to_screen(p.x, p.y)));
-    if let Some(a) = &pv.above {
-        a.draw(painter, xf);
+        let pos: Vec<[f32; 2]> = mesh.vertices.iter().map(|v| [v.pos.x, v.pos.y]).collect();
+        let rest: Vec<[f32; 2]> =
+            vs.iter().flat_map(|v| us.iter().map(move |u| [(r[0] + u * (r[2] - r[0])) as f32, (r[1] + v * (r[3] - r[1])) as f32])).collect();
+        mesh.indices = crate::warp_preview::triangle_order(&pos, &rest, us.len());
+        painter.add(clip_to_canvas(mesh, canvas_size(pv), |p| xf.to_screen(p.x, p.y)));
+        if let Some(a) = &pv.above {
+            a.draw(painter, xf);
+        }
     }
 }
 
@@ -4842,20 +4829,18 @@ mod tests {
         app.session.execute("layer.select", json!({"layer": red.0})).unwrap();
         let ctx = gpu_ctx();
         begin(&mut app, &ctx).unwrap();
-        let pv = app.transform_preview.as_ref().unwrap();
-        assert!(pv.doc.layer(bg).unwrap().visible, "the layers below show under the box");
-        assert!(!pv.doc.layer(blue).unwrap().visible, "the layer over it is drawn over the box instead");
-        let (texture, rect) = pv.above.as_ref().and_then(|a| a.shown.as_ref()).expect("something covers the layer");
-        assert_eq!(*rect, photocraft_geom::Rect::new(16, 16, 40, 40));
-        assert_eq!(texture.size(), [24, 24]);
-        cancel(&mut app);
-
-        // The top layer: nothing to draw over it.
-        app.session.execute("layer.select", json!({"layer": blue.0})).unwrap();
-        begin(&mut app, &ctx).unwrap();
-        let pv = app.transform_preview.as_ref().unwrap();
-        assert!(pv.above.as_ref().is_some_and(|a| a.shown.is_none()));
-        assert!(pv.doc.layer(red).unwrap().visible && pv.doc.layer(bg).unwrap().visible);
+        // Moved right by 8 px: under the blue layer from x = 16.
+        let t = app.ui.transform.as_mut().unwrap();
+        t.quad = t.quad.map(|q| [q[0] + 8.0, q[1]]);
+        let (shown, key) = crate::canvas::display_doc(&mut app, 0);
+        assert!(app.transform_preview.as_ref().unwrap().above.is_none(), "nothing is drawn over the canvas");
+        assert!(shown.layers.iter().all(|l| l.visible), "every layer stays in the stack");
+        assert_eq!(shown.layers.iter().map(|l| l.id).collect::<Vec<_>>(), vec![bg, red, blue], "in its order");
+        let moved = crate::transform_live::cpu_doc(&mut app, shown, key);
+        let px = |x: i32, y: i32| photocraft_compose::render(&moved, photocraft_geom::Rect::new(x, y, x + 1, y + 1)).px[0];
+        assert!(px(20, 20)[2] > 0.99 && px(20, 20)[0] < 0.01, "the blue layer covers the moved red one: {:?}", px(20, 20));
+        assert!(px(18, 10)[0] > 0.99 && px(18, 10)[2] < 0.01, "the moved red shows where nothing covers it: {:?}", px(18, 10));
+        assert!(px(10, 10)[1] > 0.99, "it left its old place: {:?}", px(10, 10));
         cancel(&mut app);
     }
 
@@ -4924,11 +4909,15 @@ mod tests {
         let mut app = app_with_square(3000, photocraft_geom::Rect::new(10, 20, 2810, 2420));
         let ctx = gpu_ctx();
         begin(&mut app, &ctx).unwrap();
-        let pv = app.transform_preview.as_ref().unwrap();
-        assert_eq!(pv.texture.size(), [2800, 2400], "one texel per layer pixel");
-        // At 100% the texture has at least as many texels as the box covers screen pixels.
-        let t = app.ui.transform.as_ref().unwrap();
-        assert!(pv.texture.size()[0] as f64 >= t.rect[2] - t.rect[0]);
+        // The canvas composites the layer's own pixels through the mesh: every layer pixel.
+        let doc = app.session.active().unwrap().doc.id;
+        let (_, live) = crate::transform_live::current(&app, doc).unwrap_or_else(|| {
+            crate::canvas::display_doc(&mut app, 0);
+            crate::transform_live::current(&app, doc).unwrap()
+        });
+        assert_eq!(live.source.content_bounds(), photocraft_geom::Rect::new(10, 20, 2810, 2420), "one texel per layer pixel");
+        // No overlay texture is built for it.
+        assert_eq!(app.transform_preview.as_ref().unwrap().texture.size(), [1, 1]);
     }
 
     #[test]
@@ -5010,7 +4999,6 @@ mod tests {
         scale_about_pivot(&mut app, 2.0, 2.0);
         let q = app.ui.transform.as_ref().unwrap().quad;
         assert!(q[0][0] < -10.0 && q[2][1] > 74.0, "the box reaches past the canvas: {q:?}");
-        let tol = 1e-3;
         for (rotation, flip) in [(0.0, false), (30.0, false), (-75.0, true)] {
             let xf = ViewXform {
                 rect: egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(400.0, 400.0)),
@@ -5020,30 +5008,17 @@ mod tests {
                 rotation,
                 aspect: 1.0,
             };
-            let meshes = preview_meshes(&app, &xf);
-            let verts: Vec<[f64; 2]> = meshes.iter().flat_map(|m| m.vertices.iter().map(|v| xf.to_doc(v.pos))).collect();
-            assert!(!verts.is_empty(), "the preview still draws (rotation {rotation})");
-            for d in &verts {
-                assert!(d[0] >= -tol && d[1] >= -tol && d[0] <= 64.0 + tol && d[1] <= 64.0 + tol, "vertex {d:?} off the canvas (rotation {rotation})");
-            }
-            // The clipped mesh still covers the whole canvas: the corners lie on it.
-            for corner in [[0.0, 0.0], [64.0, 0.0], [64.0, 64.0], [0.0, 64.0]] {
-                assert!(verts.iter().any(|d| (d[0] - corner[0]).abs() < 1e-2 && (d[1] - corner[1]).abs() < 1e-2), "corner {corner:?} (rotation {rotation})");
-            }
+            // The layer is composited on the canvas, which ends at its edge: no pixels are drawn
+            // over the view, so none over the pasteboard.
+            assert!(preview_meshes(&app, &xf).is_empty(), "nothing drawn over the view (rotation {rotation})");
         }
-        // Inside the canvas the mesh is drawn unchanged (24×24 grid).
+        let (shown, key) = crate::canvas::display_doc(&mut app, 0);
+        let moved = crate::transform_live::cpu_doc(&mut app, shown, key);
+        let id = app.session.active().unwrap().active_layer.unwrap();
+        let s = moved.layer(id).unwrap().surface().unwrap();
+        // Scaled 2× about its centre, the square covers the whole canvas.
+        assert!(s.rgba(0, 0)[3] > 0.99 && s.rgba(63, 63)[3] > 0.99);
         cancel(&mut app);
-        begin(&mut app, &gpu_ctx()).unwrap();
-        let xf = ViewXform {
-            rect: egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(200.0, 200.0)),
-            zoom: 1.0,
-            center: [32.0, 32.0],
-            flip: false,
-            rotation: 0.0,
-            aspect: 1.0,
-        };
-        let meshes = preview_meshes(&app, &xf);
-        assert_eq!(meshes.iter().map(|m| m.vertices.len()).sum::<usize>(), 25 * 25);
     }
 
     #[test]
@@ -5092,42 +5067,42 @@ mod tests {
         app.sync_views();
         app.session.execute("layer.new.layer", json!({})).unwrap();
         app.session.execute("filter.render.clouds", json!({})).unwrap();
+        app.session.execute("layer.setProps", json!({"blend": "Difference"})).unwrap();
         let ctx = gpu_ctx();
         let t0 = std::time::Instant::now();
         begin(&mut app, &ctx).unwrap();
         let begin_ms = t0.elapsed().as_secs_f64() * 1e3;
-        // The same with a linked layer mask applied to the texels (#205).
+        // The same with a linked layer mask applied to the moving pixels (#205).
         cancel(&mut app);
         app.session.execute("layer.layerMask.revealAll", json!({})).unwrap();
         app.session.execute("paint.gradient", json!({"from": [0, 0], "to": [w, 0], "colors": ["#000000", "#ffffff"], "target": "mask"})).unwrap();
         let t0 = std::time::Instant::now();
         begin(&mut app, &ctx).unwrap();
         let masked_ms = t0.elapsed().as_secs_f64() * 1e3;
-        eprintln!("transform preview begin {w}x{h}: {begin_ms:.1} ms, with a linked mask {masked_ms:.1} ms");
-        let size = app.transform_preview.as_ref().unwrap().texture.size();
-        rotate_about_pivot(&mut app, 0.05);
-        let frame = |zoom: f32| {
+        // A frame of a drag: the box turns a little, the mesh and the document to show follow.
+        let view = photocraft_geom::Rect::new(2200, 1500, 3800, 2500);
+        let n = 20;
+        let mut mesh_ms = 0.0;
+        let mut cpu_ms = 0.0;
+        let mut frames = Vec::new();
+        for _ in 0..n {
+            rotate_about_pivot(&mut app, 0.01);
             let t0 = std::time::Instant::now();
-            let _ = ctx.run_ui(egui::RawInput { max_texture_side: Some(16384), ..Default::default() }, |ui| {
-                let painter = ui.ctx().layer_painter(egui::LayerId::background());
-                let xf = ViewXform {
-                    rect: egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(1600.0, 1000.0)),
-                    zoom,
-                    center: [3000.0, 2000.0],
-                    flip: false,
-                    rotation: 0.0,
-                    aspect: 1.0,
-                };
-                draw_content(&app, &painter, &xf);
-                draw_overlay(&app, &painter, &xf);
-            });
-            t0.elapsed().as_secs_f64() * 1e3
-        };
-        let first: Vec<f64> = [1.0, 0.25, 3.0].iter().map(|z| frame(*z)).collect();
-        let n = 50;
-        let steady = (0..n).map(|i| frame([1.0, 0.25, 3.0][i % 3])).sum::<f64>() / n as f64;
+            let (shown, key) = crate::canvas::display_doc(&mut app, 0);
+            mesh_ms += t0.elapsed().as_secs_f64() * 1e3;
+            let doc = shown.id;
+            let t0 = std::time::Instant::now();
+            let applied = crate::transform_live::cpu_doc(&mut app, shown.clone(), key);
+            let _ = photocraft_compose::render(&applied, view);
+            cpu_ms += t0.elapsed().as_secs_f64() * 1e3;
+            frames.push((shown, crate::transform_live::current(&app, doc).unwrap()));
+        }
+        // The GPU composite: `cargo test --release -p photocraft-gpu --test live_transform live_bench -- --ignored --nocapture`.
+        drop(frames);
         eprintln!(
-            "transform preview {w}x{h}: texture {size:?}, begin {begin_ms:.1} ms, first frame per level (1x, 0.25x, 3x) {first:.1?} ms, steady frame {steady:.3} ms"
+            "transform preview {w}x{h}: begin {begin_ms:.1} ms, with a linked mask {masked_ms:.1} ms; per frame: mesh {:.2} ms, CPU fallback {:.1} ms (1600x1000 view)",
+            mesh_ms / n as f64,
+            cpu_ms / n as f64,
         );
     }
 
