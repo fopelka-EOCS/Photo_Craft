@@ -101,23 +101,31 @@ fn optical_kerning_round_trips_through_psd() {
     }
 }
 
-/// #3514: a fresh document of ordinary Metrics type writes no document `Txt2` block — Photoshop
-/// never writes its empty `<< /0 << >> >>` stub, and readers such as Photopea reject it — while an
-/// Optical layer still does, because its mode lives only in `Txt2`.
+/// #3514 / #2469: a fresh type layer writes no document `Txt2`. Photoshop and Photopea reject
+/// that stub ("program error"). Optical kerning, which EngineData cannot store, is written in
+/// `PcK2` and comes back on our own re-open.
 #[test]
 fn fresh_metrics_text_writes_no_txt2_block() {
     use photocraft_doc::text::Kerning;
-    let saves_txt2 = |kerning: Kerning| {
+    let save = |kerning: Kerning| {
         let t = layer("AV", &[(2, kerning, 0.0)]);
         let mut doc = Document::new("k", photocraft_geom::Size::new(64, 32), photocraft_color::ColorMode::Rgb, photocraft_color::SampleType::U8);
         let mut r = t.clone();
         photocraft_text::TextEngine::new().render_layer(&mut r, doc.resolution_dpi, doc.pixel_format());
         doc.layers.push(Layer::new("t", LayerContent::Text(r)));
         let bytes = photocraft_io::export(&doc, "k.psd", &Default::default()).unwrap().bytes;
-        photocraft_psd::PsdFile::from_bytes(&bytes).unwrap().global_blocks.iter().any(|b| &b.key == b"Txt2")
+        photocraft_psd::PsdFile::from_bytes(&bytes).unwrap()
     };
-    assert!(!saves_txt2(Kerning::Metrics), "a plain Metrics layer must not write the empty Txt2 stub");
-    assert!(saves_txt2(Kerning::Optical), "Optical lives only in Txt2");
+    let metrics = save(Kerning::Metrics);
+    assert!(metrics.global_blocks.iter().all(|b| &b.key != b"Txt2"), "a plain Metrics layer must not write Txt2");
+    assert!(metrics.global_blocks.iter().all(|b| &b.key != b"PcK2"));
+    let optical = save(Kerning::Optical);
+    assert!(optical.global_blocks.iter().all(|b| &b.key != b"Txt2"), "a synthesized Txt2 is what Photoshop refuses");
+    assert!(optical.global_blocks.iter().any(|b| &b.key == b"PcK2"), "Optical is stored for our own re-open");
+    let bytes = optical.to_bytes().unwrap();
+    let back = photocraft_io::import("k.psd", &bytes).unwrap().document;
+    let LayerContent::Text(t) = &back.layers[0].content else { panic!("expected text") };
+    assert!(chars(t).iter().all(|(mode, _)| *mode == Kerning::Optical));
 }
 
 /// Two imported layers can name the same Txt2 object; export must update the second
@@ -135,8 +143,7 @@ fn duplicate_preserved_text_indices_get_distinct_txt2_objects() {
     }
     let bytes = photocraft_io::export(&doc, "k.psd", &Default::default()).unwrap().bytes;
     let file = photocraft_psd::PsdFile::from_bytes(&bytes).unwrap();
-    let txt2 = file.global_blocks.iter().find(|b| &b.key == b"Txt2").and_then(|b| photocraft_text::psd::parse_txt2(&b.data)).unwrap();
-    assert_eq!(txt2.path(&["1", "1"]).and_then(E::as_array).unwrap().len(), 2);
+    assert!(file.global_blocks.iter().all(|b| &b.key != b"Txt2"), "two new type layers must not grow a synthesized Txt2");
     let back = photocraft_io::import("k.psd", &bytes).unwrap().document;
     for (i, expected) in [Kerning::Optical, Kerning::Metrics].into_iter().enumerate() {
         let LayerContent::Text(t) = &back.layers[i].content else { panic!("expected text layer") };
@@ -158,9 +165,7 @@ fn hostile_text_index_never_sizes_the_save() {
     doc.layers.push(Layer::new("hostile", LayerContent::Text(r)));
     let bytes = photocraft_io::export(&doc, "k.psd", &Default::default()).unwrap().bytes;
     let file = photocraft_psd::PsdFile::from_bytes(&bytes).unwrap();
-    let txt2 = file.global_blocks.iter().find(|b| &b.key == b"Txt2").and_then(|b| photocraft_text::psd::parse_txt2(&b.data)).unwrap();
-    let slots = txt2.path(&["1", "1"]).and_then(E::as_array).unwrap();
-    assert!(slots.len() <= 8, "a file-controlled TextIndex sized the save: {} slots", slots.len());
+    assert!(file.global_blocks.iter().all(|b| &b.key != b"Txt2"), "a hostile TextIndex must not produce a synthesized Txt2");
     let back = photocraft_io::import("k.psd", &bytes).unwrap().document;
     let LayerContent::Text(b) = &back.layers[0].content else { panic!("not text") };
     assert_eq!(b.text, "AV");
@@ -172,15 +177,19 @@ fn hostile_text_index_never_sizes_the_save() {
 /// described rather than lying about the new one.
 #[test]
 fn txt2_extras_survive_a_resave_of_unchanged_text() {
-    let obj = E::Dict(vec![
-        ("0".into(), E::Dict(vec![("0".into(), E::String("AV\r".into())), ("6".into(), E::Dict(vec![("0".into(), E::Array(vec![]))]))])),
-        ("21".into(), E::Dict(vec![("1".into(), E::Array(vec![E::Real(10.0), E::Real(20.0)]))])),
-    ]);
-    let prev = photocraft_text::engine_data::write_bare(&[
-        ("98".into(), E::Dict(vec![("0".into(), E::Int(14))])),
-        ("0".into(), E::dict()),
-        ("1".into(), E::Dict(vec![("1".into(), E::Array(vec![obj]))])),
-    ]);
+    let sample = layer("AV", &[(2, Kerning::Metrics, 0.0)]);
+    let mut tree = photocraft_text::psd::parse_txt2(&photocraft_text::psd::build_txt2(&[(0, &sample)], None)).unwrap();
+    if let E::Dict(items) = &mut tree
+        && let Some((_, E::Dict(objs))) = items.iter_mut().find(|(k, _)| k == "1")
+        && let Some((_, E::Array(slots))) = objs.iter_mut().find(|(k, _)| k == "1")
+        && let Some(E::Dict(obj)) = slots.first_mut()
+    {
+        obj.push(("21".into(), E::Dict(vec![("1".into(), E::Array(vec![E::Real(10.0), E::Real(20.0)]))])));
+    }
+    let prev = match tree {
+        E::Dict(items) => photocraft_text::engine_data::write_bare(&items),
+        _ => panic!("Txt2 is a dictionary"),
+    };
     let save = |text: &str| {
         let t = layer(text, &[(text.len(), Kerning::Metrics, 0.0)]);
         let mut doc = Document::new("k", photocraft_geom::Size::new(64, 32), photocraft_color::ColorMode::Rgb, photocraft_color::SampleType::U8);
@@ -189,15 +198,14 @@ fn txt2_extras_survive_a_resave_of_unchanged_text() {
         doc.layers.push(Layer::new("kept", LayerContent::Text(r)));
         doc.metadata.psd_global_blocks.push((*b"8BIM", *b"Txt2", std::sync::Arc::new(prev.clone())));
         let bytes = photocraft_io::export(&doc, "k.psd", &Default::default()).unwrap().bytes;
-        let file = photocraft_psd::PsdFile::from_bytes(&bytes).unwrap();
-        photocraft_text::psd::parse_txt2(&file.global_blocks.iter().find(|b| &b.key == b"Txt2").unwrap().data).unwrap()
+        photocraft_psd::PsdFile::from_bytes(&bytes).unwrap()
     };
     let kept = save("AV");
-    let object = kept.path(&["1", "1"]).and_then(E::as_array).unwrap()[0].clone();
+    let txt2 = photocraft_text::psd::parse_txt2(&kept.global_blocks.iter().find(|b| &b.key == b"Txt2").unwrap().data).unwrap();
+    let object = txt2.path(&["1", "1"]).and_then(E::as_array).unwrap()[0].clone();
     assert_eq!(object.path(&["21", "1"]).and_then(E::as_array).map(|items| items.len()), Some(2), "pen positions survive a resave of unchanged text");
     let stale = save("AX");
-    let object = stale.path(&["1", "1"]).and_then(E::as_array).unwrap()[0].clone();
-    assert!(object.get("21").is_none(), "positions of another text are stale and dropped");
+    assert!(stale.global_blocks.iter().all(|b| &b.key != b"Txt2"), "an edited string drops Txt2 instead of rewriting the stub Photoshop rejects");
 }
 
 /// Kerning that can't be represented (non-finite) and bad PSD fields never panic and stay sane.

@@ -940,11 +940,10 @@ fn txt2_mode_runs(layer: &TextLayer) -> Vec<(i64, usize)> {
 /// `i32::MAX`, and sizing the array by it would make every save allocate gigabytes.
 pub const MAX_TEXT_INDEX: i32 = 0xFFFF;
 
-/// Whether the document `Txt2` block is needed for `objects`: only a non-Metrics auto-kern mode
-/// (`Optical`) is exclusive to `Txt2` — EngineData's `AutoKerning` cannot distinguish Metrics from
-/// Optical — so a fresh document of ordinary Metrics text has nothing to put in the block.
-/// Writing Photoshop's empty `<< /0 << >> >>` stub anyway makes some readers (Photopea) fail
-/// (#3514); the export omits the block for such a document.
+/// Whether any layer's auto-kern mode lives only in `Txt2`: `Optical`. EngineData's `AutoKerning`
+/// cannot distinguish Metrics from Optical. PSD export does not write a synthesized `Txt2` for
+/// this (Photoshop and Photopea reject that stub, #2469, #3514). It keeps a file's own `Txt2`
+/// only when the save does not change it, and stores Optical for our own re-open in `PcK2`.
 pub fn needs_txt2(objects: &[(i32, &TextLayer)]) -> bool {
     objects.iter().any(|(_, l)| l.char_runs().iter().any(|r| r.style.kerning == Kerning::Optical))
 }
@@ -1275,9 +1274,18 @@ fn engine_antialias(n: f64) -> Option<AntiAlias> {
 /// `ink` is the layer's rendered bounds in text space (for `bounds`/`boundingBox`).
 pub fn build_tysh(layer: &TextLayer, dpi: f32, ink: Option<[f32; 4]>) -> Vec<u8> {
     let old = layer.psd_raw.as_deref().and_then(|d| parse_tysh(d));
-    let template = old.as_ref().and_then(|t| engine_data(&t.text));
+    // A one-character edit used to keep Photoshop's `TySh` and swap in a rebuilt EngineData.
+    // That hybrid is what Photoshop rejects ("program error") even after `Txt2` is removed
+    // (#2717). A fresh type layer's `TySh` opens, so a changed string starts over. An unchanged
+    // string still patches the file's own block.
+    let current = layer.text.replace('\r', "\n");
+    let text_changed = old.as_ref().is_some_and(|t| match t.text.get("Txt ") {
+        Some(D::Text(s)) => s.to_string_lossy().replace('\r', "\n") != current,
+        _ => false,
+    });
+    let template = if text_changed { None } else { old.as_ref().and_then(|t| engine_data(&t.text)) };
     let e = build_engine_data(layer, template, dpi);
-    let mut text = old.as_ref().map(|t| t.text.clone()).unwrap_or_else(|| Descriptor::new("TxLr"));
+    let mut text = if text_changed { Descriptor::new("TxLr") } else { old.as_ref().map(|t| t.text.clone()).unwrap_or_else(|| Descriptor::new("TxLr")) };
     let set = |d: &mut Descriptor, key: &str, v: D| match d.items.iter_mut().find(|(k, _)| k.is(key)) {
         Some(e) => e.1 = v,
         None => d.items.push((Id::new(key), v)),

@@ -55,6 +55,8 @@ pub(crate) struct Ctx<'a> {
     pub dpi: f32,
     /// The parsed `Txt2` block (type settings EngineData lacks, e.g. optical kerning).
     pub txt2: Option<photocraft_text::engine_data::Value>,
+    /// Optical kerning from `PcK2`, used when the file has no `Txt2` (Photoshop rejects ours).
+    kerning_sidecar: Vec<(i32, Vec<(u32, u8)>)>,
     /// Smart-filter caches from the global `FEid`/`FXid` blocks (filter masks, by placed id).
     pub filter_effects: Vec<photocraft_psd::filter_effects::FilterEffectsItem>,
     /// Placed layers naming the same source share editable contents, not their placement.
@@ -66,6 +68,57 @@ pub(crate) struct Ctx<'a> {
     /// Layer records decoded so far, out of `total` (progress).
     pub done: usize,
     pub total: usize,
+}
+
+/// Applies `PcK2` mode runs (`utf16 length`, mode 0/1/2) onto `layer`. Manual kerning (a nonzero
+/// pair) is left as EngineData stored it.
+fn apply_kerning_sidecar(layer: &mut TextLayer, modes: &[(u32, u8)]) {
+    use photocraft_doc::text::{Kerning, TextRun};
+    let total: usize = layer.text.chars().map(|c| c.len_utf16()).sum();
+    if total == 0 || total > 1_000_000 || modes.is_empty() {
+        return;
+    }
+    let mut units = vec![1u8; total];
+    let mut at = 0usize;
+    for &(len, mode) in modes {
+        let n = (len as usize).min(total.saturating_sub(at));
+        for slot in units.iter_mut().skip(at).take(n) {
+            *slot = mode;
+        }
+        at = at.saturating_add(n);
+        if at >= total {
+            break;
+        }
+    }
+    let runs = layer.char_runs();
+    let mut out: Vec<TextRun> = Vec::new();
+    let mut ui = 0usize;
+    let mut byte = 0usize;
+    for run in &runs {
+        let end = byte.saturating_add(run.len).min(layer.text.len());
+        let Some(slice) = layer.text.get(byte..end) else { break };
+        for ch in slice.chars() {
+            let mode = units.get(ui).copied().unwrap_or(1);
+            ui = ui.saturating_add(ch.len_utf16());
+            let mut style = run.style.clone();
+            if style.kern == 0.0 {
+                style.kerning = match mode {
+                    0 => Kerning::Off,
+                    2 => Kerning::Optical,
+                    _ => Kerning::Metrics,
+                };
+            }
+            match out.last_mut() {
+                Some(last) if last.style == style => last.len = last.len.saturating_add(ch.len_utf8()),
+                _ => out.push(TextRun { len: ch.len_utf8(), style }),
+            }
+        }
+        byte = end;
+    }
+    if !out.is_empty() {
+        layer.runs = out;
+        layer.sync_summary();
+    }
 }
 
 fn doc_mode(m: PsdMode) -> Option<ColorMode> {
@@ -371,6 +424,10 @@ impl Ctx<'_> {
             if let Some(txt2) = &self.txt2 {
                 photocraft_text::psd::apply_txt2(&mut t, &data, txt2);
                 photocraft_text::psd::apply_txt2_frame(&mut t, &data, txt2);
+            } else if let Some(index) = photocraft_text::psd::text_index(&data) {
+                if let Some((_, runs)) = self.kerning_sidecar.iter().find(|(i, _)| *i == index) {
+                    apply_kerning_sidecar(&mut t, runs);
+                }
             }
             // Photoshop's pixels are the cache only when the file has some: ag-psd, GIMP and
             // other writers leave type layers without image data (Photoshop re-renders them on
@@ -829,6 +886,7 @@ pub fn psd_to_document_with(file: &PsdFile, ctl: &photocraft_raster::Interrupt) 
         warnings,
         dpi: doc.resolution_dpi,
         txt2: file.global_blocks.iter().find(|b| &b.key == b"Txt2").and_then(|b| photocraft_text::psd::parse_txt2(&b.data)),
+        kerning_sidecar: file.global_blocks.iter().find(|b| &b.key == b"PcK2").map(|b| crate::psd_export::parse_kerning_sidecar(&b.data)).unwrap_or_default(),
         filter_effects: Vec::new(),
         smart_contents: Default::default(),
         plld_sizes: Default::default(),

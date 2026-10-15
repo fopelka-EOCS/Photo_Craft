@@ -1463,6 +1463,160 @@ pub(crate) fn estimate_psd_size(doc: &Document) -> Option<u64> {
     estimate_encoded_size(raw_bytes, rows, structural_bytes)
 }
 
+/// `true` when `built` is the file's own `Txt2` and is safe to write back. A block we rewrote is
+/// the stub Photoshop rejects. An unchanged stub with an empty resource dict and no glyph
+/// positions (`/21`) is the same stub, so an unedited re-save of one of our old files drops it.
+fn keep_txt2(previous: &[u8], built: &[u8]) -> bool {
+    if built != previous {
+        return false;
+    }
+    let Some(v) = photocraft_text::psd::parse_txt2(previous) else { return false };
+    let empty_resources = match v.get("0") {
+        Some(photocraft_text::engine_data::Value::Dict(items)) => items.is_empty(),
+        None => true,
+        Some(_) => false,
+    };
+    !empty_resources || has_glyph_positions(&v, 0)
+}
+
+fn has_glyph_positions(v: &photocraft_text::engine_data::Value, depth: usize) -> bool {
+    if depth > 32 {
+        return false;
+    }
+    match v {
+        photocraft_text::engine_data::Value::Dict(items) => items.iter().any(|(k, x)| k == "21" || has_glyph_positions(x, depth + 1)),
+        photocraft_text::engine_data::Value::Array(items) => items.iter().any(|x| has_glyph_positions(x, depth + 1)),
+        _ => false,
+    }
+}
+
+/// PhotoCraft kerning sidecar (`PcK2`). Photoshop skips an unknown global block. Written only
+/// when Optical kerning has to survive our own re-open and we are not passing `Txt2` through.
+/// Big-endian: version `u16` = 1, count `u16`, then `count` records of `i32` text index,
+/// `u16` run count, and runs of `u32` UTF-16 length + `u8` mode (0 manual, 1 metrics, 2 optical).
+pub(crate) fn kerning_sidecar(layers: &[(i32, &photocraft_doc::TextLayer)]) -> Option<Vec<u8>> {
+    if !photocraft_text::psd::needs_txt2(layers) {
+        return None;
+    }
+    let mut records = Vec::new();
+    for &(index, layer) in layers {
+        if !(0..=photocraft_text::psd::MAX_TEXT_INDEX).contains(&index) {
+            continue;
+        }
+        let runs = kerning_mode_runs(layer);
+        if runs.is_empty() {
+            continue;
+        }
+        records.push((index, runs));
+        if records.len() == 4096 {
+            break;
+        }
+    }
+    if records.is_empty() {
+        return None;
+    }
+    let mut out = Vec::new();
+    out.extend_from_slice(&1u16.to_be_bytes());
+    out.extend_from_slice(&(records.len() as u16).to_be_bytes());
+    for (index, runs) in records {
+        out.extend_from_slice(&index.to_be_bytes());
+        let n = runs.len().min(4096) as u16;
+        out.extend_from_slice(&n.to_be_bytes());
+        for (len, mode) in runs.into_iter().take(n as usize) {
+            out.extend_from_slice(&len.to_be_bytes());
+            out.push(mode);
+        }
+    }
+    Some(out)
+}
+
+fn kerning_mode_runs(layer: &photocraft_doc::TextLayer) -> Vec<(u32, u8)> {
+    use photocraft_doc::text::Kerning;
+    let runs = layer.char_runs();
+    let mut out: Vec<(u32, u8)> = Vec::new();
+    let mut byte = 0usize;
+    for run in &runs {
+        let end = byte.saturating_add(run.len).min(layer.text.len());
+        let piece = layer.text.get(byte..end).unwrap_or("");
+        let utf16 = u32::try_from(piece.encode_utf16().count()).unwrap_or(u32::MAX);
+        let mode = if run.style.kern != 0.0 {
+            0
+        } else {
+            match run.style.kerning {
+                Kerning::Off => 0,
+                Kerning::Optical => 2,
+                Kerning::Metrics => 1,
+            }
+        };
+        if utf16 > 0 {
+            match out.last_mut() {
+                Some(last) if last.1 == mode => last.0 = last.0.saturating_add(utf16),
+                _ => out.push((utf16, mode)),
+            }
+        }
+        byte = end;
+    }
+    out
+}
+
+/// Reads [`kerning_sidecar`]. A short or unknown block yields no records.
+pub(crate) fn parse_kerning_sidecar(data: &[u8]) -> Vec<(i32, Vec<(u32, u8)>)> {
+    let version = data.get(..2).and_then(|b| b.try_into().ok()).map(u16::from_be_bytes).unwrap_or(0);
+    if version != 1 {
+        return Vec::new();
+    }
+    let count = data.get(2..4).and_then(|b| b.try_into().ok()).map(u16::from_be_bytes).unwrap_or(0) as usize;
+    if count > 4096 {
+        return Vec::new();
+    }
+    let mut i = 4usize;
+    let mut out = Vec::new();
+    for _ in 0..count {
+        let Some(index_bytes) = data.get(i..i + 4) else { break };
+        let Ok(index_bytes) = <[u8; 4]>::try_from(index_bytes) else { break };
+        let index = i32::from_be_bytes(index_bytes);
+        i += 4;
+        let Some(n_bytes) = data.get(i..i + 2) else { break };
+        let Ok(n_bytes) = <[u8; 2]>::try_from(n_bytes) else { break };
+        let n = u16::from_be_bytes(n_bytes) as usize;
+        i += 2;
+        if n > 4096 {
+            break;
+        }
+        let mut runs = Vec::with_capacity(n);
+        let mut ok = true;
+        for _ in 0..n {
+            let Some(len_bytes) = data.get(i..i + 4) else {
+                ok = false;
+                break;
+            };
+            let Ok(len_bytes) = <[u8; 4]>::try_from(len_bytes) else {
+                ok = false;
+                break;
+            };
+            let len = u32::from_be_bytes(len_bytes);
+            i += 4;
+            let Some(&mode) = data.get(i) else {
+                ok = false;
+                break;
+            };
+            i += 1;
+            if mode > 2 {
+                ok = false;
+                break;
+            }
+            runs.push((len, mode));
+        }
+        if !ok {
+            break;
+        }
+        if (0..=photocraft_text::psd::MAX_TEXT_INDEX).contains(&index) {
+            out.push((index, runs));
+        }
+    }
+    out
+}
+
 /// The signature a kept tagged block is written with. `8B64` exists only in PSB files: a PSD
 /// with an `8B64` block (kept from a PSB source, e.g. its global `FMsk` or `cinf`) is refused by
 /// Photoshop as "not compatible with this version" (measured in Photoshop 27.11).
@@ -1689,14 +1843,16 @@ fn document_to_psd_nested(doc: &Document, opts: &PsdExportOptions, depth: u32, c
         })
         .collect();
     let previous = (!text_layers.is_empty()).then(|| preserved.iter().find(|(_, key, _)| key == b"Txt2").map(|(_, _, data)| data.to_vec())).flatten();
-    // A fresh document of ordinary (Metrics) text has nothing to put in `Txt2`, and Photoshop never
-    // writes its empty `<< /0 << >> >>` stub — readers such as Photopea reject it (#3514). Keep the
-    // block when the file had one (round-trip its pen positions/extras) or a layer is Optical (the
-    // one mode EngineData can't carry; #1348).
-    let txt2 =
-        (previous.is_some() || photocraft_text::psd::needs_txt2(&text_layers)).then(|| photocraft_text::psd::build_txt2(&text_layers, previous.as_deref()));
+    // Photoshop and Photopea reject a `Txt2` we synthesize (empty `/0`, kerning runs only):
+    // "program error" / "not compatible with this version" (#2469, #2717, #3514). An unedited
+    // save still writes the file's own block byte for byte (#2374). A rewritten block is omitted;
+    // Photoshop rebuilds it, and Optical kerning for our own re-open goes in `PcK2`.
+    let txt2 = previous.as_ref().and_then(|prev| {
+        let built = photocraft_text::psd::build_txt2(&text_layers, Some(prev));
+        keep_txt2(prev, &built).then_some(built)
+    });
     for (sig, key, data) in preserved {
-        if txt2.is_some() && key == *b"Txt2" {
+        if key == *b"Txt2" || key == *b"PcK2" {
             continue;
         }
         // A kept layer block (one the import could not read, #2700) describes layers the
@@ -1711,6 +1867,11 @@ fn document_to_psd_nested(doc: &Document, opts: &PsdExportOptions, depth: u32, c
         let mut tb = TaggedBlock::new(*b"Txt2", txt2.clone());
         tb.signature = *b"8BIM";
         tb.padding = Some(vec![0; (4 - txt2.len() % 4) % 4]);
+        global_blocks.push(tb);
+    } else if let Some(side) = kerning_sidecar(&text_layers) {
+        let mut tb = TaggedBlock::new(*b"PcK2", side.clone());
+        tb.signature = *b"8BIM";
+        tb.padding = Some(vec![0; (4 - side.len() % 4) % 4]);
         global_blocks.push(tb);
     }
     let comps_resource = ex.comps.is_some().then(|| crate::comps_map::write_comps_resource(doc));

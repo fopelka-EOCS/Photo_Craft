@@ -1166,6 +1166,28 @@ fn psd_text_fill_is_enabled_after_editing_a_legacy_export() {
     }
 }
 
+/// Changing the string must not keep Photoshop's EngineData grafted under the new text (#2717).
+/// An unchanged string still keeps a key we do not model.
+#[test]
+fn edited_string_drops_the_previous_engine_data() {
+    use crate::engine_data::Value as E;
+    let mut t = point("Before", 40.0);
+    let mut legacy = crate::psd::parse_tysh(&crate::psd::build_tysh(&t, 72.0, None)).unwrap();
+    let mut data = crate::psd::engine_data(&legacy.text).unwrap();
+    data.get_mut("EngineDict").unwrap().set("ForeignKey", E::Int(7));
+    for (key, value) in &mut legacy.text.items {
+        if key.as_bytes() == b"EngineData" {
+            *value = photocraft_psd::descriptor::Value::RawData(crate::engine_data::write(&data));
+        }
+    }
+    t.psd_raw = Some(crate::psd::write_tysh(&legacy).into());
+    let kept = crate::psd::engine_data(&crate::psd::parse_tysh(&crate::psd::build_tysh(&t, 72.0, None)).unwrap().text).unwrap();
+    assert_eq!(kept.path(&["EngineDict", "ForeignKey"]).and_then(E::as_i64), Some(7));
+    t.text = "After".into();
+    let dropped = crate::psd::engine_data(&crate::psd::parse_tysh(&crate::psd::build_tysh(&t, 72.0, None)).unwrap().text).unwrap();
+    assert!(dropped.path(&["EngineDict", "ForeignKey"]).is_none());
+}
+
 /// EngineData pair fields: manual kerning and "no automatic kerning" round-trip exactly, in
 /// Photoshop's form (see `psd::pair_runs`).
 #[test]
