@@ -442,7 +442,7 @@ fn layerless_psd_never_keeps_psb_only_block_signatures() {
     for mode in [photocraft_color::ColorMode::Indexed, photocraft_color::ColorMode::Bitmap, photocraft_color::ColorMode::Multichannel] {
         let mut d = indexed_doc(photocraft_color::Color::rgba(1.0, 1.0, 1.0, 1.0), vec![[255, 255, 255]], None);
         d.mode = mode;
-        d.metadata.psd_global_blocks.push((*b"8B64", *b"FMsk", std::sync::Arc::new(vec![0; 12])));
+        d.metadata.psd_global_blocks.push((*b"8B64", *b"FMsk", photocraft_doc::Blob::new(vec![0; 12])));
         let f = PsdFile::from_bytes(&export(&d, "x.psd", &ExportOptions::default()).unwrap().bytes).unwrap();
         assert!(f.global_blocks.iter().any(|b| &b.key == b"FMsk"), "{mode:?}");
         assert!(f.global_blocks.iter().all(|b| &b.signature == b"8BIM"), "{mode:?}");
