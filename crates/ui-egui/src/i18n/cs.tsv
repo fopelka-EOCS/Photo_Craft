@@ -4139,3 +4139,6 @@ cameraRaw	Dehaze	Odstranění oparu
 	{n} frames	{n} snímků
 	Frames before	Snímky před
 	Frames after	Snímky po
+	Tween	Prolnout
+	Last frame	Poslední snímek
+	Frames to add	Počet přidaných snímků

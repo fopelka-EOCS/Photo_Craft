@@ -4599,3 +4599,6 @@ shape	Appearance	Оформление
 	{n} frames	{n} кадров
 	Frames before	Кадры до
 	Frames after	Кадры после
+	Tween	Промежуточные кадры
+	Last frame	Последний кадр
+	Frames to add	Добавить кадров

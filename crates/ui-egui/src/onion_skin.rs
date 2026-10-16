@@ -2,6 +2,8 @@
 //! earlier ones tinted red and the later ones green, so the next pose can be drawn against them.
 //! It only changes what the canvas shows; nothing is saved or exported.
 
+use std::sync::Arc;
+
 use egui::{Color32, TextureHandle, TextureOptions};
 use photocraft_doc::{AnimFrame, DocId, Document, FrameAnimation, Layer, LayerId};
 use serde::{Deserialize, Serialize};
@@ -63,9 +65,16 @@ pub fn ghost_tint(s: OnionSkin, distance: u32, earlier: bool) -> Color32 {
     base.gamma_multiply(alpha)
 }
 
+/// What a ghost was drawn from: the ghost frame's hidden layers and opacities, the shown frame's, and the pixel version.
+type GhostKey = (Vec<LayerId>, Vec<(LayerId, f32)>, Vec<LayerId>, Vec<(LayerId, f32)>, u64);
+
+fn ghost_key(a: &FrameAnimation, i: usize, epoch: u64) -> GhostKey {
+    let (ghost, shown) = (&a.frames[i], &a.frames[a.current]);
+    (ghost.hidden.clone(), ghost.opacities.clone(), shown.hidden.clone(), shown.opacities.clone(), epoch)
+}
+
 struct Ghost {
-    /// The layers the ghost frame and the shown frame hid when this was drawn, and the pixel version.
-    key: (Vec<LayerId>, Vec<LayerId>, u64),
+    key: GhostKey,
     tex: TextureHandle,
 }
 
@@ -125,7 +134,7 @@ pub fn ghosts(app: &PhotocraftApp, ctx: &egui::Context, canvas_doc: DocId) -> Ve
         // One new ghost per UI frame, so stepping through a long animation stays smooth.
         let mut budget = 1;
         for &(i, distance, earlier) in &wanted {
-            let key = (a.frames[i].hidden.clone(), a.frames[a.current].hidden.clone(), c.epoch);
+            let key = ghost_key(a, i, c.epoch);
             if c.ghosts.get(&i).is_none_or(|g| g.key != key) {
                 if budget == 0 {
                     ctx.request_repaint();
@@ -145,8 +154,8 @@ pub fn ghosts(app: &PhotocraftApp, ctx: &egui::Context, canvas_doc: DocId) -> Ve
 }
 
 /// What a ghost of frame `i` shows while frame `current` is on the canvas: the layers that look different
-/// there (drawn in the ghost frame and not now). A layer both frames show the same way, such as an opaque
-/// Background, would only wash out what is drawn on top of it.
+/// there (drawn in the ghost frame and not now, or drawn in both at another opacity). A layer both frames show
+/// the same way, such as an opaque Background, would only wash out what is drawn on top of it.
 ///
 /// A layer is drawn in a frame when its own eye and those of the groups above it are on. A group that holds a
 /// layer which differs stays shown, or the compositor would skip what is inside it; a group the ghost frame
@@ -154,13 +163,14 @@ pub fn ghosts(app: &PhotocraftApp, ctx: &egui::Context, canvas_doc: DocId) -> Ve
 pub fn ghost_frame(layers: &[Layer], a: &FrameAnimation, i: usize) -> AnimFrame {
     let (ghost, now) = (&a.frames[i], &a.frames[a.current]);
     /// `there` and `here`: every group above is on in the ghost frame, and in the current frame.
-    fn walk(layers: &[Layer], ghost: &AnimFrame, now: &AnimFrame, (there, here): (bool, bool), hidden: &mut Vec<LayerId>) -> bool {
+    fn walk(layers: &[Layer], a: &FrameAnimation, (ghost, now): (&AnimFrame, &AnimFrame), (there, here): (bool, bool), hidden: &mut Vec<LayerId>) -> bool {
         let mut any = false;
         for l in layers {
             let drawn_there = there && ghost.hidden.binary_search(&l.id).is_err();
             let drawn_here = here && now.hidden.binary_search(&l.id).is_err();
-            let inside = l.children().is_some_and(|c| walk(c, ghost, now, (drawn_there, drawn_here), hidden));
-            let shown = (drawn_there && !drawn_here) || inside;
+            let faded = a.opacity_in(ghost, l.id).zip(a.opacity_in(now, l.id)).is_some_and(|(x, y)| (x - y).abs() > 0.001);
+            let inside = l.children().is_some_and(|c| walk(c, a, (ghost, now), (drawn_there, drawn_here), hidden));
+            let shown = (drawn_there && (!drawn_here || faded)) || inside;
             if !shown {
                 hidden.push(l.id);
             }
@@ -169,15 +179,16 @@ pub fn ghost_frame(layers: &[Layer], a: &FrameAnimation, i: usize) -> AnimFrame 
         any
     }
     let mut hidden = Vec::new();
-    walk(layers, ghost, now, (true, true), &mut hidden);
+    walk(layers, a, (ghost, now), (true, true), &mut hidden);
     hidden.sort();
-    AnimFrame { delay_ms: 0, hidden }
+    AnimFrame { delay_ms: 0, hidden, opacities: ghost.opacities.clone() }
 }
 
 /// Frame `i` of the animation as a ghost, composited and reduced.
 fn render(ctx: &egui::Context, doc: &Document, a: &FrameAnimation, i: usize, reuse: Option<TextureHandle>) -> TextureHandle {
     let mut d = doc.clone();
-    let only = FrameAnimation { frames: vec![std::sync::Arc::new(ghost_frame(&d.layers, a, i))], current: 0, loops: Default::default() };
+    let only =
+        FrameAnimation { frames: vec![Arc::new(ghost_frame(&d.layers, a, i))], current: 0, loops: Default::default(), defaults: Arc::clone(&a.defaults) };
     only.apply(0, &mut d.layers);
     let img = photocraft_compose::thumbnail(&d, GHOST_SIDE);
     let color = egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.pixels);
@@ -205,64 +216,21 @@ mod tests {
     #[test]
     fn a_ghost_shows_only_what_differs_from_the_shown_frame() {
         let all = [layer(1), layer(2)];
+        let frame = |hidden: Vec<LayerId>, op2: f32| Arc::new(AnimFrame { delay_ms: 0, hidden, opacities: vec![(LayerId(1), 1.0), (LayerId(2), op2)] });
         // Layer 1 (a Background) is shown in both frames; layer 2 only in the ghost frame.
         let a = FrameAnimation {
-            frames: vec![AnimFrame { delay_ms: 0, hidden: vec![] }.into(), AnimFrame { delay_ms: 0, hidden: vec![LayerId(2)] }.into()],
+            frames: vec![frame(vec![], 1.0), frame(vec![LayerId(2)], 1.0)],
             current: 1,
             loops: Default::default(),
+            defaults: Default::default(),
         };
         assert_eq!(ghost_frame(&all, &a, 0).hidden, [LayerId(1)], "the shared Background stays out of the ghost");
+        // A layer both frames show at different opacities (a fade) is part of the ghost.
+        let fade = FrameAnimation { frames: vec![frame(vec![], 1.0), frame(vec![], 0.4)], current: 1, loops: Default::default(), defaults: Default::default() };
+        assert_eq!(ghost_frame(&all, &fade, 0).hidden, [LayerId(1)]);
         // A frame ghosted against itself shows nothing.
         let same = FrameAnimation { current: 0, ..a.clone() };
         assert_eq!(ghost_frame(&all, &same, 0).hidden.len(), 2);
-    }
-
-    fn layer(id: u64) -> Layer {
-        let mut l = Layer::group("L", Vec::new());
-        l.id = LayerId(id);
-        l
-    }
-
-    fn frames(hidden: [Vec<LayerId>; 2]) -> Vec<std::sync::Arc<AnimFrame>> {
-        hidden.into_iter().map(|hidden| AnimFrame { delay_ms: 0, hidden }.into()).collect()
-    }
-
-    #[test]
-    fn a_ghost_keeps_the_group_around_a_layer_that_differs() {
-        // Group 1 is shown in both frames; the layer inside it, 2, only in the ghost frame.
-        let mut group = layer(1);
-        if let Some(c) = group.children_mut() {
-            c.push(layer(2));
-        }
-        let a = FrameAnimation { frames: frames([vec![], vec![LayerId(2)]]), current: 1, loops: Default::default() };
-        assert!(ghost_frame(&[group], &a, 0).hidden.is_empty(), "the group stays shown, or its child would never draw");
-    }
-
-    #[test]
-    fn a_ghost_shows_the_children_of_a_group_that_only_the_ghost_frame_shows() {
-        // Group 1 holds layer 2. The ghost frame shows the group, the current frame hides it, and the child's own
-        // eye is on in both: what the ghost adds is the group's contents.
-        let mut group = layer(1);
-        if let Some(c) = group.children_mut() {
-            c.push(layer(2));
-        }
-        let a = FrameAnimation { frames: frames([vec![], vec![LayerId(1)]]), current: 1, loops: Default::default() };
-        assert!(ghost_frame(&[group], &a, 0).hidden.is_empty(), "the group and its child both draw in the ghost");
-    }
-
-    #[test]
-    fn a_ghost_shows_nothing_of_a_group_the_ghost_frame_hides() {
-        // Group 1 holds layer 2, whose own eye is on in both frames. The ghost frame hides the group, the current
-        // frame shows it: the ghost adds nothing, however its child looks.
-        let mut group = layer(1);
-        if let Some(c) = group.children_mut() {
-            c.push(layer(2));
-        }
-        let a = FrameAnimation { frames: frames([vec![LayerId(1)], vec![]]), current: 1, loops: Default::default() };
-        assert_eq!(ghost_frame(&[group.clone()], &a, 0).hidden, [LayerId(1), LayerId(2)]);
-        // And a child shown in the ghost frame, with the group on in both, is what the ghost adds.
-        let b = FrameAnimation { frames: frames([vec![], vec![LayerId(2)]]), current: 1, loops: Default::default() };
-        assert!(ghost_frame(&[group], &b, 0).hidden.is_empty());
     }
 
     #[test]
@@ -277,5 +245,64 @@ mod tests {
         let (near, far) = (ghost_tint(s, 1, true), ghost_tint(s, 2, true));
         assert!(near.a() > far.a());
         assert_ne!(ghost_tint(s, 1, true), ghost_tint(s, 1, false));
+    }
+
+    fn layer(id: u64) -> Layer {
+        let mut l = Layer::group("L", Vec::new());
+        l.id = LayerId(id);
+        l
+    }
+
+    #[test]
+    fn a_ghost_shows_the_children_of_a_group_that_only_the_ghost_frame_shows() {
+        // Group 1 holds layer 2. The ghost frame shows the group, the current frame hides it, and the child's own
+        // eye is on in both: what the ghost adds is the group's contents.
+        let mut group = layer(1);
+        if let Some(c) = group.children_mut() {
+            c.push(layer(2));
+        }
+        let frame = |hidden: Vec<LayerId>| Arc::new(AnimFrame { delay_ms: 0, hidden, opacities: vec![] });
+        let a = FrameAnimation { frames: vec![frame(vec![]), frame(vec![LayerId(1)])], current: 1, loops: Default::default(), defaults: Default::default() };
+        assert!(ghost_frame(&[group], &a, 0).hidden.is_empty(), "the group and its child both draw in the ghost");
+    }
+
+    #[test]
+    fn a_ghost_keeps_the_group_around_a_layer_that_differs() {
+        // Group 1 is shown in both frames; the layer inside it, 2, only in the ghost frame.
+        let mut group = layer(1);
+        if let Some(c) = group.children_mut() {
+            c.push(layer(2));
+        }
+        let frame = |hidden: Vec<LayerId>| Arc::new(AnimFrame { delay_ms: 0, hidden, opacities: vec![] });
+        let a = FrameAnimation { frames: vec![frame(vec![]), frame(vec![LayerId(2)])], current: 1, loops: Default::default(), defaults: Default::default() };
+        assert!(ghost_frame(&[group], &a, 0).hidden.is_empty(), "the group stays shown, or its child would never draw");
+    }
+
+    #[test]
+    fn a_ghost_shows_nothing_of_a_group_the_ghost_frame_hides() {
+        // Group 1 holds layer 2, whose own eye is on in both frames. The ghost frame hides the group, the current
+        // frame shows it: the ghost adds nothing, however its child looks.
+        let mut group = layer(1);
+        if let Some(c) = group.children_mut() {
+            c.push(layer(2));
+        }
+        let frame = |hidden: Vec<LayerId>| Arc::new(AnimFrame { delay_ms: 0, hidden, opacities: vec![] });
+        let a = FrameAnimation { frames: vec![frame(vec![LayerId(1)]), frame(vec![])], current: 1, loops: Default::default(), defaults: Default::default() };
+        assert_eq!(ghost_frame(&[group.clone()], &a, 0).hidden, [LayerId(1), LayerId(2)]);
+        // And a child shown in the ghost frame, with the group on in both, is what the ghost adds.
+        let b = FrameAnimation { frames: vec![frame(vec![]), frame(vec![LayerId(2)])], current: 1, loops: Default::default(), defaults: Default::default() };
+        assert!(ghost_frame(&[group], &b, 0).hidden.is_empty());
+    }
+
+    #[test]
+    fn a_ghost_is_redrawn_when_only_a_fade_differs() {
+        let frame = |op: f32| Arc::new(AnimFrame { delay_ms: 0, hidden: vec![], opacities: vec![(LayerId(1), op)] });
+        // Tweened frames hide the same layers and differ only in opacity.
+        let mut a = FrameAnimation { frames: vec![frame(0.2), frame(0.5), frame(0.8)], current: 2, loops: Default::default(), defaults: Default::default() };
+        let before = ghost_key(&a, 0, 7);
+        a.current = 1;
+        assert_ne!(before, ghost_key(&a, 0, 7), "the shown frame's fade changed what the ghost differs by");
+        a.frame_mut(0).unwrap().opacities[0].1 = 0.3;
+        assert_ne!(ghost_key(&a, 0, 7), before, "so did the ghost frame's own");
     }
 }
