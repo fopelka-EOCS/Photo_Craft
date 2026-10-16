@@ -4597,3 +4597,5 @@ shape	Appearance	Оформление
 	{seconds} sec.	{seconds} с
 	{count} times	{count} раз
 	{n} frames	{n} кадров
+	Frames before	Кадры до
+	Frames after	Кадры после

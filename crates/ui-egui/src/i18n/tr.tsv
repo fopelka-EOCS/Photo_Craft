@@ -4122,3 +4122,5 @@ cameraData	Lens	Lens
 	{seconds} sec.	{seconds} sn.
 	{count} times	{count} kez
 	{n} frames	{n} kare
+	Frames before	Önceki kareler
+	Frames after	Sonraki kareler

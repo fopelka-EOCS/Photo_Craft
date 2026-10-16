@@ -3403,3 +3403,5 @@ curves	Smooth	Glätten
 	{seconds} sec.	{seconds} Sek.
 	{count} times	{count}-mal
 	{n} frames	{n} Einzelbilder
+	Frames before	Frames davor
+	Frames after	Frames danach
