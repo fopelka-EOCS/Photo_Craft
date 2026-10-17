@@ -1,186 +1,237 @@
-use std::io::Write;
+//! The command line, as clap types. Values stay strings: the handlers check them, with their own
+//! messages (#7071). A flag a subcommand doesn't take is a usage error, so a typo such as
+//! `--fromat` can't be silently ignored (#423).
 
-use crate::{
-    Result,
-    automation::{commands, mcp, serve},
-    batch::{batch, droplet},
-    document::{convert, info, run_cmds},
-};
+use clap::{ArgAction, ArgMatches, Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 
-pub const USAGE: &str = "\
-photocraft-cli: headless PhotoCraft
-
-USAGE:
-  photocraft-cli convert <in> <out> [--format <ext>] [--quality <1-100>] [--in-place] [--tiff-layers] [--tiff-compression <none|lzw|zip>] [--tga-bits <24|32>] [--dpx-bits <8|10|12|16>] [--dds-compression <none|bc1|bc2|bc3>] [--dds-mipmaps] [--jpeg-format <baseline|optimized|progressive>]
-      Convert between formats (.pcraft, .psd, .png, .jpg, .tif, .webp, .exr, …).
-      An <out> that is the <in> file is refused, as the result would replace the original;
-      --in-place allows it.
-      TIFF output is flat unless --tiff-layers keeps the layers (Photoshop layer data);
-      --tiff-compression compresses it (none, the default; lzw; zip).
-      --quality sets the JPEG or WebP quality; a WebP written with a quality is lossy, without one lossless.
-      --tga-bits sets a TGA's bits per pixel: 32 writes the alpha channel (or else the transparency) as
-      its alpha, 24 none. Without it: 32 with an alpha channel or transparency, else 24.
-      --dpx-bits sets a DPX's bits per sample. Without it: 8 for an 8-bit document, else 16.
-      --dds-compression sets a DDS texture's compression: none (uncompressed, the default), bc1
-      (DXT1: alpha on or off), bc2 (DXT3) or bc3 (DXT5). --dds-mipmaps also writes the full mip chain.
-      --jpeg-format picks a JPEG's scans, as JPEG Options does: baseline (the default), optimized
-      (Huffman tables fitted to the image; RGB is written 4:2:0 and keeps the standard tables, so
-      only Gray and CMYK shrink) or progressive.
-  photocraft-cli info <file> [--compact]
-      Print the document as JSON (size, mode, depth, layer tree).
-  photocraft-cli run (<file> | --new <json>) --cmd <id> [--params <json>] [--cmd …] [--out <file>] [--format <ext>] [--quality <1-100>] [--tiff-layers] [--tiff-compression <none|lzw|zip>] [--tga-bits <24|32>] [--dpx-bits <8|10|12|16>] [--dds-compression <none|bc1|bc2|bc3>] [--dds-mipmaps] [--jpeg-format <baseline|optimized|progressive>]
-      Open a file, run engine commands in order, save the result. Each --params
-      applies to the preceding --cmd. Prints each command's JSON result.
-  photocraft-cli batch --actions <actions.json|set.atn> [--action <name>] --in <dir> --out <dir> [--format <ext>] [--quality <1-100>] [--in-place] [--tiff-layers] [--tiff-compression <none|lzw|zip>] [--tga-bits <24|32>] [--dpx-bits <8|10|12|16>] [--dds-compression <none|bc1|bc2|bc3>] [--dds-mipmaps] [--jpeg-format <baseline|optimized|progressive>]
-      Apply an action list to every image in a directory. A Photoshop Actions file (.atn) is a
-      set: its action --action names plays, as below. JSON steps are [id, params] pairs,
-      {\"command\": id, \"params\": {…}} objects or bare ids, as a recorded action or droplet stores them
-      (a list, or wrapped in {\"actions\": …}, {\"steps\": …} or a droplet). An Actions set (the Actions
-      panel's actions.json, {\"actions\": [{\"name\", \"steps\"}…]}) plays the action --action names (needed
-      when the set holds more than one) with the whole set loaded, so its steps can play other actions
-      of the set. An --out folder that is the --in folder is refused, as the results would replace
-      the originals; --in-place allows it.
-  photocraft-cli droplet <file.pcdroplet> <file-or-dir>… [--out <dir>]
-      Run a droplet (File › Automate › Create Droplet) on images and folders.
-  photocraft-cli commands [--json] [--filter <text>]
-      List the engine command registry.
-  photocraft-cli mcp [--bridge <127.0.0.1:port>] [--control-token <64-hex> | --control-token-file <path>]
-      [--automation-read-root <dir>] [--automation-write-root <dir>]
-      Run the MCP server on stdio (headless engine, or bridge to a running `photocraft --control <port>`).
-  photocraft-cli serve [--port <port>] [--control-token <64-hex> | --control-token-file <path>]
-      [--automation-read-root <dir>] [--automation-write-root <dir>]
-      Keep one headless session open and answer JSON lines ({\"id\",\"method\",\"params\"}) on stdio,
-      or on 127.0.0.1:<port>. Methods: engine.execute, jobs.list/cancel, engine.commands,
-      doc.open/new/place/save/exportLayers/exportDataSets/importDataSets/inspect/render/select/close, session.list, batch, methods
-      (docs/control-protocol.md#headless-server).
-
-  photocraft-cli <subcommand> --help (or -h) prints this text. A flag the subcommand doesn't take is
-  an error.
-";
-
-pub(crate) struct Args {
-    pub(crate) positional: Vec<String>,
-    pub(crate) flags: Vec<(String, Option<String>)>,
+/// photocraft-cli: headless PhotoCraft
+#[derive(Parser)]
+#[command(name = "photocraft-cli", arg_required_else_help = true, args_override_self = true)]
+pub(crate) struct Cli {
+    #[command(subcommand)]
+    pub(crate) command: Command,
 }
 
-/// A subcommand: the flags it reads (taking a value, or given bare) and what it runs. A flag
-/// outside these is a usage error, so a typo such as `--fromat` can't be silently ignored (#423).
-pub(crate) struct Subcommand {
-    pub(crate) name: &'static str,
-    pub(crate) values: &'static [&'static str],
-    pub(crate) bare: &'static [&'static str],
-    pub(crate) run: fn(&Args, &mut dyn Write, &mut dyn Write) -> Result,
+#[derive(Subcommand)]
+pub(crate) enum Command {
+    Convert(ConvertArgs),
+    Info(InfoArgs),
+    Run(RunArgs),
+    Batch(BatchArgs),
+    Droplet(DropletArgs),
+    Commands(CommandsArgs),
+    Mcp(McpArgs),
+    Serve(ServeArgs),
 }
 
-pub(crate) const SUBCOMMANDS: &[Subcommand] = &[
-    Subcommand {
-        name: "convert",
-        values: &["--format", "--quality", "--tga-bits", "--dpx-bits", "--dds-compression", "--tiff-compression", "--jpeg-format"],
-        bare: &["--in-place", "--tiff-layers", "--dds-mipmaps"],
-        run: convert,
-    },
-    Subcommand { name: "info", values: &[], bare: &["--compact"], run: |a, out, _| info(a, out) },
-    Subcommand {
-        name: "run",
-        values: &[
-            "--new",
-            "--cmd",
-            "--params",
-            "--out",
-            "--format",
-            "--quality",
-            "--tga-bits",
-            "--dpx-bits",
-            "--dds-compression",
-            "--tiff-compression",
-            "--jpeg-format",
-        ],
-        bare: &["--tiff-layers", "--dds-mipmaps"],
-        run: run_cmds,
-    },
-    Subcommand {
-        name: "batch",
-        values: &[
-            "--actions",
-            "--action",
-            "--in",
-            "--out",
-            "--format",
-            "--quality",
-            "--tga-bits",
-            "--dpx-bits",
-            "--dds-compression",
-            "--tiff-compression",
-            "--jpeg-format",
-        ],
-        bare: &["--in-place", "--tiff-layers", "--dds-mipmaps"],
-        run: batch,
-    },
-    Subcommand { name: "droplet", values: &["--out"], bare: &[], run: droplet },
-    Subcommand { name: "commands", values: &["--filter"], bare: &["--json"], run: |a, out, _| commands(a, out) },
-    Subcommand {
-        name: "mcp",
-        values: &["--bridge", "--control-token", "--control-token-file", "--automation-read-root", "--automation-write-root"],
-        bare: &[],
-        run: |a, _, _| mcp(a),
-    },
-    Subcommand {
-        name: "serve",
-        values: &["--port", "--control-token", "--control-token-file", "--automation-read-root", "--automation-write-root"],
-        bare: &[],
-        run: |a, _, err| serve(a, err),
-    },
-];
-
-/// A command line [`parse`] refuses: printed with the usage text, exit 2.
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum UsageError {
-    #[error("unknown flag {flag} for {sub}")]
-    UnknownFlag { flag: String, sub: &'static str },
-    #[error("{0} takes no value")]
-    TakesNoValue(String),
-    #[error("{0} needs a value")]
-    NeedsValue(String),
+// How an image is written: shared by `convert`, `run` and `batch`.
+#[derive(Args)]
+pub(crate) struct ExportArgs {
+    /// Output format, overriding the output's extension (png, jpg, tif, webp, …)
+    #[arg(long, value_name = "EXT", allow_hyphen_values = true)]
+    pub(crate) format: Option<String>,
+    /// JPEG or WebP quality, 1-100. A WebP written with a quality is lossy, without one lossless
+    #[arg(long, value_name = "1-100", allow_hyphen_values = true)]
+    pub(crate) quality: Option<String>,
+    /// Keep the layers in TIFF output (Photoshop layer data); TIFF output is flat without it
+    #[arg(long)]
+    pub(crate) tiff_layers: bool,
+    /// Compress TIFF output: none (the default), lzw or zip
+    #[arg(long, value_name = "none|lzw|zip", allow_hyphen_values = true)]
+    pub(crate) tiff_compression: Option<String>,
+    /// A TGA's bits per pixel: 32 writes the alpha channel (or else the transparency) as its
+    /// alpha, 24 none. Without it: 32 with an alpha channel or transparency, else 24
+    #[arg(long, value_name = "24|32", allow_hyphen_values = true)]
+    pub(crate) tga_bits: Option<String>,
+    /// A DPX's bits per sample. Without it: 8 for an 8-bit document, else 16
+    #[arg(long, value_name = "8|10|12|16", allow_hyphen_values = true)]
+    pub(crate) dpx_bits: Option<String>,
+    /// A DDS texture's compression: none (uncompressed, the default), bc1 (DXT1: alpha on or
+    /// off), bc2 (DXT3) or bc3 (DXT5)
+    #[arg(long, value_name = "none|bc1|bc2|bc3", allow_hyphen_values = true)]
+    pub(crate) dds_compression: Option<String>,
+    /// Also write a DDS texture's full mip chain
+    #[arg(long)]
+    pub(crate) dds_mipmaps: bool,
+    /// A JPEG's scans, as JPEG Options picks them: baseline (the default), optimized (Huffman
+    /// tables fitted to the image; RGB is written 4:2:0 and keeps the standard tables, so only Gray
+    /// and CMYK shrink) or progressive
+    #[arg(long, value_name = "baseline|optimized|progressive", allow_hyphen_values = true)]
+    pub(crate) jpeg_format: Option<String>,
 }
 
-/// The subcommand's arguments, or `None` when they ask for help (`--help` or `-h`).
-pub(crate) fn parse(sub: &Subcommand, args: &[String]) -> Result<Option<Args>, UsageError> {
-    let mut a = Args { positional: Vec::new(), flags: Vec::new() };
-    let unknown = |flag: &str| UsageError::UnknownFlag { flag: flag.to_owned(), sub: sub.name };
-    let mut i = 0;
-    while let Some(s) = args.get(i) {
-        if s == "--help" || s == "-h" {
-            return Ok(None);
+/// Convert between formats (.pcraft, .psd, .png, .jpg, .tif, .webp, .exr, …)
+///
+/// An <OUT> that is the <IN> file is refused, as the result would replace the original;
+/// --in-place allows it.
+#[derive(Args)]
+pub(crate) struct ConvertArgs {
+    /// The file to read
+    #[arg(value_name = "IN")]
+    pub(crate) input: String,
+    /// The file to write; its extension picks the format unless --format is given
+    #[arg(value_name = "OUT")]
+    pub(crate) output: String,
+    /// Allow an <OUT> that is the <IN> file, replacing the original
+    #[arg(long)]
+    pub(crate) in_place: bool,
+    #[command(flatten)]
+    pub(crate) export: ExportArgs,
+}
+
+/// Print the document as JSON (size, mode, depth, layer tree)
+#[derive(Args)]
+pub(crate) struct InfoArgs {
+    pub(crate) file: String,
+    /// One line of JSON instead of pretty-printed
+    #[arg(long)]
+    pub(crate) compact: bool,
+}
+
+/// Open a file (or start a new document), run engine commands in order, save the result
+///
+/// Prints each command's JSON result. Give exactly one of <FILE> or --new.
+#[derive(Args)]
+pub(crate) struct RunArgs {
+    /// The document to open
+    pub(crate) file: Option<String>,
+    /// Start from a new document with these JSON parameters instead of opening a file
+    #[arg(long, value_name = "JSON", allow_hyphen_values = true)]
+    pub(crate) new: Option<String>,
+    /// An engine command to run; repeat for several, run in order
+    #[arg(long, value_name = "ID", action = ArgAction::Append, allow_hyphen_values = true)]
+    pub(crate) cmd: Vec<String>,
+    /// JSON parameters for the --cmd before it (default {})
+    #[arg(long, value_name = "JSON", action = ArgAction::Append, allow_hyphen_values = true)]
+    pub(crate) params: Vec<String>,
+    /// Save the result to this file
+    #[arg(long, value_name = "FILE", allow_hyphen_values = true)]
+    pub(crate) out: Option<String>,
+    #[command(flatten)]
+    pub(crate) export: ExportArgs,
+    /// `--cmd` and `--params` values in command-line order (`true` for a `--cmd`), set by [`parse`].
+    #[arg(skip)]
+    pub(crate) steps: Vec<(bool, String)>,
+}
+
+/// Apply an action list to every image in a directory
+///
+/// A Photoshop Actions file (.atn) is a set: its action --action names plays, as below. JSON steps
+/// are [id, params] pairs, {"command": id, "params": {…}} objects or bare ids, as a recorded
+/// action or droplet stores them (a list, or wrapped in {"actions": …}, {"steps": …} or a
+/// droplet). An Actions set (the Actions panel's actions.json, {"actions": [{"name", "steps"}…]})
+/// plays the action --action names (needed when the set holds more than one) with the whole set
+/// loaded, so its steps can play other actions of the set.
+///
+/// An --out folder that is the --in folder is refused, as the results would replace the
+/// originals; --in-place allows it.
+#[derive(Args)]
+pub(crate) struct BatchArgs {
+    /// The action list: actions.json, a droplet, or a Photoshop Actions file (.atn)
+    #[arg(long, value_name = "FILE", allow_hyphen_values = true)]
+    pub(crate) actions: Option<String>,
+    /// Which action of an Actions set to play
+    #[arg(long, value_name = "NAME", allow_hyphen_values = true)]
+    pub(crate) action: Option<String>,
+    /// The folder of images to process
+    #[arg(long = "in", value_name = "DIR", allow_hyphen_values = true)]
+    pub(crate) in_dir: Option<String>,
+    /// The folder to write the results to, as <stem>.<ext>
+    #[arg(long, value_name = "DIR", allow_hyphen_values = true)]
+    pub(crate) out: Option<String>,
+    /// Allow an --out that is the --in folder, replacing the originals
+    #[arg(long)]
+    pub(crate) in_place: bool,
+    #[command(flatten)]
+    pub(crate) export: ExportArgs,
+}
+
+/// Run a droplet (File › Automate › Create Droplet) on images and folders
+#[derive(Args)]
+pub(crate) struct DropletArgs {
+    /// The droplet to run
+    #[arg(value_name = "FILE.pcdroplet")]
+    pub(crate) file: String,
+    /// Images and folders to run it on
+    #[arg(value_name = "FILE-OR-DIR", required = true)]
+    pub(crate) inputs: Vec<String>,
+    /// The folder to write the results to
+    #[arg(long, value_name = "DIR", allow_hyphen_values = true)]
+    pub(crate) out: Option<String>,
+}
+
+/// List the engine command registry
+#[derive(Args)]
+pub(crate) struct CommandsArgs {
+    /// Print the entries as JSON
+    #[arg(long)]
+    pub(crate) json: bool,
+    /// Only the commands matching this text
+    #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+    pub(crate) filter: Option<String>,
+}
+
+// The control token and the folders automation may touch: shared by `mcp` and `serve`.
+#[derive(Args)]
+pub(crate) struct ControlArgs {
+    /// The control token (64 hex digits)
+    #[arg(long, value_name = "64-HEX", allow_hyphen_values = true)]
+    pub(crate) control_token: Option<String>,
+    /// A file holding the control token (a server creates it when missing)
+    #[arg(long, value_name = "PATH", allow_hyphen_values = true)]
+    pub(crate) control_token_file: Option<String>,
+    /// The folder automation may read from (none without it)
+    #[arg(long, value_name = "DIR", allow_hyphen_values = true)]
+    pub(crate) automation_read_root: Option<String>,
+    /// The folder automation may write to (none without it)
+    #[arg(long, value_name = "DIR", allow_hyphen_values = true)]
+    pub(crate) automation_write_root: Option<String>,
+}
+
+/// Run the MCP server on stdio (headless engine, or bridge to a running `photocraft --control <port>`)
+#[derive(Args)]
+pub(crate) struct McpArgs {
+    /// Bridge to the PhotoCraft app listening here instead of a headless engine
+    #[arg(long, value_name = "127.0.0.1:PORT", allow_hyphen_values = true)]
+    pub(crate) bridge: Option<String>,
+    #[command(flatten)]
+    pub(crate) control: ControlArgs,
+}
+
+/// Keep one headless session open and answer JSON lines on stdio, or on 127.0.0.1:<PORT>
+///
+/// Each request is a JSON line {"id", "method", "params"}. Methods: engine.execute,
+/// jobs.list/cancel, engine.commands,
+/// doc.open/new/place/save/exportLayers/exportDataSets/importDataSets/inspect/render/select/close,
+/// session.list, batch, methods (docs/control-protocol.md#headless-server).
+#[derive(Args)]
+pub(crate) struct ServeArgs {
+    /// Listen on 127.0.0.1:<PORT> instead of stdio
+    #[arg(long, value_name = "PORT", allow_hyphen_values = true)]
+    pub(crate) port: Option<String>,
+    #[command(flatten)]
+    pub(crate) control: ControlArgs,
+}
+
+/// `--cmd` and `--params` values back in command-line order: clap keeps each flag's values apart,
+/// their indices say how they interleave.
+fn steps(m: &ArgMatches) -> Vec<(bool, String)> {
+    let mut steps: Vec<(usize, bool, String)> = Vec::new();
+    for (id, is_cmd) in [("cmd", true), ("params", false)] {
+        if let (Some(at), Some(values)) = (m.indices_of(id), m.get_many::<String>(id)) {
+            steps.extend(at.zip(values).map(|(i, v)| (i, is_cmd, v.clone())));
         }
-        if let Some((k, v)) = s.split_once('=').filter(|(k, _)| k.starts_with("--")) {
-            if sub.bare.contains(&k) {
-                return Err(UsageError::TakesNoValue(k.to_owned()));
-            }
-            if !sub.values.contains(&k) {
-                return Err(unknown(k));
-            }
-            a.flags.push((k.to_owned(), Some(v.to_owned())));
-        } else if sub.values.contains(&s.as_str()) {
-            let v = args.get(i + 1).ok_or_else(|| UsageError::NeedsValue(s.clone()))?;
-            a.flags.push((s.clone(), Some(v.clone())));
-            i += 1;
-        } else if sub.bare.contains(&s.as_str()) {
-            a.flags.push((s.clone(), None));
-        } else if s.starts_with("--") {
-            return Err(unknown(s));
-        } else {
-            a.positional.push(s.clone());
-        }
-        i += 1;
     }
-    Ok(Some(a))
+    steps.sort_by_key(|s| s.0);
+    steps.into_iter().map(|(_, is_cmd, v)| (is_cmd, v)).collect()
 }
 
-impl Args {
-    pub(crate) fn get(&self, k: &str) -> Option<&str> {
-        self.flags.iter().rev().find(|(f, _)| f == k).and_then(|(_, v)| v.as_deref())
+/// Parse the arguments (without the binary name).
+pub(crate) fn parse(args: &[String]) -> Result<Cli, clap::Error> {
+    let matches = Cli::command().try_get_matches_from(std::iter::once("photocraft-cli").chain(args.iter().map(String::as_str)))?;
+    let mut cli = Cli::from_arg_matches(&matches)?;
+    if let (Command::Run(r), Some(m)) = (&mut cli.command, matches.subcommand_matches("run")) {
+        r.steps = steps(m);
     }
-    pub(crate) fn has(&self, k: &str) -> bool {
-        self.flags.iter().any(|(f, _)| f == k)
-    }
+    Ok(cli)
 }
