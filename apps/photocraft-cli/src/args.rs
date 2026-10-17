@@ -139,7 +139,8 @@ pub(crate) struct BatchArgs {
     /// The folder to write the results to, as <stem>.<ext>
     #[arg(long, value_name = "DIR", allow_hyphen_values = true)]
     pub(crate) out: Option<String>,
-    /// Allow an --out that is the --in folder, replacing the originals
+    /// An --out folder that is the --in folder is refused, as the results would replace the
+    /// originals; --in-place allows it
     #[arg(long)]
     pub(crate) in_place: bool,
     #[command(flatten)]
@@ -177,7 +178,8 @@ pub(crate) struct ControlArgs {
     /// The control token (64 hex digits)
     #[arg(long, value_name = "64-HEX", allow_hyphen_values = true)]
     pub(crate) control_token: Option<String>,
-    /// A file holding the control token (a server creates it when missing)
+    /// A file holding the control token, used instead of --control-token (a server creates it
+    /// when missing)
     #[arg(long, value_name = "PATH", allow_hyphen_values = true)]
     pub(crate) control_token_file: Option<String>,
     /// The folder automation may read from (none without it)
