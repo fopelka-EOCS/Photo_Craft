@@ -462,12 +462,13 @@ fn float_in_window_moves_the_document_instead_of_copying_it() {
     menu(&mut app, &ctx, "window.arrange.newWindowForDocument", json!({})).unwrap();
     assert_eq!(app.ui.windows.len(), 2);
     assert!((0..3).all(|d| !app.ui.floats(d)));
-    // Closing a floating window brings its document back as a tab (nothing is closed or lost).
+    // Closing a document that floats takes its window with it.
     menu(&mut app, &ctx, "window.arrange.floatInWindow", json!({"document": 2})).unwrap();
     assert!(app.ui.floats(2));
-    app.ui.windows.iter_mut().filter(|w| w.document == 2).for_each(|w| w.open = false);
-    assert!(!app.ui.floats(2));
-    assert_eq!(app.session.documents().len(), 3);
+    app.run("file.close", json!({"document": 2})).unwrap();
+    app.sync_views();
+    assert_eq!(app.session.documents().len(), 2);
+    assert!(app.ui.windows.iter().all(|w| w.document < 2 && !w.floating), "{:?}", app.ui.windows);
 }
 
 /// Tiles in Window › Arrange leave out documents that float in their own window.

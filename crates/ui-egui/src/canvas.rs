@@ -2203,7 +2203,9 @@ fn documents(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         if let Some(slot) = app.ui.views.get_mut(main) {
             *slot = v;
         }
-        if ui.input(|i| i.pointer.primary_pressed() && i.pointer.interact_pos().is_some_and(|p| rect.contains(p))) {
+        // Not through a floating window embedded over the canvas (the web build).
+        let press = ui.input(|i| i.pointer.primary_pressed().then(|| i.pointer.interact_pos()).flatten());
+        if press.is_some_and(|p| rect.contains(p) && ui.ctx().layer_id_at(p) == Some(ui.layer_id())) {
             app.session.set_active(main);
         }
     }
@@ -5979,35 +5981,94 @@ pub(crate) fn finish_gesture(app: &mut PhotocraftApp, d: Drag) {
 }
 
 /// Extra OS windows showing documents (multi-window / multi-monitor).
+///
+/// A floating document (Float in Window, a tab dragged off the strip) is worked on in its window
+/// as in Photoshop: focusing or clicking it makes the document active, its canvas then takes the
+/// tools and its keys run the shortcuts, and it shares the document's own view (zoom commands
+/// act on it). Closing it closes the document, with the usual prompt for unsaved changes. A
+/// second view (New Window for …) only shows the document and just closes.
 pub fn extra_windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let wins = app.ui.windows.clone();
+    // Closing a floating window closes its document, after the loop: closing shifts the
+    // document indices the remaining windows hold.
+    let mut close_docs = Vec::new();
     for w in wins.into_iter().filter(|w| w.open) {
         let Some(st) = app.session.documents().get(w.document) else { continue };
-        let title = format!("{} — window {}", st.doc.name, w.id);
+        let doc_id = st.doc.id;
+        let title = if w.floating { pro_tab_title(app, w.document) } else { format!("{} — window {}", st.doc.name, w.id) };
         let vid = egui::ViewportId::from_hash_of(("docwin", w.id));
         let mut builder = egui::ViewportBuilder::default().with_title(title).with_inner_size([800.0, 600.0]);
         if let Some([x, y]) = w.position {
             builder = builder.with_position([x, y]);
         }
-        let mut view = w.view.clone();
+        let mut view = if w.floating { app.ui.views.get(w.document).cloned().unwrap_or_else(|| w.view.clone()) } else { w.view.clone() };
         let mut close = false;
+        let focus_id = egui::Id::new(("docwin-focused", w.id));
         ctx.show_viewport_immediate(vid, builder, |ui, _class| {
-            if ui.ctx().input(|i| i.viewport().close_requested()) {
+            let wctx = ui.ctx().clone();
+            if wctx.input(|i| i.viewport().close_requested()) {
                 close = true;
+                if w.floating {
+                    // The document decides: it closes (and the window with it) unless the
+                    // unsaved-changes prompt is cancelled.
+                    wctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                }
             }
-            egui::CentralPanel::default().frame(egui::Frame::NONE.fill(crate::theme::Tokens::get(ui.ctx()).canvas)).show(ui, |ui| {
+            // A real OS window has its own focus and keyboard input. Embedded in the main window
+            // (the web build, tests) it shares the main window's, whose shortcuts already ran.
+            let own_window = !ctx.embed_viewports();
+            if w.floating && own_window {
+                let focused = wctx.input(|i| i.focused);
+                let was = wctx.data(|d| d.get_temp::<bool>(focus_id)).unwrap_or(false);
+                wctx.data_mut(|d| d.insert_temp(focus_id, focused));
+                if focused && !was && app.session.active_index() != Some(w.document) {
+                    app.session.set_active(w.document);
+                    ctx.request_repaint();
+                }
+            }
+            let primary = w.floating && app.session.active_index() == Some(w.document);
+            // Keys typed into this window go to its own input, not the main window's.
+            if primary && own_window && wctx.input(|i| i.focused) {
+                crate::shortcuts::handle(app, &wctx);
+            }
+            egui::CentralPanel::default().frame(egui::Frame::NONE.fill(crate::theme::Tokens::get(&wctx).canvas)).show(ui, |ui| {
                 let rect = ui.available_rect_before_wrap();
-                view = canvas_view(app, ui, w.document, rect, view.clone(), false);
+                // A click on this window's canvas makes its document active (the tool takes it
+                // from the next press, as a click on another tile does).
+                let press = ui.input(|i| i.pointer.primary_pressed().then(|| i.pointer.interact_pos()).flatten());
+                if w.floating && !primary && press.is_some_and(|p| rect.contains(p) && ui.ctx().layer_id_at(p) == Some(ui.layer_id())) {
+                    app.session.set_active(w.document);
+                    ctx.request_repaint();
+                }
+                if primary {
+                    // Fit on Screen, zoom keys and pointer mapping size and place the active
+                    // document's view by this window's canvas.
+                    app.last_canvas_rect = rect;
+                }
+                view = canvas_view(app, ui, w.document, rect, view.clone(), primary);
             });
         });
+        if w.floating
+            && let Some(slot) = app.ui.views.get_mut(w.document)
+        {
+            *slot = view.clone();
+        }
         if let Some(win) = app.ui.windows.iter_mut().find(|x| x.id == w.id) {
             win.view = view;
-            if close {
+            if close && !win.floating {
                 win.open = false;
             }
         }
+        if close && w.floating {
+            close_docs.push(doc_id);
+        }
     }
     app.ui.windows.retain(|w| w.open);
+    for id in close_docs {
+        if let Some(doc) = app.session.documents().iter().position(|d| d.doc.id == id) {
+            let _ = crate::menus::invoke(app, ctx, "file.close", json!({"document": doc}));
+        }
+    }
 }
 
 /// Selection mode from the options bar, overridden by modifier keys (⇧ add, ⌥ subtract, ⇧⌥ intersect).
@@ -7133,6 +7194,62 @@ mod tests {
         assert_eq!(main_document(&mut app, 0), Some(1), "its tab floated too: the remaining tab");
         crate::menus::invoke(&mut app, &ctx, "window.arrange.floatInWindow", json!({"document": 1})).unwrap();
         assert_eq!(main_document(&mut app, 1), None, "every document floats");
+    }
+
+    /// A floating document is worked on in its own window, not just shown there: a brush stroke
+    /// in the window paints the document, and a click in the window makes it active again.
+    #[test]
+    fn a_floating_window_takes_the_tools() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        for name in ["a", "b"] {
+            app.run("file.new", json!({"width": 300, "height": 200, "name": name})).unwrap();
+            app.run("layer.new.layer", json!({})).unwrap();
+        }
+        app.run("tools.setBrush", json!({"brush": {"size": 20, "hardness": 1.0}})).unwrap();
+        app.ui.tool = crate::state::Tool::Brush;
+        app.sync_views();
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1400.0, 900.0)).with_step_dt(1.0 / 60.0).build_ui_state(
+            |ui, app: &mut PhotocraftApp| {
+                let ctx = ui.ctx().clone();
+                if !ctx.fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                    return;
+                }
+                egui::CentralPanel::default().show(ui, |ui| document_area(app, ui));
+                extra_windows(app, &ctx);
+            },
+            app,
+        );
+        PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ALL[0]);
+        h.run_steps(4);
+        let ctx = h.ctx.clone();
+        crate::menus::invoke(h.state_mut(), &ctx, "window.arrange.floatInWindow", json!({"document": 1})).unwrap();
+        h.run_steps(6);
+        let painted = |app: &PhotocraftApp, d: usize| app.session.documents()[d].history.past_len();
+        let before = (painted(h.state(), 0), painted(h.state(), 1));
+        // The floating, active document's canvas is the one tools map to.
+        let window = h.state().last_canvas_rect;
+        let (a, b) = (window.center() - egui::vec2(60.0, 0.0), window.center() + egui::vec2(60.0, 0.0));
+        h.event(egui::Event::PointerMoved(a));
+        h.run_steps(1);
+        h.event(egui::Event::PointerButton { pos: a, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+        h.run_steps(1);
+        for i in 1..=8 {
+            h.event(egui::Event::PointerMoved(a + (b - a) * (i as f32 / 8.0)));
+            h.run_steps(1);
+        }
+        h.event(egui::Event::PointerButton { pos: b, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+        h.run_steps(4);
+        assert_eq!(painted(h.state(), 0), before.0, "the main window's document is untouched");
+        assert!(painted(h.state(), 1) > before.1, "the stroke in the floating window painted its document");
+        // Back to the main window's document, then a click in the floating window takes over again.
+        h.state_mut().session.set_active(0);
+        h.run_steps(2);
+        h.event(egui::Event::PointerMoved(window.center()));
+        h.event(egui::Event::PointerButton { pos: window.center(), button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+        h.run_steps(1);
+        h.event(egui::Event::PointerButton { pos: window.center(), button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+        h.run_steps(2);
+        assert_eq!(h.state().session.active_index(), Some(1), "a click in the floating window activates its document");
     }
 
     #[test]
