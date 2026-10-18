@@ -178,7 +178,7 @@ impl Ctx<'_> {
         let (w, h) = r.size().unwrap_or((0, 0));
         let s = self.fmt.sample;
         let ids: Vec<i16> = (0..self.cc as i16).chain([CHANNEL_TRANSPARENCY]).collect();
-        let planes: Vec<Option<Vec<u8>>> = if cfg!(target_arch = "wasm32") {
+        let planes: Vec<Option<Vec<u8>>> = if cfg!(all(target_arch = "wasm32", not(target_feature = "atomics"))) {
             ids.iter().map(|&id| self.channel_plane(rec, id, name)).collect()
         } else {
             // The channels decode independently; their RLE rows are the bulk of the open

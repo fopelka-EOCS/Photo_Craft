@@ -3,22 +3,22 @@
 /// Calls `f(index, chunk)` for each `chunk`-sized piece of `buf`.
 pub(crate) fn chunks_mut<T: Send>(buf: &mut [T], chunk: usize, f: impl Fn(usize, &mut [T]) + Sync + Send) {
     let chunk = chunk.max(1);
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
     {
         use rayon::prelude::*;
         buf.par_chunks_mut(chunk).enumerate().for_each(|(i, c)| f(i, c));
     }
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
     buf.chunks_mut(chunk).enumerate().for_each(|(i, c)| f(i, c));
 }
 
 /// Native worker count (the browser builds run sequentially).
 pub(crate) fn workers() -> usize {
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
     {
         rayon::current_num_threads()
     }
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
     {
         1
     }
@@ -43,12 +43,12 @@ pub(crate) fn chunks_mut_limited<T: Send>(buf: &mut [T], chunk: usize, jobs: usi
 
 /// Maps `f` over `0..n`, keeping order.
 pub(crate) fn map<T: Send>(n: usize, f: impl Fn(usize) -> T + Sync + Send) -> Vec<T> {
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
     {
         use rayon::prelude::*;
         (0..n).into_par_iter().map(f).collect()
     }
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
     (0..n).map(f).collect()
 }
 

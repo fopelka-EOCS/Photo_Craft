@@ -32,6 +32,10 @@ rayon = { workspace = true }
 # (packaging/web/package.sh); there JPEG XL DNG is reported as unsupported (src/jxl.rs).
 jxl-oxide = { version = "=0.12.6", default-features = false, features = ["rayon"] }
 
+# The browser threads build (wasm with `atomics`: cargo xtask web-threads) takes the rayon paths too.
+[target.'cfg(all(target_arch = "wasm32", target_feature = "atomics"))'.dependencies]
+rayon = { workspace = true }
+
 [dev-dependencies]
 photocraft-raw = { path = ".", features = ["testgen"] }
 # Writes sRGB PNG previews in the `rawinfo` example.

@@ -1047,12 +1047,12 @@ fn buffer_to_image(buf: &photocraft_compose::Buffer) -> egui::ColorImage {
             *o = egui::Color32::from_rgba_unmultiplied(q(p[0]), q(p[1]), q(p[2]), q(p[3]));
         }
     };
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
     {
         use rayon::prelude::*;
         pixels.par_chunks_mut(16 * 1024).zip(buf.px.par_chunks(16 * 1024)).for_each(|(o, s)| convert(o, s));
     }
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
     convert(&mut pixels, &buf.px);
     egui::ColorImage::new([buf.rect.width() as usize, buf.rect.height() as usize], pixels)
 }
@@ -1069,12 +1069,12 @@ fn color_image(img: &photocraft_raster::Rgba8Image) -> egui::ColorImage {
             *o = egui::Color32::from_rgba_unmultiplied(r, g, b, a);
         }
     };
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
     {
         use rayon::prelude::*;
         pixels.par_chunks_mut(16 * 1024).zip(src.par_chunks(16 * 1024)).for_each(|(o, s)| convert(o, s));
     }
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
     convert(&mut pixels, src);
     egui::ColorImage::new(size, pixels)
 }

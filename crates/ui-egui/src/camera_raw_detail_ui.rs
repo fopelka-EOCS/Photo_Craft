@@ -376,12 +376,12 @@ pub(crate) fn display_image(
             *o = Color32::from_rgba_unmultiplied(r, g, b, a);
         }
     };
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
     {
         use rayon::prelude::*;
         pixels.par_chunks_mut(band_rows * width).enumerate().for_each(|(i, out)| band(i, out));
     }
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
     for (i, out) in pixels.chunks_mut(band_rows * width).enumerate() {
         band(i, out);
     }

@@ -296,12 +296,12 @@ pub fn render_cmyk(doc: &Document, rect: Rect, tile: i32) -> Option<Buffer> {
             }
         });
     };
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
     {
         use rayon::prelude::*;
         out.px.par_chunks_mut(w * rows).enumerate().for_each(|(i, px)| band(i, px));
     }
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
     for (i, px) in out.px.chunks_mut(w * rows).enumerate() {
         band(i, px);
     }

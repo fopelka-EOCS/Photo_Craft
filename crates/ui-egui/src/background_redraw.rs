@@ -18,7 +18,7 @@ use std::sync::mpsc::{Receiver, SyncSender, TryRecvError};
 use photocraft_doc::{DocId, Document};
 use photocraft_engine::display_color::CanvasDisplay;
 use photocraft_geom::Rect;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
 use rayon::prelude::*;
 
 use crate::PhotocraftApp;
@@ -200,6 +200,14 @@ fn spawn(
     let (tx, rx) = std::sync::mpsc::sync_channel(BATCH);
     let stop = Arc::new(AtomicBool::new(false));
     let work = (blocks.clone(), stop.clone(), ctx.clone());
+    // Never reached in the browser ([`enabled`]). Its threads build (wasm with `atomics`) can't
+    // even send egui's `Context` to a thread, so there it has no thread to start.
+    #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+    let spawned: std::io::Result<()> = {
+        let _ = (work, doc, display, format, todo, tx);
+        Err(std::io::Error::other("no background redraw in the browser"))
+    };
+    #[cfg(not(all(target_arch = "wasm32", target_feature = "atomics")))]
     let spawned = std::thread::Builder::new().name("canvas-redraw".into()).spawn(move || {
         let (blocks, stop, ctx) = work;
         // A panic stops the redraw: the receiver sees the worker gone and drops it.
@@ -216,6 +224,7 @@ fn spawn(
 /// The worker: composite `todo`'s blocks of `doc` in batches and hand each over, until done or
 /// stopped.
 #[allow(clippy::too_many_arguments)]
+#[cfg_attr(all(target_arch = "wasm32", target_feature = "atomics"), allow(dead_code))]
 fn draw(
     doc: &Document,
     display: Option<&CanvasDisplay>,
@@ -231,9 +240,9 @@ fn draw(
             return;
         }
         // Never reached in the browser ([`enabled`]); it only has to build there, without rayon.
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
         let batch = batch.par_iter();
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
         let batch = batch.iter();
         let pieces: Vec<Piece> = batch
             .map(|&block| Piece { block, texels: crate::gpu_canvas::display_texels(format, display, &photocraft_compose::render(doc, blocks[block])) })

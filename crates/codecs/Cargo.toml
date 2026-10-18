@@ -39,6 +39,10 @@ rayon.workspace = true
 # EXR block (de)compression runs on the rayon pool natively; wasm stays single-threaded.
 exr = { version = "1.73", default-features = false, features = ["rayon"] }
 
+# The browser threads build (wasm with `atomics`: cargo xtask web-threads) takes the rayon paths too.
+[target.'cfg(all(target_arch = "wasm32", target_feature = "atomics"))'.dependencies]
+rayon = { workspace = true }
+
 [dev-dependencies]
 proptest.workspace = true
 # Oracle decoders for cross-checking in tests only.

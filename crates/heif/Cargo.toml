@@ -11,8 +11,12 @@ rust-version.workspace = true
 # moving the pin is a reviewed change (re-run the fuzz target and the heif corpus tests).
 heic-rs = { version = "=0.1.4", default-features = false, features = ["std"] }
 
-# The tiles of a HEIC photo decode in parallel on native; wasm stays single-threaded.
+# The tiles of a HEIC photo decode in parallel on native, and on wasm only in the threads build
+# (`atomics`: cargo xtask web-threads), where rayon's global pool runs on Web Workers.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+heic-rs = { version = "=0.1.4", default-features = false, features = ["std", "parallel"] }
+
+[target.'cfg(all(target_arch = "wasm32", target_feature = "atomics"))'.dependencies]
 heic-rs = { version = "=0.1.4", default-features = false, features = ["std", "parallel"] }
 
 [lints]
