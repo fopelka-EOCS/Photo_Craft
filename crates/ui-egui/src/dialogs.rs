@@ -104,15 +104,22 @@ fn older_dialog_above(ctx: &egui::Context, live: egui::LayerId, dialogs: &[Dialo
     ctx.memory(|m| m.layer_ids().skip_while(|l| *l != live).skip(1).any(|l| others.contains(&l)))
 }
 
-fn resizable_dialog(fields: &serde_json::Map<String, Value>) -> bool {
-    fields.contains_key("__web") || crate::prefs_ui::is_preferences(fields)
+/// The size a resizable dialog opens at, or `None` for a dialog sized by its contents.
+fn resizable_dialog(fields: &serde_json::Map<String, Value>) -> Option<egui::Vec2> {
+    if crate::prefs_ui::is_preferences(fields) {
+        Some(crate::prefs_ui::PREFERENCES_SIZE)
+    } else if fields.contains_key("__web") {
+        Some(egui::vec2(960.0, 900.0))
+    } else {
+        None
+    }
 }
 
 fn show_modal<T>(
     modal: egui::Modal,
     ctx: &egui::Context,
     id: egui::Id,
-    resizable: bool,
+    resizable: Option<egui::Vec2>,
     interactive: bool,
     contents: impl FnOnce(&mut egui::Ui) -> T,
 ) -> egui::ModalResponse<T> {
@@ -121,14 +128,9 @@ fn show_modal<T>(
         if !interactive {
             ui.disable();
         }
-        if resizable {
+        if let Some(size) = resizable {
             let max = (ctx.content_rect().size() - egui::vec2(40.0, 40.0)).max(egui::vec2(560.0, 400.0));
-            egui::Resize::default()
-                .id(id.with("resize"))
-                .default_size(egui::vec2(960.0, 900.0).min(max))
-                .min_size(egui::vec2(560.0, 400.0))
-                .max_size(max)
-                .show(ui, contents)
+            egui::Resize::default().id(id.with("resize")).default_size(size.min(max)).min_size(egui::vec2(560.0, 400.0)).max_size(max).show(ui, contents)
         } else {
             contents(ui)
         }
@@ -207,7 +209,8 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         // Photoshop doesn't dim the window behind dialogs: previews must be judged at true contrast.
         let web = fields.contains_key("__web");
         let web_popup_open = web && egui::Popup::is_any_open(ctx);
-        let modal = show_modal(modal, ctx, id, resizable_dialog(&fields), interactive, |ui| {
+        let resizable = resizable_dialog(&fields);
+        let modal = show_modal(modal, ctx, id, resizable, interactive, |ui| {
             sizing = ui.is_sizing_pass();
             let available = ui.available_size();
             // A dialog of a few short fields (`__compact`, Fit Image) is narrower (#4673): the title
@@ -218,7 +221,9 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             if !compact {
                 ui.set_min_width(if curves { 300.0 } else { 380.0 });
             }
-            let wide = crate::prefs_ui::width(&d.fields, (ctx.content_rect().width() - 48.0).max(380.0));
+            // A resizable dialog's contents fill its resizable area (#7420), the others the window.
+            let room = if resizable.is_some() { available.x } else { (ctx.content_rect().width() - 48.0).max(380.0) };
+            let wide = crate::prefs_ui::width(&d.fields, room);
             if let Some(w) = wide {
                 ui.set_min_width(w.min(460.0));
             }
@@ -1132,9 +1137,9 @@ mod preference_resize_tests {
         let ordinary = json!({});
         let web = json!({"__web": true});
 
-        assert!(resizable_dialog(prefs.as_object().unwrap()));
-        assert!(!resizable_dialog(shortcuts.as_object().unwrap()));
-        assert!(!resizable_dialog(ordinary.as_object().unwrap()));
-        assert!(resizable_dialog(web.as_object().unwrap()));
+        assert_eq!(resizable_dialog(prefs.as_object().unwrap()), Some(crate::prefs_ui::PREFERENCES_SIZE));
+        assert_eq!(resizable_dialog(shortcuts.as_object().unwrap()), None);
+        assert_eq!(resizable_dialog(ordinary.as_object().unwrap()), None);
+        assert_eq!(resizable_dialog(web.as_object().unwrap()), Some(egui::vec2(960.0, 900.0)));
     }
 }
