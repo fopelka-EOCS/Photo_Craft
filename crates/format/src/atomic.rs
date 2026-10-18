@@ -28,7 +28,7 @@
 //! [`atomic_write_with`] takes an [`AtomicFs`] so tests can inject failures at each step.
 
 use std::io::{self, Write};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The file-system steps [`atomic_write_with`] performs. [`RealFs`] is the real thing; tests
@@ -268,34 +268,14 @@ fn resolve_symlink(path: &Path) -> io::Result<PathBuf> {
             return Ok(current); // not (or no longer) a link: the chain ends here
         };
         let base = current.parent().unwrap_or(Path::new(".")).to_path_buf();
-        current = normalize_lexically(&if link.is_absolute() { link } else { base.join(link) });
+        // `..` stays in the path for the OS to resolve: folding it by text is wrong when a folder
+        // on the way is itself a symlink.
+        current = if link.is_absolute() { link } else { base.join(link) };
         if !std::fs::symlink_metadata(&current).is_ok_and(|m| m.file_type().is_symlink()) {
             return Ok(current);
         }
     }
     Err(io::Error::new(io::ErrorKind::InvalidInput, format!("{}: too many levels of symbolic links", path.display())))
-}
-
-/// Drop `.` components and fold `..` ones lexically, without touching the file system.
-fn normalize_lexically(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for comp in path.components() {
-        match comp {
-            Component::CurDir => {}
-            Component::ParentDir => match out.components().next_back() {
-                Some(Component::Normal(_)) => {
-                    out.pop();
-                }
-                Some(Component::RootDir) | Some(Component::Prefix(_)) => {}
-                _ => out.push(comp),
-            },
-            c => out.push(c),
-        }
-    }
-    if out.as_os_str().is_empty() {
-        out.push(Component::CurDir);
-    }
-    out
 }
 
 /// A unique hidden temporary file name to write beside `file` before renaming over it.
