@@ -211,15 +211,18 @@ impl ImageSourceData {
 
     /// The `body` converted to `order`, behind its signature.
     fn finish(body: Vec<u8>, version: Version, order: ByteOrder) -> Result<(Vec<u8>, Vec<String>)> {
-        let (body, warnings) =
-            if order.is_little() { transcode::transcode_blocks(&body, version, ByteOrder::Big, ByteOrder::Little)? } else { (body, Vec::new()) };
+        let signature = if version.is_psb() { SIGNATURE_PSB } else { SIGNATURE };
+        if order.is_little() {
+            // Converted behind the signature: the converted body fills the buffer it is given,
+            // so adding the signature afterwards would move (copy) it.
+            return transcode::transcode_blocks_after(signature, &body, version, ByteOrder::Big, ByteOrder::Little);
+        }
         // The signature goes in front of the body in place, not by copying the body into a new
         // buffer beside it.
         let mut out = body;
-        let signature = if version.is_psb() { SIGNATURE_PSB } else { SIGNATURE };
         out.try_reserve_exact(signature.len()).map_err(|_| PsdError::LimitExceeded("not enough memory for the layer data"))?;
         out.splice(0..0, signature.iter().copied());
-        Ok((out, warnings))
+        Ok((out, Vec::new()))
     }
 
     /// The layers, global mask and global blocks of a PSD as image source data (byte order Big).
@@ -339,6 +342,15 @@ pub mod transcode {
         Ok(t.finish())
     }
 
+    /// [`transcode_blocks`] written after `prefix`, in one buffer sized for both.
+    pub fn transcode_blocks_after(prefix: &[u8], data: &[u8], version: Version, from: ByteOrder, to: ByteOrder) -> Result<(Vec<u8>, Vec<String>)> {
+        let mut out = Vec::with_capacity(prefix.len().saturating_add(data.len()));
+        out.extend_from_slice(prefix);
+        let mut t = Tx::appending(out, data, version, from, to);
+        t.blocks()?;
+        Ok(t.finish())
+    }
+
     /// Converts a layer-info body (the data of a `Layr` / `Lr16` / `Lr32` block) between orders.
     pub fn transcode_layer_info(data: &[u8], version: Version, from: ByteOrder, to: ByteOrder) -> Result<(Vec<u8>, Vec<String>)> {
         let mut t = Tx::new(data, version, from, to);
@@ -393,8 +405,13 @@ pub mod transcode {
 
     impl<'a> Tx<'a> {
         fn new(data: &'a [u8], version: Version, from: ByteOrder, to: ByteOrder) -> Self {
+            Self::appending(Vec::with_capacity(data.len()), data, version, from, to)
+        }
+
+        /// A walker that appends to `out`.
+        fn appending(out: Vec<u8>, data: &'a [u8], version: Version, from: ByteOrder, to: ByteOrder) -> Self {
             let r = if from.is_little() { Reader::new_little(data) } else { Reader::new(data) };
-            Tx { r, out: Vec::with_capacity(data.len()), from, to, version, warnings: Vec::new(), depth: 0 }
+            Tx { r, out, from, to, version, warnings: Vec::new(), depth: 0 }
         }
 
         fn finish(self) -> (Vec<u8>, Vec<String>) {
@@ -2473,6 +2490,11 @@ mod tests {
             assert_eq!(d.to_bytes(ByteOrder::Big).unwrap().0, [signature, &body[..]].concat());
             let (little, _) = transcode_blocks(&body, version, ByteOrder::Big, ByteOrder::Little).unwrap();
             assert_eq!(d.to_bytes(ByteOrder::Little).unwrap().0, [signature, &little[..]].concat());
+            // Converted behind the signature in the buffer it starts with: never grown (growing
+            // would at least double it), so the body is not moved to make room.
+            let (after, _) = transcode::transcode_blocks_after(signature, &body, version, ByteOrder::Big, ByteOrder::Little).unwrap();
+            assert_eq!(after, [signature, &little[..]].concat());
+            assert_eq!(after.capacity(), signature.len() + body.len());
         }
     }
 

@@ -42,17 +42,31 @@ impl ZipWriter {
 
     /// A writer whose output is allocated once for `entries` (name, data length): growing it as
     /// entries come in would double the buffer near the end, copying the whole archive (#6607).
-    pub fn for_entries<'a>(entries: impl IntoIterator<Item = (&'a str, usize)>) -> Self {
-        let (mut out, mut central) = (0usize, 0usize);
+    /// Fails, before allocating, on entries that [`Self::add`] or [`Self::finish`] would refuse,
+    /// or when there is not enough memory.
+    pub fn for_entries<'a>(entries: impl IntoIterator<Item = (&'a str, usize)>) -> Result<Self, FormatError> {
+        let (mut out, mut central, mut count) = (0usize, 0usize, 0usize);
         for (name, len) in entries {
+            if u32::try_from(len).is_err() {
+                return Err(FormatError::Unsupported("zip entry over 4 GiB".into()));
+            }
             out = out.saturating_add(LOCAL_HEADER + name.len()).saturating_add(len);
             central = central.saturating_add(CENTRAL_HEADER + name.len());
+            count += 1;
         }
+        if count > usize::from(u16::MAX) {
+            return Err(FormatError::Unsupported("more than 65535 zip entries (ZIP64 not supported)".into()));
+        }
+        // The central directory starts where the entries end, at an offset that must fit 32 bits.
+        if u32::try_from(out).is_err() {
+            return Err(FormatError::Unsupported("zip over 4 GiB".into()));
+        }
+        let no_memory = |_| FormatError::LimitExceeded("not enough memory for the archive".into());
         let mut w = Self::new();
         // Room for the central directory and its end record too: `finish` appends them.
-        w.out.reserve(out.saturating_add(central).saturating_add(END_RECORD));
-        w.central.reserve(central);
-        w
+        w.out.try_reserve_exact(out.saturating_add(central).saturating_add(END_RECORD)).map_err(no_memory)?;
+        w.central.try_reserve_exact(central).map_err(no_memory)?;
+        Ok(w)
     }
 
     pub fn add(&mut self, name: &str, data: &[u8]) -> Result<(), FormatError> {
@@ -267,7 +281,7 @@ mod tests {
     #[test]
     fn an_archive_sized_for_its_entries_fills_its_buffer_exactly() {
         let entries: Vec<(String, Vec<u8>)> = (0..50).map(|i| (format!("objects/{i:03}.zst"), vec![i as u8; i * 997])).collect();
-        let mut z = ZipWriter::for_entries(entries.iter().map(|(n, d)| (n.as_str(), d.len())));
+        let mut z = ZipWriter::for_entries(entries.iter().map(|(n, d)| (n.as_str(), d.len()))).unwrap();
         for (n, d) in &entries {
             z.add(n, d).unwrap();
         }
@@ -276,6 +290,17 @@ mod tests {
         let r = ZipReader::new(&bytes).unwrap();
         assert_eq!(r.entries.len(), entries.len());
         assert_eq!(r.read_by_name("objects/049.zst", usize::MAX).unwrap(), entries[49].1);
+    }
+
+    /// Sizes `add` or `finish` would refuse fail up front, before anything is allocated.
+    #[test]
+    fn unsupported_sizes_are_refused_before_reserving() {
+        let big = u32::MAX as usize;
+        assert!(matches!(ZipWriter::for_entries([("x", usize::MAX)]), Err(FormatError::Unsupported(_))));
+        assert!(matches!(ZipWriter::for_entries([("x", big + 1)]), Err(FormatError::Unsupported(_))));
+        assert!(matches!(ZipWriter::for_entries([("a", big / 2), ("b", big / 2 + 1)]), Err(FormatError::Unsupported(_))));
+        let names = vec!["n"; usize::from(u16::MAX) + 1];
+        assert!(matches!(ZipWriter::for_entries(names.into_iter().map(|n| (n, 0))), Err(FormatError::Unsupported(_))));
     }
 
     #[test]
