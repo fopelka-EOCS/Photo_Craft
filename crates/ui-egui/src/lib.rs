@@ -1867,22 +1867,43 @@ fn dock_strip_id() -> egui::Id {
 fn auto_show_peek(app: &PhotocraftApp, ctx: &egui::Context) -> Peek {
     let mut peek = Peek::default();
     if !app.session.prefs().workspace.auto_show_hidden_panels {
+        clear_panel_strip(ctx, toolbar_strip_id());
+        clear_panel_strip(ctx, dock_strip_id());
         return peek;
     }
-    let Some(p) = ctx.input(|i| i.pointer.latest_pos()) else { return peek };
+    let Some(p) = ctx.input(|i| i.pointer.latest_pos()) else {
+        clear_panel_strip(ctx, toolbar_strip_id());
+        clear_panel_strip(ctx, dock_strip_id());
+        return peek;
+    };
     const ZONE: f32 = 18.0;
     let win = ctx.content_rect();
     let rtl = crate::direction::is_rtl();
-    let over = |id: egui::Id| ctx.data(|d| d.get_temp::<egui::Rect>(id)).is_some_and(|r| r.expand(2.0).contains(p));
+    let over = |id: egui::Id| ctx.data(|d| d.get_temp::<Option<egui::Rect>>(id)).flatten().is_some_and(|r| r.expand(2.0).contains(p));
+    // A strip only keeps an *active* peek alive: while the panel is visible again, or once the
+    // pointer has left the edge and the strip, it is dropped, so a stale strip cannot reveal the
+    // panel from anywhere over its former area later.
     if !app.ui.panels.toolbar {
         let edge = if rtl { win.right() } else { win.left() };
         peek.toolbar = (p.x - edge).abs() <= ZONE || over(toolbar_strip_id());
+    }
+    if !peek.toolbar {
+        clear_panel_strip(ctx, toolbar_strip_id());
     }
     if !app.ui.panels.dock {
         let edge = if rtl { win.left() } else { win.right() };
         peek.dock = (p.x - edge).abs() <= ZONE || over(dock_strip_id());
     }
+    if !peek.dock {
+        clear_panel_strip(ctx, dock_strip_id());
+    }
     peek
+}
+
+fn clear_panel_strip(ctx: &egui::Context, id: egui::Id) {
+    ctx.data_mut(|d| {
+        d.insert_temp(id, None::<egui::Rect>);
+    });
 }
 
 /// Records the strip a start (`toolbar`) or end (`dock`) panel occupied, so the next frame's
@@ -1892,7 +1913,7 @@ fn record_panel_strip(ctx: &egui::Context, id: egui::Id, before: egui::Rect, aft
     let x = if start != crate::direction::is_rtl() { before.left() } else { before.right() - w };
     let rect = egui::Rect::from_min_size(egui::pos2(x, before.top()), egui::vec2(w, before.height()));
     ctx.data_mut(|d| {
-        d.insert_temp(id, rect);
+        d.insert_temp(id, Some(rect));
     });
 }
 
@@ -2100,12 +2121,22 @@ impl eframe::App for PhotocraftApp {
         if chrome && (self.ui.panels.toolbar || peek.toolbar) {
             let before = ui.available_rect_before_wrap();
             panels::toolbar(self, ui);
-            record_panel_strip(&ctx, toolbar_strip_id(), before, ui.available_rect_before_wrap(), true);
+            // Only a peek leaves a strip behind: a normally visible panel must not turn its old
+            // area into a hover target once it is hidden again.
+            if peek.toolbar {
+                record_panel_strip(&ctx, toolbar_strip_id(), before, ui.available_rect_before_wrap(), true);
+            } else {
+                clear_panel_strip(&ctx, toolbar_strip_id());
+            }
         }
         if chrome && (self.ui.panels.dock || peek.dock) {
             let before = ui.available_rect_before_wrap();
             panels::right_dock(self, ui);
-            record_panel_strip(&ctx, dock_strip_id(), before, ui.available_rect_before_wrap(), false);
+            if peek.dock {
+                record_panel_strip(&ctx, dock_strip_id(), before, ui.available_rect_before_wrap(), false);
+            } else {
+                clear_panel_strip(&ctx, dock_strip_id());
+            }
         }
         let t = theme::Tokens::get(&ctx);
         let backdrop = if chrome { prefs_ui::pasteboard_color(self).unwrap_or(t.canvas) } else { egui::Color32::BLACK };
