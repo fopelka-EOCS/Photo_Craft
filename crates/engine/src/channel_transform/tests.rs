@@ -796,3 +796,70 @@ fn native_raster_masks_honour_selections_at_every_depth_with_or_without_linking(
         }
     }
 }
+
+/// Merging #6967 must keep its selection-centred presets for explicit whole layers while
+/// the same commands still isolate an explicitly targeted colour component.
+#[test]
+fn preset_selection_pivots_preserve_explicit_layer_and_colour_target_precedence() {
+    for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
+        for all in [false, true] {
+            let destinations = if all { [(9, 2), (2, 5), (9, 5), (7, 0), (4, 7)] } else { [(7, 2), (2, 5), (7, 5), (6, 1), (3, 6)] };
+            for (command, (x, y)) in [
+                "edit.transform.flipHorizontal",
+                "edit.transform.flipVertical",
+                "edit.transform.rotate180",
+                "edit.transform.rotate90Cw",
+                "edit.transform.rotate90Ccw",
+            ]
+            .into_iter()
+            .zip(destinations)
+            {
+                for isolated in [false, true] {
+                    let mut s = session(ColorMode::Rgb, depth);
+                    s.execute("layer.new.layer", json!({})).unwrap();
+                    s.edit("asymmetric marker", |doc, active| {
+                        doc.layer_mut(active.unwrap()).unwrap().surface_mut().unwrap().write_pixel(2, 2, &[0.8, 0.6, 0.4, 0.75]);
+                        Ok(())
+                    })
+                    .unwrap();
+                    s.execute("channel.target", json!({"channel":"green"})).unwrap();
+                    s.execute("channel.setVisible", json!({"channel":"composite","visible":true})).unwrap();
+                    if all {
+                        s.execute("select.all", json!({})).unwrap();
+                    } else {
+                        s.execute("select.rect", json!({"x":0,"y":0,"width":10,"height":8})).unwrap();
+                    }
+                    let st = s.active().unwrap();
+                    let id = st.active_layer.unwrap();
+                    let before = st.doc.clone();
+                    let view = st.channel_view.clone();
+                    let history = st.history.past_len();
+                    let original = before.layer(id).unwrap().surface().unwrap();
+                    let mut p = json!({"layer":id.0});
+                    if isolated {
+                        p["target"] = json!({"color":0});
+                    }
+                    s.execute(command, p).unwrap();
+                    let after = surface(&s);
+                    assert_eq!(after.sample_channel(x, y, 0), original.sample_channel(2, 2, 0), "{command}/{depth:?}/{all}/{isolated}");
+                    if isolated {
+                        for y in 0..8 {
+                            for x in 0..12 {
+                                for c in [1, 2, 3] {
+                                    assert_eq!(after.sample_channel(x, y, c).to_bits(), original.sample_channel(x, y, c).to_bits());
+                                }
+                            }
+                        }
+                    } else {
+                        assert_eq!(after.pixel(x, y), original.pixel(2, 2));
+                        assert_eq!(after.sample_channel(2, 2, 3), 0.0, "an explicit layer moves all its selected samples");
+                    }
+                    assert_eq!(s.active().unwrap().channel_view, view);
+                    assert_eq!(s.active().unwrap().history.past_len(), history + 1);
+                    s.undo();
+                    assert_eq!(s.active().unwrap().doc, before);
+                }
+            }
+        }
+    }
+}
