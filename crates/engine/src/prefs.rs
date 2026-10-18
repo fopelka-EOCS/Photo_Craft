@@ -1074,7 +1074,6 @@ pub fn is_hidden(path: &str) -> bool {
     HIDDEN_UNTIL_IMPLEMENTED.contains(&path)
         || (!cfg!(target_os = "linux") && LINUX_ONLY.contains(&path))
         || (!cfg!(all(unix, not(target_os = "macos"))) && X11_DESKTOP_ONLY.contains(&path))
-        || (!cfg!(all(unix, not(target_os = "macos"))) && X11_DESKTOP_ONLY.contains(&path))
 }
 
 /// Preferences that only do something on Linux; the dialog doesn't show them elsewhere. They

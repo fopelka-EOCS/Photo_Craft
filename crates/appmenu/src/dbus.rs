@@ -185,8 +185,8 @@ impl MenuBarIface {
         let Some(item) = menu.item(id.max(0) as u32) else {
             return Err(zbus::fdo::Error::InvalidArgs(format!("unknown item {id}")));
         };
-        let props = wire_props(&item.props, &[name.to_string()]);
-        props.into_iter().next().map(|(_, v)| v).ok_or_else(|| zbus::fdo::Error::InvalidArgs(format!("item {id} has no property {name}")))
+        let mut props = wire_props(&item.props, &[name.to_string()]);
+        props.remove(name).ok_or_else(|| zbus::fdo::Error::InvalidArgs(format!("item {id} has no property {name}")))
     }
 
     fn get_property_names(&self, ids: Vec<i32>) -> zbus::fdo::Result<Vec<(i32, Vec<String>)>> {

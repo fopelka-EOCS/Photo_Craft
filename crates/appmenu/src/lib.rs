@@ -27,7 +27,7 @@
 //! let model = MenuModel::top(vec![MenuEntry::command("File", "file.new", true)
 //!     .submenu(vec![MenuEntry::command("New…", "file.new", true)])]);
 //! // Linux/BSD with D-Bus: export and register our X11 top-level windows.
-//! // Other platforms: Ok with a no-op handle (activation events never fire).
+//! // Other platforms: Err (no global-menu host is available); keep the in-window menu bar.
 //! let wake = std::sync::Arc::new(|| {}); // egui: `ctx.request_repaint()`
 //! let menu = AppMenu::start("photocraft", wake).ok();
 //! if let Some(menu) = &menu {

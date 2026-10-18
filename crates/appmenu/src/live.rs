@@ -10,7 +10,7 @@ use crate::x11;
 use crate::{Error, MenuEvent, MenuModel, MenuWake};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 use zbus::blocking::Connection;
@@ -129,10 +129,14 @@ fn worker(app_name: &str, rx: Receiver<Message>, state: Arc<Mutex<MenuState>>, b
         let stop = match rx.recv_timeout(SCAN_INTERVAL) {
             Ok(Message::Model(m)) => {
                 model = Some(m);
-                while let Ok(Message::Model(m)) = rx.try_recv() {
-                    model = Some(m);
+                // Keep the newest model, but a queued shutdown must not be swallowed.
+                loop {
+                    match rx.try_recv() {
+                        Ok(Message::Model(m)) => model = Some(m),
+                        Ok(Message::Shutdown) | Err(TryRecvError::Disconnected) => break true,
+                        Err(TryRecvError::Empty) => break false,
+                    }
                 }
-                false
             }
             Ok(Message::Shutdown) | Err(RecvTimeoutError::Disconnected) => true,
             Err(RecvTimeoutError::Timeout) => false,

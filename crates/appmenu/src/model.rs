@@ -120,13 +120,6 @@ impl From<MenuCommand> for MenuEntry {
     }
 }
 
-impl From<bool> for MenuEntry {
-    /// `true` for a separator, `false` for nothing (builders accept `Option`).
-    fn from(_: bool) -> Self {
-        MenuEntry::Separator
-    }
-}
-
 /// A menu item: label, action token, state, optional shortcut, optional submenu.
 #[derive(Clone, Debug)]
 pub struct MenuCommand {

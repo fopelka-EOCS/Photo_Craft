@@ -250,6 +250,7 @@ mod tests {
         ]
     }
 
+    #[cfg(all(unix, not(target_os = "macos"), not(target_arch = "wasm32")))]
     #[test]
     fn a_hosted_global_menu_hides_the_in_window_titles() {
         use crate::PhotocraftApp;

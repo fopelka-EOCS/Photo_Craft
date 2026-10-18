@@ -82,7 +82,7 @@ fn window_list(conn: &RustConnection, window: u32, name: &[u8]) -> Option<Vec<u3
     let atom = intern(conn, name)?;
     let cookie = conn.get_property(false, window, atom, AtomEnum::WINDOW, 0, 256).ok()?;
     let reply = cookie.reply().ok()?;
-    Some(reply.value.as_chunks::<4>().0.iter().map(|b| u32::from_le_bytes(*b)).collect())
+    Some(reply.value32()?.collect())
 }
 
 /// The immediate children of a window (empty on any error — the caller keeps walking).
@@ -139,8 +139,7 @@ fn intern(conn: &RustConnection, name: &[u8]) -> Option<u32> {
 fn cardinal(conn: &RustConnection, window: u32, atom: u32) -> Option<u32> {
     let cookie = conn.get_property(false, window, atom, AtomEnum::CARDINAL, 0, 1).ok()?;
     let reply = cookie.reply().ok()?;
-    let bytes: [u8; 4] = reply.value.get(0..4)?.try_into().ok()?;
-    Some(u32::from_le_bytes(bytes))
+    reply.value32()?.next()
 }
 
 /// The ATOM values of a window property (empty on any error).
@@ -149,5 +148,5 @@ fn property_atoms(conn: &RustConnection, window: u32, atom: u32) -> Vec<u32> {
         return Vec::new();
     };
     let Ok(reply) = cookie.reply() else { return Vec::new() };
-    reply.value.as_chunks::<4>().0.iter().map(|b| u32::from_le_bytes(*b)).collect()
+    reply.value32().map(Iterator::collect).unwrap_or_default()
 }

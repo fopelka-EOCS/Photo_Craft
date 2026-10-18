@@ -87,7 +87,17 @@ fn client_sees_layout_and_clicks_come_back() {
     let proxy = Proxy::new(&client, name.as_str(), "/MenuBar", "com.canonical.dbusmenu").expect("proxy");
 
     // The layout: root row with the two top menus deeper in, full property detail.
-    let (revision, row): (u32, TestRow) = proxy.call("GetLayout", &(0i32, -1i32, Vec::<String>::new())).expect("GetLayout");
+    // The worker publishes asynchronously: wait (bounded) for the first revision.
+    let mut layout = None;
+    for _ in 0..100 {
+        let (revision, row): (u32, TestRow) = proxy.call("GetLayout", &(0i32, -1i32, Vec::<String>::new())).expect("GetLayout");
+        if revision >= 1 {
+            layout = Some((revision, row));
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let (revision, row) = layout.expect("the menu was never published");
     assert!(revision >= 1);
     assert_eq!(row.id, 0);
     assert_eq!(row.children.len(), 2);

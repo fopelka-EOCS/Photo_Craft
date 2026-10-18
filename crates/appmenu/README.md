@@ -17,7 +17,7 @@ The public surface is deliberately **backend-neutral**, so the same shell code r
 everywhere and a new platform backend slots in without touching the model or any caller:
 
 - *Portable, compiled on every target:* `MenuModel` / `MenuEntry` / `MenuCommand`,
-  `flat::FlatItem` (+ `MenuModel::from_flat`), `Shortcut`/`ShortcutMod`, `MenuEvent`
+  `Shortcut`/`ShortcutMod`, `MenuEvent`, `MenuWake`
   (an activation carries the app's `action` token and the backend's item id), and the
   `AppMenu` handle contract (`start` / `replace` / `try_event` / `hosted` / `shutdown`).
 - *Backend-specific, compiled only where it applies:* the Linux backend's `dbus.rs`
@@ -76,7 +76,8 @@ let model = MenuModel::top(vec![
     ]),
 ]);
 
-let menu = photocraft_appmenu::AppMenu::start("photocraft")?;
+let wake: photocraft_appmenu::MenuWake = std::sync::Arc::new(|| {}); // egui: ctx.request_repaint()
+let menu = photocraft_appmenu::AppMenu::start("photocraft", wake)?;
 menu.replace(&model);
 // in the frame loop:
 while let Some(event) = menu.try_event() {
@@ -86,7 +87,8 @@ while let Some(event) = menu.try_event() {
 
 ## Checklist for a *craft app adopting it
 
-* Call `AppMenu::start(app_name)` once (lazily, on the first frame is fine), publish on a
+* Call `AppMenu::start(app_name, wake)` once (lazily, on the first frame is fine; `wake`
+  requests a repaint so a global-menu click is handled promptly), publish on a
   duty cycle or on a dirty flag, and drain `try_event` every frame.
 * While a host serves the menus the app hides its in-window menu bar — with two app-side
   decisions (ui-egui here): a preference (Interface › Use Global Menu Bar, default on; off,

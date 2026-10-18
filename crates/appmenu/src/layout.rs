@@ -53,8 +53,9 @@ pub struct MenuDiff {
 /// keyed by identity — leaf items by their `action` token (the stable thing in dynamic
 /// menus: "Undo Exposure" keeps its id while its label changes), submenu titles by their
 /// label (they have no action), separators by position, repeats by occurrence order. The
-/// map is bounded: past the cap it resets (ids renumber once; the shape change makes
-/// importers re-fetch, which they would do anyway).
+/// map is bounded: [`FlatMenu::build_with_ids`] resets it between builds when the next build
+/// could reach the cap (ids renumber once; the shape change makes importers re-fetch,
+/// which they would do anyway). It never resets mid-build, so ids within one menu stay unique.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Ids {
     by_key: HashMap<String, u32>,
@@ -73,15 +74,18 @@ impl Default for Ids {
 }
 
 impl Ids {
+    /// Starts over when a build of up to [`MAX_ITEMS`] new items could pass [`MAX_IDS`].
+    fn reset_if_near_cap(&mut self) {
+        if self.next.saturating_add(MAX_ITEMS as u32) >= MAX_IDS {
+            log::warn!("AppMenu: id table capped; item ids renumber");
+            *self = Ids::default();
+        }
+    }
+
     /// Allocates or looks up the id for an item identity.
     fn alloc(&mut self, key: String) -> u32 {
         if let Some(&id) = self.by_key.get(&key) {
             return id;
-        }
-        if self.next >= MAX_IDS {
-            log::warn!("AppMenu: id table capped; item ids renumber");
-            self.by_key.clear();
-            self.next = 1;
         }
         let id = self.next;
         self.next = id.saturating_add(1);
@@ -109,6 +113,7 @@ impl FlatMenu {
     /// cannot run the wrong command, importers re-fetch less, and property-only updates
     /// continue to cover the common case.
     pub fn build_with_ids(model: &MenuModel, ids: &mut Ids) -> FlatMenu {
+        ids.reset_if_near_cap();
         let mut menu = FlatMenu::default();
         menu.items.push(FlatItem {
             id: ROOT_ID,
@@ -143,11 +148,15 @@ const MAX_ITEMS: usize = 4096;
 /// [`MAX_ITEMS`] so an absurd or cyclic model truncates instead of recursing forever
 /// (the never-crash rule).
 fn walk_preorder(menu: &mut FlatMenu, parent: u32, entries: &[MenuEntry], depth: u32, ids: &mut Ids, parent_key: &str, occurrence: &mut HashMap<String, u32>) {
-    if depth > FlatMenu::MAX_DEPTH || menu.items.len() >= MAX_ITEMS {
-        log::warn!("AppMenu: menu truncated (nesting past {} or over {} items)", FlatMenu::MAX_DEPTH, MAX_ITEMS);
+    if depth > FlatMenu::MAX_DEPTH {
+        log::warn!("AppMenu: menu truncated (nesting past {})", FlatMenu::MAX_DEPTH);
         return;
     }
     for (pos, entry) in entries.iter().enumerate() {
+        if menu.items.len() >= MAX_ITEMS {
+            log::warn!("AppMenu: menu truncated (over {MAX_ITEMS} items)");
+            return;
+        }
         let (kind, data) = match entry {
             MenuEntry::Command(c) => {
                 if c.children.as_ref().is_none_or(|n| n.is_empty()) {
@@ -403,18 +412,21 @@ mod tests {
 
     #[test]
     fn ids_renumber_when_the_table_is_capped() {
-        // Hostile-input bound: past MAX_IDS the allocator starts over instead of growing
-        // without limit (and never hands out the root's reserved 0).
+        // Hostile-input bound: near MAX_IDS the next build starts the table over instead of
+        // growing without limit (never handing out the root's reserved 0, never mid-build).
         let mut ids = Ids::default();
-        let key = "a:one".to_string();
-        let one = ids.alloc(key.clone());
-        for i in 0..=MAX_IDS {
+        let first = FlatMenu::build_with_ids(&demo_model(), &mut ids);
+        let one = first.children(ROOT_ID)[0];
+        for i in 0..MAX_IDS {
             ids.alloc(format!("x:{i}"));
         }
-        let one2 = ids.alloc(key);
-        assert_ne!(one2, one, "the table reset");
-        assert_ne!(one2, ROOT_ID, "0 stays reserved");
-        assert_eq!(one, 1, "ids hand out from 1");
+        let second = FlatMenu::build_with_ids(&demo_model(), &mut ids);
+        assert_eq!(second.children(ROOT_ID)[0], one, "the table reset and renumbered from 1");
+        assert!(second.items.iter().skip(1).all(|i| i.id != ROOT_ID), "0 stays reserved");
+        let mut seen: Vec<u32> = second.items.iter().map(|i| i.id).collect();
+        seen.sort_unstable();
+        seen.dedup();
+        assert_eq!(seen.len(), second.items.len(), "ids stay unique within one build");
     }
 
     #[test]
