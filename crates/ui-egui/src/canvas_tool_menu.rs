@@ -407,6 +407,22 @@ pub fn type_layer_at(app: &mut PhotocraftApp, tool: Tool, doc: [f64; 2]) -> Opti
     crate::type_tool::hit_layer(app, doc[0], doc[1])
 }
 
+/// Make the right-clicked type layer `id` the active layer, which the structural rows (Rasterize
+/// Type, Convert to Shape…) act on and the checks show. Inside a multiselection the selection stays,
+/// so the formatting rows still act on every selected type layer, as the Type menu's do; outside it
+/// the type replaces the selection, as a click with the Type tool does.
+fn target_type_layer(app: &mut PhotocraftApp, id: photocraft_doc::LayerId) -> bool {
+    let Some(st) = app.session.active() else { return false };
+    let selected = st.selected_layers();
+    if st.active_layer == Some(id) {
+        true
+    } else if selected.contains(&id) {
+        photocraft_engine::layer_multi_cmds::set_selection(&mut app.session, selected, Some(id), Some(id)).is_ok()
+    } else {
+        app.session.select_layer(id).is_ok()
+    }
+}
+
 /// The misspelled word of the edited text under document point `doc`, with its suggestions.
 fn spelling_at(app: &mut PhotocraftApp, doc: [f64; 2]) -> Option<Spelling> {
     let layer = app.ui.text_edit.as_ref()?.layer;
@@ -677,12 +693,7 @@ pub fn open_at(app: &mut PhotocraftApp, ctx: &Context, tool: Tool, pos: [f32; 2]
     if !pos.iter().all(|v| v.is_finite()) {
         return false;
     }
-    let type_layer = !text
-        && doc.and_then(|d| type_layer_at(app, tool, d)).is_some_and(|id| {
-            // Type outside the selected layers becomes the target, as a click with the Type tool
-            // makes it, so the rows act on (and their checks show) the type that was clicked.
-            app.session.active().is_some_and(|st| st.selected_layers().contains(&id)) || app.session.select_layer(id).is_ok()
-        });
+    let type_layer = !text && doc.and_then(|d| type_layer_at(app, tool, d)).is_some_and(|id| target_type_layer(app, id));
     if !(applies(tool) || text || type_layer) {
         return false;
     }
@@ -1188,6 +1199,29 @@ mod tests {
         choose(&mut app, &ctx, "type.rasterizeTypeLayer");
         assert!(text_of(&app, id).is_none(), "the type layer is pixels now");
         assert!(app.ui.text_edit.is_none());
+    }
+
+    /// Two selected type layers: the one right-clicked becomes active, and the selection stays.
+    #[test]
+    fn type_layer_menu_in_a_multiselection_acts_on_the_clicked_type() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 200, "height": 100})).unwrap();
+        app.ui.tool = Tool::Type;
+        let top = app.run("type.create", json!({"text": "Top", "size": 30, "x": 10, "y": 40})).unwrap()["layer"].as_u64().unwrap();
+        let bottom = app.run("type.create", json!({"text": "Low", "size": 30, "x": 10, "y": 90})).unwrap()["layer"].as_u64().unwrap();
+        app.run("layer.select", json!({"layer": bottom})).unwrap();
+        app.run("layer.select", json!({"layer": top, "mode": "add"})).unwrap();
+        let at = [25.0, 80.0];
+        assert_eq!(crate::type_tool::hit_layer(&mut app, at[0], at[1]).map(|l| l.0), Some(bottom));
+        assert_eq!(app.session.active().unwrap().active_layer.map(|l| l.0), Some(top));
+        let ctx = Context::default();
+        assert!(open_at(&mut app, &ctx, Tool::Type, [10.0, 10.0], Some(at)));
+        let st = app.session.active().unwrap();
+        assert_eq!(st.active_layer.map(|l| l.0), Some(bottom), "the clicked type is the target");
+        assert_eq!(st.selected_layers().len(), 2, "the multiselection stays");
+        choose(&mut app, &ctx, "type.rasterizeTypeLayer");
+        assert!(text_of(&app, bottom).is_none(), "the clicked type is rasterized");
+        assert!(text_of(&app, top).is_some(), "not the other selected type");
     }
 
     #[test]
