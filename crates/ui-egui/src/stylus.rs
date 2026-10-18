@@ -648,6 +648,16 @@ mod tests {
     }
 
     #[test]
+    fn an_interior_zero_pressure_sample_keeps_its_place_in_the_timeline() {
+        let mut s = Stylus::default();
+        for p in [0.10, 0.0, 0.20] {
+            s.feed.set(Some(pen(p)));
+        }
+        s.update(&[]);
+        assert_eq!(s.frame.iter().map(|p| p.pressure).collect::<Vec<_>>(), vec![0.10, 0.0, 0.20]);
+    }
+
+    #[test]
     fn the_pressure_curve_reshapes_pen_pressure_but_not_the_mouse() {
         let mut s = Stylus::default();
         s.set_pressure_curve(&[[0.0, 0.0], [0.3, 0.6], [1.0, 1.0]]);
