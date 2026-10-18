@@ -75,14 +75,6 @@ impl Encoding {
     }
 }
 
-fn srgb_encode(v: f32) -> f32 {
-    linear_to_srgb(v)
-}
-
-fn srgb_decode(v: f32) -> f32 {
-    srgb_to_linear(v)
-}
-
 fn luma_linear(c: [f32; 3]) -> f32 {
     luma(c)
 }
