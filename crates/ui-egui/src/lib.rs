@@ -1987,8 +1987,9 @@ impl eframe::App for PhotocraftApp {
         // Windows precision touchpads and some Linux Wayland compositors send pinches
         // as fractional Ctrl + wheel rather than a native Zoom event (#4566).
         // Leave Ctrl+whole-notch mouse scrolling alone, and honour the pinch preference.
+        // A modifier combination the user mapped (Scroll Wheel Mapping) takes its wheel events as they are.
         if cfg!(any(target_os = "windows", target_os = "linux")) && self.session.prefs().enhanced_controls.zoom_with_trackpad_pinch {
-            wheel_nav::fold_legacy_pinch(ctx, raw_input);
+            wheel_nav::fold_legacy_pinch(ctx, raw_input, &wheel_nav::Bindings::from_prefs(&self.session.prefs().general));
         }
         raw_input.events.extend(self.take_synthetic_step());
         // A pen held still is no touch screen's press-and-hold right click (stylus.rs).

@@ -237,12 +237,26 @@ Values the app honours live: history states (every open document), effect-cache 
 theme, canvas colour and border, checkerboard size and colours (CPU and GPU canvas), gamut warning
 colour and opacity, guide/grid/smart-guide colours and styles, grid spacing and subdivisions, ruler
 units (rulers, Info panel, Image Size default unit), image interpolation (Image Size default),
-painting and other cursors, zoom with scroll wheel, Use Shift Key for Tool Switch, Bundle Arrow-Key
+painting and other cursors, zoom with scroll wheel and Scroll Wheel Mapping (`general.wheelAction*`, below), Use Shift Key for Tool Switch, Bundle Arrow-Key
 Nudges and Nudge Bundle Pause (arrow keys sent with `ui.key` that follow each other within the pause
 nudge the layers, selection outline or Free Transform box as one history step; an agent calling
 `layer.translate` or `select.transformSelection` itself gets the same with a shared `coalesce` key),
 keyboard shortcuts, hidden and coloured menu items, autosave interval and crash recovery, and the history
 log text file. GPU on/off and the GPU tile size apply at the next launch.
+
+Scroll Wheel Mapping (Preferences › General, for desktops that keep a modifier for themselves):
+`general.wheelActionPlain`, `wheelActionShift`, `wheelActionCtrl`, `wheelActionAlt`,
+`wheelActionShiftAlt`, `wheelActionCtrlShift`, `wheelActionCtrlAlt` and `wheelActionCtrlShiftAlt`
+each choose what the wheel does over the canvas with those modifiers held (Ctrl is Cmd on macOS):
+`photoshop` (the default: the Photoshop wheel behaviour of the image canvas, including Zoom with Scroll
+Wheel),
+`scrollVertical`, `scrollHorizontal`, `zoomContinuous` (x1.1 per notch), `zoomSnap` (next zoom
+level) or `doNothing`. Scroll mappings move the view by exactly the wheel's distance in the frame
+the event arrives, without glide. Continuous zoom scales by the wheel's distance; snap zoom adds
+it up and steps through the zoom levels once it adds up to one. A wheel event whose modifiers are mapped also stays out of the Windows and Linux
+touchpad-pinch fallback (a pinch that arrives as Ctrl + wheel): only combinations left on
+`photoshop` can still be turned into a zoom; a native pinch always zooms. The navigator and the
+Camera Raw preview keep the Photoshop behaviour.
 
 The desktop app stores them in `preferences.json` in the platform config directory (macOS
 `~/Library/Application Support/Photocraft`, Windows `%APPDATA%\Photocraft`, Linux
@@ -527,6 +541,7 @@ including while placing colour samplers. Alt/Option + wheel zooms at the pointer
 wheel pans. Pinch zooms. Ctrl/Command +/- zoom, 0 fits, and Alt/Option + Ctrl/Command + 0 shows
 100%; Ctrl/Command+Shift-click also selects 100%. Right-click opens Fit / 100% / preset
 percentages. Tool double-clicks fit the image.
+
 Text fields retain their keys and wheel gestures over the settings panel still scroll it.
 
 The proxy remains the fast path while changing settings. Where more source pixels are needed,
