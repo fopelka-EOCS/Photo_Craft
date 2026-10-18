@@ -169,10 +169,19 @@ fn read_psd_thumbnail_bounded(path: &Path, file_len: u64) -> Option<ColorImage> 
         if file.read_exact(&mut res_bytes).is_ok()
             && let Ok((resources, _)) = photocraft_psd::tiff::resources_from_bytes(&res_bytes)
         {
+            let decode_opts = photocraft_codecs::DecodeOptions {
+                limits: photocraft_codecs::Limits {
+                    max_width: 4096,
+                    max_height: 4096,
+                    max_pixels: 4096 * 4096,
+                    max_alloc: 4096 * 4096 * 4,
+                },
+                ..Default::default()
+            };
             for r in &resources {
                 if (r.id == photocraft_psd::resources::ids::THUMBNAIL || r.id == photocraft_psd::resources::ids::THUMBNAIL_PS4)
                     && let Some(jfif) = r.data.get(28..)
-                    && let Ok(img) = photocraft_codecs::decode(jfif)
+                    && let Ok(img) = photocraft_codecs::decode_with(jfif, &decode_opts)
                 {
                     let rgba = img.convert(photocraft_codecs::ChannelLayout::Rgba, photocraft_codecs::SampleType::U8);
                     if rgba.data().len() == rgba.width() as usize * rgba.height() as usize * 4 {
