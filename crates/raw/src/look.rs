@@ -1017,6 +1017,32 @@ mod tests {
     }
 
     #[test]
+    fn black_and_white_reference_that_a_curve_cannot_improve_is_rejected() {
+        let (w, h) = (480, 320);
+        let (mut s, _) = shot(w, h, &true_matrix());
+        s.make = Some("FUJIFILM".into());
+        s.model = Some("X-T30".into());
+        // The reference's lightness is the spectral rendering's, scaled up for bluish and down
+        // for reddish patches (zero on average): a hue-dependent difference no tone curve can
+        // follow, so the curve cannot lower the held-out error by 15 %.
+        let d = crate::develop_sensor(&s, &wb_opts()).unwrap();
+        assert_eq!((d.width as usize, d.height as usize), (w, h));
+        let enc = |v: f64| ((if v <= 0.0031308 { 12.92 * v } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 }) * 255.0).round() as u8;
+        let grey: Vec<u8> = d
+            .rgb
+            .chunks(3)
+            .flat_map(|p| {
+                let pro = [0, 1, 2].map(|k| (f64::from(p[k]) / 65535.0).powf(1.8));
+                let sum = pro.iter().sum::<f64>().max(1e-6);
+                let y = color::apply(&PRO_TO_XYZ_Y_ROW, pro)[0] * (1.0 + 1.2 * (pro[2] - pro[0]) / sum);
+                [enc(y.clamp(0.0, 1.0)); 3]
+            })
+            .collect();
+        let err = fit_look(&s, &wb_opts(), &Reference { width: w as u32, height: h as u32, rgb: &grey }).unwrap_err();
+        assert!(err.0.contains("does not improve enough on the spectral matrices"), "{err}");
+    }
+
+    #[test]
     fn tighter_camera_preview_aligns_for_color_without_changing_the_raw_crop() {
         let (w, h) = (480, 320);
         let (s, rgb) = shot(w, h, &true_matrix());

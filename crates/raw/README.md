@@ -143,10 +143,13 @@ For a slightly tighter camera JPEG, fitting can align the reference proxy using 
 90–100% centred search on training cells. It requires a strong correlation improvement and
 retains the held-out colour gates; the developed crop and camera calibration are unchanged.
 
-Without a usable fit (no preview, an unrelated, monochrome or differently shaped one, or a fit that
-does not clearly help) the documented neutral fallback stays: the white-balanced camera channels are
-treated as linear sRGB primaries, with no tone curve (plausible but flat, greyish colours; converting
-to DNG gives calibrated colour), and `develop` says so.
+Without a usable fit (no preview, an unrelated or differently shaped one, or a fit that does not
+clearly help), a camera with measured spectral matrices (see below) develops through them, with no
+tone curve; with a black-and-white preview it keeps them and fits only the tone curve. Only when
+there is no usable look, no calibration in the file and no spectral matrix does the documented
+neutral fallback apply: the white-balanced camera channels are treated as linear sRGB primaries,
+with no tone curve (plausible but flat, greyish colours; converting to DNG gives calibrated
+colour), and `develop` says so.
 
 Measured on 8 Nikon D3200 NEFs (12-bit lossy compressed, indoor scenes) against each file's
 embedded JPEG (mean CIE76 ΔE, 300-pixel grid, full develop output in sRGB): fallback 11.6–26.0,
