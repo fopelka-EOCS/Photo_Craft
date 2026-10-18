@@ -174,3 +174,6 @@ sync_github_name = false
 real_name = "Vlad Grankovsky"
 display_name = "Vlad Grankovsky"
 sync_github_name = false
+
+[people.Byxis]
+sync_github_name = true
