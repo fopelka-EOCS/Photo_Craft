@@ -1142,4 +1142,61 @@ mod preference_resize_tests {
         assert_eq!(resizable_dialog(ordinary.as_object().unwrap()), None);
         assert_eq!(resizable_dialog(web.as_object().unwrap()), Some(egui::vec2(960.0, 900.0)));
     }
+
+    /// Drags the dialog's resize grip (its frame's bottom-right corner) by `by`.
+    fn drag_corner(h: &mut egui_kittest::Harness<'_, PhotocraftApp>, by: egui::Vec2) {
+        let corner = frame(h).max - egui::vec2(14.0, 14.0);
+        h.event(egui::Event::PointerMoved(corner));
+        h.step();
+        h.event(egui::Event::PointerButton { pos: corner, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+        h.step();
+        h.event(egui::Event::PointerMoved(corner + by));
+        h.step();
+        h.event(egui::Event::PointerButton { pos: corner + by, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+        h.run_steps(4);
+    }
+
+    fn frame(h: &egui_kittest::Harness<'_, PhotocraftApp>) -> egui::Rect {
+        let rects: Vec<egui::Rect> = h.ctx.data(|m| m.get_temp(egui::Id::new(RECTS))).unwrap();
+        rects[0]
+    }
+
+    /// The button row sits in the frame's bottom-right corner (its order follows the platform):
+    /// the contents fill the dialog, no empty space.
+    fn assert_buttons_in_corner(h: &egui_kittest::Harness<'_, PhotocraftApp>, when: &str) {
+        use egui_kittest::kittest::Queryable;
+        let f = frame(h);
+        let row = ["OK", "Cancel", "Apply"].map(|l| h.get_by_label(l).rect()).into_iter().reduce(|a, b| a.union(b)).unwrap();
+        assert!(f.bottom() - row.bottom() < 24.0 && f.right() - row.right() < 24.0, "{when}: frame {f:?}, buttons {row:?}");
+    }
+
+    #[test]
+    fn preferences_contents_follow_the_dialog_when_it_is_resized() {
+        // #7420: the dialog resized but its contents kept a size from the window, leaving the
+        // buttons part-way up a dialog that opened, or was dragged, larger than them.
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        crate::prefs_ui::open_preferences(&mut app, "interface");
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1600.0, 1000.0)).build_ui_state(
+            |ui, app| {
+                if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("semibold".into()))) {
+                    show(app, ui.ctx());
+                }
+            },
+            app,
+        );
+        PhotocraftApp::setup_context(&h.ctx, Default::default());
+        h.run_steps(5);
+        assert_buttons_in_corner(&h, "on open");
+        let opened = frame(&h);
+        drag_corner(&mut h, egui::vec2(220.0, 80.0));
+        assert!(frame(&h).width() > opened.width() + 150.0 && frame(&h).height() > opened.height() + 50.0, "wider: {:?}", frame(&h));
+        assert_buttons_in_corner(&h, "wider");
+        drag_corner(&mut h, egui::vec2(-500.0, -300.0));
+        let smaller = frame(&h);
+        assert!(smaller.width() < opened.width() - 200.0 && smaller.height() < opened.height() - 150.0, "smaller: {smaller:?}");
+        assert_buttons_in_corner(&h, "smaller");
+        // The contents never ask for more than the dialog gives them, so it keeps its size.
+        h.run_steps(10);
+        assert_eq!(frame(&h), smaller);
+    }
 }
