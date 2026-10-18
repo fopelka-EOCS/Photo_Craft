@@ -306,7 +306,8 @@ fn source(name: &str, bytes: &[u8]) -> Value {
     json!({"data": photocraft_engine::paint::tile::b64_encode(bytes)})
 }
 
-/// Load a `.atn` file's bytes into the Actions panel (the panel menu's Load Actions…).
+/// Load a `.atn` or PhotoCraft action `.json` file's bytes into the Actions panel (the panel
+/// menu's Load Actions…).
 pub fn load_bytes(app: &mut PhotocraftApp, name: &str, bytes: &[u8]) -> Result<Value, String> {
     let r = app.run("actions.load", source(name, bytes))?;
     let n = r["actions"].as_array().map_or(0, Vec::len) as u64;
@@ -344,7 +345,7 @@ pub fn load_bytes(app: &mut PhotocraftApp, name: &str, bytes: &[u8]) -> Result<V
 }
 
 fn load_dialog(app: &mut PhotocraftApp) -> Result<Value, String> {
-    app.pick_file_bytes_filtered(&["atn"], |app, name, bytes| load_bytes(app, &name, &bytes))
+    app.pick_file_bytes_filtered(&["atn", "json"], |app, name, bytes| load_bytes(app, &name, &bytes))
 }
 
 /// Save Actions…: the selected action's set (every action of it), or every action when none

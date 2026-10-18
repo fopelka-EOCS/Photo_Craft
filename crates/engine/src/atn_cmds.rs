@@ -982,7 +982,31 @@ fn pattern_desc(p: &Value) -> Option<Descriptor> {
     Some(t)
 }
 
+/// Layer › Layer Mask: the `Usng` value of `Mk` a new `Chnl` at the mask.
+const MASK_USING: &[(&str, &str)] = &[
+    ("RvlA", "layer.layerMask.revealAll"),
+    ("HdAl", "layer.layerMask.hideAll"),
+    ("RvlS", "layer.layerMask.revealSelection"),
+    ("HdSl", "layer.layerMask.hideSelection"),
+];
+
+fn mask_ref() -> D {
+    D::Reference(vec![ReferenceItem::Enumerated { class: class("Chnl"), type_id: code("Chnl"), value: code("Msk ") }])
+}
+
 fn make_from(d: &Descriptor) -> Mapped {
+    // Add Layer Mask: `Mk` a new channel `At` the mask, `Usng` reveal/hide all/selection.
+    if let Some(D::Class(c)) = d.get("Nw  ")
+        && trimmed(&c.class_id) == "Chnl"
+        && let Some(at) = get_ref(d, "At  ")
+        && ref_class(at).as_deref() == Some("Chnl")
+        && matches!(target(at), Target::Ordinal(ref o) if o == "Msk")
+    {
+        return match get_enum(d, "Usng").and_then(|u| lookup(MASK_USING, &u)) {
+            Some(id) => none(id),
+            None => Mapped::Unsupported { harmless: false },
+        };
+    }
     // Duplicate layer/group into a new document: `Mk` with a document class, a layer
     // `Usng`, an optional `Nm` (the new document's name) and an optional `LyrN`
     // (the copy's name). A `Dplc` with a `T` document reference (duplicate into another
@@ -1101,6 +1125,12 @@ fn make_to(id: &str, p: &Value) -> Option<Descriptor> {
         }
         u
     };
+    if let Some(using) = lookup_back(MASK_USING, id) {
+        if !targets_only_active(p) {
+            return None;
+        }
+        return Some(desc("null").with("Nw  ", D::Class(class("Chnl"))).with("At  ", mask_ref()).with("Usng", enm("UsrM", using)));
+    }
     Some(match id {
         "layer.new.layer" => {
             let mut u = with_name("Lyr ");
@@ -1444,7 +1474,13 @@ fn select_to(id: &str, p: &Value) -> Option<Descriptor> {
     let enumerated = |cls: &str, ty: &str, v: &str| D::Reference(vec![ReferenceItem::Enumerated { class: class(cls), type_id: code(ty), value: code(v) }]);
     Some(match id {
         "layer.select" => {
-            let mut d = desc("null").with("null", name_ref("Lyr ", jstr(p, "layer")?));
+            // `layer` or `name` names it; a numeric id or a later same-named layer
+            // (`occurrence`) has no Photoshop reference that replays in another document.
+            if jnum(p, "occurrence").is_some_and(|o| o != 0.0) {
+                return None;
+            }
+            let name = jstr(p, "layer").or_else(|| jstr(p, "name"))?;
+            let mut d = desc("null").with("null", name_ref("Lyr ", name));
             match jstr(p, "mode") {
                 None | Some("replace") => {}
                 Some("add") => d = d.with("selectionModifier", enm("selectionModifierType", "addToSelection")),
@@ -2547,6 +2583,42 @@ macro_rules! adjustment_event {
 
 const RIPPLE_SIZE: &[(&str, &str)] = &[("Sml", "small"), ("Mdm", "medium"), ("Lrg", "large")];
 
+const WAVE_TYPE: &[(&str, &str)] = &[("WvSn", "sine"), ("WvTr", "triangle"), ("WvSq", "square")];
+const WAVE_UNDEFINED: &[(&str, &str)] = &[("WrpA", "wrap"), ("RptE", "repeat")];
+const WAVE: &[F] = &[
+    F("NmbG", "generators", Kind::Long),
+    F("WLMn", "wavelengthMin", Kind::Long),
+    F("WLMx", "wavelengthMax", Kind::Long),
+    F("AmMn", "amplitudeMin", Kind::Long),
+    F("AmMx", "amplitudeMax", Kind::Long),
+    F("Wvtp", "type", Kind::Enum("Wvtp", WAVE_TYPE)),
+    F("UndA", "undefinedAreas", Kind::Enum("UndA", WAVE_UNDEFINED)),
+    F("RndS", "seed", Kind::Long),
+];
+
+/// Filter › Distort › Wave. PhotoCraft's Wave has no Scale: a step that scales the waves
+/// stays a kept Photoshop step rather than playing at the wrong strength.
+fn wave_from(d: &Descriptor) -> Mapped {
+    let unscaled = |k: &str| get_num(d, k).is_none_or(|v| (v - 100.0).abs() < 1e-6);
+    if !(unscaled("SclH") && unscaled("SclV")) {
+        return Mapped::Unsupported { harmless: false };
+    }
+    match fields_from(d, WAVE) {
+        Some(m) => step("filter.distort.wave", Value::Object(m)),
+        None => Mapped::Unsupported { harmless: false },
+    }
+}
+
+fn wave_to(_: &str, p: &Value) -> Option<Descriptor> {
+    fields_to(p, WAVE, desc("null")).map(|d| d.with("SclH", pct(100.0)).with("SclV", pct(100.0)))
+}
+
+/// True when `p` doesn't pick a layer by id: the step acts on the targeted layer, as a recorded
+/// Photoshop step does. A layer id means nothing when the action replays in another document.
+fn targets_only_active(p: &Value) -> bool {
+    p.get("layer").is_none_or(Value::is_null) && p.get("layers").is_none_or(Value::is_null)
+}
+
 /// Select and Mask (`refineSelectionEdge`). Smart Radius, decontamination and the output follow
 /// Photoshop's; the edge itself is PhotoCraft's own matting, so results differ in detail.
 const REFINE_EDGE: &[F] = &[
@@ -2651,6 +2723,7 @@ const EVENTS: &[Event] = &[
         &[F("Hrzn", "horizontal", Kind::Long), F("Vrtc", "vertical", Kind::Long), F("Fl  ", "undefinedAreas", Kind::Enum("FlMd", OFFSET_FILL))]
     ),
     ev!("Rple", "ripple", "Ripple", "filter.distort.ripple", &[F("Amnt", "amount", Kind::Long), F("RplS", "size", Kind::Enum("RplS", RIPPLE_SIZE))]),
+    Event { code: "Wave", name: "wave", label: "Wave", ids: &["filter.distort.wave"], from: wave_from, to: wave_to },
     ev!("Crst", "crystallize", "Crystallize", "filter.pixelate.crystallize", &[F("ClSz", "cellSize", Kind::Long)]),
     Event { code: "GEfc", name: "filterGallery", label: "Filter Gallery", ids: GALLERY_IDS, from: gallery_from, to: gallery_to },
     // Adjustments (Image › Adjustments).
@@ -2804,6 +2877,10 @@ const EVENTS: &[Event] = &[
             "layer.newAdjustmentLayer.channelMixer",
             "layer.newAdjustmentLayer.selectiveColor",
             "layer.newAdjustmentLayer.gradientMap",
+            "layer.layerMask.revealAll",
+            "layer.layerMask.hideAll",
+            "layer.layerMask.revealSelection",
+            "layer.layerMask.hideSelection",
             "file.new",
             "file.newFromClipboard",
         ],
@@ -2884,9 +2961,13 @@ const EVENTS: &[Event] = &[
         from: merge_visible_from,
         to: merge_visible_to,
     },
+    // Merge Down stays unmapped: on a group it merges into the layer below, which Merge Layers
+    // (one `Mrg2` for both) would replay as an in-place group merge.
     ev!("Mrg2", "mergeLayersNew", "Merge Layers", "layer.mergeLayers", &[]),
     ev!("CpTL", "copyToLayer", "Layer Via Copy", "layer.new.layerViaCopy", &[]),
     ev!("CtTL", "cutToLayer", "Layer Via Cut", "layer.new.layerViaCut", &[]),
+    // Rasterize › Type stays unmapped: Rasterize Layer, its only `.atn` form, also turns a vector
+    // mask into pixels.
     ev!("", "rasterizeLayer", "Rasterize", "layer.rasterize.layer", &[]),
     ev!("", "selectAllLayers", "Select All Layers", "select.allLayers", &[]),
     ev!("", "selectNoLayers", "Deselect Layers", "select.deselectLayers", &[]),
@@ -3067,6 +3148,60 @@ pub fn import(bytes: &[u8]) -> std::result::Result<Imported, String> {
     Ok(out)
 }
 
+/// PhotoCraft's own action JSON, loaded as one set: the Actions panel's `actions.json`
+/// (`{"actions": [{"name", "steps", …}…]}`), a bare list of actions, or one action's steps
+/// (`[[id, params]…]`, as a script or droplet holds them), named `stem`. Every step is kept;
+/// a command this build doesn't know is a warning and fails at playback.
+pub fn import_json(bytes: &[u8], stem: &str) -> std::result::Result<Imported, String> {
+    let v: Value = serde_json::from_slice(without_bom(bytes)).map_err(|e| format!("actions JSON: {e}"))?;
+    let list = v.get("actions").unwrap_or(&v);
+    let is_set = list.as_array().is_some_and(|a| !a.is_empty() && a.iter().all(|x| x.get("name").is_some_and(Value::is_string)));
+    let mut actions: Vec<Action> = if is_set {
+        serde_json::from_value(list.clone()).map_err(|e| format!("Actions set: {e}"))?
+    } else {
+        let steps = crate::automate_cmds::parse_action(&v, "actions.load").map_err(|e| e.to_string())?;
+        if steps.is_empty() {
+            return Err("the file holds no actions or steps".into());
+        }
+        let name = if stem.trim().is_empty() { "Action 1" } else { stem.trim() };
+        vec![Action::new(name, steps)]
+    };
+    if actions.is_empty() {
+        return Err("the file holds no actions".into());
+    }
+    // A blank name is no name: fall through to the next source rather than to the default.
+    let nonblank = |s: &str| Some(s.trim()).filter(|t| !t.is_empty()).map(str::to_string);
+    let set = v
+        .get("set")
+        .and_then(Value::as_str)
+        .and_then(nonblank)
+        .or_else(|| actions.iter().find_map(|a| a.set.as_deref().and_then(nonblank)))
+        .unwrap_or_else(|| DEFAULT_SET.to_string());
+    let mut warnings = Vec::new();
+    for a in &mut actions {
+        a.set = Some(set.clone());
+        if a.name.trim().is_empty() {
+            a.name = "Action 1".into();
+        }
+        for (i, (id, _)) in a.steps.iter().enumerate() {
+            if crate::commands::find(id).is_none() {
+                warnings.push(format!("`{}` step {}: unknown command `{id}`", a.name, i + 1));
+            }
+        }
+    }
+    Ok(Imported { set, actions, warnings, ..Default::default() })
+}
+
+/// `bytes` without a leading UTF-8 byte order mark (Windows editors add one).
+fn without_bom(bytes: &[u8]) -> &[u8] {
+    bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes)
+}
+
+/// True when `bytes` look like JSON rather than `.atn` (which starts with its version word).
+fn is_json(bytes: &[u8]) -> bool {
+    matches!(without_bom(bytes).iter().find(|b| !b.is_ascii_whitespace()), Some(b'{' | b'['))
+}
+
 // ------------------------------------------------------------------ export
 
 /// A step Save Actions could not express as a Photoshop event.
@@ -3151,8 +3286,8 @@ fn load(s: &mut Session, p: &Value) -> Result<Value> {
     if s.actions.recording.is_some() || s.actions.playing > 0 {
         return Err(bad(cmd, "stop recording or playing before loading actions"));
     }
-    let (bytes, _) = crate::preset_import_cmds::file_bytes(p, cmd, ".atn file")?;
-    let mut imp = import(&bytes).map_err(|e| bad(cmd, e))?;
+    let (bytes, stem) = crate::preset_import_cmds::file_bytes(p, cmd, ".atn or .json file")?;
+    let mut imp = if is_json(&bytes) { import_json(&bytes, &stem) } else { import(&bytes) }.map_err(|e| bad(cmd, e))?;
     match p.get("set") {
         None | Some(Value::Null) => {}
         Some(Value::String(n)) if !n.trim().is_empty() => {
@@ -3298,7 +3433,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Load Actions…",
             menu: &[],
             shortcut: None,
-            params: r##"{"path":".atn file"?,"data":base64 bytes?,"set":name? (override the file's set name),"replace":bool=true (replace the actions of a set of the same name)} → {set, actions:[names], steps, unsupported:[{action, step, event, name}], functionKeys:[{action, key}], warnings}. Photoshop steps PhotoCraft cannot play become actions.photoshopStep steps (kept for Save Actions; they fail at playback with the step's name); tool selections and other steps with no document effect are imported switched off. Layer references by name replay in any document."##,
+            params: r##"{"path":".atn or .json file"?,"data":base64 bytes?,"set":name? (override the file's set name),"replace":bool=true (replace the actions of a set of the same name)} → {set, actions:[names], steps, unsupported:[{action, step, event, name}], functionKeys:[{action, key}], warnings}. Photoshop steps PhotoCraft cannot play become actions.photoshopStep steps (kept for Save Actions; they fail at playback with the step's name); tool selections and other steps with no document effect are imported switched off. Layer references by name replay in any document. A JSON file is PhotoCraft's own action format, loaded as one set: the Actions panel's actions.json ({"actions":[{"name","steps",…}…]}, set from a top-level "set" or the actions' own), a bare list of actions, or one action's steps ([[id, params]…], named after the file); unknown command ids are warnings."##,
             enabled: always,
             run: load,
             journal: false,

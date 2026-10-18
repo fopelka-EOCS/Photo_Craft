@@ -321,6 +321,14 @@ fn every_mapped_command_exports_and_imports_back() {
         ("image.mode.bitmap", json!({"method": "threshold"})),
         ("image.imageSize", json!({"resolution": 1200, "resample": "preserveDetails", "keepPrintSize": true})),
         ("layer.new.layerFromBackground", json!({"ifPresent": true, "select": false})),
+        (
+            "filter.distort.wave",
+            json!({"generators": 3, "wavelengthMin": 300, "wavelengthMax": 900, "amplitudeMin": 4, "amplitudeMax": 18, "type": "triangle", "undefinedAreas": "wrap", "seed": 11}),
+        ),
+        ("layer.layerMask.revealAll", json!({})),
+        ("layer.layerMask.hideAll", json!({})),
+        ("layer.layerMask.revealSelection", json!({})),
+        ("layer.layerMask.hideSelection", json!({})),
     ];
     for (id, params) in &cases {
         let item = export_item(id, params, "S").unwrap_or_else(|| panic!("{id} does not export"));
@@ -1067,4 +1075,111 @@ fn fractional_translation_only_transform_keeps_offset_and_interpolation() {
     assert_eq!(steps[0].0, "edit.transform");
     assert_eq!(steps[0].1.get("dx").and_then(Value::as_f64), Some(0.5));
     assert_eq!(steps[0].1.get("interpolation"), Some(&json!("bilinear")));
+}
+
+/// Select by `name` saves as Select by layer name and plays back the same way.
+#[test]
+fn select_by_name_exports() {
+    let cases: Vec<(&str, Value, &str, Value)> = vec![
+        ("layer.select", json!({"name": "Glow"}), "layer.select", json!({"layer": "Glow"})),
+        ("layer.select", json!({"name": "Glow", "occurrence": 0}), "layer.select", json!({"layer": "Glow"})),
+    ];
+    for (id, params, back_id, back) in &cases {
+        let item = export_item(id, params, "S").unwrap_or_else(|| panic!("{id} does not export"));
+        let e = event_for(&item.event).unwrap_or_else(|| panic!("{id} exported as an unknown event"));
+        let Mapped::Steps(steps) = (e.from)(item.descriptor.as_ref().unwrap()) else { panic!("{id} did not import back") };
+        assert_eq!(steps, vec![(back_id.to_string(), back.clone())], "{id}");
+    }
+    // A layer picked by id or a later same-named layer has no Photoshop reference, and Merge Down
+    // and Rasterize Type have no event that replays them exactly: all still refused.
+    for (id, params) in [
+        ("layer.mergeDown", json!({})),
+        ("layer.rasterize.type", json!({})),
+        ("type.rasterize", json!({})),
+        ("layer.select", json!({"layer": 4})),
+        ("layer.select", json!({"name": "Glow", "occurrence": 1})),
+        ("layer.layerMask.revealSelection", json!({"layer": 4})),
+    ] {
+        assert!(export_item(id, &params, "S").is_none(), "{id} {params}");
+    }
+}
+
+#[test]
+fn wave_with_scale_stays_a_photoshop_step() {
+    let scaled = desc("null").with("NmbG", long(5.0)).with("SclH", pct(50.0)).with("SclV", pct(100.0));
+    assert!(matches!(wave_from(&scaled), Mapped::Unsupported { .. }));
+    let unscaled = desc("null").with("NmbG", long(5.0)).with("SclH", pct(100.0)).with("SclV", pct(100.0));
+    assert!(matches!(wave_from(&unscaled), Mapped::Steps(_)));
+}
+
+#[test]
+fn layer_mask_and_wave_play_back_from_atn() {
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 64, "height": 32, "background": "black"})).unwrap();
+    s.execute("type.create", json!({"x": 4, "y": 24, "text": "Hi", "size": 20, "color": "#ffffff"})).unwrap();
+    s.actions.list.push(Action::new(
+        "Bake",
+        vec![
+            ("layer.rasterize.layer".into(), json!({})),
+            ("layer.layerMask.revealAll".into(), json!({})),
+            ("filter.distort.wave".into(), json!({"generators": 2, "seed": 3})),
+            ("layer.mergeLayers".into(), json!({})),
+        ],
+    ));
+    let r = s.execute("actions.save", json!({"action": "Bake"})).unwrap();
+    let mut t = Session::new();
+    t.execute("actions.load", json!({"data": r["data"]})).unwrap();
+    t.execute("file.new", json!({"width": 64, "height": 32, "background": "black"})).unwrap();
+    t.execute("type.create", json!({"x": 4, "y": 24, "text": "Hi", "size": 20, "color": "#ffffff"})).unwrap();
+    let played = t.execute("actions.play", json!({"action": "Bake"})).unwrap();
+    assert!(played.get("failed").is_none_or(Value::is_null), "{played}");
+    assert_eq!(t.active().unwrap().doc.layers.len(), 1, "type rasterized and merged into the background");
+}
+
+#[test]
+fn load_actions_reads_photocraft_json() {
+    let mut s = Session::new();
+    // The Actions panel's own file.
+    let set = json!({"version": 1, "set": "Psycho", "actions": [
+        {"name": "Glow", "steps": [["filter.blur.gaussianBlur", {"radius": 4}], ["layer.layerStyle.blendingOptions", {"blendIf": {"channel": "gray", "thisLayer": [0, 4, 255, 255]}}]]},
+        {"name": "Grain", "steps": [["filter.noise.addNoise", {"amount": 10}]], "disabled": [0]},
+    ]});
+    let r = s.execute("actions.load", json!({"data": b64(set.to_string().as_bytes())})).unwrap();
+    assert_eq!(r["set"], "Psycho");
+    assert_eq!(r["actions"], json!(["Glow", "Grain"]));
+    assert_eq!(r["steps"], 3);
+    assert_eq!(r["warnings"], json!([]));
+    let glow = s.actions.list.iter().find(|a| a.name == "Glow").unwrap();
+    assert_eq!(glow.set.as_deref(), Some("Psycho"));
+    assert_eq!(glow.steps[1].0, "layer.layerStyle.blendingOptions", "steps .atn can't hold load from JSON");
+    assert!(!s.actions.list.iter().find(|a| a.name == "Grain").unwrap().step_enabled(0));
+
+    // One action's steps (a script), with a byte order mark: named after the file, default set.
+    let dir = std::env::temp_dir().join(format!("pc-json-actions-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("Psycho Typo - panic.json");
+    let mut bytes = vec![0xEF, 0xBB, 0xBF];
+    bytes.extend_from_slice(br#"[["filter.blur.gaussianBlur", {"radius": 2}], ["no.such.command", {}]]"#);
+    std::fs::write(&path, bytes).unwrap();
+    let r = s.execute("actions.load", json!({"path": path.to_string_lossy()})).unwrap();
+    std::fs::remove_dir_all(&dir).ok();
+    assert_eq!(r["actions"], json!(["Psycho Typo - panic"]));
+    assert_eq!(r["set"], DEFAULT_SET);
+    assert_eq!(r["warnings"].as_array().unwrap().len(), 1, "{r}");
+
+    // Loading the same set again replaces it rather than duplicating names.
+    s.execute("actions.load", json!({"data": b64(set.to_string().as_bytes())})).unwrap();
+    assert_eq!(s.actions.list.iter().filter(|a| a.set.as_deref() == Some("Psycho")).count(), 2);
+
+    // A blank top-level set falls through to the actions' own set, not to the default.
+    let blank = json!({"set": "  ", "actions": [{"name": "Glow", "set": "Psycho", "steps": [["filter.blur.gaussianBlur", {"radius": 1}]]}]});
+    let r = s.execute("actions.load", json!({"data": b64(blank.to_string().as_bytes())})).unwrap();
+    assert_eq!(r["set"], "Psycho");
+
+    // Malformed JSON and an empty set are errors, not panics, and leave the list as it was.
+    let before = s.actions.list.clone();
+    for bad in ["{", "[]", r#"{"actions": []}"#, r#"[1, 2]"#, r#"{"actions": [{"name": 3}]}"#] {
+        assert!(s.execute("actions.load", json!({"data": b64(bad.as_bytes())})).is_err(), "{bad}");
+        assert_eq!(s.actions.list, before, "{bad} changed the actions");
+    }
 }
