@@ -166,4 +166,3 @@ opt-level = "z"
 opt-level = "z"
 [profile.wasm-release.package.photocraft-paint]
 opt-level = 3
-

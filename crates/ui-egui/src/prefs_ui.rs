@@ -1518,12 +1518,14 @@ fn pref_group(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::Ui)) {
 fn interface_groups(ui: &mut egui::Ui, obj: &mut Map<String, Value>, keys: &[String], lang: crate::i18n::Lang, system: Option<egui::Theme>, query: &str) {
     const APPEARANCE: [&str; 3] = ["canvasColor", "canvasCustomColor", "canvasBorder"];
     const PRESENTATION: [&str; 3] = ["language", "uiFontSize", "uiScale"];
+    const LINUX: [&str; 1] = ["useInWindowBarOnLinux"];
     let shown = |k: &str| keys.iter().any(|key| key == k) && field_visible("interface", obj, k, query);
     // In Photoshop's order, not the stored one.
     let pick = |names: &[&str]| names.iter().filter(|n| shown(n)).map(|n| n.to_string()).collect::<Vec<_>>();
     let appearance = pick(&APPEARANCE);
     let presentation = pick(&PRESENTATION);
-    let rest = keys.iter().filter(|k| !APPEARANCE.contains(&k.as_str()) && !PRESENTATION.contains(&k.as_str()) && shown(k));
+    let linux = pick(&LINUX);
+    let rest = keys.iter().filter(|k| !APPEARANCE.contains(&k.as_str()) && !PRESENTATION.contains(&k.as_str()) && !LINUX.contains(&k.as_str()) && shown(k));
     // Checkboxes line up at the left edge, as in Photoshop; the other options keep a label column.
     let (checks, other): (Vec<String>, Vec<String>) = rest.cloned().partition(|k| obj.get(k).is_some_and(Value::is_boolean));
     let rows = AppearanceRows::matching(query);
@@ -1539,6 +1541,11 @@ fn interface_groups(ui: &mut egui::Ui, obj: &mut Map<String, Value>, keys: &[Str
     if !presentation.is_empty() {
         pref_group(ui, "Presentation", |ui| {
             grid("interface-presentation").show(ui, |ui| field_rows(ui, "interface", obj, presentation, lang));
+        });
+    }
+    if !linux.is_empty() {
+        pref_group(ui, "Linux", |ui| {
+            grid("interface-linux").show(ui, |ui| field_rows(ui, "interface", obj, linux, lang));
         });
     }
     if !checks.is_empty() || !other.is_empty() {
@@ -1569,6 +1576,8 @@ fn field_visible(section: &str, obj: &Map<String, Value>, k: &str, query: &str) 
         || (section == "performance" && matches!(k, "useGpu" | "gpuBackend" | "renderingMode"))
         // The browser presents frames itself: Low-Latency Drawing does nothing there.
         || (cfg!(target_arch = "wasm32") && path == "performance.lowLatencyDrawing")
+        // Native menu bars are supported by the macOS app menu and Linux desktop global menus.
+        || (path == "interface.useInWindowBarOnLinux" && !cfg!(target_os = "linux"))
         || (section == "export" && !export_field_visible(obj, k))
         || (section == "tools" && !tools_field_visible(obj, k));
     (query.is_empty() || preference_matches(section, k, query))
@@ -1608,13 +1617,15 @@ fn field_rows(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>, ke
     for k in keys {
         let path = format!("{section}.{k}");
         let v = obj.get(&k).cloned().unwrap_or(Value::Null);
-        let human = humanize(&k);
+        let human = if path == "interface.useInWindowBarOnLinux" { "Use In-Window Bar on Linux".to_string() } else { humanize(&k) };
         let label = tl!(&human).to_string();
         match &v {
             Value::Bool(b) => {
                 ui.label("");
                 let mut b = *b;
-                if path == "interface.systemTitleBar" && cfg!(all(not(target_arch = "wasm32"), not(target_os = "macos"))) {
+                let applies_next_launch = (path == "interface.systemTitleBar" && cfg!(all(not(target_arch = "wasm32"), not(target_os = "macos"))))
+                    || (path == "interface.useInWindowBarOnLinux" && cfg!(target_os = "linux"));
+                if applies_next_launch {
                     ui.vertical(|ui| {
                         crate::widgets::checkbox(ui, &mut b, &label);
                         ui.label(RichText::new(tl!("Applies at next launch.")).color(t.text_dim));

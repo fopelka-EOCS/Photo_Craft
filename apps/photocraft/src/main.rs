@@ -24,7 +24,7 @@
 //! crashes inside the driver also falls back by itself next time (see `gpu_startup`).
 //!
 //! `--in-window-menus` (or `PHOTOCRAFT_IN_WINDOW_MENUS=1`) keeps the menus inside the window on
-//! macOS instead of the macOS menu bar (`mac_menu`).
+//! macOS instead of the macOS menu bar, and on Linux instead of the desktop global menu.
 //!
 //! `--control <port>` (or `PHOTOCRAFT_CONTROL_PORT`) starts a localhost JSON-lines control server.
 //! The first line must authenticate; subsequent request lines get reply lines.
@@ -54,6 +54,8 @@ mod mac_menu;
 #[cfg(target_os = "macos")]
 mod mac_window;
 // Pure logic is tested on every platform; only Linux runs the check.
+#[cfg(target_os = "linux")]
+mod linux_global_menu;
 #[cfg(any(target_os = "linux", test))]
 mod linux_libs;
 mod logging;
@@ -95,6 +97,17 @@ fn custom_titlebar(prefs_file: Option<&std::path::Path>) -> bool {
     let prefs: photocraft_engine::prefs::Preferences =
         prefs_file.and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
     CUSTOM_TITLEBAR && !prefs.interface.system_title_bar
+}
+
+/// Whether to install a native menu for this launch; command-line override wins. Linux users can
+/// instead keep the menu inside the window through Preferences › Interface › Linux.
+fn use_native_menu(prefs_file: Option<&std::path::Path>, in_window_override: bool) -> bool {
+    if in_window_override {
+        return false;
+    }
+    let prefs: photocraft_engine::prefs::Preferences =
+        prefs_file.and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    !cfg!(target_os = "linux") || !prefs.interface.use_in_window_bar_on_linux
 }
 
 /// The main window: 1440 × 900 (shrunk to fit the monitor, and maximized on the first frame
@@ -174,7 +187,8 @@ Options:
   -h, --help                       Print this help and exit
       --version                    Print the version, commit and build date and exit
       --safe-gpu                   Start with the CPU renderer for this launch (after a graphics driver crash)
-      --in-window-menus            macOS: keep the menus inside the window instead of the menu bar
+      --in-window-menus            macOS and Linux: keep menus in the window instead of the menu
+                                   bar or desktop global menu
       --new-instance               Windows and Linux: start a separate PhotoCraft instead of opening
                                    the files in the one already running
       --present-mode <mode>        How frames reach the display: fifo, autovsync or novsync
@@ -637,6 +651,7 @@ fn main() -> eframe::Result {
     // Brush presets load in the background; the app attaches them when they arrive.
     let presets = services::presets_dir().map(photocraft_engine::preset_store::open_dir_async);
     let custom_titlebar = custom_titlebar(services::prefs_file().as_deref());
+    let use_native_menu = use_native_menu(services::prefs_file().as_deref(), in_window_menus);
     let mut options = native_options(custom_titlebar);
     // winit picks Wayland whenever `WAYLAND_DISPLAY` is set; open on X11 when that was chosen.
     #[cfg(target_os = "linux")]
@@ -822,7 +837,7 @@ fn main() -> eframe::Result {
                 // Quit through AppKit, not by closing the window (Touch Bar Macs, #1575, #1458).
                 app.services.quit = Some(Box::new(mac_window::terminate_later));
                 // The macOS menu bar, installed now so winit's default menu doesn't stay up.
-                if !in_window_menus {
+                if use_native_menu {
                     app.services.native_menu = mac_menu::install(&cc.egui_ctx, &app);
                 }
             }
@@ -835,6 +850,12 @@ fn main() -> eframe::Result {
             }
             // Where file drags and drops are (winit 0.30 doesn't say).
             app.services.cursor_pos = cursor::service(cc);
+            #[cfg(target_os = "linux")]
+            if use_native_menu {
+                // Failure to register (including native Wayland without an X11 window) leaves
+                // `native_menu` as None, so the normal in-window menu bar remains visible.
+                app.services.native_menu = linux_global_menu::install(&cc.egui_ctx, &app);
+            }
             // The custom title bar's undecorated window must stay borderless, or its caption and
             // border offset the content and the pointer on some Windows systems (#2246).
             app.services.window_frame = window_frame::service(cc, custom_titlebar);
@@ -842,6 +863,8 @@ fn main() -> eframe::Result {
             if custom_titlebar {
                 app.services.caption_style = caption_style::service();
             }
+            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+            let _ = use_native_menu;
             // Caps Lock state (X11/Windows/macOS; `None` on native Wayland): the canvas shows the
             // precise crosshair for painting tools while it is toggled on (#1758).
             app.services.caps_lock = caps_lock::service(cc);
@@ -1038,6 +1061,21 @@ mod tests {
         if super::CUSTOM_TITLEBAR {
             assert_eq!(super::native_options(true).viewport.decorations, Some(false));
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn the_linux_menu_preference_selects_native_or_in_window_menus() {
+        let dir = std::env::temp_dir().join(format!("pc-native-menu-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("prefs.json");
+        assert!(super::use_native_menu(None, false), "native menu is the default");
+        assert!(!super::use_native_menu(None, true), "the launch override keeps menus in-window");
+        std::fs::write(&file, r#"{"interface":{"useInWindowBarOnLinux":true}}"#).unwrap();
+        assert!(!super::use_native_menu(Some(&file), false));
+        std::fs::write(&file, r#"{"interface":{"useInWindowBarOnLinux":false}}"#).unwrap();
+        assert!(super::use_native_menu(Some(&file), false));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
