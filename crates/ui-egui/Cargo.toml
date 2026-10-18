@@ -46,6 +46,13 @@ rayon = { workspace = true }
 # Safe native UI-language APIs (Windows/macOS); no subprocess or web dependency.
 sys-locale = "=0.3.2"
 
+# The browser threads build (wasm with `atomics`: cargo xtask web-threads) takes the rayon paths too.
+[target.'cfg(all(target_arch = "wasm32", target_feature = "atomics"))'.dependencies]
+rayon = { workspace = true }
+# wgpu objects are neither Send nor Sync with atomics; the GPU canvas keeps them in a
+# SendWrapper that only the thread that made them can open (gpu_canvas.rs).
+send_wrapper = "0.6"
+
 # Installed RAM for the GPU memory budget (`gpu_canvas::physical_memory`): the safe binding the
 # desktop app already uses, pinned to the same version.
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -62,6 +69,8 @@ egui_kittest = { workspace = true, features = ["wgpu", "snapshot", "eframe"] }
 photocraft-testkit = { workspace = true }
 # Only for examples/perf_scenarios.rs (a 500-brush .abr for the #210 import row).
 photocraft-psd = { workspace = true }
+# The threads build's GPU canvas wrapper, tested on native (gpu_canvas.rs `on_owner_thread`).
+send_wrapper = "0.6"
 
 [build-dependencies]
 # Deflates the translation catalogs and egui's default fonts (build.rs); already linked at run time to inflate them.

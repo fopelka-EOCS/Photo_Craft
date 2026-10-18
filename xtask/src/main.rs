@@ -11,8 +11,10 @@ mod layers;
 mod perf;
 mod pinned;
 mod scorecard;
+mod serve;
 mod sha256;
 mod stats;
+mod threads;
 mod version;
 
 use std::path::{Path, PathBuf};
@@ -23,7 +25,14 @@ usage: cargo xtask <command>
 
 commands:
   layers          enforce the crate dependency layering (plan/architecture.md §3)
-  wasm            cargo check --target wasm32-unknown-unknown for the wasm-safe crates
+  wasm [--threads]
+                  cargo check --target wasm32-unknown-unknown for the wasm-safe crates; --threads:
+                  the same and the web app with WebAssembly threads (atomics, on the pinned nightly)
+  web-threads     build the web app with WebAssembly threads into dist/web-threads (Trunk, pinned
+                  nightly); PHOTOCRAFT_WEB_THREADS=1 packaging/web/package.sh packs it with the app
+  serve <dir> [--port N] [--no-isolation]
+                  serve a built site on http://127.0.0.1:8765 with the cross-origin isolation
+                  headers the threads build needs (--no-isolation: without them)
   ci              fmt --check, clippy -D warnings, test, layers, wasm (stops at first failure)
   corpus [--all | --pngsuite | --psd | --psd-tools | --pixls | --photoshop] [--local] [--update-manifest]
                   show where test corpora live and their pins (xtask/src/corpus_pins.rs), or fetch
@@ -53,7 +62,13 @@ fn main() -> ExitCode {
     let rest: Vec<&str> = args.iter().skip(1).map(String::as_str).collect();
     let result = match args.first().map(String::as_str) {
         Some("layers") => cmd_layers(),
-        Some("wasm") => cmd_wasm(),
+        Some("wasm") => match rest.as_slice() {
+            [] => cmd_wasm(false),
+            ["--threads"] => cmd_wasm(true),
+            _ => Err("usage: cargo xtask wasm [--threads]".into()),
+        },
+        Some("web-threads") => threads::cmd_build(&rest),
+        Some("serve") => serve::run(&rest),
         Some("ci") => cmd_ci(),
         Some("corpus") => corpus::cmd(&rest),
         Some("test-corpus") => corpus::test_cmd(&rest),
@@ -157,22 +172,43 @@ fn wasm_set() -> Result<Vec<String>, String> {
 /// (package, feature).
 const WASM_FEATURES: &[(&str, &str)] = &[("photocraft-codecs", "heif")];
 
-fn cmd_wasm() -> Result<(), String> {
-    let set = wasm_set()?;
-    let mut results = Vec::new();
-    for pkg in &set {
-        let mut c = cargo();
+/// Checked for wasm32 without threads only: the boot module that picks the threads build is itself
+/// a plain module.
+const WASM_FEATURES_PLAIN: &[(&str, &str)] = &[("photocraft-web-boot", "threads")];
+
+/// Checked for wasm32 with threads only: the app's own threads start-up (it needs the browser
+/// build's dependencies, so it isn't in the wasm-safe set).
+const WASM_FEATURES_THREADS: &[(&str, &str)] = &[("photocraft-web", "heif")];
+
+/// `threads`: with WebAssembly threads ([`threads`]), in its own target dir.
+fn cmd_wasm(threads: bool) -> Result<(), String> {
+    if threads {
+        threads::preflight()?;
+    }
+    let target_dir = threads::target_dir("wasm-threads");
+    let check = |pkg: &str, feature: Option<&str>| {
+        let mut c = if threads { threads::cargo(&target_dir) } else { cargo() };
         c.args(["check", "--target", "wasm32-unknown-unknown", "-p", pkg]);
-        let ok = run(c, &format!("cargo check --target wasm32-unknown-unknown -p {pkg}")).is_ok();
-        results.push((pkg.clone(), ok));
+        if threads {
+            // The nightly's resolver must not rewrite the lockfile the rest of the workspace uses.
+            c.arg("--locked");
+        }
+        if let Some(f) = feature {
+            c.args(["--features", f]);
+        }
+        let label = format!("{pkg}{}", feature.map(|f| format!(" --features {f}")).unwrap_or_default());
+        let ok = run(c, &format!("cargo check --target wasm32-unknown-unknown{} -p {label}", if threads { " (threads)" } else { "" })).is_ok();
+        (label, ok)
+    };
+    let mut results = Vec::new();
+    for pkg in &wasm_set()? {
+        results.push(check(pkg, None));
     }
-    for (pkg, feature) in WASM_FEATURES {
-        let mut c = cargo();
-        c.args(["check", "--target", "wasm32-unknown-unknown", "-p", pkg, "--features", feature]);
-        let ok = run(c, &format!("cargo check --target wasm32-unknown-unknown -p {pkg} --features {feature}")).is_ok();
-        results.push((format!("{pkg} --features {feature}"), ok));
+    let extra = if threads { WASM_FEATURES_THREADS } else { WASM_FEATURES_PLAIN };
+    for (pkg, feature) in WASM_FEATURES.iter().chain(extra) {
+        results.push(check(pkg, Some(feature)));
     }
-    println!("\nwasm32-unknown-unknown check:");
+    println!("\nwasm32-unknown-unknown check{}:", if threads { " with threads (atomics)" } else { "" });
     for (p, ok) in &results {
         println!("  {:<6} {p}", if *ok { "ok" } else { "FAIL" });
     }
@@ -214,7 +250,7 @@ fn cmd_ci() -> Result<(), String> {
             }),
         ),
         ("layers", Box::new(cmd_layers)),
-        ("wasm", Box::new(cmd_wasm)),
+        ("wasm", Box::new(|| cmd_wasm(false))),
     ];
     let mut done = Vec::new();
     for (name, f) in &steps {

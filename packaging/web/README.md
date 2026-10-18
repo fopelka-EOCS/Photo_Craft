@@ -129,10 +129,11 @@ their names and need revalidation.
   `app/photocraft-web.js` and `app/parts.txt`. The sample `_headers` and `.htaccess` do this.
 - **HTTPS:** WebGPU (and the clipboard) only work in a secure context, which means `https://`
   or `http://localhost`. Over plain HTTP elsewhere, the app falls back to WebGL2.
-- **No special isolation headers:** PhotoCraft doesn't use `SharedArrayBuffer`, so it doesn't
-  need `Cross-Origin-Opener-Policy` or `Cross-Origin-Embedder-Policy`. If your site already sends
-  COEP `require-corp`, also send `Cross-Origin-Resource-Policy: same-origin` (or `cross-origin`
-  when the files live on a CDN) on the app's files.
+- **No special isolation headers:** the standard build doesn't use `SharedArrayBuffer`, so it
+  doesn't need `Cross-Origin-Opener-Policy` or `Cross-Origin-Embedder-Policy`. If your site already
+  sends COEP `require-corp`, also send `Cross-Origin-Resource-Policy: same-origin` (or
+  `cross-origin` when the files live on a CDN) on the app's files. A site packaged with the threads
+  build wants them; see [Multithreaded build](#multithreaded-build-optional).
 
 nginx example:
 
@@ -148,6 +149,38 @@ location /photocraft/ {
 ```
 
 Local test: `python3 -m http.server 8765` inside the folder, then open http://localhost:8765/.
+
+## Multithreaded build (optional)
+
+`PHOTOCRAFT_WEB_THREADS=1 packaging/web/package.sh` adds `app-threads/`: the same app built with
+WebAssembly threads, which runs its parallel steps (filters, compositing, exports, colour
+conversion) on a pool of Web Workers, one per core but one (at most 16). The page starts it only
+where it can run, and the standard build in `app/` everywhere else, so one site serves every browser:
+
+| The page is | It starts |
+|---|---|
+| cross-origin isolated (the host sends the headers below) | `app-threads/` |
+| not isolated, or opened with `?threads=0` | `app/` |
+| isolated, but the threads build fails to start | `app/` |
+
+Shared WebAssembly memory needs a cross-origin isolated page. Send these on every file of the site
+(the threads package's `_headers` and `.htaccess` do):
+
+```text
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Embedder-Policy: require-corp
+Cross-Origin-Resource-Policy: same-origin
+```
+
+COEP `require-corp` blocks cross-origin resources that don't opt in with CORP or CORS, and an
+embedding page must be isolated too (and allow `cross-origin-isolated`) for the iframe to be; the
+app needs nothing from other origins, and where the page isn't isolated it simply runs the
+standard build. `?threads=N` sets the number of workers. Local test with the headers:
+`cargo xtask serve <the site folder>` (add `--no-isolation` to see the fallback).
+
+Building it needs the nightly in `xtask/src/threads.rs` with `rust-src` (`cargo xtask web-threads`
+says what to install). The threads package is about twice the size of the standard one; a
+visitor downloads the WebAssembly of one build only.
 
 ## Fonts
 

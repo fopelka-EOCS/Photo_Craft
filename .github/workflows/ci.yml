@@ -339,6 +339,33 @@ jobs:
       - name: Check wasm-safe crates
         run: cargo xtask wasm
 
+  wasm-threads:
+    timeout-minutes: 30
+    name: wasm32 threads check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The threads build (WebAssembly threads, `cargo xtask web-threads`) needs a nightly that
+      # rebuilds std with atomics: the one in xtask/src/threads.rs (a test keeps them the same).
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-10-09
+          components: rust-src
+          targets: wasm32-unknown-unknown
+      # Installed last, so it is the default that runs xtask itself.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm32-threads
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
+      # The parallel code is gated `any(not(target_arch = "wasm32"), target_feature = "atomics")`
+      # and its sequential twin `all(target_arch = "wasm32", not(target_feature = "atomics"))`.
+      # `cargo xtask wasm` builds the twins; this builds the parallel side for wasm, plus the
+      # web app's threads start-up.
+      - name: Check wasm-safe crates and the web app with threads
+        run: cargo xtask wasm --threads
+
   web:
     timeout-minutes: 60
     name: web build and wasm size gate

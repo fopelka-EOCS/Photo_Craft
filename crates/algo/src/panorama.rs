@@ -1006,12 +1006,12 @@ fn par_zip(a: &[f32], b: &[f32], f: impl Fn(f32, f32) -> f32 + Sync + Send) -> V
             *o = f(a, b);
         }
     };
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
     {
         use rayon::prelude::*;
         out.par_chunks_mut(CHUNK).zip(a.par_chunks(CHUNK)).zip(b.par_chunks(CHUNK)).for_each(|((o, a), b)| fill(o, a, b));
     }
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
     out.chunks_mut(CHUNK).zip(a.chunks(CHUNK)).zip(b.chunks(CHUNK)).for_each(|((o, a), b)| fill(o, a, b));
     out
 }

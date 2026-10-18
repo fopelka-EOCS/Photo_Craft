@@ -388,6 +388,23 @@ Any static file server works for `dist/web`, for example `python3 -m http.server
 
 URL flags: `?webgl` forces the WebGL2 backend, and `?cpu` forces the CPU canvas path.
 
+### Threads build
+
+The same app can run its parallel code (the rayon paths that use every core on desktop) in the browser on WebAssembly threads: shared memory and a rayon pool of Web Workers (wasm-bindgen-rayon). It needs a nightly that rebuilds std with atomics; xtask pins it (`NIGHTLY` in `xtask/src/threads.rs`).
+
+```sh
+rustup toolchain install nightly-2026-10-09 --component rust-src --target wasm32-unknown-unknown
+cargo xtask web-threads                              # dist/web-threads, like trunk build --release
+PHOTOCRAFT_WEB_THREADS=1 packaging/web/package.sh    # both builds in one site
+cargo xtask serve target/web-package/photocraft-web-<version>                  # with COOP/COEP
+cargo xtask serve target/web-package/photocraft-web-<version> --no-isolation   # without: the fallback
+```
+
+- **Gates.** Code that runs on rayon natively is gated `any(not(target_arch = "wasm32"), target_feature = "atomics")`, its sequential twin `all(target_arch = "wasm32", not(target_feature = "atomics"))`; new parallel code follows the same pattern. `cargo xtask wasm --threads` type-checks the parallel side for wasm (CI's `wasm32 threads check`), as `cargo xtask wasm` does the sequential side. `std::thread::spawn` fails on wasm even with atomics, so a step on scoped OS threads gets a rayon branch for the threads build (`png::banded_idat`, `io::pixels::par_map`); background jobs stay synchronous in the browser, whose main thread may never block on a lock they hold.
+- **Start-up.** The threads app's `main` (`apps/photocraft-web/src/threads.rs`) starts the worker pool before the app, so rayon never makes its one-thread fallback pool: one worker per core but one, at most 16, or `?threads=N`. On the page's own thread rayon spins rather than blocks (`web_spin_lock`).
+- **Fallback.** The packaged page's boot module, built with its `threads` feature, starts `app-threads/` only where the page is `crossOriginIsolated` (the host sends COOP and COEP; the sample `_headers` and `.htaccess` do in a threads package) and `app/` everywhere else, or when the threads build doesn't start. `?threads=0` asks for `app/`.
+- **GPU canvas.** wgpu's objects are neither `Send` nor `Sync` with atomics, so `gpu_canvas` keeps them in a `SendWrapper` that only the thread that made them opens (`resources_in`); elsewhere the canvas has no resources rather than a panic.
+
 To build and serve the web app entirely in Docker, run from the repository root:
 
 ```sh

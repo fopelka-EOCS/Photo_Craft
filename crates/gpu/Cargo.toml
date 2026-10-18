@@ -22,6 +22,10 @@ log = { workspace = true }
 # Effect distance fields are computed in parallel bands.
 rayon = { workspace = true }
 
+# The browser threads build (wasm with `atomics`: cargo xtask web-threads) takes the rayon paths too.
+[target.'cfg(all(target_arch = "wasm32", target_feature = "atomics"))'.dependencies]
+rayon = { workspace = true }
+
 [dev-dependencies]
 wgpu = { version = "30" }
 pollster = "1"

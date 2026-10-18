@@ -117,12 +117,12 @@ fn blur(w: usize, h: usize, v: &[f32], r: usize) -> Vec<f32> {
             }
         }
     };
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
     {
         use rayon::prelude::*;
         bands.into_par_iter().enumerate().for_each_init(Vec::new, |acc, (bi, mut segs)| run(bi, &mut segs, acc));
     }
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
     {
         let mut acc = Vec::new();
         for (bi, mut segs) in bands.into_iter().enumerate() {
@@ -134,23 +134,23 @@ fn blur(w: usize, h: usize, v: &[f32], r: usize) -> Vec<f32> {
 
 /// Runs `f(y, row)` over the `w`-wide rows of `buf`, in parallel on native targets.
 fn par_rows(buf: &mut [f32], w: usize, f: impl Fn(usize, &mut [f32]) + Sync + Send) {
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
     {
         use rayon::prelude::*;
         buf.par_chunks_mut(w).enumerate().for_each(|(y, row)| f(y, row));
     }
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
     buf.chunks_mut(w).enumerate().for_each(|(y, row)| f(y, row));
 }
 
 /// [`par_rows`] over three row-aligned buffers in lockstep.
 fn par_rows3(a: &mut [f32], b: &mut [f32], c: &mut [f32], w: usize, f: impl Fn(usize, &mut [f32], &mut [f32], &mut [f32]) + Sync + Send) {
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
     {
         use rayon::prelude::*;
         a.par_chunks_mut(w).zip(b.par_chunks_mut(w)).zip(c.par_chunks_mut(w)).enumerate().for_each(|(y, ((a, b), c))| f(y, a, b, c));
     }
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
     a.chunks_mut(w).zip(b.chunks_mut(w)).zip(c.chunks_mut(w)).enumerate().for_each(|(y, ((a, b), c))| f(y, a, b, c));
 }
 
