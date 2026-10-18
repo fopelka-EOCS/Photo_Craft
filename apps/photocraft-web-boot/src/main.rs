@@ -15,6 +15,12 @@
 //!
 //! `trunk build` in `apps/photocraft-web` still gives the app as one `.wasm`, for development and
 //! for hosts without a per-file cap; only the packaged site starts through this module.
+//!
+//! With the `threads` feature the site also holds the app's threads build in `app-threads/`
+//! (`PHOTOCRAFT_WEB_THREADS=1 packaging/web/package.sh`): WebAssembly threads, which need shared
+//! memory and so a cross-origin isolated page. This module starts that build where the page is
+//! isolated, and the single-threaded one in `app/` everywhere else, or when the threads build
+//! can't start. `?threads=0` asks for the single-threaded one.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
@@ -34,6 +40,35 @@ fn parts(list: &str) -> Option<Vec<String>> {
     let parts: Vec<String> = lines.map(str::to_owned).collect();
     let plain = |p: &String| !p.starts_with('.') && !p.contains(['/', '\\', '?', '#', ':', '%']);
     (!parts.is_empty() && parts.iter().all(plain)).then_some(parts)
+}
+
+/// The two builds of the app a site can hold.
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum App {
+    /// One thread, in `app/`: every site has it.
+    Single,
+    /// WebAssembly threads, in `app-threads/`: sites packaged with it (the `threads` feature).
+    Threads,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl App {
+    /// The folder packaging puts this build in, next to this module's own files.
+    fn dir(self) -> &'static str {
+        match self {
+            App::Single => "./app",
+            App::Threads => "./app-threads",
+        }
+    }
+}
+
+/// The build to start: the threads build where the site has one and the page can run it (shared
+/// memory needs a cross-origin isolated page), unless the page's query says `threads=0`.
+#[cfg(any(target_arch = "wasm32", test))]
+fn choose(has_threads: bool, isolated: bool, query: &str) -> App {
+    let one_thread = query.trim_start_matches('?').split('&').any(|pair| pair.strip_prefix("threads=").and_then(|n| n.parse::<usize>().ok()) == Some(0));
+    if has_threads && isolated && !one_thread { App::Threads } else { App::Single }
 }
 
 /// Gzip inflated a chunk at a time, for browsers that can't do it themselves.
@@ -73,10 +108,8 @@ mod boot {
         TransformStreamDefaultController, Transformer, WritableStream,
     };
 
-    use super::Inflater;
+    use super::{App, Inflater};
 
-    /// Where packaging puts the app, next to this module's own files.
-    const PARTS: &str = "./app/parts.txt";
     /// Seconds to wait before each further try; one more than this many tries are made.
     const RETRY_AFTER: [u32; 2] = [1, 3];
 
@@ -87,6 +120,32 @@ mod boot {
     extern "C" {
         #[wasm_bindgen(js_name = default, catch)]
         async fn start_app(module: JsValue) -> Result<JsValue, JsValue>;
+    }
+
+    // The threads build's loader, the same way. It also instantiates the module on shared memory
+    // and, once the app runs, starts the app's Web Workers.
+    #[cfg(feature = "threads")]
+    #[wasm_bindgen(raw_module = "./app-threads/photocraft-web.js")]
+    extern "C" {
+        #[wasm_bindgen(js_name = default, catch)]
+        async fn start_threads_app(module: JsValue) -> Result<JsValue, JsValue>;
+    }
+
+    /// Starts `app` from the inflated module in `arg`.
+    async fn start_build(app: App, arg: JsValue) -> Result<JsValue, JsValue> {
+        match app {
+            App::Single => start_app(arg).await,
+            #[cfg(feature = "threads")]
+            App::Threads => start_threads_app(arg).await,
+            #[cfg(not(feature = "threads"))]
+            App::Threads => Err(JsValue::from_str("this site has no threads build")),
+        }
+    }
+
+    /// Whether the page is cross-origin isolated (its host sends COOP and COEP), which shared
+    /// WebAssembly memory needs.
+    fn isolated() -> bool {
+        js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("crossOriginIsolated")).ok().and_then(|v| v.as_bool()).unwrap_or(false)
     }
 
     // The browser's own inflater. `web-sys` has it only behind its unstable-API flag, which would
@@ -122,12 +181,12 @@ mod boot {
         Ok(response)
     }
 
-    /// Copies each part into `sink` in order, then closes it.
-    async fn feed(parts: Vec<String>, sink: WritableStream, fresh: bool) -> Result<(), JsValue> {
+    /// Copies each part of `app` into `sink` in order, then closes it.
+    async fn feed(app: App, parts: Vec<String>, sink: WritableStream, fresh: bool) -> Result<(), JsValue> {
         let keep_open = StreamPipeOptions::new();
         keep_open.set_prevent_close(true);
         for part in &parts {
-            let body = fetch(&format!("./app/{part}"), fresh).await?.body().ok_or_else(|| JsValue::from_str("part without a body"))?;
+            let body = fetch(&format!("{}/{part}", app.dir()), fresh).await?.body().ok_or_else(|| JsValue::from_str("part without a body"))?;
             JsFuture::from(body.pipe_to_with_options(&sink, &keep_open)).await?;
         }
         JsFuture::from(sink.close()).await?;
@@ -172,9 +231,10 @@ mod boot {
         Ok(compressed.pipe_through(&pair))
     }
 
-    async fn run(fresh: bool) -> Result<(), JsValue> {
-        let list = JsFuture::from(fetch(PARTS, fresh).await?.text()?).await?.as_string().unwrap_or_default();
-        let parts = super::parts(&list).ok_or_else(|| JsValue::from_str("app/parts.txt is not a parts list"))?;
+    async fn run(app: App, fresh: bool) -> Result<(), JsValue> {
+        let list_url = format!("{}/parts.txt", app.dir());
+        let list = JsFuture::from(fetch(&list_url, fresh).await?.text()?).await?.as_string().unwrap_or_default();
+        let parts = super::parts(&list).ok_or_else(|| JsValue::from_str(&format!("{list_url} is not a parts list")))?;
         let joined = TransformStream::new()?;
         let wasm = inflated(&joined.readable())?;
         // Why the download stopped: the app's loader only reports that its stream broke.
@@ -182,7 +242,7 @@ mod boot {
         let failed = cause.clone();
         let sink = joined.writable();
         spawn_local(async move {
-            if let Err(e) = feed(parts, sink.clone(), fresh).await {
+            if let Err(e) = feed(app, parts, sink.clone(), fresh).await {
                 let _ = sink.abort_with_reason(&e);
                 failed.replace(Some(e));
             }
@@ -194,7 +254,7 @@ mod boot {
         let response = Response::new_with_opt_readable_stream_and_init(Some(&wasm), &init)?;
         let arg = js_sys::Object::new();
         js_sys::Reflect::set(&arg, &JsValue::from_str("module_or_path"), &response)?;
-        match start_app(arg.into()).await {
+        match start_build(app, arg.into()).await {
             Ok(_) => Ok(()),
             Err(e) => Err(cause.take().unwrap_or(e)),
         }
@@ -226,13 +286,26 @@ mod boot {
     }
 
     pub fn start() {
-        spawn_local(async {
+        let query = web_sys::window().and_then(|w| w.location().search().ok()).unwrap_or_default();
+        let mut app = super::choose(cfg!(feature = "threads"), isolated(), &query);
+        spawn_local(async move {
             let mut attempt = 0;
             loop {
-                let error = match run(attempt > 0).await {
+                let error = match run(app, attempt > 0).await {
                     Ok(()) => return,
                     Err(e) => e,
                 };
+                if app == App::Threads {
+                    // A browser may refuse shared memory of that size, or its parts may not
+                    // download: the single-threaded build still runs everywhere. (Its loader is
+                    // imported with this module's, so a site without it doesn't get this far.)
+                    web_sys::console::warn_2(
+                        &JsValue::from_str("photocraft-web-boot: the threads build didn't start, starting the single-threaded one:"),
+                        &error,
+                    );
+                    app = App::Single;
+                    continue;
+                }
                 web_sys::console::error_2(&JsValue::from_str("photocraft-web-boot: could not start PhotoCraft:"), &error);
                 let Some(&wait) = RETRY_AFTER.get(attempt) else {
                     say("PhotoCraft couldn't be downloaded. Check your connection, then try again: ", true);
@@ -258,7 +331,21 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{Inflater, MARKER, parts};
+    use super::{App, Inflater, MARKER, choose, parts};
+
+    /// The threads build needs shared memory, which only a cross-origin isolated page has; without
+    /// it, or without a threads build in the site, the single-threaded build starts.
+    #[test]
+    fn the_threads_build_starts_only_where_it_can_run() {
+        assert_eq!(choose(true, true, ""), App::Threads);
+        assert_eq!(choose(true, true, "?webgl&threads=8"), App::Threads, "a pool size is still the threads build");
+        assert_eq!(choose(true, false, ""), App::Single, "not isolated: no shared memory");
+        assert_eq!(choose(false, true, ""), App::Single, "a site packaged without it");
+        assert_eq!(choose(true, true, "?threads=0"), App::Single, "asked for one thread");
+        assert_eq!(choose(true, true, "?webgl&threads=0&cpu"), App::Single);
+        assert_eq!(choose(true, true, "?mythreads=0"), App::Threads, "another key");
+        assert_eq!((App::Single.dir(), App::Threads.dir()), ("./app", "./app-threads"));
+    }
 
     fn gzip(bytes: &[u8]) -> Vec<u8> {
         let mut z = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
