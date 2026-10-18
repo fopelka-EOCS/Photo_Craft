@@ -2130,6 +2130,7 @@ layers	Fill:	Độ tô:
 	Collapse Panel Group	Thu gọn nhóm bảng
 	Color Picker (Fill Color)	Ống hút màu (Màu tô)
 	Color Picker (Stroke Color)	Ống hút màu (Màu nét)
+	Color Picker	Bộ chọn màu
 	Contents:	Nội dung:
 	Custom Pattern:	Họa tiết tùy chỉnh:
 	Cycle Screen Mode	Đổi chế độ màn hình
@@ -3717,4 +3718,3 @@ curves	Smooth	Làm mượt
 	Increase Brush Size	Tăng kích thước cọ
 	Decrease Brush Hardness	Giảm độ cứng của cọ
 	Increase Brush Hardness	Tăng độ cứng của cọ
-	Color Picker	Bộ chọn màu
