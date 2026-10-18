@@ -163,8 +163,8 @@ fn read_psd_thumbnail_bounded(path: &Path, file_len: u64) -> Option<ColorImage> 
     file.read_exact(&mut res_len_buf).ok()?;
     let res_len = u32::from_be_bytes(res_len_buf);
 
-    // 4. Read only the resources section (bounded up to 32 MB)
-    if res_len > 0 && res_len <= 32 * 1024 * 1024 {
+    // 4. Read only the resources section (bounded up to 32 MB and within file length)
+    if res_len > 0 && res_len <= 32 * 1024 * 1024 && (res_len as u64) <= file_len {
         let mut res_bytes = vec![0u8; res_len as usize];
         if file.read_exact(&mut res_bytes).is_ok()
             && let Ok((resources, _)) = photocraft_psd::tiff::resources_from_bytes(&res_bytes)
@@ -272,7 +272,8 @@ fn load_thumbnail_image_bounded(path: &str, file_len: u64) -> Option<ColorImage>
         && let Ok(img) = photocraft_codecs::decode(&bytes)
     {
         let (w, h) = img.dimensions();
-        if w > 0 && h > 0 {
+        // Guard against decompression bombs: don't expand > 4096 images to gigabytes of RGBA
+        if w > 0 && h > 0 && w <= 4096 && h <= 4096 {
             let rgba = img.convert(photocraft_codecs::ChannelLayout::Rgba, photocraft_codecs::SampleType::U8);
             return downsample_rgba(w, h, rgba.data(), 256);
         }
@@ -295,6 +296,10 @@ fn drain_pending_thumbnails(app: &PhotocraftApp, ctx: &egui::Context, opts: Text
     let mut cache = app.thumbnail_cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     for (path, key, opt_img) in pending {
         cache.in_flight.remove(&path);
+        // If the document is currently open in the session, do not overwrite its live in-memory thumbnail
+        if app.session.documents().iter().any(|d| d.path.as_deref().is_some_and(|p| paths_match(p, &path))) {
+            continue;
+        }
         let tex = opt_img.map(|ci| {
             if let Some(existing) = cache.entries.get_mut(&path).and_then(|e| e.texture.as_mut()) {
                 existing.set(ci, opts);
@@ -431,11 +436,12 @@ pub(crate) fn get_or_load_thumbnail(app: &PhotocraftApp, ctx: &egui::Context, pa
             let file_len = meta.len();
             std::thread::spawn(move || {
                 let opt_img = load_thumbnail_image_bounded(&path_str, file_len);
-                {
-                    let mut cache = cache_arc.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let mut cache = cache_arc.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                // Only enqueue if the path was not invalidated or removed while loading
+                if cache.in_flight.remove(&path_str) {
                     cache.pending.push((path_str, key_clone, opt_img));
+                    ctx_clone.request_repaint();
                 }
-                ctx_clone.request_repaint();
             });
             cached_entry.and_then(|e| e.texture)
         } else {
@@ -1287,6 +1293,112 @@ mod tests {
         // Second call: drains pending and returns the loaded texture
         let tex2 = get_or_load_thumbnail(&app, &ctx, &path_str);
         assert!(tex2.is_some(), "subsequent frame receives the loaded thumbnail from background worker");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn recent_thumbnail_discards_background_result_if_invalidated_while_loading() {
+        let temp_dir = std::env::temp_dir().join(format!("photocraft_inval_test_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let file_path = temp_dir.join("inval_test.png");
+        let path_str = file_path.to_string_lossy().into_owned();
+
+        let img = photocraft_codecs::Image::from_raw(
+            8,
+            8,
+            photocraft_codecs::ChannelLayout::Rgba,
+            photocraft_codecs::SampleType::U8,
+            [255, 0, 0, 255].repeat(64),
+        ).unwrap();
+        let png = photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &photocraft_codecs::EncodeOptions::default()).unwrap();
+        std::fs::write(&file_path, &png).unwrap();
+
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.background_jobs = true;
+
+        let ctx = egui::Context::default();
+        let tex1 = get_or_load_thumbnail(&app, &ctx, &path_str);
+        assert!(tex1.is_none());
+
+        // Immediately invalidate while thread is in flight
+        app.thumbnail_cache.lock().unwrap().invalidate(&path_str);
+
+        // Wait a short time for thread to complete
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // The background thread should have detected it was removed from in_flight and discarded its result
+        let cache = app.thumbnail_cache.lock().unwrap();
+        assert!(!cache.in_flight.contains(&path_str));
+        assert!(cache.pending.iter().all(|(p, ..)| p != &path_str));
+        assert!(!cache.entries.contains_key(&path_str));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn recent_thumbnail_does_not_overwrite_active_document_in_drain() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let doc_path = "C:/fake/path/active_project.psd".to_string();
+
+        let doc = photocraft_doc::Document::new(
+            "active_project",
+            photocraft_geom::Size::new(100, 100),
+            photocraft_color::ColorMode::Rgb,
+            photocraft_color::SampleType::U8,
+        );
+        let (doc_id, _) = app.session.open_document(doc, Some(doc_path.clone()));
+        let st = app.session.active().unwrap();
+        let revision = st.revision;
+
+        let ctx = egui::Context::default();
+        // Load initial thumbnail for open document
+        let open_tex = get_or_load_thumbnail(&app, &ctx, &doc_path);
+        assert!(open_tex.is_some());
+
+        // Simulate an obsolete disk result queued in pending
+        {
+            let mut cache = app.thumbnail_cache.lock().unwrap();
+            let disk_key = CacheKey::DiskFile { modified: None, len: 1000 };
+            cache.pending.push((doc_path.clone(), disk_key, None));
+        }
+
+        // Drain pending thumbnails
+        let opts = egui::TextureOptions::default();
+        drain_pending_thumbnails(&app, &ctx, opts);
+
+        // Verify the cache still holds the OpenDoc entry, NOT overwritten by disk entry
+        let cache = app.thumbnail_cache.lock().unwrap();
+        let entry = cache.entries.get(&doc_path).expect("entry must exist");
+        assert_eq!(entry.key, CacheKey::OpenDoc { revision });
+
+        let _ = app.session.close(0);
+        let _ = doc_id;
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn recent_thumbnail_skips_flat_image_larger_than_4k_dimensions() {
+        let temp_dir = std::env::temp_dir().join(format!("photocraft_huge_img_test_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let file_path = temp_dir.join("huge_img.png");
+        let path_str = file_path.to_string_lossy().into_owned();
+
+        // Write a PNG with 4097x1 dimensions (exceeds 4096 cap on longest side)
+        let img = photocraft_codecs::Image::from_raw(
+            4097,
+            1,
+            photocraft_codecs::ChannelLayout::Rgba,
+            photocraft_codecs::SampleType::U8,
+            vec![0u8; 4097 * 4],
+        ).unwrap();
+        let png = photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &photocraft_codecs::EncodeOptions::default()).unwrap();
+        std::fs::write(&file_path, &png).unwrap();
+
+        let thumb = load_thumbnail_image_bounded(&path_str, png.len() as u64);
+        assert!(thumb.is_none(), "flat images exceeding 4096 on longest side must be skipped");
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
