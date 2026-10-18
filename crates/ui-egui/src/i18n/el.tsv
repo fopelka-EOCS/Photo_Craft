@@ -3610,6 +3610,8 @@ fontWeight	Thin	Πολύ λεπτά
 # Shared text style Color Picker (#2015)
 	Color Picker (Text Color)	Επιλογέας χρώματος (χρώμα κειμένου)
 	Color Picker ({name})	Επιλογέας χρώματος ({name})
+	Photo Filter Color	Χρώμα φωτογραφικού φίλτρου
+	Stop Color	Χρώμα σημείου διαβάθμισης
 	Auto Hide Notifications	Αυτόματη απόκρυψη ειδοποιήσεων
 	Notification Duration (seconds)	Διάρκεια ειδοποίησης (δευτερόλεπτα)
 	Bundle Arrow-Key Nudges	Ομαδοποίηση μετατοπίσεων με βέλη
@@ -3930,5 +3932,3 @@ curves	Smooth	Εξομάλυνση
 	Increase Brush Size	Αύξηση μεγέθους πινέλου
 	Decrease Brush Hardness	Μείωση σκληρότητας πινέλου
 	Increase Brush Hardness	Αύξηση σκληρότητας πινέλου
-	Photo Filter Color	Χρώμα φωτογραφικού φίλτρου
-	Stop Color	Χρώμα σημείου διαβάθμισης

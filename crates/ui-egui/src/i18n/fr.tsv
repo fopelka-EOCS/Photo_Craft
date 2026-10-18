@@ -2794,6 +2794,9 @@ cameraRaw	Blending	Fusion
 # Shared screen eyedropper and text Color Picker (#1128).
 	Color Picker (Text Color)	Sélecteur de couleurs (Couleur du texte)
 	Color Picker ({name})	Sélecteur de couleurs ({name})
+	Photo Filter Color	Couleur du filtre photo
+	Stop Color	Couleur du point
+	Tint Color	Couleur de la nuance
 	Color Picker (Fill Color)	Sélecteur de couleurs (Couleur de remplissage)
 	Fill color	Couleur de remplissage
 	Color Picker (Stroke Color)	Sélecteur de couleurs (Couleur du contour)
@@ -3238,6 +3241,3 @@ curves	Smooth	Lisser
 	Increase Brush Size	Augmenter la taille du pinceau
 	Decrease Brush Hardness	Réduire la dureté du pinceau
 	Increase Brush Hardness	Augmenter la dureté du pinceau
-	Photo Filter Color	Couleur du filtre photo
-	Stop Color	Couleur du point
-	Tint Color	Couleur de la nuance

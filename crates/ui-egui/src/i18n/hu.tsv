@@ -2686,6 +2686,8 @@ cameraRaw	Yellow	Sárga
 	Color Picker (Fill Color)	Színválasztó (kitöltőszín)
 	Color Picker (Foreground Color)	Színválasztó (előtérszín)
 	Color Picker ({name})	Színválasztó ({name})
+	Photo Filter Color	Fotószűrő színe
+	Stop Color	Átmenetpont színe
 	Color Profile	Színprofil
 	Color space	Színtér
 	Color…	Szín…
@@ -4149,5 +4151,3 @@ cameraRaw	Yellow	Sárga
 	Increase Brush Size	Ecsetméret növelése
 	Decrease Brush Hardness	Ecsetkeménység csökkentése
 	Increase Brush Hardness	Ecsetkeménység növelése
-	Photo Filter Color	Fotószűrő színe
-	Stop Color	Átmenetpont színe

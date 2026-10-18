@@ -2770,6 +2770,8 @@ cameraRaw	Blending	Stapanje
 # Shared screen eyedropper and text Color Picker (#1128).
 	Color Picker (Text Color)	Birač boja (boja teksta)
 	Color Picker ({name})	Birač boja ({name})
+	Photo Filter Color	Boja foto-filtera
+	Stop Color	Boja tačke
 	Color Picker (Fill Color)	Birač boja (boja popune)
 	Fill color	Boja popune
 	Color Picker (Stroke Color)	Birač boja (boja obruba)
@@ -4303,5 +4305,3 @@ shape	Appearance	Izgled
 	Increase Brush Size	Povećaj veličinu četkice
 	Decrease Brush Hardness	Smanji tvrdoću četkice
 	Increase Brush Hardness	Povećaj tvrdoću četkice
-	Photo Filter Color	Boja foto-filtera
-	Stop Color	Boja tačke

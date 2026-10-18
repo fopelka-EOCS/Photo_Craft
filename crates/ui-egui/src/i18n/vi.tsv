@@ -2359,6 +2359,8 @@ shape	Appearance	Diện mạo
 	Auto Center Preview	Tự động căn giữa xem trước
 	Brush	Cọ
 	Color Picker ({name})	Bộ chọn màu ({name})
+	Photo Filter Color	Màu bộ lọc ảnh
+	Stop Color	Màu điểm dừng
 	Front Image	Ảnh phía trước
 	Next Document	Tài liệu tiếp theo
 	Open EXR Parts…	Mở các phần EXR…
@@ -3717,5 +3719,3 @@ curves	Smooth	Làm mượt
 	Increase Brush Size	Tăng kích thước cọ
 	Decrease Brush Hardness	Giảm độ cứng của cọ
 	Increase Brush Hardness	Tăng độ cứng của cọ
-	Photo Filter Color	Màu bộ lọc ảnh
-	Stop Color	Màu điểm dừng

@@ -2349,6 +2349,8 @@
 	Apply At Canvas Bounds	Kanvas Sınırlarında Uygula
 	Color Picker (Text Color)	Renk Seçici (Metin Rengi)
 	Color Picker ({name})	Renk Seçici ({name})
+	Photo Filter Color	Fotoğraf Filtresi Rengi
+	Stop Color	Durak Rengi
 	Color Picker (Fill Color)	Renk Seçici (Dolgu Rengi)
 	Fill color	Rengi doldur
 	Color Picker (Stroke Color)	Renk Seçici (Kontur Rengi)
@@ -3960,5 +3962,3 @@ cameraData	Lens	Lens
 	Increase Brush Size	Fırça boyutunu büyüt
 	Decrease Brush Hardness	Fırça sertliğini azalt
 	Increase Brush Hardness	Fırça sertliğini artır
-	Photo Filter Color	Fotoğraf Filtresi Rengi
-	Stop Color	Durak Rengi

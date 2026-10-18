@@ -2353,6 +2353,9 @@ cameraRaw	Blending	混合
 # Shared screen eyedropper and text Color Picker (#1128).
 	Color Picker (Text Color)	檢色器（文字顏色）
 	Color Picker ({name})	檢色器（{name}）
+	Photo Filter Color	相片濾鏡顏色
+	Stop Color	色標顏色
+	Tint Color	色調顏色
 	Color Picker (Fill Color)	檢色器（填滿顏色）
 	Fill color	填滿顏色
 	Color Picker (Stroke Color)	檢色器（筆畫顏色）
@@ -2836,6 +2839,3 @@ curves	Smooth	平滑
 	Increase Brush Size	放大筆刷大小
 	Decrease Brush Hardness	降低筆刷硬度
 	Increase Brush Hardness	提高筆刷硬度
-	Photo Filter Color	相片濾鏡顏色
-	Stop Color	色標顏色
-	Tint Color	色調顏色

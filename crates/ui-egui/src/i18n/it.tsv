@@ -2444,6 +2444,8 @@ cameraRaw	Amount	Quantità
 # Shared screen eyedropper and text Color Picker (#1128).
 	Color Picker (Text Color)	Selettore colore (Colore del testo)
 	Color Picker ({name})	Selettore colore ({name})
+	Photo Filter Color	Colore filtro fotografico
+	Stop Color	Colore punto
 	Color Picker (Fill Color)	Selettore colore (Colore di riempimento)
 	Fill color	Colore di riempimento
 	Color Picker (Stroke Color)	Selettore colore (Colore della traccia)
@@ -4347,5 +4349,3 @@ shape	Appearance	Aspetto
 	GPU Memory (MB, 0 = Automatic)	Memoria GPU (MB, 0 = Automatico)
 	{name} was changed by another app after it was opened or saved here.	{name} è stato modificato da un'altra app dopo essere stato aperto o salvato qui.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Sostituiscilo con questo documento, oppure annulla e usa File › Salva con nome per tenerli entrambi.
-	Photo Filter Color	Colore filtro fotografico
-	Stop Color	Colore punto

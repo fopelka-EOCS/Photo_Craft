@@ -2379,6 +2379,8 @@
 	Apply At Canvas Bounds	Toepassen op canvasgrenzen
 	Color Picker (Text Color)	Kleurkiezer (tekstkleur)
 	Color Picker ({name})	Kleurkiezer ({name})
+	Photo Filter Color	Fotofilterkleur
+	Stop Color	Kleur van kleurstop
 	Color Picker (Fill Color)	Kleurkiezer (vulkleur)
 	Fill color	Vulkleur
 	Color Picker (Stroke Color)	Kleurkiezer (lijnkleur)
@@ -3990,5 +3992,3 @@ curves	Smooth	Vloeiend maken
 	Increase Brush Size	Penseelgrootte vergroten
 	Decrease Brush Hardness	Penseelhardheid verlagen
 	Increase Brush Hardness	Penseelhardheid verhogen
-	Photo Filter Color	Fotofilterkleur
-	Stop Color	Kleur van kleurstop

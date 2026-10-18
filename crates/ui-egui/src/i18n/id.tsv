@@ -2781,6 +2781,9 @@ cameraRaw	Blending	Pembauran
 # Shared screen eyedropper and text Color Picker (#1128).
 	Color Picker (Text Color)	Pemilih Warna (Warna Teks)
 	Color Picker ({name})	Pemilih Warna ({name})
+	Photo Filter Color	Warna Filter Foto
+	Stop Color	Warna stop
+	Tint Color	Warna Tint
 	Color Picker (Fill Color)	Pemilih Warna (Warna Isian)
 	Fill color	Warna isian
 	Color Picker (Stroke Color)	Pemilih Warna (Warna Stroke)
@@ -3225,6 +3228,3 @@ curves	Smooth	Haluskan
 	Increase Brush Size	Perbesar ukuran kuas
 	Decrease Brush Hardness	Kurangi kekerasan kuas
 	Increase Brush Hardness	Tambah kekerasan kuas
-	Photo Filter Color	Warna Filter Foto
-	Stop Color	Warna stop
-	Tint Color	Warna Tint

@@ -2797,6 +2797,8 @@ cameraRaw	Whites	Brancos
 # Shared screen eyedropper and text Color Picker (#1128).
 	Color Picker (Text Color)	Seletor de cores (Cor do texto)
 	Color Picker ({name})	Seletor de cores ({name})
+	Photo Filter Color	Cor do filtro de fotos
+	Stop Color	Cor da parada
 	Color Picker (Fill Color)	Seletor de cores (Cor de preenchimento)
 	Fill color	Cor de preenchimento
 	Color Picker (Stroke Color)	Seletor de cores (Cor do traçado)
@@ -4020,5 +4022,3 @@ layerLabel	No Color	Sem cor
 	Increase Brush Size	Aumentar tamanho do pincel
 	Decrease Brush Hardness	Diminuir dureza do pincel
 	Increase Brush Hardness	Aumentar dureza do pincel
-	Photo Filter Color	Cor do filtro de fotos
-	Stop Color	Cor da parada
