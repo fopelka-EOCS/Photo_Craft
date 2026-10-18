@@ -3489,6 +3489,24 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             crate::select_mask_view::canvas_brush(app, &painter, p, press, xf.zoom_x());
         } else if primary
             && !middle
+            && crate::adjust_dialog::curves_on_top(app)
+            && let Some(mods) = ctx
+                .input(|i| {
+                    i.events.iter().rev().find_map(|e| match e {
+                        egui::Event::PointerButton { button: PointerButton::Primary, pressed: true, modifiers, .. } => Some(*modifiers),
+                        _ => None,
+                    })
+                })
+                .map(|m| crate::workspace_ui::sticky_mods(app, m))
+                .filter(|m| m.command)
+            && let Some(p) = crate::dialogs::free_press(&ctx, rect)
+        {
+            // ⌘/Ctrl-click with Curves open: a point at the pixel's tone (#7325). The press's own
+            // modifiers decide, and only the press adds: a drag would add one per frame.
+            let d = xf.to_doc(p);
+            crate::adjust_dialog::add_point_at(app, &ctx, d[0], d[1], mods.shift);
+        } else if primary
+            && !middle
             && let Some(p) = crate::dialogs::free_pointer_over(&ctx, rect).filter(|p| img_rect.contains(*p))
         {
             // Color Range samples colours with its eyedropper on the image itself.
