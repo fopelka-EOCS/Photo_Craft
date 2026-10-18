@@ -261,6 +261,11 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 ui.set_min_width(360.0);
                 ui.set_max_width(360.0);
             }
+            // System Info: the text box and its button column, as in Photoshop.
+            if d.kind == DialogKind::About && crate::system_info_ui::owns(&d.fields) {
+                ui.set_min_width(crate::system_info_ui::WIDTH);
+                ui.set_max_width(crate::system_info_ui::WIDTH);
+            }
             if color_picker {
                 ui.set_width(crate::color_picker_ui::CONTENT_WIDTH);
             }
@@ -287,16 +292,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                         outcome = Some(true);
                     }
                 }
-                DialogKind::About if fields.get("systemInfo").and_then(Value::as_bool) == Some(true) => {
-                    let lines = crate::gpu_status::system_info_ui(app);
-                    for l in &lines {
-                        ui.add(egui::Label::new(egui::RichText::new(l).font(crate::theme::mono(12.0))).selectable(true));
-                    }
-                    ui.add_space(8.0);
-                    if crate::widgets::secondary_button(ui, tl!("Copy"), 84.0).clicked() {
-                        ui.ctx().copy_text(crate::gpu_status::system_info(app).join("\n"));
-                    }
-                }
+                DialogKind::About if crate::system_info_ui::owns(&fields) => outcome = crate::system_info_ui::body(app, ui, interactive, id),
                 DialogKind::About => {
                     // Tabs About · Contributors · Models (craftrules standards/contributors.md). The
                     // tab is a dialog field, so automation can switch it with `ui.dialog.set`.
@@ -382,7 +378,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 }
             }
             crate::field_tab::end(ui.ctx(), tab);
-            if crate::guide_layout_ui::owns(&fields) || crate::brush_preset_dialog::owns(&fields) {
+            if crate::guide_layout_ui::owns(&fields) || crate::brush_preset_dialog::owns(&fields) || crate::system_info_ui::owns(&fields) {
                 // These dialogs own their right-side actions and validate Enter themselves.
             } else if crate::color_picker_ui::owns(&fields) {
                 if interactive && outcome.is_none() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {

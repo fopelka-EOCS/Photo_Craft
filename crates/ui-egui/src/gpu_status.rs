@@ -65,12 +65,35 @@ pub fn system_info(app: &PhotocraftApp) -> Vec<String> {
     crate::i18n::with_language(crate::i18n::Lang::EN, || system_info_ui(app))
 }
 
-/// Help › System Info's on-screen text: version, platform and the graphics state.
+/// Help › System Info's on-screen text, in Photoshop's order: version, operating system,
+/// processor, memory, the performance preferences, then the graphics and monitor state.
 pub fn system_info_ui(app: &PhotocraftApp) -> Vec<String> {
-    let mut v = vec![format!("PhotoCraft {}", photocraft_engine::build_info::long_version()), {
-        let template = "Platform: {os} {arch}";
-        crate::i18n::fmt(tl!(template), &[("os", std::env::consts::OS), ("arch", std::env::consts::ARCH)])
-    }];
+    let host = crate::system_info_ui::host();
+    let line = |template: &str, value: &str| crate::i18n::fmt(tl!(template), &[("value", value)]);
+    let mb = |bytes: u64| (bytes >> 20).to_string();
+    let perf = &app.session.prefs().performance;
+    let arch = match &host.cpu {
+        Some(cpu) => format!("{}, {cpu}", std::env::consts::ARCH),
+        None => std::env::consts::ARCH.to_string(),
+    };
+    let mut v = vec![
+        line("PhotoCraft version: {value}", &photocraft_engine::build_info::long_version()),
+        line("Operating system: {value}", &host.os),
+        line("System architecture: {value}", &arch),
+    ];
+    if let Some(n) = host.threads {
+        v.push(line("Logical processor count: {value}", &n.to_string()));
+    }
+    if let Some(bytes) = crate::gpu_canvas::physical_memory() {
+        v.push(line("Built-in memory: {value} MB", &mb(bytes)));
+    }
+    v.push(line("Memory available to PhotoCraft: {value} MB", &perf.memory_usage_mb.to_string()));
+    if let Some(bytes) = crate::system_info_ui::process_memory() {
+        v.push(line("Memory used by PhotoCraft: {value} MB", &mb(bytes)));
+    }
+    v.push(line("History states: {value}", &perf.history_states.to_string()));
+    v.push(line("Cache levels: {value}", &perf.cache_levels.to_string()));
+    v.push(line("Cache tile size: {value} px", &perf.cache_tile_size.to_string()));
     v.extend(app.perf.gpu_info.lines());
     v.extend(crate::monitor_status::summary_lines(app));
     v
@@ -78,10 +101,16 @@ pub fn system_info_ui(app: &PhotocraftApp) -> Vec<String> {
 
 /// The `help.systemInfo` result: the same facts as JSON.
 pub fn system_info_json(app: &PhotocraftApp) -> serde_json::Value {
+    let host = crate::system_info_ui::host();
     json!({
         "version": photocraft_engine::build_info::long_version(),
         "os": std::env::consts::OS,
+        "osVersion": host.os,
         "arch": std::env::consts::ARCH,
+        "cpu": host.cpu,
+        "logicalProcessors": host.threads,
+        "physicalMemory": crate::gpu_canvas::physical_memory(),
+        "processMemory": crate::system_info_ui::process_memory(),
         "gpu": app.perf.gpu_info,
         "monitor": app.session.color.monitor_status(),
         "displays": app.session.color.display_statuses(),

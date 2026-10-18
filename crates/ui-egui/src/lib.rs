@@ -206,6 +206,7 @@ pub mod stylus;
 pub mod swap_arrow;
 pub mod swatches_ui;
 pub mod symmetry_ui;
+pub mod system_info_ui;
 mod tab_strip;
 pub mod targa_options_ui;
 pub mod text_field_menu;
