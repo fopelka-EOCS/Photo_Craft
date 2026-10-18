@@ -1482,7 +1482,7 @@ impl RafSpec {
             RafPacking::Compressed { lossy } => {
                 assert!(self.width == 780 && self.height.is_multiple_of(6) && self.data.iter().all(|&v| v == 0), "see RafPacking::Compressed");
                 let quantizers: Vec<u8> = (0..self.height / 6).map(|g| [2, 0, 5][g % 3]).collect();
-                crate::rafc::zero_stream(self.bits, self.cfa.len() == 36, lossy.then_some(quantizers.as_slice()))
+                crate::rafc::zero_stream(self.bits, self.cfa.len() == 36, self.height / 6, lossy.then_some(quantizers.as_slice()))
             }
         }
     }

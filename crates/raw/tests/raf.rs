@@ -128,6 +128,19 @@ fn compressed_lossless_and_lossy_decode() {
 }
 
 #[test]
+fn compressed_images_of_any_group_count_decode() {
+    for h in [6, 24] {
+        for lossy in [false, true] {
+            let mut spec = compressed(&XTRANS, 14, lossy);
+            spec.height = h;
+            spec.data = vec![0; 780 * h];
+            let s = decode(&spec.build(), &Limits::default()).unwrap_or_else(|e| panic!("{h} rows, lossy {lossy}: {e}"));
+            assert_eq!((s.height, s.data.len()), (h, 780 * h));
+        }
+    }
+}
+
+#[test]
 fn compressed_variants_that_cannot_be_decoded_fail_cleanly() {
     // The header's compression mode disagrees with the stream (lossy header, lossless stream).
     let mut b = compressed(&XTRANS, 14, false).build();
@@ -148,13 +161,17 @@ fn compressed_variants_that_cannot_be_decoded_fail_cleanly() {
     let at = b.windows(5).position(|w| w == b"IS\x01\x10\x0e").unwrap();
     b[at..at + 2].copy_from_slice(b"XX");
     assert!(matches!(decode(&b, &Limits::default()), Err(RawError::Unsupported(_))));
-    // A damaged entropy stream is an error, never a panic.
-    let mut b = compressed(&XTRANS, 14, true).build();
-    let len = b.len();
-    b.truncate(len - 200);
-    let b104 = (b.len() - u32::from_be_bytes(b[100..104].try_into().unwrap()) as usize) as u32;
-    b[104..108].copy_from_slice(&b104.to_be_bytes());
-    assert!(decode(&b, &Limits::default()).is_err());
+    // A damaged entropy stream (sizes intact, a run of zero bits inside the first stripe that
+    // overruns the residual escape) is malformed, never a panic.
+    let mut b = compressed(&XTRANS, 14, false).build();
+    let at = b.windows(5).position(|w| w == b"IS\x01\x10\x0e").unwrap();
+    // Lossless: the 16-byte header and the two-entry size table, padded to 32 bytes.
+    let stream = at + 32;
+    b[stream + 64..stream + 128].fill(0);
+    match decode(&b, &Limits::default()) {
+        Err(RawError::Malformed(m)) => assert!(m.contains("residual"), "{m}"),
+        other => panic!("expected malformed, got {other:?}"),
+    }
 }
 
 #[test]

@@ -129,7 +129,7 @@ what an agent can't finish alone.
   (AGENTS.md forbids JS in the app).
 
 ### G14. Camera Raw depth
-- **Missing:** CR3 (detected, unsupported), lossy DNG (FILE-215-11), .xmp
+- **Missing:** CR3 (detected, unsupported), .xmp
   sidecars, masking and calibration in the Camera Raw dialog, per-camera colour for non-DNG
   cameras, lens profiles.
 - **Evidence:** `crates/raw/src/lib.rs:228` (CR3), scorecard FILE-215-11/12, #50.

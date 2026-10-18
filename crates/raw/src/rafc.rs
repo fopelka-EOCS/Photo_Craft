@@ -33,10 +33,12 @@ pub(crate) const XTRANS: [[usize; 6]; 6] =
 /// Which X-Trans vector slots hold real samples, per pair and colour, by column mod 4.
 const MASKS: [[u8; 2]; 6] = [[10, 15], [15, 10], [14, 10], [15, 11], [11, 15], [10, 14]];
 
+/// A malformed-stream error.
 fn corrupt(why: &str) -> RawError {
     RawError::malformed(format!("Fujifilm compressed RAF: {why}"))
 }
 
+/// Big-endian 16-bit value at `at`.
 fn be16(src: &[u8], at: usize) -> Result<usize> {
     let s = src.get(at..at.saturating_add(2)).ok_or_else(|| corrupt("truncated header"))?;
     let [a, b] = s else { return Err(corrupt("truncated header")) };
@@ -215,6 +217,8 @@ fn quant(v: i32, near: u32) -> i32 {
     if v < 0 { -bucket } else { bucket }
 }
 
+/// Prediction for an even column from its north-west, north, north-east and north-north
+/// neighbours: the pair across the smallest gradient, averaged with the north sample.
 #[inline]
 fn even_prediction(nw: i32, n: i32, ne: i32, nn: i32) -> i32 {
     let (a, b, c) = ((nw - n).abs(), (ne - n).abs(), (nn - n).abs());
@@ -228,11 +232,13 @@ fn even_prediction(nw: i32, n: i32, ne: i32, nn: i32) -> i32 {
     (pair + 2 * n) >> 2
 }
 
+/// Sample `x` of line `y` of a colour vector.
 #[inline]
 fn sample(rows: &[Vec<i32>], y: usize, x: usize) -> Result<i32> {
     rows.get(y).and_then(|r| r.get(x)).copied().ok_or_else(|| corrupt("invalid predictor position"))
 }
 
+/// Decodes one stripe, six rows at a time, into `height × stripe.width` samples.
 fn decode_stripe(stripe: &Stripe<'_>, height: usize, bits: u32, xtrans: bool) -> Result<Vec<u16>> {
     let size = if xtrans { BLOCK * 2 / 3 } else { BLOCK / 2 };
     let mut previous = vec![vec![vec![0; size + 2]; 2]; 3];
@@ -361,11 +367,11 @@ fn decode_stripe(stripe: &Stripe<'_>, height: usize, bits: u32, xtrans: bool) ->
 }
 
 /// A compressed stream whose residuals are all zero (every sample decodes to 0), for tests
-/// and fuzz seeds: two stripes over a 780-pixel-wide image, `6 × groups` rows high
-/// (`groups` = the quantizer count, or 3 when lossless).
+/// and fuzz seeds: two stripes over a 780-pixel-wide image, `6 × groups` rows high. Lossy
+/// streams take one quantizer per group.
 #[cfg(any(test, feature = "testgen"))]
-pub(crate) fn zero_stream(bits: u32, xtrans: bool, quantizers: Option<&[u8]>) -> Vec<u8> {
-    let groups = quantizers.map_or(3, <[u8]>::len);
+pub(crate) fn zero_stream(bits: u32, xtrans: bool, groups: usize, quantizers: Option<&[u8]>) -> Vec<u8> {
+    assert!(quantizers.is_none_or(|q| q.len() == groups), "one quantizer per six-row group");
     let mut bitstream = Vec::new();
     let mut main = [[(1u32 << (bits - 6), 1u32); 2]; 3];
     let mut fine = main;
@@ -433,7 +439,7 @@ mod tests {
         for bits in [12, 14, 16] {
             for xtrans in [false, true] {
                 for q in [None, Some([2, 0, 5].as_slice())] {
-                    let src = zero_stream(bits, xtrans, q);
+                    let src = zero_stream(bits, xtrans, 3, q);
                     assert_eq!(decode(&src, 780, 18, bits, xtrans).unwrap(), vec![0; 780 * 18], "{bits} {xtrans} {q:?}");
                 }
             }
@@ -442,7 +448,7 @@ mod tests {
 
     #[test]
     fn malformed_headers_and_truncated_entropy_are_errors() {
-        let valid = zero_stream(14, true, Some(&[1, 2, 0]));
+        let valid = zero_stream(14, true, 3, Some(&[1, 2, 0]));
         for len in (0..96).chain([valid.len() / 2, valid.len() - 1]) {
             assert!(decode(&valid[..len], 780, 18, 14, true).is_err(), "length {len}");
         }
@@ -489,7 +495,7 @@ mod tests {
             let quantizer = (next() & 0xFF) as u8;
             let len = (next() % 2048) as usize;
             let data: Vec<u8> = (0..len).map(|_| next() as u8).collect();
-            let mut src = zero_stream(bits, xtrans, Some(&[quantizer]));
+            let mut src = zero_stream(bits, xtrans, 1, Some(&[quantizer]));
             src.truncate(64);
             for i in [16, 20] {
                 src[i..i + 4].copy_from_slice(&(data.len() as u32).to_be_bytes());
