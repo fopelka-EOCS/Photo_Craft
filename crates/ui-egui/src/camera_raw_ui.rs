@@ -139,6 +139,30 @@ impl CameraRawDialog {
         })
     }
 
+    /// Auto: chooses Exposure, Contrast, Highlights, Shadows, Whites and Blacks from the picture
+    /// (see [`photocraft_algo::camera_raw::auto_tone`]) as one undoable edit. Judged on the
+    /// preview as it renders, so the raw-open dialog's sensor-stage Shadows and Highlights count.
+    pub(crate) fn auto_tone(&mut self) {
+        let raw_curve = self.raw_curve.as_ref();
+        let found = photocraft_algo::camera_raw::auto_tone(&self.proxy, self.pw, self.ph, &self.params, &|src, w, h, params| {
+            let mut px = src.to_vec();
+            let mut p = params.clone();
+            if let Some(curve) = raw_curve {
+                photocraft_io::raw::retone(&mut px, w, h, curve, raw_stage(&p));
+                (p.shadows, p.highlights, p.clarity, p.texture, p.dehaze) = (0.0, 0.0, 0.0, 0.0, 0.0);
+            }
+            photocraft_algo::camera_raw::develop(&mut px, w, h, &p, self.float);
+            px
+        });
+        let mut next = self.params.clone();
+        found.apply(&mut next);
+        if next != self.params {
+            remember_edit(self);
+            self.params = next;
+            self.dirty = true;
+        }
+    }
+
     pub(crate) fn render(&mut self, ctx: &egui::Context) {
         let t0 = crate::gpu_canvas::now_ms();
         let mut px = self.proxy.clone();
@@ -684,8 +708,8 @@ pub fn menu(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &Val
     for (key, value) in fields {
         match key.as_str() {
             "set" | "scope" | "view" => {}
-            "before" | "commit" | "cancel" | "saveSettings" | "loadSettings" | "undo" | "redo" if value.is_boolean() => {}
-            "before" | "commit" | "cancel" | "saveSettings" | "loadSettings" | "undo" | "redo" => {
+            "before" | "commit" | "cancel" | "saveSettings" | "loadSettings" | "undo" | "redo" | "auto" if value.is_boolean() => {}
+            "before" | "commit" | "cancel" | "saveSettings" | "loadSettings" | "undo" | "redo" | "auto" => {
                 return Some(Err(format!("Camera Raw {key} must be a boolean")));
             }
             _ => return Some(Err(format!("unknown Camera Raw ui property {key}"))),
@@ -774,6 +798,9 @@ fn menu_update(app: &mut PhotocraftApp, ctx: &egui::Context, ui: &Value) -> Opti
     }
     if let Some(update) = scope_update {
         update.apply(d, &mut app.ui.camera_raw_scope);
+    }
+    if ui.get("auto").and_then(Value::as_bool) == Some(true) {
+        d.auto_tone();
     }
     if ui.get("undo").and_then(Value::as_bool) == Some(true) {
         undo_edit(d);
@@ -1140,12 +1167,16 @@ fn draw(app: &mut PhotocraftApp, ctx: &egui::Context, own_window: bool) {
         super::camera_raw_scope_ui::header(&mut props, d, scope);
         d.scope.alt_tone = None;
         let mut dirty = false;
+        let mut auto = false;
         egui::ScrollArea::vertical().id_salt("camera-raw-props").show(&mut props, |ui| {
             ui.spacing_mut().item_spacing.y = 4.0;
             let p = &mut d.params;
             let alt = &mut d.scope.alt_tone;
             let (ts, tn) = (temp_stops(), tint_stops());
             section(ui, "Light", true, |ui| {
+                if ui.button(tl!("Auto")).clicked() {
+                    auto = true;
+                }
                 tone_row(ui, &mut dirty, alt, ToneZone::Exposure, &mut p.exposure);
                 row(ui, &mut dirty, "Contrast", &mut p.contrast, -100.0..=100.0, None);
                 tone_row(ui, &mut dirty, alt, ToneZone::Highlights, &mut p.highlights);
@@ -1241,6 +1272,9 @@ fn draw(app: &mut PhotocraftApp, ctx: &egui::Context, own_window: bool) {
                 row(ui, &mut dirty, "Color Detail", &mut p.noise_color_detail, 0.0..=100.0, None);
             });
         });
+        if auto {
+            d.auto_tone();
+        }
         super::camera_raw_scope_ui::floating(ctx, d, scope, right);
         super::camera_raw_scope_ui::shortcuts(ctx, scope);
         d.dirty |= dirty;
