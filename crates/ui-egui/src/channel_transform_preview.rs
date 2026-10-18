@@ -102,7 +102,7 @@ impl Preview {
 
     /// Composite the captured pixels through the current eyes without changing the source.
     fn image(&self, view: &ChannelView, in_color: bool, display: Option<&photocraft_engine::display_color::CanvasDisplay>) -> ColorImage {
-        let overlay = match crate::channel_view::render(&self.shown, view, self.shown.bounds(), 1, in_color, self.layer) {
+        let overlay = match crate::channel_view::render_for_display(&self.shown, view, self.shown.bounds(), 1, in_color, self.layer, display) {
             // Solo/partial colour views already contain the opaque composite. Do not render it twice.
             Some(pixels) if pixels.iter().all(|p| p.a() == 255) => {
                 return ColorImage::new([self.shown.size.width as usize, self.shown.size.height as usize], pixels);
@@ -684,6 +684,75 @@ mod tests {
         let mut changed = ctx.tex_manager().write().take_delta();
         assert!(changed.set.contains_key(&tex_a) && changed.set.contains_key(&tex_b), "geometry changes refresh both windows in place");
         changed.clear();
+        crate::transform_tool::cancel(&mut a);
+    }
+
+    #[test]
+    fn tinted_solo_channel_preview_uses_each_window_display_profile() {
+        use photocraft_engine::color_cmds::resolve_profile;
+        use photocraft_engine::display_color::Display;
+
+        let mut a = app();
+        let icc = |id: &str| Some(resolve_profile(id, None, None).unwrap().to_bytes());
+        a.session.color.set_displays(Ok(vec![
+            Display { id: 1, name: "sRGB".into(), frame: [0.0, 0.0, 100.0, 100.0], profile_name: None, icc: icc("srgb") },
+            Display { id: 4, name: "Display P3".into(), frame: [100.0, 0.0, 100.0, 100.0], profile_name: None, icc: icc("display-p3") },
+        ]));
+        a.session.color.main_display = Some(1);
+        a.run("prefs.set", json!({"values":{"interface.showChannelsInColor":true}})).unwrap();
+        a.run("channel.target", json!({"channel":"green"})).unwrap();
+        assert_eq!(a.session.active().unwrap().channel_view.visible_colors(3), 1);
+        let ctx = egui::Context::default();
+        crate::transform_tool::begin(&mut a, &ctx).unwrap();
+        let doc = a.session.active().unwrap().doc.clone();
+        let (srgb, _) = crate::canvas::canvas_display(&a, &doc, Some(1));
+        let (p3, _) = crate::canvas::canvas_display(&a, &doc, Some(4));
+        assert!(srgb.as_ref().unwrap().is_identity());
+        assert!(!p3.as_ref().unwrap().is_identity());
+        let srgb_tex = texture(&mut a, &ctx, 0, Some(1)).unwrap();
+        let p3_tex = texture(&mut a, &ctx, 0, Some(4)).unwrap();
+        let mut delta = ctx.tex_manager().write().take_delta();
+        let image = |id| {
+            let egui::ImageData::Color(image) = &delta.set.get(&id).unwrap()[0].image;
+            image.pixels.clone()
+        };
+        let srgb_pixels = image(srgb_tex);
+        let p3_pixels = image(p3_tex);
+        delta.clear();
+        let preview = a.transform_preview.as_ref().unwrap().channel.as_ref().unwrap();
+        let view = &a.session.active().unwrap().channel_view;
+        let source = crate::channel_view::render(&preview.shown, view, preview.shown.bounds(), 1, true, preview.layer).unwrap();
+        assert_eq!(srgb_pixels, source);
+        assert_ne!(p3_pixels, source, "a tinted solo channel must change for another monitor profile");
+        let buffer = photocraft_compose::Buffer {
+            rect: preview.shown.bounds(),
+            px: source.iter().map(|pixel| pixel.to_array().map(|component| f32::from(component) / 255.0)).collect(),
+        };
+        assert_eq!(p3_pixels, crate::canvas::display_image(p3.as_deref(), &buffer).pixels);
+        crate::transform_tool::cancel(&mut a);
+    }
+
+    #[test]
+    fn linear_solo_channel_preview_keeps_dark_detail() {
+        let mut doc = Document::with_background("linear shadow", Size::new(4, 4), ColorMode::Rgb, SampleType::F32, Color::rgb(0.001, 0.002, 0.003));
+        doc.icc_profile = Some(photocraft_cms::Builtin::LinearSrgb.profile().to_bytes());
+        let mut session = Session::new();
+        session.add_document(doc, None);
+        let mut a = PhotocraftApp::new(session, crate::Services::default());
+        a.sync_views();
+        a.run("prefs.set", json!({"values":{"interface.showChannelsInColor":true}})).unwrap();
+        a.run("channel.target", json!({"channel":"green"})).unwrap();
+        let ctx = egui::Context::default();
+        crate::transform_tool::begin(&mut a, &ctx).unwrap();
+        let doc = a.session.active().unwrap().doc.clone();
+        let (display, _) = crate::canvas::canvas_display(&a, &doc, None);
+        assert!(display.as_ref().unwrap().encode_srgb);
+        let tex = texture(&mut a, &ctx, 0, None).unwrap();
+        let mut delta = ctx.tex_manager().write().take_delta();
+        let egui::ImageData::Color(image) = &delta.set.get(&tex).unwrap()[0].image;
+        let green = image.pixels[0].g();
+        assert!(green > 1, "encoding precedes 8-bit quantization of a 0.002 linear sample: {green}");
+        delta.clear();
         crate::transform_tool::cancel(&mut a);
     }
 

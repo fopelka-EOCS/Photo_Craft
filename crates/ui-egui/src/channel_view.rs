@@ -33,6 +33,7 @@ struct SampledComposite {
 struct CompositeSource<'a> {
     cached: Option<&'a [[f32; 4]]>,
     fresh: &'a mut Option<Vec<[f32; 4]>>,
+    display: Option<&'a photocraft_engine::display_color::CanvasDisplay>,
 }
 
 pub struct Cache {
@@ -90,7 +91,22 @@ fn composite(doc: &Document, r: Rect, factor: u32) -> Vec<[f32; 4]> {
 /// channels tinted instead of grayscale (Photoshop's "Show Channels in Color").
 pub fn render(doc: &Document, v: &ChannelView, r: Rect, factor: u32, in_color: bool, active: Option<photocraft_doc::LayerId>) -> Option<Vec<Color32>> {
     let mut unused = None;
-    render_with_source(doc, v, r, factor, in_color, active, CompositeSource { cached: None, fresh: &mut unused })
+    render_with_source(doc, v, r, factor, in_color, active, CompositeSource { cached: None, fresh: &mut unused, display: None })
+}
+
+/// As [`render`], but colour-manage the opaque colour-component base before screen-space alpha,
+/// Quick Mask and layer-mask overlays are composited onto it.
+pub(crate) fn render_for_display(
+    doc: &Document,
+    v: &ChannelView,
+    r: Rect,
+    factor: u32,
+    in_color: bool,
+    active: Option<photocraft_doc::LayerId>,
+    display: Option<&photocraft_engine::display_color::CanvasDisplay>,
+) -> Option<Vec<Color32>> {
+    let mut unused = None;
+    render_with_source(doc, v, r, factor, in_color, active, CompositeSource { cached: None, fresh: &mut unused, display })
 }
 
 fn render_with_source(
@@ -192,6 +208,19 @@ fn render_with_source(
     } else {
         vec![[0.0; 4]; n]
     };
+    if vis > 0
+        && vis < colors
+        && let Some(display) = source.display.filter(|display| !display.is_identity())
+    {
+        // Partial colour views are in the document's composite profile. Convert their base
+        // before adding channel/mask overlays, whose UI colours are screen-space values.
+        let converted = display.composite_pixels_to_rgba8(&out);
+        for (pixel, converted) in out.iter_mut().zip(converted) {
+            for (component, value) in pixel.iter_mut().zip(converted) {
+                *component = f32::from(value) / 255.0;
+            }
+        }
+    }
     // Rubylith: `color` at `opacity` × coverage over the accumulated pixels.
     let mut tint = |values: Vec<f32>, color: photocraft_color::Color, opacity: f32, coverage: &dyn Fn(f32) -> f32| {
         let c = color.to_rgb();
@@ -327,7 +356,7 @@ pub fn ensure(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize) -> Optio
     let b = doc.bounds();
     let cached = app.channel_views.get(&id).and_then(|c| c.source.as_ref()).map(|s| s.pixels.as_slice());
     let mut fresh = None;
-    let px = render_with_source(&doc, &view, b, factor, in_color, active, CompositeSource { cached, fresh: &mut fresh })?;
+    let px = render_with_source(&doc, &view, b, factor, in_color, active, CompositeSource { cached, fresh: &mut fresh, display: None })?;
     let new_source = fresh.is_some();
     let size = [b.width().div_ceil(factor) as usize, b.height().div_ceil(factor) as usize];
     let img = egui::ColorImage::new(size, px);
@@ -438,7 +467,7 @@ mod tests {
             1,
             false,
             st.active_layer,
-            CompositeSource { cached: Some(&refreshed.pixels), fresh: &mut unused },
+            CompositeSource { cached: Some(&refreshed.pixels), fresh: &mut unused, display: None },
         )
         .unwrap();
         assert_eq!(actual, expected, "reused pixels must preserve channel colours");
@@ -600,6 +629,32 @@ mod tests {
         assert!(px.r() < 100 && px.g() > 150 && px.b() > 150, "cyan ink, not gray: {px:?}");
         let gray = render(&st.doc, &st.channel_view, st.doc.bounds(), 1, false, st.active_layer).unwrap()[0];
         assert_eq!(gray.r(), gray.g(), "off stays grayscale");
+    }
+
+    #[test]
+    fn display_conversion_precedes_spot_overlay_on_a_solo_colour_channel() {
+        let mut doc = Document::with_background(
+            "channel display",
+            photocraft_doc::Size::new(4, 4),
+            ColorMode::Rgb,
+            photocraft_color::SampleType::U8,
+            photocraft_color::Color::rgb(0.2, 0.4, 0.6),
+        );
+        doc.icc_profile = Some(photocraft_cms::Builtin::DisplayP3.profile().to_bytes());
+        let mut surface = Surface::new(photocraft_color::PixelFormat::GRAY8);
+        surface.fill_rect(doc.bounds(), &[1.0]);
+        let mut spot = AlphaChannel::new("spot", surface);
+        spot.spot = Some((photocraft_color::Color::rgb(1.0, 0.0, 0.0), 1.0));
+        doc.channels.push(spot);
+        let display = photocraft_engine::Session::new().color.canvas_display(&doc).unwrap();
+        assert!(!display.is_identity());
+        let mut view = ChannelView { color_hidden: vec![true, false, true], ..Default::default() };
+        let raw = render(&doc, &view, doc.bounds(), 1, true, None).unwrap();
+        let converted = render_for_display(&doc, &view, doc.bounds(), 1, true, None, Some(&display)).unwrap();
+        assert_ne!(raw, converted, "the colour-channel base uses the document profile");
+        view.alpha_visible = vec![true];
+        let overlay = render_for_display(&doc, &view, doc.bounds(), 1, true, None, Some(&display)).unwrap();
+        assert!(overlay.iter().all(|pixel| *pixel == Color32::RED), "screen-space spot colour stays red");
     }
 
     /// Lab: a and b tint over a neutral Lightness; Lightness itself stays gray (Adobe's exception).
