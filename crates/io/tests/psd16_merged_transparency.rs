@@ -8,11 +8,12 @@
 mod common;
 
 use common::raster;
-use photocraft_color::{ColorMode, SampleType};
-use photocraft_doc::Document;
+use photocraft_color::{Color, ColorMode, PixelFormat, SampleType};
+use photocraft_doc::{AlphaChannel, Document};
 use photocraft_geom::{Rect, Size};
 use photocraft_io::*;
 use photocraft_psd::PsdFile;
+use photocraft_raster::Surface;
 
 /// The unicode alpha channel names (resource 1045), empty without it.
 fn names(file: &PsdFile) -> Vec<String> {
@@ -58,6 +59,42 @@ fn resave_keeps_a_name_marked_merged_transparency() {
             assert_eq!(resaved.header.channels, 4, "{case}: a save with no edits keeps the channel count");
             let resaved_names = names(&resaved);
             assert!(resaved_names.iter().filter(|n| *n == "Transparency").count() <= 1, "{case}: no duplicate Transparency: {resaved_names:?}");
+        }
+    }
+}
+
+/// An opaque document (white Background, one layer) whose only alpha channel the user named
+/// "Transparency": PhotoCraft writes it with a positive count in `Lr16`/`Lr32` and no `Mt16`/`Mt32`,
+/// like Photoshop's file above, but the visible Background shows the composite has no
+/// transparency, so the channel stays the user's and survives a re-save.
+#[test]
+fn a_user_channel_named_transparency_over_a_background_is_kept() {
+    for depth in [SampleType::U16, SampleType::F32] {
+        for path in ["x.psd", "x.psb"] {
+            let case = format!("{depth:?} {path}");
+            let mut doc = Document::with_background("t", Size::new(8, 6), ColorMode::Rgb, depth, Color::WHITE);
+            let fmt = doc.pixel_format();
+            doc.layers.push(raster("shape", fmt, Rect::new(1, 1, 5, 4), 3, true));
+            let mut plane = Surface::new(PixelFormat::new(ColorMode::Grayscale, depth, false));
+            plane.fill_rect(Rect::new(0, 0, 3, 6), &[1.0]);
+            doc.channels.push(AlphaChannel::new("Transparency", plane));
+
+            let file = PsdFile::from_bytes(&export(&doc, path, &ExportOptions::default()).expect("export").bytes).expect("parse");
+            assert_eq!(file.header.channels, 4, "{case}: colour + the user channel");
+            assert!(!file.layer_info.as_ref().expect("layers").merged_alpha, "{case}: a positive layer count");
+            assert!(!file.global_blocks.iter().any(|b| matches!(&b.key, b"Mtrn" | b"Mt16" | b"Mt32")), "{case}: no marker");
+            assert_eq!(names(&file), ["Transparency"], "{case}");
+            assert!(!file.merged_has_alpha(), "{case}: the name over a visible Background is no mark");
+
+            let opened = import(path, &file.to_bytes().expect("write")).expect("import").document;
+            let user: Vec<_> = opened.channels.iter().map(|c| c.name.as_str()).collect();
+            assert_eq!(user, ["Transparency"], "{case}: the user channel is kept");
+            assert_eq!(opened.channels[0].surface.sample_channel(1, 1, 0), 1.0, "{case}");
+            assert_eq!(opened.channels[0].surface.sample_channel(5, 1, 0), 0.0, "{case}");
+
+            let resaved = PsdFile::from_bytes(&export(&opened, path, &ExportOptions::default()).expect("re-export").bytes).expect("reparse");
+            assert_eq!(resaved.header.channels, 4, "{case}: a save with no edits keeps the user channel");
+            assert_eq!(names(&resaved), ["Transparency"], "{case}");
         }
     }
 }

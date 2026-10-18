@@ -228,6 +228,11 @@ fn mt32_marks_the_merged_transparency() {
     let name: Vec<u8> = [0u8, 0, 0, 13].into_iter().chain("Transparency\0".encode_utf16().flat_map(u16::to_be_bytes)).collect();
     file.resources.retain(|r| !matches!(r.id, 1006 | 1045));
     assert!(!file.merged_has_alpha(), "a positive layer count alone");
+    // #4654: with the layers in `Lr32` and no Background, the "Transparency" name alone marks it
+    // too (psd16_merged_transparency.rs); take it out again so `Mt32` is tested on its own.
+    file.resources.push(photocraft_psd::ImageResource::new(1045, name.clone()));
+    assert!(file.merged_has_alpha(), "the Transparency name without a Background");
+    file.resources.retain(|r| r.id != 1045);
     file.global_blocks.push(photocraft_psd::TaggedBlock::new(*b"Mt32", Vec::new()));
     assert!(file.merged_has_alpha());
     file.resources.push(photocraft_psd::ImageResource::new(1045, name));

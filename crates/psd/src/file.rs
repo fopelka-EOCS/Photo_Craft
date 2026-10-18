@@ -356,8 +356,10 @@ impl PsdFile {
     /// `Mt16`, `Mt32`) is present. Photoshop marks 32-bit documents with `Mt32` and a positive
     /// layer count (psd-tools transparentbg.psd). Photoshop also names the merged transparency
     /// "Transparency" and lists it first among the alpha channel names, and some of its 16-bit
-    /// PSBs carry no other mark (#4654): when the layers sit in a global `Lr16`/`Lr32` block, that
-    /// name with one name per extra channel marks it too.
+    /// PSBs carry no other mark (#4654): when the layers sit in a global `Lr16`/`Lr32` block and
+    /// none of them is a visible Background, that name with one name per extra channel marks it
+    /// too. A visible Background makes the composite opaque, so Photoshop writes no merged
+    /// transparency then, and a channel with that name is the user's own.
     pub fn merged_has_alpha(&self) -> bool {
         let Some(color) = self.header.color_mode.color_channels() else {
             return false;
@@ -370,36 +372,31 @@ impl PsdFile {
             Some(li) => {
                 // At 16/32 bits the parser only places the layers in the depth's own `Lr16`/`Lr32` block.
                 let in_block = matches!(self.header.depth, 16 | 32) && matches!(self.layer_info_placement, LayerInfoPlacement::GlobalBlock { .. });
-                li.merged_alpha || marked || (in_block && self.names_merged_transparency(self.header.channels - color))
+                li.merged_alpha || marked || (in_block && !Self::has_visible_background(li) && self.names_merged_transparency(self.header.channels - color))
             }
             None => true,
         }
     }
 
+    /// `true` when the bottom layer record is a visible Photoshop Background: it has channels and
+    /// none of them is the transparency (`-1`) channel.
+    fn has_visible_background(li: &LayerInfo) -> bool {
+        li.layers.first().is_some_and(|r| !r.flags.hidden() && !r.channels.is_empty() && r.channels.iter().all(|c| c.id >= 0))
+    }
+
     /// `true` when the alpha channel names (resource 1045, else 1006) hold exactly `extra` names
-    /// and the first is "Transparency", Photoshop's name for the merged transparency.
+    /// and the first is "Transparency", Photoshop's name for the merged transparency. Reads at
+    /// most `extra + 1` names.
     fn names_merged_transparency(&self, extra: u16) -> bool {
-        const NAME: &str = "Transparency";
-        let mut names = Vec::new();
-        if let Some(r) = self.resource(1045) {
-            let mut at = 0usize;
-            while let Some(len) = r.data.get(at..at.saturating_add(4)).and_then(|b| b.try_into().ok()).map(u32::from_be_bytes) {
-                at = at.saturating_add(4);
-                let end = (len as usize).checked_mul(2).and_then(|n| at.checked_add(n));
-                let Some(units) = end.and_then(|end| r.data.get(at..end)) else { break };
-                let units: Vec<u16> = units.as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes(*c)).collect();
-                names.push(String::from_utf16_lossy(&units).trim_end_matches('\0').to_string());
-                at = at.saturating_add(units.len() * 2);
-            }
-        } else if let Some(r) = self.resource(1006) {
-            let mut at = 0usize;
-            while let Some(&len) = r.data.get(at) {
-                let Some(name) = r.data.get(at + 1..at + 1 + usize::from(len)) else { break };
-                names.push(String::from_utf8_lossy(name).into_owned());
-                at += 1 + usize::from(len);
-            }
+        fn first_of_exactly(mut names: impl Iterator<Item = String>, extra: usize) -> bool {
+            names.next().is_some_and(|first| first == "Transparency") && names.take(extra).count() + 1 == extra
         }
-        names.len() == usize::from(extra) && names.first().is_some_and(|n| n == NAME)
+        let extra = usize::from(extra);
+        match (self.resource(1045), self.resource(1006)) {
+            (Some(r), _) => first_of_exactly(resources::unicode_alpha_names(&r.data), extra),
+            (None, Some(r)) => first_of_exactly(resources::pascal_alpha_names(&r.data), extra),
+            (None, None) => false,
+        }
     }
 
     /// Checks structural invariants that the writer relies on.
@@ -597,6 +594,37 @@ mod write_tests {
             file.resources.retain(|r| !matches!(r.id, 1006 | 1045));
             file.resources.push(ImageResource::new(1045, name.clone()));
             assert_eq!(file.merged_has_alpha(), expected, "depth {depth}, key {}", String::from_utf8_lossy(&key));
+        }
+    }
+
+    /// A visible Background (bottom record without a `-1` channel) makes the composite opaque, so
+    /// a "Transparency" channel is the user's own; a hidden one doesn't. Too many names or a
+    /// 1006 Pascal name follow the 1045 rules.
+    #[test]
+    fn transparency_name_is_no_mark_over_a_visible_background() {
+        let unicode: Vec<u8> = [0u8, 0, 0, 13].into_iter().chain("Transparency\0".encode_utf16().flat_map(u16::to_be_bytes)).collect();
+        let pascal: Vec<u8> = [12u8].into_iter().chain(*b"Transparency").collect();
+        let file_with = |id: u16, name: &[u8], background: bool, hidden: bool| {
+            let mut file = testgen::layered(Version::Psb, ColorMode::Rgb, 16, Compression::Raw);
+            file.header.channels = 4;
+            file.layer_info.as_mut().unwrap().merged_alpha = false;
+            file.global_blocks.retain(|b| !matches!(&b.key, b"Mtrn" | b"Mt16" | b"Mt32"));
+            file.layer_info_placement = LayerInfoPlacement::GlobalBlock { index: 0, signature: *b"8BIM", key: *b"Lr16", padding: None };
+            file.resources.retain(|r| !matches!(r.id, 1006 | 1045));
+            file.resources.push(ImageResource::new(id, name.to_vec()));
+            let bottom = &mut file.layers_mut()[0];
+            if background {
+                bottom.channels.retain(|c| c.id != -1);
+            }
+            bottom.flags.0 = if hidden { crate::LayerFlags::HIDDEN } else { 0 };
+            file
+        };
+        for (id, name) in [(1045, &unicode), (1006, &pascal)] {
+            assert!(file_with(id, name, false, false).merged_has_alpha(), "{id}: no Background");
+            assert!(!file_with(id, name, true, false).merged_has_alpha(), "{id}: a visible Background");
+            assert!(file_with(id, name, true, true).merged_has_alpha(), "{id}: a hidden Background");
+            let twice = [name.as_slice(), name.as_slice()].concat();
+            assert!(!file_with(id, &twice, false, false).merged_has_alpha(), "{id}: two names for one extra channel");
         }
     }
 }

@@ -603,20 +603,10 @@ fn be_to_ne_plane(plane: &[u8], s: SampleType, n: usize) -> Vec<u8> {
     interleave(&[Some(plane)], &[zero_sample(s)], n, s, &[false])
 }
 
+/// The Unicode alpha channel names (resource 1045), parsed by `photocraft-psd` as
+/// `merged_has_alpha` reads them.
 fn unicode_names(data: &[u8]) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut at = 0;
-    while at + 4 <= data.len() {
-        let n = u32::from_be_bytes([data[at], data[at + 1], data[at + 2], data[at + 3]]) as usize;
-        at += 4;
-        // Checked: `n * 2` overflows a 32-bit `usize` for a hostile length.
-        let Some(end) = n.checked_mul(2).and_then(|len| at.checked_add(len)) else { break };
-        let Some(b) = data.get(at..end) else { break };
-        let units: Vec<u16> = b.as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
-        out.push(String::from_utf16_lossy(&units).trim_end_matches('\0').to_string());
-        at = end;
-    }
-    out
+    photocraft_psd::resources::unicode_alpha_names(data).collect()
 }
 
 /// Plane `i` of a decoded merged image whose planes are `plane` bytes each, or `None` when it is

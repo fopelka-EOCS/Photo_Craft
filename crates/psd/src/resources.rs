@@ -270,6 +270,34 @@ pub fn version_info_resource(has_real_merged_data: bool) -> ImageResource {
     )
 }
 
+/// The names in a Unicode alpha channel names resource (1045): u32 length + UTF-16BE each, a
+/// trailing NUL trimmed. Yields them one at a time and stops at the first entry that runs past
+/// the data, so a hostile length ends the list.
+pub fn unicode_alpha_names(data: &[u8]) -> impl Iterator<Item = String> + '_ {
+    let mut at = 0usize;
+    std::iter::from_fn(move || {
+        let start = at.checked_add(4)?;
+        let len = u32::from_be_bytes(data.get(at..start)?.try_into().ok()?) as usize;
+        // Checked: `len * 2` overflows a 32-bit `usize` for a hostile length.
+        let end = len.checked_mul(2).and_then(|n| start.checked_add(n))?;
+        let units: Vec<u16> = data.get(start..end)?.as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes(*c)).collect();
+        at = end;
+        Some(String::from_utf16_lossy(&units).trim_end_matches('\0').to_string())
+    })
+}
+
+/// The names in a Pascal-string alpha channel names resource (1006), one at a time; stops at the
+/// first entry that runs past the data.
+pub fn pascal_alpha_names(data: &[u8]) -> impl Iterator<Item = String> + '_ {
+    let mut at = 0usize;
+    std::iter::from_fn(move || {
+        let len = usize::from(*data.get(at)?);
+        let name = data.get(at + 1..at + 1 + len)?;
+        at += 1 + len;
+        Some(String::from_utf8_lossy(name).into_owned())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -357,6 +385,16 @@ mod tests {
         let r = ImageResource::new(ids::XMP, b"<x/>".to_vec());
         assert_eq!(r.xmp_str(), Some("<x/>"));
         assert_eq!(ImageResource::new(4242, vec![]).parsed(), None);
+    }
+
+    #[test]
+    fn alpha_names_parse_and_stop_at_a_hostile_length() {
+        let mut data = 2u32.to_be_bytes().to_vec();
+        data.extend([0, b'A', 0, 0]);
+        data.extend(u32::MAX.to_be_bytes());
+        data.extend([0, b'B']);
+        assert_eq!(unicode_alpha_names(&data).collect::<Vec<_>>(), ["A"]);
+        assert_eq!(pascal_alpha_names(&[1, b'A', 2, b'B', b'C', 9, b'D']).collect::<Vec<_>>(), ["A", "BC"]);
     }
 
     #[test]
