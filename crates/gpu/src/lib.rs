@@ -1049,7 +1049,14 @@ impl Compositor {
                 // caller is about to redo on the CPU.
                 match stats {
                     Ok(_) => t.finish(&mut encoder),
-                    Err(_) => t.cancel(),
+                    Err(_) => {
+                        t.cancel();
+                        // The refresh is lost, but a measurement that came back with it is not:
+                        // hand it to the next render rather than drop it on the fallback path.
+                        if let Some(landed) = landed {
+                            t.restore(landed);
+                        }
+                    }
                 }
             }
             let stats = stats?;

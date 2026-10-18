@@ -261,6 +261,13 @@ impl GpuTimer {
         self.ready
     }
 
+    /// Put a measurement back after a caller took it but could not use it (its refresh failed),
+    /// so the sample is reported by the next one instead of being lost on the fallback path.
+    /// A measurement that has landed since wins: it is the newer of the two.
+    pub fn restore(&mut self, t: GpuTiming) {
+        self.ready.get_or_insert(t);
+    }
+
     /// Take the most recent completed measurement, leaving none behind, so a stale number is
     /// never reported twice as if it were new.
     pub fn take(&mut self) -> Option<GpuTiming> {

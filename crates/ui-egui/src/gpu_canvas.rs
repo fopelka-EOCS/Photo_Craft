@@ -295,6 +295,15 @@ impl GpuCanvas {
         }
     }
 
+    /// Take any GPU measurement that has landed since the last call, without compositing
+    /// anything. [`Compositor::render`] carries measurements out in its stats, but a refresh is
+    /// the only thing that collects them, so the last refresh before the app goes idle would
+    /// never be reported. The frame loop calls this so it is.
+    pub fn take_gpu_timing(&self) -> Option<photocraft_gpu::GpuTiming> {
+        let mut r = self.rs.renderer.write();
+        r.callback_resources.get_mut::<Resources>()?.compositor.as_mut()?.take_gpu_timing()
+    }
+
     /// GPU bytes the wgpu compositor holds: resident layer pages and caches (effect maps and
     /// lower-stack chunks). Keep the scorecard's memory measurements inclusive of reuse.
     pub fn compositor_bytes(&self) -> Option<(u64, usize)> {
@@ -938,8 +947,16 @@ pub fn device_descriptor(adapter: &wgpu::Adapter) -> wgpu::DeviceDescriptor<'sta
 /// The timestamp-query features when the adapter supports all of them, else none: asking for a
 /// feature an adapter lacks fails device creation, and a canvas without GPU timing is far better
 /// than no canvas.
+///
+/// `PHOTOCRAFT_NO_GPU_TIMING` suppresses the request as well as the timer
+/// ([`photocraft_gpu::Compositor::measure_gpu_time`]), so the variable also rescues a driver
+/// that advertises the features and then fails or misbehaves on device creation — not only one
+/// whose timestamps come back wrong.
 pub fn timing_features(adapter: &wgpu::Adapter) -> wgpu::Features {
     let want = photocraft_gpu::timing::FEATURES;
+    if std::env::var_os("PHOTOCRAFT_NO_GPU_TIMING").is_some() {
+        return wgpu::Features::empty();
+    }
     if adapter.features().contains(want) { want } else { wgpu::Features::empty() }
 }
 
@@ -2444,6 +2461,36 @@ mod mip_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A GPU measurement arrives a frame or two after its refresh, so most GPU refreshes carry
+    /// none; the last one reported must stand until a newer one lands. A CPU refresh is
+    /// different: there is no GPU time at all then, and keeping the old number would show it as
+    /// this refresh's. Runs anywhere — the GPU timing tests need hardware and CI has none.
+    #[test]
+    fn a_gpu_measurement_stands_until_replaced_and_a_cpu_refresh_clears_it() {
+        let timing = |ms, px| photocraft_gpu::GpuTiming { ms, px, spans: 1 };
+        let refresh = |kind, gpu| Refresh { kind, gpu, ..Default::default() };
+        let mut perf = Perf::default();
+        assert_eq!(perf.gpu_ms, None, "nothing is reported before a measurement");
+
+        perf.record_refresh(&refresh("gpu-full", Some(timing(83.9, 24_000_000))));
+        assert_eq!((perf.gpu_ms, perf.gpu_ms_px), (Some(83.9), 24_000_000));
+
+        // The common case: a GPU refresh whose own measurement has not come back yet.
+        perf.record_refresh(&refresh("gpu-rect", None));
+        assert_eq!((perf.gpu_ms, perf.gpu_ms_px), (Some(83.9), 24_000_000), "the last measurement stands");
+
+        perf.record_refresh(&refresh("gpu-rect", Some(timing(11.2, 1_098_640))));
+        assert_eq!((perf.gpu_ms, perf.gpu_ms_px), (Some(11.2), 1_098_640), "a newer measurement replaces it");
+
+        // The CPU compositor did this one: the GPU number belongs to no refresh on screen.
+        perf.record_refresh(&refresh("full", None));
+        assert_eq!((perf.gpu_ms, perf.gpu_ms_px), (None, 0), "a CPU refresh clears it rather than showing a stale one");
+
+        // And it comes back on the next GPU refresh that carries one.
+        perf.record_refresh(&refresh("gpu-full", Some(timing(42.0, 6_000_000))));
+        assert_eq!((perf.gpu_ms, perf.gpu_ms_px), (Some(42.0), 6_000_000));
+    }
 
     #[test]
     fn device_limits_support_v3d_shader_variable_limit() {
