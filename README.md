@@ -268,6 +268,41 @@ CRAFT_FONTS_DIR="$PWD/../craft-fonts" cargo run --release -p photocraft
 
 New contributors and AI agents: start with [`AGENTS.md`](AGENTS.md), then [`docs/`](docs/).
 
+## Build dan paket rilis
+
+Panduan ini menghasilkan artefak lokal. Artefak yang dibagikan ke pengguna lain perlu ditandatangani dengan identitas pengembang masing-masing; tanda tangan ad-hoc hanya untuk pengujian di Mac pembuatnya.
+
+### macOS
+
+Gunakan macOS 11 atau lebih baru, Xcode Command Line Tools, Rust stable, serta target Rust untuk arsitektur yang ingin dibangun. Untuk build universal, jalankan di macOS dan pasang kedua target:
+
+```sh
+xcode-select --install
+rustup toolchain install stable
+rustup target add aarch64-apple-darwin x86_64-apple-darwin
+git clone https://github.com/storytold/photocraft
+cd photocraft
+./packaging/macos/package.sh --arch universal
+```
+
+Hasilnya berada di `dist/release/`: DMG `photocraft-<versi>-macos-universal.dmg` dan ZIP CLI. Untuk Apple silicon saja gunakan `--arch aarch64`; untuk Intel gunakan `--arch x86_64`. Secara default paket memakai tanda tangan ad-hoc. Untuk rilis yang dapat dibuka di Mac lain, atur `MACOS_SIGN_IDENTITY`, lalu juga `APPLE_ID`, `APPLE_PASSWORD`, dan `APPLE_TEAM_ID` agar skrip melakukan notarization.
+
+### Windows: MSI installer
+
+Bangun paket Windows pada komputer Windows dengan Visual Studio Build Tools yang menyertakan workload **Desktop development with C++**, Windows SDK, Rust stable MSVC, PowerShell 7, dan .NET SDK. Setelah itu pasang WiX 5:
+
+```powershell
+rustup toolchain install stable-x86_64-pc-windows-msvc
+rustup target add x86_64-pc-windows-msvc
+dotnet tool install --global wix --version 5.0.2
+wix extension add -g WixToolset.UI.wixext/5.0.2 WixToolset.Util.wixext/5.0.2
+git clone https://github.com/storytold/photocraft
+Set-Location photocraft
+pwsh ./packaging/windows/package.ps1 -Arch x64
+```
+
+Skrip membuat `dist/release/photocraft-<versi>-windows-x64.msi` dan ZIP portabel. Gunakan `-Arch arm64` atau `-Arch x86` setelah memasang target Rust serta build tools yang sesuai. Tanpa konfigurasi sertifikat, paket tetap dibuat tetapi tidak ditandatangani; lihat `packaging/windows/sign.ps1` sebelum mendistribusikannya.
+
 Installers for macOS, Windows, Linux, FreeBSD and the web are attached to each [GitHub release](https://github.com/storytold/photocraft/releases). On Linux you can pick an AppImage, a `.deb`, an `.rpm`, a tarball or a Flatpak bundle. The bundle needs the freedesktop runtime from [Flathub](https://flathub.org/setup), which `flatpak` offers to install along with it:
 
 ```sh

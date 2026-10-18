@@ -126,6 +126,7 @@ pub mod layer_tree_ui;
 mod layout_keys;
 pub mod links;
 pub mod liquify_ui;
+pub mod local_ai;
 pub mod magnetic_lasso_ui;
 mod mask_props_ui;
 pub mod mask_thumbs_ui;
@@ -450,6 +451,8 @@ pub type CaptionStyleFn = Box<dyn Fn(&egui::Context) -> CaptionStyle>;
 /// I/O dependencies.
 #[derive(Default)]
 pub struct Services {
+    /// Local AI bridge supplied by the desktop app.
+    pub local_ai: Option<local_ai::Service>,
     /// User-initiated desktop/browser pixel sampling.
     pub screen_pick: Option<screen_picker::Service>,
     /// Decode a file's bytes into a document (PSD, PNG, JPEG, …).
@@ -558,6 +561,7 @@ pub(crate) type HistJob = (DocId, u64, std::sync::mpsc::Receiver<(DocId, f64, st
 type InfoSampleKey = (i32, i32, u64, u32);
 
 pub struct PhotocraftApp {
+    pub local_ai: local_ai::State,
     pub session: Session,
     pub ui: UiState,
     pub services: Services,
@@ -848,6 +852,7 @@ impl PhotocraftApp {
     pub fn new(session: Session, services: Services) -> Self {
         let mut app = Self {
             session,
+            local_ai: Default::default(),
             ui: UiState::default(),
             services,
             canvases: HashMap::new(),
@@ -2031,6 +2036,7 @@ impl eframe::App for PhotocraftApp {
         // The OS title bar (and the taskbar / Alt-Tab entry) follows the active file; with the
         // system title bar this is where the document name lives, as the in-app title is hidden.
         panels::sync_window_title(self, &ctx);
+        local_ai::tick(self, &ctx);
         let chrome = !self.ui.view.hides_chrome();
         if chrome && self.ui.panels.menu_bar {
             panels::title_bar(self, ui);
@@ -2040,6 +2046,9 @@ impl eframe::App for PhotocraftApp {
         }
         if chrome && self.ui.panels.status_bar {
             panels::status_bar(self, ui);
+        }
+        if chrome && self.ui.panels.ai_studio && self.services.local_ai.is_some() {
+            local_ai::panel(self, ui);
         }
         if chrome && self.ui.panels.toolbar {
             panels::toolbar(self, ui);

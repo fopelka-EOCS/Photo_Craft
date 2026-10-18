@@ -1398,6 +1398,7 @@ fn build() -> Vec<CommandSpec> {
             journal: true,
         });
     }
+    v.extend(crate::ai_cmds::specs());
     v.extend(crate::layer_style::specs());
     v.extend(crate::layer_list_cmds::specs());
     v.extend(crate::filters::specs());

@@ -99,6 +99,16 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             if resp.clicked() {
                 app.ui.panels.toolbar_double = !double;
             }
+            if app.services.local_ai.is_some() {
+                let visible = app.ui.panels.ai_studio;
+                let response =
+                    ui.add_sized(vec2(bx, bx), egui::Button::new(RichText::new("AI").size(11.0)).wrap_mode(egui::TextWrapMode::Extend).selected(visible));
+                response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "AI Studio"));
+                if response.on_hover_text(if visible { "Sembunyikan AI Studio" } else { "Tampilkan AI Studio" }).clicked() {
+                    app.ui.panels.ai_studio = !visible;
+                    ui.ctx().request_repaint();
+                }
+            }
             ui.add_space(4.0);
             // Subtle violet wash at the bottom of the toolbar.
             let full = ui.max_rect();

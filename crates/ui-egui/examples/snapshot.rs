@@ -41,6 +41,10 @@ fn main() {
         arg(&args, "--script").map(|s| serde_json::from_str::<Vec<(String, Value)>>(&s).expect("--script must be [[method, params], …]")).unwrap_or_default();
 
     let services = Services {
+        local_ai: args
+            .iter()
+            .any(|a| a == "--local-ai")
+            .then(|| std::sync::Arc::new(|_, _| Err("Preview only".into())) as photocraft_ui_egui::local_ai::Service),
         import: Some(Box::new(|name: &str, bytes: &[u8], depth: usize| {
             photocraft_io::import_with_svg_group_depth(name, bytes, depth).map(|r| (r.document, r.warnings)).map_err(|e| e.to_string())
         })),
