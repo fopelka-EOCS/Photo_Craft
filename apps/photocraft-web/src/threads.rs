@@ -14,6 +14,13 @@ const MAX_DEFAULT: usize = 16;
 /// Workers at most, whatever `?threads=` asks.
 const MAX: usize = 64;
 
+/// How long the app waits for the pool before it starts on one thread. Workers that never get going
+/// (one that fails to load or instantiate the module never reports ready, and wasm-bindgen-rayon
+/// then waits for good) would otherwise keep the page on "Loading" forever; a healthy pool is up in
+/// well under a second.
+#[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+const POOL_WAIT_MS: i32 = 10_000;
+
 /// The `threads=N` value in a page's query (`?webgl&threads=4`), if one parses.
 pub fn requested(query: &str) -> Option<usize> {
     query.trim_start_matches('?').split('&').find_map(|pair| pair.strip_prefix("threads=")?.parse().ok())
@@ -38,9 +45,25 @@ pub fn start() {
     let workers = pool_size(cores, &window.location().search().unwrap_or_default());
     wasm_bindgen_futures::spawn_local(async move {
         let t0 = js_sys::Date::now();
-        match wasm_bindgen_futures::JsFuture::from(wasm_bindgen_rayon::init_thread_pool(workers)).await {
+        let pool = wasm_bindgen_rayon::init_thread_pool(workers);
+        let timed_out = wasm_bindgen::JsValue::from_str("photocraft: worker pool timed out");
+        let wait = js_sys::Promise::new(&mut |done, _| {
+            let late = js_sys::Function::from(wasm_bindgen::prelude::Closure::once_into_js({
+                let timed_out = timed_out.clone();
+                move || {
+                    let _ = done.call1(&wasm_bindgen::JsValue::NULL, &timed_out);
+                }
+            }));
+            let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(&late, POOL_WAIT_MS);
+        });
+        // Whichever settles first. The race also handles the pool's outcome if it comes later: a pool
+        // that starts after the app has used rayon only fails to install itself (rayon's global pool
+        // is set once), inside wasm-bindgen-rayon's own promise, and changes nothing.
+        let first = wasm_bindgen_futures::JsFuture::from(js_sys::Promise::race(&js_sys::Array::of2(&pool, &wait))).await;
+        // Without a pool rayon runs everything on the page's thread, as the single-threaded build does.
+        match first {
+            Ok(v) if v == timed_out => log::warn!("no worker threads after {} s, running on one", POOL_WAIT_MS / 1000),
             Ok(_) => log::info!("worker pool: {} threads, started in {:.0} ms", rayon::current_num_threads(), js_sys::Date::now() - t0),
-            // rayon then runs everything on the page's thread, as the single-threaded build does.
             Err(e) => log::warn!("no worker threads, running on one: {e:?}"),
         }
         crate::web::start();
