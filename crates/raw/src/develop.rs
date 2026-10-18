@@ -192,6 +192,11 @@ pub(crate) fn resolve_neutral(s: &Sensor, opts: &DevelopOptions, sc: &Scale, war
     })
 }
 
+/// The note for colour from [`crate::spectral`]'s matrices.
+pub(crate) fn spectral_note(c: &crate::spectral::Camera) -> String {
+    format!("colour from the measured spectral sensitivities of the {} {} (rawtoaces-data)", c.make, c.model)
+}
+
 /// Develops sensor data.
 pub fn develop_sensor(s: &Sensor, opts: &DevelopOptions) -> Result<Developed> {
     let c = s.crop;
@@ -240,12 +245,18 @@ pub fn develop_sensor(s: &Sensor, opts: &DevelopOptions) -> Result<Developed> {
             l.to_xyz
         }
         (None, Some(m)) => m,
-        (None, None) => {
-            if s.format != RawFormat::Dng && !mono {
-                warnings.push("no colour calibration for this camera; camera colours are treated as sRGB primaries".into());
+        (None, None) => match crate::spectral::for_sensor(s).and_then(|c| c.color_info().balanced_to_xyz_d50(neutral).map(|m| (c, m))) {
+            Some((c, m)) => {
+                warnings.push(spectral_note(c));
+                m
             }
-            color::srgb_to_xyz_d50()
-        }
+            None => {
+                if s.format != RawFormat::Dng && !mono {
+                    warnings.push("no colour calibration for this camera; camera colours are treated as sRGB primaries".into());
+                }
+                color::srgb_to_xyz_d50()
+            }
+        },
     };
     let gain = 2f64.powf(s.baseline_exposure + opts.exposure.clamp(-10.0, 10.0));
     let out_m = color::scale(&color::mul(&color::xyz_d50_to_prophoto(), &to_xyz), gain);

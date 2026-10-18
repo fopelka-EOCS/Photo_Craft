@@ -107,7 +107,7 @@ limit checks peak live development buffers instead of summing disjoint phases. A
 simultaneous scratch bands only when required; normal load balancing and pixels are preserved.
 The default 2 GiB limit is unchanged and excludes caller-owned sensor/document storage.
 
-Files without colour calibration (CR2, NEF, ARW, RW2, ORF, RAF…) have no camera matrix. Every one of
+Files without colour calibration (CR2, NEF, ARW, RW2, ORF, RAF…) carry no camera matrix. Every one of
 them carries a JPEG the camera rendered from the same sensor data, so `fit_look` estimates the
 camera's rendering per file: both the sensor data (white-balanced as `develop` does) and the
 decoded JPEG are reduced to a common grid of at most 256 cells on the long edge, and a 3×3
@@ -120,6 +120,18 @@ the matrix is plausible and the held-out mean CIE76 ΔE drops to at most 85 % of
 Pass it as `DevelopOptions::camera_look`; `develop` then notes "colour fitted to the camera's
 embedded JPEG (mean ΔE …)". The crate cannot decode JPEG itself: `photocraft-io` decodes the
 smallest preview at least 512 pixels long, fits and develops in one go.
+
+Measured camera matrices (`spectral`): for 52 camera models (22 Canon, 11 Nikon, 11 Sony, 3
+Fujifilm, 5 others) plus their aliases and same-sensor bodies (the X-T30, X-T30 II, X-Pro3, X100V,
+X-S10 and X-E4 take the X-T3's), DNG ColorMatrix1/2 and ForwardMatrix1/2 for Standard Illuminant A
+and D65, fitted by LightCraft to the cameras' measured spectral sensitivities from rawtoaces-data
+(Academy Software Foundation, Apache-2.0; the table is copied from LightCraft, see `ATTRIBUTION.md`).
+When no fitted look is used (the fit was rejected), `develop` uses them through the DNG colour model
+instead of the neutral fallback and notes "colour from the measured spectral sensitivities of …".
+When the camera's JPEG is black and white (a film simulation such as Acros, a monochrome picture
+style), `fit_look` keeps the matrices' colour and fits only the tone curve, from the lightness of
+the same cells; it is used when it lowers the held-out mean L\* error to at most 85 % of the
+matrices' without a curve.
 Camera Raw's tuned import fits at the default exposure and as-shot white balance first,
 then applies the user's Exposure, Temperature and Tint to that same rendering.
 The D5100's measured image area is 4928 × 3264 at (8, 8) in a 4992 × 3280
