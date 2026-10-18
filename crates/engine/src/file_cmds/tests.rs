@@ -146,18 +146,18 @@ fn save_a_copy_refuses_the_documents_own_file() {
     open_bytes_as(&mut s, &path, &bytes, None, Some(path.clone())).unwrap();
     s.execute("layer.new.layer", json!({})).unwrap();
     s.execute("edit.fill", json!({"color": "#00ff00"})).unwrap();
-    let mut own = vec![path.clone(), format!("{dir}/./own.png")];
-    #[cfg(unix)]
-    {
-        let link = join(&dir, "link.png");
-        std::fs::hard_link(&path, &link).unwrap();
-        own.push(link);
-    }
-    for p in &own {
+    let link = join(&dir, "link.png");
+    std::fs::hard_link(&path, &link).unwrap();
+    let rev = s.active().unwrap().revision;
+    for p in [path.clone(), format!("{dir}/./own.png"), link] {
         let r = s.execute("file.saveACopy", json!({"path": p}));
         assert!(r.as_ref().is_err_and(|e| e.to_string().contains("overwrite")), "{p}: {r:?}");
         assert!(s.execute("file.saveACopy", json!({"path": p, "overwrite": false})).is_err(), "{p}");
         assert_eq!(std::fs::read(&path).unwrap(), bytes, "{p}");
+        let st = s.active().unwrap();
+        assert_eq!(st.path.as_deref(), Some(path.as_str()), "{p}");
+        assert_eq!(st.revision, rev, "{p}");
+        assert!(st.is_dirty(), "{p}");
     }
     let other = join(&dir, "other.png");
     s.execute("file.saveACopy", json!({"path": other})).unwrap();
