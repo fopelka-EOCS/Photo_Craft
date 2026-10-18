@@ -142,7 +142,7 @@ fn import_button_fills_the_dialog_and_ok_applies_the_set() {
     assert_eq!(h.state().ui.status, "", "the import failed");
     let overrides = field(&h, "overrides");
     assert_eq!(overrides["filter.blur.gaussianBlur"], json!("Cmd+Ctrl+Alt+G"));
-    assert!(overrides.get("edit.preferences.general").is_none(), "Cmd+, is Preferences' default: {overrides}");
+    assert_eq!(overrides["edit.preferences.general"], json!("Cmd+K"), "the kys assigns Cmd+K; our default is Cmd+,: {overrides}");
     assert_eq!(overrides["filter.lastFilter"], json!("Cmd+F"));
     assert!(overrides.get("edit.undo").is_none(), "Cmd+Z is the default again: {overrides}");
     assert!(overrides.get("select.all").is_none(), "already the default: {overrides}");
@@ -159,7 +159,7 @@ fn import_button_fills_the_dialog_and_ok_applies_the_set() {
     let app = h.state();
     assert_eq!(crate::shortcuts::effective_shortcut(app, "edit.undo", Some("Cmd+Z")).as_deref(), Some("Cmd+Z"));
     assert_eq!(crate::shortcuts::effective_shortcut(app, "filter.blur.gaussianBlur", None).as_deref(), Some("Cmd+Ctrl+Alt+G"));
-    assert_eq!(crate::shortcuts::effective_shortcut(app, "edit.preferences.general", Some("Cmd+,")).as_deref(), Some("Cmd+,"));
+    assert_eq!(crate::shortcuts::effective_shortcut(app, "edit.preferences.general", Some("Cmd+,")).as_deref(), Some("Cmd+K"));
     // Cmd+F went to Last Filter, so Search (Cmd+F by default) lost its key.
     assert_eq!(crate::shortcuts::effective_shortcut(app, "edit.search", Some("Cmd+F")), None);
     assert_eq!(crate::shortcuts::effective_shortcut(app, "filter.lastFilter", Some("Cmd+Alt+F")).as_deref(), Some("Cmd+F"));
