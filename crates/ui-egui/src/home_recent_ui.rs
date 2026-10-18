@@ -237,12 +237,23 @@ fn load_thumbnail_image_bounded(path: &str, file_len: u64) -> Option<ColorImage>
         return None;
     }
 
+    // Guard against decompression bombs: bound decoder allocation and dimensions up front
+    let decode_opts = photocraft_codecs::DecodeOptions {
+        limits: photocraft_codecs::Limits {
+            max_width: 4096,
+            max_height: 4096,
+            max_pixels: 4096 * 4096,
+            max_alloc: 4096 * 4096 * 4,
+        },
+        ..Default::default()
+    };
+
     // 2. If .pcraft, read the embedded thumbnail PNG
     if ext.eq_ignore_ascii_case("pcraft") {
         if std_path.is_dir() {
             let thumb_path = std_path.join("thumb.png");
             if let Ok(bytes) = std::fs::read(thumb_path)
-                && let Ok(img) = photocraft_codecs::decode(&bytes)
+                && let Ok(img) = photocraft_codecs::decode_with(&bytes, &decode_opts)
             {
                 let rgba = img.convert(photocraft_codecs::ChannelLayout::Rgba, photocraft_codecs::SampleType::U8);
                 if rgba.data().len() == rgba.width() as usize * rgba.height() as usize * 4 {
@@ -254,7 +265,7 @@ fn load_thumbnail_image_bounded(path: &str, file_len: u64) -> Option<ColorImage>
             }
         } else if let Ok(bytes) = std::fs::read(std_path)
             && let Ok(Some(png_bytes)) = photocraft_format::read_thumbnail(&bytes)
-            && let Ok(img) = photocraft_codecs::decode(&png_bytes)
+            && let Ok(img) = photocraft_codecs::decode_with(&png_bytes, &decode_opts)
         {
             let rgba = img.convert(photocraft_codecs::ChannelLayout::Rgba, photocraft_codecs::SampleType::U8);
             if rgba.data().len() == rgba.width() as usize * rgba.height() as usize * 4 {
@@ -269,7 +280,7 @@ fn load_thumbnail_image_bounded(path: &str, file_len: u64) -> Option<ColorImage>
 
     // 3. Flat raster formats (PNG, JPG, WebP, TIFF, GIF, BMP, etc.)
     if let Ok(bytes) = std::fs::read(std_path)
-        && let Ok(img) = photocraft_codecs::decode(&bytes)
+        && let Ok(img) = photocraft_codecs::decode_with(&bytes, &decode_opts)
     {
         let (w, h) = img.dimensions();
         // Guard against decompression bombs: don't expand > 4096 images to gigabytes of RGBA
@@ -505,8 +516,8 @@ pub(crate) fn recent_header(ui: &mut Ui, is_grid: &mut bool, total_width: f32) {
     // Container box for the toggles, aligned flush to the right edge of header_rect
     let box_size = vec2(60.0, 28.0);
     let box_rect = Rect::from_min_size(pos2(header_rect.right() - box_size.x, header_rect.top()), box_size);
-    ui.painter().rect_filled(box_rect, 4.0, Color32::from_black_alpha(70));
-    ui.painter().rect_stroke(box_rect, 4.0, Stroke::new(1.0, Color32::from_white_alpha(25)), egui::StrokeKind::Inside);
+    ui.painter().rect_filled(box_rect, 4.0, t.field);
+    ui.painter().rect_stroke(box_rect, 4.0, Stroke::new(1.0, t.field_border), egui::StrokeKind::Inside);
 
     let grid_rect = Rect::from_min_size(box_rect.min + vec2(2.0, 2.0), vec2(28.0, 24.0));
     let list_rect = Rect::from_min_size(pos2(box_rect.min.x + 30.0, box_rect.min.y + 2.0), vec2(28.0, 24.0));
@@ -522,15 +533,15 @@ pub(crate) fn recent_header(ui: &mut Ui, is_grid: &mut bool, total_width: f32) {
 
     if *is_grid {
         ui.painter().rect_filled(grid_rect, 3.0, t.hover);
-        ui.painter().rect_stroke(grid_rect, 3.0, Stroke::new(1.0, Color32::from_rgb(26, 115, 232)), egui::StrokeKind::Inside);
+        ui.painter().rect_stroke(grid_rect, 3.0, Stroke::new(1.0, t.accent), egui::StrokeKind::Inside);
     }
     if !*is_grid {
         ui.painter().rect_filled(list_rect, 3.0, t.hover);
-        ui.painter().rect_stroke(list_rect, 3.0, Stroke::new(1.0, Color32::from_rgb(26, 115, 232)), egui::StrokeKind::Inside);
+        ui.painter().rect_stroke(list_rect, 3.0, Stroke::new(1.0, t.accent), egui::StrokeKind::Inside);
     }
 
-    let grid_tint = if *is_grid { Color32::WHITE } else { t.text_dim };
-    let list_tint = if !*is_grid { Color32::WHITE } else { t.text_dim };
+    let grid_tint = if *is_grid { t.text } else { t.text_dim };
+    let list_tint = if !*is_grid { t.text } else { t.text_dim };
 
     icons::paint(ui, grid_rect, "grid-2x2", 15.0, grid_tint);
     icons::paint(ui, list_rect, "marquee-row", 15.0, list_tint);
@@ -556,12 +567,12 @@ pub(crate) fn render_grid_card(
     let hovered = ui.rect_contains_pointer(card_rect);
 
     // Card background & border
-    let bg_fill = Color32::from_rgb(38, 38, 38);
+    let bg_fill = t.card;
     ui.painter().rect_filled(card_rect, 6.0, bg_fill);
     let border_stroke = if hovered {
-        Stroke::new(1.0, Color32::from_rgb(26, 115, 232))
+        Stroke::new(1.0, t.accent)
     } else {
-        Stroke::new(1.0, Color32::from_white_alpha(20))
+        Stroke::new(1.0, t.card_border)
     };
     ui.painter().rect_stroke(card_rect, 6.0, border_stroke, egui::StrokeKind::Inside);
 
@@ -570,11 +581,11 @@ pub(crate) fn render_grid_card(
         card_rect.min + vec2(1.0, 1.0),
         vec2(GRID_CARD_WIDTH - 2.0, GRID_PREVIEW_HEIGHT),
     );
-    // Dark inner well for preview area with rounded top corners
+    // Inner well for preview area with rounded top corners
     ui.painter().rect_filled(
         preview_rect,
         egui::CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 },
-        Color32::from_rgb(20, 20, 20),
+        t.field,
     );
 
     if let Some(tex) = thumb {
@@ -595,7 +606,7 @@ pub(crate) fn render_grid_card(
 
     // Small photo icon badge at bottom-left of preview
     let badge_rect = Rect::from_center_size(pos2(preview_rect.left() + 16.0, preview_rect.bottom() - 14.0), vec2(16.0, 16.0));
-    icons::paint(ui, badge_rect, "image", 13.0, Color32::from_white_alpha(190));
+    icons::paint(ui, badge_rect, "image", 13.0, t.text_dim);
 
     // Bottom info area
     let info_top = preview_rect.bottom() + 8.0;
@@ -603,8 +614,8 @@ pub(crate) fn render_grid_card(
     let text_max_w = (card_rect.right() - text_x - 12.0).max(10.0);
 
     // Filename
-    let name_galley = crate::tab_strip::elided(ui, name, crate::theme::semibold(13.0), Color32::WHITE, text_max_w);
-    ui.painter().galley(pos2(text_x, info_top), name_galley, Color32::WHITE);
+    let name_galley = crate::tab_strip::elided(ui, name, crate::theme::semibold(13.0), t.text, text_max_w);
+    ui.painter().galley(pos2(text_x, info_top), name_galley, t.text);
 
     // Monitor icon + folder / "On your computer"
     let monitor_rect = Rect::from_center_size(pos2(text_x + 6.0, info_top + 28.0), vec2(14.0, 14.0));
@@ -640,42 +651,34 @@ pub(crate) fn render_grid_card(
 }
 
 /// Render a dashed/hairline drop target card inside the recent grid.
-pub(crate) fn render_inline_drop_card(ui: &mut Ui) -> bool {
+pub(crate) fn render_inline_drop_card(ui: &mut Ui, drop_text: &str) -> bool {
     let t = Tokens::get(ui.ctx());
     let (card_rect, resp) = ui.allocate_exact_size(vec2(GRID_CARD_WIDTH, GRID_CARD_HEIGHT), Sense::click());
     let hovered = ui.rect_contains_pointer(card_rect);
 
-    let border_color = if hovered {
-        Color32::from_white_alpha(80)
-    } else {
-        Color32::from_white_alpha(28)
-    };
-    let bg_color = if hovered {
-        Color32::from_white_alpha(10)
-    } else {
-        Color32::from_white_alpha(3)
-    };
+    let border_color = if hovered { t.accent } else { t.separator };
+    let bg_color = if hovered { t.hover } else { Color32::TRANSPARENT };
 
     ui.painter().rect_filled(card_rect, 6.0, bg_color);
     ui.painter().rect_stroke(card_rect, 6.0, Stroke::new(1.0, border_color), egui::StrokeKind::Inside);
 
     // Centered plus / image icon
     let icon_box = Rect::from_center_size(pos2(card_rect.center().x, card_rect.center().y - 20.0), vec2(36.0, 36.0));
-    let icon_color = if hovered { Color32::WHITE } else { t.text_dim };
+    let icon_color = if hovered { t.text } else { t.text_dim };
     icons::paint(ui, icon_box, "image", 28.0, icon_color);
 
     // Message
-    let drop_text = tl!("Drop an image or PSD anywhere to open it.");
     let max_w = card_rect.width() - 24.0;
+    let text_color = if hovered { t.text } else { t.text_faint };
     let job = egui::text::LayoutJob::simple(
         drop_text.to_string(),
         egui::FontId::proportional(11.5),
-        if hovered { t.text } else { t.text_faint },
+        text_color,
         max_w,
     );
     let galley = ui.painter().layout_job(job);
     let text_pos = pos2(card_rect.center().x - galley.size().x / 2.0, card_rect.center().y + 8.0);
-    ui.painter().galley(text_pos, galley, t.text_faint);
+    ui.painter().galley(text_pos, galley, text_color);
 
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Open…")));
     resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(tl!("Open…")).clicked()
@@ -812,7 +815,8 @@ pub(crate) fn show_home_recent(app: &mut PhotocraftApp, ui: &mut Ui, recent: &[S
 
                 // Inline drop card as the last card in the grid
                 let drop_idx = recent.len();
-                if render_inline_drop_card(ui) {
+                let drop_hint = crate::canvas::start_screen_drop_hint(app);
+                if render_inline_drop_card(ui, &drop_hint) {
                     action_to_take = Some(RecentAction::OpenDialog);
                 }
                 if (drop_idx + 1).is_multiple_of(cols) {
@@ -950,6 +954,21 @@ mod tests {
 
         let start_x = h.get_by_label("Recent").rect().min.x;
         assert_eq!(box_right, start_x + content_w, "toggle buttons must align flush to content right edge");
+    }
+
+    #[test]
+    fn inline_drop_card_renders_hint_and_open_button() {
+        let hint = "Drop an image or PSD anywhere to open it.";
+        let mut clicked = false;
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(400.0, 400.0)).build_ui(|ui| {
+            if render_inline_drop_card(ui, hint) {
+                clicked = true;
+            }
+        });
+        PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::default());
+        h.run_steps(2);
+        assert!(h.query_by_label("Open…").is_some());
+        let _ = clicked;
     }
 
     #[test]

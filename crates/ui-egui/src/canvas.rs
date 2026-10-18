@@ -2783,6 +2783,8 @@ fn start_screen(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         let card = Rect::from_center_size(area.center(), egui::vec2(card_w, (area.height() - 40.0).max(300.0)));
         ui.scope_builder(egui::UiBuilder::new().max_rect(card), |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                render_start_actions_row(app, ui, card.width());
+                ui.add_space(16.0);
                 render_start_content(app, ui, &recent, card.width());
             });
         });
@@ -2811,6 +2813,58 @@ fn start_screen(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 });
         });
     }
+}
+
+fn render_start_actions_row(app: &mut PhotocraftApp, ui: &mut egui::Ui, avail_w: f32) {
+    let t = crate::theme::Tokens::get(ui.ctx());
+    let btn_w = ((avail_w - 12.0) / 2.0).clamp(100.0, 150.0);
+
+    ui.horizontal(|ui| {
+        // [ New file ]
+        let new_label = tl!("New file");
+        let (new_rect, new_resp) = ui.allocate_exact_size(egui::vec2(btn_w, 32.0), Sense::click());
+        new_resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, new_label));
+        let new_resp = new_resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+        let new_bg = if new_resp.hovered() {
+            egui::Color32::from_rgb(41, 131, 245)
+        } else {
+            egui::Color32::from_rgb(26, 115, 232)
+        };
+        ui.painter().rect_filled(new_rect, 4.0, new_bg);
+        ui.painter().text(
+            new_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            new_label,
+            crate::theme::semibold(13.0),
+            egui::Color32::WHITE,
+        );
+        if new_resp.clicked() {
+            let fields = app.new_document_fields();
+            app.ui.open_dialog(crate::state::DialogKind::NewDocument, fields);
+        }
+
+        ui.add_space(8.0);
+
+        // [ Open… ]
+        let open_label = tl!("Open…");
+        let (open_rect, open_resp) = ui.allocate_exact_size(egui::vec2(btn_w, 32.0), Sense::click());
+        open_resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, open_label));
+        let open_resp = open_resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+        if open_resp.hovered() {
+            ui.painter().rect_filled(open_rect, 4.0, t.hover);
+        }
+        ui.painter().rect_stroke(open_rect, 4.0, egui::Stroke::new(1.0, t.separator), egui::StrokeKind::Inside);
+        ui.painter().text(
+            open_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            open_label,
+            crate::theme::semibold(13.0),
+            t.text,
+        );
+        if open_resp.clicked() {
+            let _ = app.open_dialog_file();
+        }
+    });
 }
 
 fn render_start_rail(app: &mut PhotocraftApp, ui: &mut egui::Ui, rail_w: f32) {
@@ -2851,7 +2905,7 @@ fn render_start_rail(app: &mut PhotocraftApp, ui: &mut egui::Ui, rail_w: f32) {
     if open_resp.hovered() {
         ui.painter().rect_filled(open_rect, 4.0, t.hover);
     }
-    ui.painter().rect_stroke(open_rect, 4.0, egui::Stroke::new(1.0, egui::Color32::from_white_alpha(35)), egui::StrokeKind::Inside);
+    ui.painter().rect_stroke(open_rect, 4.0, egui::Stroke::new(1.0, t.separator), egui::StrokeKind::Inside);
     ui.painter().text(
         open_rect.center(),
         egui::Align2::CENTER_CENTER,
@@ -2870,7 +2924,7 @@ fn render_start_rail(app: &mut PhotocraftApp, ui: &mut egui::Ui, rail_w: f32) {
     let (sep_rect, _) = ui.allocate_exact_size(egui::vec2(sep_w, 1.0), Sense::hover());
     ui.painter().line_segment(
         [sep_rect.min, egui::pos2(sep_rect.max.x, sep_rect.min.y)],
-        egui::Stroke::new(1.0, egui::Color32::from_white_alpha(26)),
+        egui::Stroke::new(1.0, t.separator),
     );
 
     ui.add_space(14.0);
@@ -2879,15 +2933,15 @@ fn render_start_rail(app: &mut PhotocraftApp, ui: &mut egui::Ui, rail_w: f32) {
     let (home_rect, home_resp) = ui.allocate_exact_size(egui::vec2(rail_w, 32.0), Sense::click());
     home_resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Home")));
     let active_bar = Rect::from_min_size(egui::pos2(home_rect.left(), home_rect.center().y - 7.0), egui::vec2(1.5, 14.0));
-    ui.painter().rect_filled(active_bar, 1.0, egui::Color32::from_white_alpha(110));
+    ui.painter().rect_filled(active_bar, 1.0, t.accent);
     let house_box = Rect::from_center_size(egui::pos2(home_rect.left() + 20.0, home_rect.center().y), egui::vec2(16.0, 16.0));
-    crate::icons::paint(ui, house_box, "house", 16.0, egui::Color32::WHITE);
+    crate::icons::paint(ui, house_box, "house", 16.0, t.text);
     ui.painter().text(
         egui::pos2(home_rect.left() + 34.0, home_rect.center().y),
         egui::Align2::LEFT_CENTER,
         tl!("Home"),
         crate::theme::semibold(13.5),
-        egui::Color32::WHITE,
+        t.text,
     );
 
     ui.add_space(4.0);
@@ -2955,6 +3009,7 @@ fn render_rail_link(app: &mut PhotocraftApp, ui: &mut egui::Ui, rail_w: f32, lab
 }
 
 fn render_start_content(app: &mut PhotocraftApp, ui: &mut egui::Ui, recent: &[String], content_w: f32) {
+    let t = crate::theme::Tokens::get(ui.ctx());
     ui.add_space(8.0);
 
     // Top Row: [01] PhotoCraft
@@ -2975,10 +3030,10 @@ fn render_start_content(app: &mut PhotocraftApp, ui: &mut egui::Ui, recent: &[St
         let title_galley = ui.painter().layout_no_wrap(
             tl!("PhotoCraft").into(),
             crate::theme::semibold(20.0),
-            egui::Color32::WHITE,
+            t.text,
         );
         let (title_r, _) = ui.allocate_exact_size(title_galley.size(), Sense::hover());
-        ui.painter().galley(title_r.min, title_galley, egui::Color32::WHITE);
+        ui.painter().galley(title_r.min, title_galley, t.text);
     });
 
     ui.add_space(18.0);
@@ -2987,7 +3042,7 @@ fn render_start_content(app: &mut PhotocraftApp, ui: &mut egui::Ui, recent: &[St
     let (sep_r, _) = ui.allocate_exact_size(egui::vec2(content_w, 1.0), Sense::hover());
     ui.painter().line_segment(
         [sep_r.min, egui::pos2(sep_r.max.x, sep_r.min.y)],
-        egui::Stroke::new(1.0, egui::Color32::from_white_alpha(22)),
+        egui::Stroke::new(1.0, t.separator),
     );
 
     ui.add_space(24.0);
@@ -3054,7 +3109,7 @@ fn render_first_run_content(app: &mut PhotocraftApp, ui: &mut egui::Ui, content_
 }
 
 /// Wayland has no native file drops (winit 0.30, #386), so the hint offers File › Open and paste.
-fn start_screen_drop_hint(app: &PhotocraftApp) -> std::borrow::Cow<'static, str> {
+pub(crate) fn start_screen_drop_hint(app: &PhotocraftApp) -> std::borrow::Cow<'static, str> {
     if app.services.is_wayland {
         crate::i18n::fmt(tl!("Use File › Open, or paste a copied image with {paste}."), &[("paste", &crate::notices::paste_hint(app))]).into()
     } else {
@@ -7326,6 +7381,27 @@ mod tests {
         h.run_steps(3);
         assert!(h.query_by_label("hidden.psd").is_none(), "hidden when off");
         assert_eq!(h.state().0.ui.recent_files.len(), 1, "the list itself is kept");
+    }
+
+    #[test]
+    fn start_screen_narrow_window_renders_actions_row() {
+        use egui_kittest::kittest::Queryable;
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.push_recent("/tmp/photocraft-narrow/test.psd");
+        // Window narrower than 640px (e.g. 500px width split-screen)
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(500.0, 600.0)).build_ui_state(
+            |ui, (app, ready): &mut (PhotocraftApp, bool)| {
+                if *ready {
+                    egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| document_area(app, ui));
+                }
+            },
+            (app, false),
+        );
+        PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::default());
+        h.state_mut().1 = true;
+        h.run_steps(3);
+        assert!(h.query_by_label("New file").is_some(), "New file button must be present in narrow mode");
+        assert!(h.query_all_by_label("Open…").next().is_some(), "Open… button must be present in narrow mode");
     }
 
     /// The Home screen's × takes a file off Recent without opening it, and its right-click menu
