@@ -1,224 +1,26 @@
 //! The About window's credits: every contributor (GitHub login always; display and real names only
 //! with recorded consent) and the AI models that helped. The tables are baked into the binary by
-//! build.rs from contributors/contributors.json (craftrules standards/contributors.md); nothing is
-//! read at run time. UI strings go through `tl!` (column abbreviations like `+LOC` stay as they are).
+//! build.rs through craft-credits from contributors/contributors.json (craftrules
+//! standards/contributors.md); nothing is read at run time. The data, sorting and formatting come
+//! from craft-credits; UI strings go through `tl!` (column abbreviations like `+LOC` stay as they are).
 
-use std::cmp::Ordering;
-
+use craft_credits::fmt::group;
+use craft_credits::{Contributor, Model, NameMode, SortKey, sorted};
 use egui::RichText;
 
 use crate::PhotocraftApp;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Contributor {
-    pub login: &'static str,
-    pub display_name: Option<&'static str>,
-    pub real_name: Option<&'static str>,
-    pub prs: u64,
-    pub commits: u64,
-    pub lines_added: u64,
-    pub lines_deleted: u64,
-    pub binary_added: u64,
-    pub binary_deleted: u64,
-    /// ISO 8601 UTC; empty for someone credited only through a merged PR.
-    pub first_commit: &'static str,
-    pub last_commit: &'static str,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Model {
-    pub company: &'static str,
-    pub model: &'static str,
-    pub version: &'static str,
-    pub commits: u64,
-    pub lines_added: u64,
-    pub lines_deleted: u64,
-}
-
 include!(concat!(env!("OUT_DIR"), "/credits.rs"));
 
-/// Which name to show. Display and real names fall back to the `@username` when not given.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum NameMode {
-    #[default]
-    Username,
-    DisplayName,
-    RealName,
+/// A table header in the UI language. The symbols (`PRs`, `+LOC`, …) stay as they are.
+fn header_label(k: SortKey) -> &'static str {
+    let h = k.label().1;
+    if craft_credits::UI_STRINGS.contains(&h) { tl!(h) } else { h }
 }
 
-impl NameMode {
-    pub const ALL: [NameMode; 3] = [NameMode::Username, NameMode::DisplayName, NameMode::RealName];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            NameMode::Username => tl!("Username"),
-            NameMode::DisplayName => tl!("Display name"),
-            NameMode::RealName => tl!("Real name"),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum SortKey {
-    Name,
-    Prs,
-    Commits,
-    LinesAdded,
-    LinesDeleted,
-    LinesDelta,
-    BinaryAdded,
-    BinaryDeleted,
-    #[default]
-    FirstCommit,
-    LastCommit,
-}
-
-impl SortKey {
-    pub const ALL: [SortKey; 10] = [
-        SortKey::Name,
-        SortKey::Prs,
-        SortKey::Commits,
-        SortKey::LinesAdded,
-        SortKey::LinesDeleted,
-        SortKey::LinesDelta,
-        SortKey::BinaryAdded,
-        SortKey::BinaryDeleted,
-        SortKey::FirstCommit,
-        SortKey::LastCommit,
-    ];
-
-    /// Menu label and table header, in the UI language.
-    pub fn label(self) -> (&'static str, &'static str) {
-        match self {
-            SortKey::Name => (tl!("Name (A–Z)"), tl!("Name")),
-            SortKey::Prs => (tl!("Merged PRs"), "PRs"),
-            SortKey::Commits => (tl!("Commits"), tl!("Commits")),
-            SortKey::LinesAdded => (tl!("Lines added"), "+LOC"),
-            SortKey::LinesDeleted => (tl!("Lines deleted"), "−LOC"),
-            SortKey::LinesDelta => (tl!("Line delta"), "ΔLOC"),
-            SortKey::BinaryAdded => (tl!("Binary assets added"), "+Bin"),
-            SortKey::BinaryDeleted => (tl!("Binary assets removed"), "−Bin"),
-            SortKey::FirstCommit => (tl!("First commit"), tl!("First")),
-            SortKey::LastCommit => (tl!("Last commit"), tl!("Last")),
-        }
-    }
-
-    /// Names and dates read naturally oldest/A first; counts read biggest first.
-    pub fn default_ascending(self) -> bool {
-        matches!(self, SortKey::Name | SortKey::FirstCommit | SortKey::LastCommit)
-    }
-
-    /// Counts line up on the right of their column; names and dates read from the left.
-    fn numeric(self) -> bool {
-        !self.default_ascending()
-    }
-
-    /// The table cell for `c` (the name column shows `c.name(..)` as a link instead).
-    fn cell(self, c: &Contributor) -> String {
-        match self {
-            SortKey::Name => c.login.to_string(),
-            SortKey::Prs => group(c.prs),
-            SortKey::Commits => group(c.commits),
-            SortKey::LinesAdded => group(c.lines_added),
-            SortKey::LinesDeleted => group(c.lines_deleted),
-            SortKey::LinesDelta => signed(c.lines_delta()),
-            SortKey::BinaryAdded => group(c.binary_added),
-            SortKey::BinaryDeleted => group(c.binary_deleted),
-            SortKey::FirstCommit => day(c.first_commit).to_string(),
-            SortKey::LastCommit => day(c.last_commit).to_string(),
-        }
-    }
-}
-
-impl Contributor {
-    pub fn name(&self, mode: NameMode) -> String {
-        let chosen = match mode {
-            NameMode::Username => None,
-            NameMode::DisplayName => self.display_name,
-            NameMode::RealName => self.real_name,
-        };
-        chosen.map_or_else(|| format!("@{}", self.login), str::to_string)
-    }
-
-    pub fn lines_delta(&self) -> i128 {
-        i128::from(self.lines_added) - i128::from(self.lines_deleted)
-    }
-
-    /// One line with everything we know, for tooltips.
-    pub fn summary(&self) -> String {
-        crate::i18n::fmt(
-            tl!("@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}"),
-            &[
-                ("login", self.login),
-                ("prs", &group(self.prs)),
-                ("commits", &group(self.commits)),
-                ("added", &group(self.lines_added)),
-                ("deleted", &group(self.lines_deleted)),
-                ("delta", &signed(self.lines_delta())),
-                ("binAdded", &group(self.binary_added)),
-                ("binDeleted", &group(self.binary_deleted)),
-                ("first", day(self.first_commit)),
-                ("last", day(self.last_commit)),
-            ],
-        )
-    }
-}
-
-/// Alphabetical key: case-insensitive, ignoring the `@` of usernames.
-fn name_key(name: &str) -> String {
-    name.trim_start_matches('@').to_lowercase()
-}
-
-fn compare(a: &Contributor, b: &Contributor, mode: NameMode, key: SortKey) -> Ordering {
-    match key {
-        SortKey::Name => name_key(&a.name(mode)).cmp(&name_key(&b.name(mode))),
-        SortKey::Prs => a.prs.cmp(&b.prs),
-        SortKey::Commits => a.commits.cmp(&b.commits),
-        SortKey::LinesAdded => a.lines_added.cmp(&b.lines_added),
-        SortKey::LinesDeleted => a.lines_deleted.cmp(&b.lines_deleted),
-        SortKey::LinesDelta => a.lines_delta().cmp(&b.lines_delta()),
-        SortKey::BinaryAdded => a.binary_added.cmp(&b.binary_added),
-        SortKey::BinaryDeleted => a.binary_deleted.cmp(&b.binary_deleted),
-        // A PR-only contributor (no commit date) sorts after everyone with a date.
-        SortKey::FirstCommit => dated(a.first_commit).cmp(&dated(b.first_commit)),
-        SortKey::LastCommit => dated(a.last_commit).cmp(&dated(b.last_commit)),
-    }
-}
-
-fn dated(d: &str) -> (bool, &str) {
-    (d.is_empty(), d)
-}
-
-/// Contributors in display order. Ties fall back to the name (A–Z) so the order is stable.
-pub fn sorted(list: &[Contributor], mode: NameMode, key: SortKey, ascending: bool) -> Vec<&Contributor> {
-    let mut v: Vec<&Contributor> = list.iter().collect();
-    v.sort_by(|a, b| {
-        let o = compare(a, b, mode, key);
-        let o = if ascending { o } else { o.reverse() };
-        o.then_with(|| compare(a, b, mode, SortKey::Name)).then_with(|| a.login.cmp(b.login))
-    });
-    v
-}
-
-fn group(n: u64) -> String {
-    let s = n.to_string();
-    let mut out = String::with_capacity(s.len() + s.len() / 3);
-    for (i, ch) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(ch);
-    }
-    out
-}
-
-fn signed(n: i128) -> String {
-    let g = group(u64::try_from(n.unsigned_abs()).unwrap_or(u64::MAX));
-    if n < 0 { format!("−{g}") } else { format!("+{g}") }
-}
-
-fn day(iso: &str) -> &str {
-    if iso.is_empty() { "—" } else { iso.get(..10).unwrap_or(iso) }
+/// One line with everything we know about `c`, for tooltips.
+fn summary(c: &Contributor) -> String {
+    c.summary_in(tl!(craft_credits::SUMMARY))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -259,16 +61,16 @@ fn contributors_in(app: &mut PhotocraftApp, ui: &mut egui::Ui, contributors: &[C
     ui.horizontal_wrapped(|ui| {
         ui.label(tl!("Show"));
         for m in NameMode::ALL {
-            if ui.selectable_label(v.names == m, m.label()).clicked() {
+            if ui.selectable_label(v.names == m, tl!(m.label())).clicked() {
                 v.names = m;
             }
         }
         ui.separator();
         ui.label(tl!("Sort"));
         let (press, close) = crate::press_menu::PressCombo::before(ui, "credits_sort");
-        let sort = egui::ComboBox::from_id_salt("credits_sort").selected_text(v.key.label().0).close_behavior(close).show_ui(ui, |ui| {
+        let sort = egui::ComboBox::from_id_salt("credits_sort").selected_text(tl!(v.key.label().0)).close_behavior(close).show_ui(ui, |ui| {
             for k in SortKey::ALL {
-                let item = ui.selectable_label(v.key == k, k.label().0);
+                let item = ui.selectable_label(v.key == k, tl!(k.label().0));
                 if press.chosen(ui, &item) {
                     v.key = k;
                     v.ascending = k.default_ascending();
@@ -332,7 +134,7 @@ fn table_height(ui: &egui::Ui, rows: usize) -> f32 {
 /// desktop build can't rely on (egui_winit needs its "links" feature, which we don't enable).
 fn link(app: &mut PhotocraftApp, ui: &mut egui::Ui, c: &Contributor, names: NameMode) -> egui::Response {
     let url = format!("https://github.com/{}", c.login);
-    let r = ui.add(egui::Link::new(c.name(names))).on_hover_text(c.summary());
+    let r = ui.add(egui::Link::new(c.name(names))).on_hover_text(summary(c));
     if r.clicked() {
         crate::links::open(app, ui.ctx(), &url);
     }
@@ -399,7 +201,7 @@ fn table(app: &mut PhotocraftApp, ui: &mut egui::Ui, list: &[&Contributor], v: &
         .iter()
         .map(|&k| {
             let cells: Vec<String> = list.iter().map(|c| k.cell(c)).collect();
-            (k != SortKey::Name).then(|| column_width(ui, k.label().1, cells.iter().map(String::as_str)))
+            (k != SortKey::Name).then(|| column_width(ui, header_label(k), cells.iter().map(String::as_str)))
         })
         .collect();
     credits_table(
@@ -412,7 +214,7 @@ fn table(app: &mut PhotocraftApp, ui: &mut egui::Ui, list: &[&Contributor], v: &
             for k in SortKey::ALL {
                 header.col(|ui| {
                     let sort = (v.key == k).then_some(v.ascending);
-                    let (long, short) = k.label();
+                    let (long, short) = (tl!(k.label().0), header_label(k));
                     if header_cell(ui, &t, short, k.numeric(), Some(sort)).on_hover_text(long).clicked() {
                         if v.key == k {
                             v.ascending = !v.ascending;
@@ -543,77 +345,6 @@ fn models_in(ui: &mut egui::Ui, models: &[Model], total_commits: u64) {
             });
         },
     );
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn c(login: &'static str, display: Option<&'static str>, real: Option<&'static str>, added: u64, deleted: u64, first: &'static str) -> Contributor {
-        Contributor {
-            login,
-            display_name: display,
-            real_name: real,
-            prs: 0,
-            commits: 1,
-            lines_added: added,
-            lines_deleted: deleted,
-            binary_added: 0,
-            binary_deleted: 0,
-            first_commit: first,
-            last_commit: first,
-        }
-    }
-
-    fn people() -> [Contributor; 4] {
-        [
-            c("zed", None, None, 5, 50, "2026-01-02T00:00:00Z"),
-            c("Bob", Some("Ann"), None, 10, 0, "2026-01-01T00:00:00Z"),
-            c("alice", None, None, 7, 1, ""),
-            c("carol", None, Some("Dana"), 1, 0, "2026-01-03T00:00:00Z"),
-        ]
-    }
-
-    fn logins(v: &[&Contributor]) -> Vec<&'static str> {
-        v.iter().map(|c| c.login).collect()
-    }
-
-    #[test]
-    fn names_fall_back_to_the_username() {
-        let p = c("bob", Some("Bobby"), None, 0, 0, "");
-        assert_eq!(p.name(NameMode::Username), "@bob");
-        assert_eq!(p.name(NameMode::DisplayName), "Bobby");
-        assert_eq!(p.name(NameMode::RealName), "@bob");
-    }
-
-    #[test]
-    fn alphabetical_ignores_at_and_case() {
-        let all = people();
-        let v = sorted(&all, NameMode::Username, SortKey::Name, true);
-        assert_eq!(logins(&v), ["alice", "Bob", "carol", "zed"]);
-        let v = sorted(&all, NameMode::DisplayName, SortKey::Name, true);
-        assert_eq!(logins(&v), ["alice", "Bob", "carol", "zed"]); // "Ann" sorts with the @usernames
-        let v = sorted(&all, NameMode::RealName, SortKey::Name, false);
-        assert_eq!(logins(&v), ["zed", "carol", "Bob", "alice"]); // "Dana" between bob and zed
-    }
-
-    #[test]
-    fn delta_and_dates() {
-        let all = people();
-        let v = sorted(&all, NameMode::Username, SortKey::LinesDelta, false);
-        assert_eq!(logins(&v), ["Bob", "alice", "carol", "zed"]);
-        let v = sorted(&all, NameMode::Username, SortKey::FirstCommit, true);
-        assert_eq!(logins(&v), ["Bob", "zed", "carol", "alice"]); // undated last
-    }
-
-    #[test]
-    fn formatting() {
-        assert_eq!(group(1234567), "1,234,567");
-        assert_eq!(group(12), "12");
-        assert_eq!(signed(-1000), "−1,000");
-        assert_eq!(day("2026-10-07T18:45:23Z"), "2026-10-07");
-        assert_eq!(day(""), "—");
-    }
 }
 
 #[cfg(test)]

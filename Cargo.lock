@@ -1223,6 +1223,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-credits"
+version = "0.1.0"
+source = "git+https://github.com/zuujiscom/craft-libs?rev=3d8dca51d78f8a875b379aec7a23afcd3ec30391#3d8dca51d78f8a875b379aec7a23afcd3ec30391"
+dependencies = [
+ "serde_json",
+ "toml",
+]
+
+[[package]]
 name = "craft-docpath"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=82a24b006eefa036b43c09a67fb9a3fbd17ffe63#82a24b006eefa036b43c09a67fb9a3fbd17ffe63"
@@ -5016,6 +5025,7 @@ name = "photocraft-ui-egui"
 version = "0.10.0"
 dependencies = [
  "base64 0.22.1",
+ "craft-credits",
  "craft-print",
  "craft-ui",
  "eframe",
@@ -5048,7 +5058,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sys-locale",
- "toml",
  "unicode-bidi",
  "winsafe",
 ]

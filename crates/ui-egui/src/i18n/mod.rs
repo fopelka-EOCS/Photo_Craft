@@ -1163,6 +1163,8 @@ mod tests {
                 }
             }
         }
+        // The credits labels live in craft-credits, which lists them.
+        literals.extend(craft_credits::UI_STRINGS.iter().map(|s| s.to_string()));
         assert!(literals.len() > 300, "scan found only {} literals", literals.len());
         for l in LANGUAGES.iter().filter(|l| l.complete_menus) {
             let cat = l.catalog();
