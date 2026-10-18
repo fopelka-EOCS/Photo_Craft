@@ -85,8 +85,10 @@ pub fn curves_on_top(app: &PhotocraftApp) -> bool {
 }
 
 /// ⌘/Ctrl-click on the image with Curves on top (#7325): a point on the curve shown in the dialog
-/// at the clicked pixel's tone, at the output the curve already gives there, so the image does not
-/// change; with `every_channel` (Shift) one on each colour channel instead, at that channel's value.
+/// at the clicked pixel's tone, at the output the curve gives there rounded to a whole level, so the
+/// image barely changes (where the curve is clipped at 0 or 255 the point re-shapes it, as a click on
+/// the graph there does); with `every_channel` (Shift) one on each colour channel instead, at that
+/// channel's value.
 /// The pixel comes from the same merged composite as the eyedroppers. Returns true when Curves is
 /// on top: the click is the dialog's even when nothing is added (pencil curve, Lab or CMYK, a mask
 /// or saved channel target, outside the image, a full curve).
