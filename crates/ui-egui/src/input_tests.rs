@@ -1087,3 +1087,29 @@ fn move_tool_controls_rotate_from_just_outside_the_box() {
     let tilt = (end[1][1] - end[0][1]).atan2(end[1][0] - end[0][0]).to_degrees();
     assert!((tilt - 90.0).abs() < 8.0 || (tilt + 270.0).abs() < 8.0, "rotated about a quarter turn, got {tilt}° (zoom {zoom})");
 }
+
+/// Preferences › Tools › Disable Touch Drawing: a finger contact must not leave brush strokes.
+#[test]
+fn disable_touch_drawing_blocks_a_finger_stroke() {
+    let mut h = harness();
+    h.state_mut().run("prefs.set", json!({"path": "tools.disableTouchDrawing", "value": true})).unwrap();
+    h.state_mut().ui.tool = crate::state::Tool::Brush;
+    let p = h.state().last_canvas_rect.center();
+    assert!(!h.state().session.active().unwrap().history.can_undo());
+    let touch = |phase: egui::TouchPhase, pos: Pos2, force: Option<f32>| {
+        egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(1), phase, pos, force }
+    };
+    h.event(touch(egui::TouchPhase::Start, p, None));
+    h.event(egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    h.run_steps(2);
+    for i in 1..=6 {
+        let q = p + vec2(12.0 * i as f32, 0.0);
+        h.event(touch(egui::TouchPhase::Move, q, None));
+        h.event(egui::Event::PointerMoved(q));
+        h.run_steps(1);
+    }
+    h.event(touch(egui::TouchPhase::End, p, None));
+    h.event(egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    h.run_steps(3);
+    assert!(!h.state().session.active().unwrap().history.can_undo(), "the finger drag must not paint");
+}

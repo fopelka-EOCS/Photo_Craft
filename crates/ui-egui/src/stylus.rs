@@ -113,6 +113,8 @@ pub struct Stylus {
     pub feed: StylusFeed,
     /// Preferences › Tools › Use Tablet Pressure: off, a pen paints like a mouse.
     pub use_pressure: bool,
+    /// Preferences › Tools › Disable Touch Drawing: finger contacts must not stroke on the canvas.
+    pub disable_touch_drawing: bool,
     /// Preferences › Tools › Pressure Curve (`None`: linear), with the points it was built from.
     pressure_curve: Option<photocraft_engine::prefs::PressureCurve>,
     curve_points: Vec<[f32; 2]>,
@@ -156,6 +158,7 @@ impl Default for Stylus {
         Self {
             feed: StylusFeed::default(),
             use_pressure: true,
+            disable_touch_drawing: false,
             pressure_curve: None,
             curve_points: Vec::new(),
             end: None,
@@ -244,6 +247,22 @@ impl Stylus {
             self.frame.retain(|s| s.pressure > 0.0);
         }
         self.peak = self.frame.iter().fold(self.peak, |m, s| m.max(s.pressure));
+        if self.contacts.is_empty() {
+            self.touch_pen = false;
+        }
+    }
+
+    /// Finger contacts must not start or extend canvas strokes (Preferences › Tools › Disable Touch
+    /// Drawing). The mouse and a stylus (tablet feed or a touch contact with pen identity) still
+    /// paint. Two or more contacts are always blocked so pinch gestures stay navigation-only.
+    pub fn finger_blocks_drawing(&self) -> bool {
+        if !self.disable_touch_drawing {
+            return false;
+        }
+        if self.contacts.len() >= 2 {
+            return true;
+        }
+        !self.contacts.is_empty() && !self.touch_pen && self.feed.get().is_none()
     }
 
     /// The pen's current sample. When the pen touched during this frame but has lifted since
@@ -727,6 +746,29 @@ mod tests {
         // A force-less move mid-stroke keeps the last force.
         s.update(&[touch_id(8, Move, None)]);
         assert_eq!(s.pressure(), 0.3);
+    }
+
+    #[test]
+    fn finger_blocks_drawing_respects_the_preference_and_pen_identity() {
+        use egui::TouchPhase::{End, Start};
+        let mut s = Stylus::default();
+        s.disable_touch_drawing = true;
+        s.update(&[touch_id(1, Start, None)]);
+        assert!(s.finger_blocks_drawing());
+        s.update(&[touch_id(1, End, None)]);
+        s.update(&[]);
+        assert!(!s.finger_blocks_drawing());
+        s.update(&[touch_id(2, Start, Some(0.4))]);
+        assert!(!s.finger_blocks_drawing(), "pressure marks a stylus contact");
+        s.update(&[touch_id(2, End, None)]);
+        s.update(&[]);
+        s.disable_touch_drawing = false;
+        s.update(&[touch_id(3, Start, None)]);
+        assert!(!s.finger_blocks_drawing());
+        s.disable_touch_drawing = true;
+        assert!(s.finger_blocks_drawing());
+        s.update(&[touch_id(4, Start, None)]);
+        assert!(s.finger_blocks_drawing(), "two fingers block strokes for gestures");
     }
 
     #[test]
