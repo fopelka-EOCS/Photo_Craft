@@ -364,7 +364,8 @@ pub fn finish_object_selection(app: &mut PhotocraftApp, start: [f64; 2], end: [f
         let size = app.session.tools.brush.size;
         let mode = crate::tool_feedback::document_selection_mode(app, Tool::ObjectSelection, mods);
         let enhance = app.ui.tool_options.enhance_edge;
-        let r = app.run("select.quick", json!({"points": [[end[0], end[1]]], "size": size, "mode": mode, "enhanceEdge": enhance, "sampleAllLayers": sample_all}));
+        let r =
+            app.run("select.quick", json!({"points": [[end[0], end[1]]], "size": size, "mode": mode, "enhanceEdge": enhance, "sampleAllLayers": sample_all}));
         report_smart_result(app, r, tl!("Quick Selection found nothing there"));
         return;
     }
