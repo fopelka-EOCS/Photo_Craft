@@ -1096,8 +1096,12 @@ fn disable_touch_drawing_blocks_a_finger_stroke() {
     h.state_mut().ui.tool = crate::state::Tool::Brush;
     let p = h.state().last_canvas_rect.center();
     assert!(!h.state().session.active().unwrap().history.can_undo());
-    let touch = |phase: egui::TouchPhase, pos: Pos2, force: Option<f32>| {
-        egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(1), phase, pos, force }
+    let touch = |phase: egui::TouchPhase, pos: Pos2, force: Option<f32>| egui::Event::Touch {
+        device_id: egui::TouchDeviceId(1),
+        id: egui::TouchId(1),
+        phase,
+        pos,
+        force,
     };
     h.event(touch(egui::TouchPhase::Start, p, None));
     h.event(egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
