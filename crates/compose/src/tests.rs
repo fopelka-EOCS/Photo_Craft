@@ -943,6 +943,32 @@ fn color_overlay_ignores_fill_opacity_but_not_opacity() {
     assert!(close4(px(&d, 20, 20), [0.5, 1.0, 0.5, 1.0]), "{:?}", px(&d, 20, 20));
 }
 
+#[test]
+fn fill_zero_glass_with_a_descending_gloss_shows_the_backdrop() {
+    // A fill-0 card whose bevel gloss contour starts at 100 % (Rolling Slope - Descending, as in
+    // a "liquid glass" template): the flat middle stays see-through, the bevel edge still lights.
+    let mut d = Document::with_background("t", Size::new(40, 40), ColorMode::Rgb, SampleType::U8, Color::rgb(0.3, 0.3, 0.3));
+    let mut fx = bevel_fx(photocraft_doc::BevelStyle::InnerBevel, 0.0);
+    if let Effect::BevelEmboss(b) = &mut fx {
+        b.angle = 90.0;
+        b.highlight = FxCommon::new(photocraft_color::BlendMode::Screen, 1.0);
+        b.shadow.opacity = 0.0;
+        b.gloss_contour = photocraft_doc::Contour::Custom {
+            name: "descending".into(),
+            points: vec![CurvePoint { input: 0.0, output: 1.0 }, CurvePoint { input: 1.0, output: 0.0 }],
+            corners: vec![],
+        };
+    }
+    let mut l = solid_layer("card", Rect::new(10, 10, 30, 30), [1.0; 4]);
+    l.fill_opacity = 0.0;
+    l.effects.items = vec![fx];
+    d.layers.push(l);
+    let mid = px(&d, 20, 20);
+    assert!(close4(mid, [0.3, 0.3, 0.3, 1.0]), "flat middle: {mid:?}");
+    let edge = px(&d, 20, 13);
+    assert!(edge[0] > 0.5, "lit top edge: {edge:?}");
+}
+
 fn shadow(distance: f32, angle: f32) -> Shadow {
     Shadow {
         common: FxCommon::new(photocraft_color::BlendMode::Normal, 1.0),

@@ -1601,6 +1601,21 @@ fn layer_effects_opacity_fill_blend_and_off_canvas() {
         d.layers.push(l);
         fx_check(&mut g, &d, &format!("outside stroke at fill {fill}"));
     }
+    // A fill-0 "glass" layer whose bevel gloss contour starts at 100 %: the flat top stays clear.
+    let mut d = fx_doc(80, 80, SampleType::U8);
+    let mut l = Layer::raster("glass", d.pixel_format());
+    l.surface_mut().unwrap().fill_rect(Rect::new(14, 14, 66, 66), &[1.0; 4]);
+    let mut glass = bevel(BevelStyle::InnerBevel, true, 8.0, 2.0);
+    glass.gloss_contour = Contour::Custom {
+        name: "descending".into(),
+        points: vec![Cp { input: 0.0, output: 1.0 }, Cp { input: 0.4, output: 0.4 }, Cp { input: 1.0, output: 0.0 }],
+        corners: vec![],
+    };
+    glass.highlight = FxCommon::new(BlendMode::ColorDodge, 1.0);
+    l.effects.items = vec![Effect::BevelEmboss(glass)];
+    l.fill_opacity = 0.0;
+    d.layers.push(l);
+    fx_check(&mut g, &d, "fill 0 glass, gloss starting high");
     // Shapes partly off the canvas (their effects reach back in) and a masked effect layer.
     let mut d = fx_doc(90, 70, SampleType::U8);
     let mut l = blob("edge", d.pixel_format(), 4.0, 66.0, 18.0, [0.9, 0.9, 0.2]);

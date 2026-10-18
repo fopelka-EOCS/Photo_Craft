@@ -1329,7 +1329,8 @@ fn fs_mbevelshade(in: VOut) -> @location(0) vec4<f32> {
 }
 
 // One bevel shading value (`bevel_maps`' shade_into): highlight (p1.z = 0) or shadow amount for
-// height-gradient scale `depth`, times `region`, through the gloss contour.
+// height-gradient scale `depth`, times `region`, through the gloss contour (flat pixels skip it
+// and stay 0).
 fn bevel_part(p: vec2<i32>, depth: f32, region: f32) -> f32 {
     let gx = (ra(p + vec2(1, 0)) - ra(p - vec2(1, 0))) * 0.5 * depth;
     let gy = (ra(p + vec2(0, 1)) - ra(p - vec2(0, 1))) * 0.5 * depth;
@@ -1344,7 +1345,7 @@ fn bevel_part(p: vec2<i32>, depth: f32, region: f32) -> f32 {
     } else if (k > 0.0) {
         v = clamp(k / max(1.0 - se, 1e-3), 0.0, 1.0) * region;
     }
-    if (op.p1.w > 0.5) { v = lut(0, v); }
+    if (op.p1.w > 0.5 && (gx != 0.0 || gy != 0.0)) { v = lut(0, v); }
     return v;
 }
 

@@ -1625,11 +1625,13 @@ fn bevel_maps(shape: &Map, b: &Bevel, light: &GlobalLight, tex: &TextureCtx, pat
     };
     let shade_into = |depth: f32, region_kind: u8| -> (Map, Map) {
         let (mut hi, mut sh) = (Map::new(shape.w, shape.h, 0.0), Map::new(shape.w, shape.h, 0.0));
+        let mut flat = vec![false; hi.v.len()];
         for y in 0..shape.h as i64 {
             for x in 0..shape.w as i64 {
                 let i = y as usize * shape.w + x as usize;
                 let gx = (hmap.get(x + 1, y) - hmap.get(x - 1, y)) * 0.5 * depth;
                 let gy = (hmap.get(x, y + 1) - hmap.get(x, y - 1)) * 0.5 * depth;
+                flat[i] = gx == 0.0 && gy == 0.0;
                 let n = [-gx, -gy, 1.0];
                 let len = (n[0] * n[0] + n[1] * n[1] + 1.0).sqrt();
                 let shade = (n[0] * light_v[0] + n[1] * light_v[1] + n[2] * light_v[2]) / len;
@@ -1642,7 +1644,18 @@ fn bevel_maps(shape: &Map, b: &Bevel, light: &GlobalLight, tex: &TextureCtx, pat
                 }
             }
         }
-        (apply_contour(hi, &b.gloss_contour), apply_contour(sh, &b.gloss_contour))
+        // The gloss contour shapes the light across the bevel's slopes; a flat pixel isn't on them
+        // and stays unshaded even when the contour starts above 0 (a Rolling Slope - Descending
+        // gloss would otherwise paint the whole top of a fill-0 glass card; keep in sync with
+        // `bevel_part`).
+        let (mut hi, mut sh) = (apply_contour(hi, &b.gloss_contour), apply_contour(sh, &b.gloss_contour));
+        for (i, &f) in flat.iter().enumerate() {
+            if f {
+                hi.v[i] = 0.0;
+                sh.v[i] = 0.0;
+            }
+        }
+        (hi, sh)
     };
     let maps = match g.paint {
         BevelPaint::Inner | BevelPaint::Outer => {
@@ -2490,6 +2503,27 @@ mod tests {
         // Nothing outside the shape; the ramp reaches about `size` inside.
         assert_eq!(at(&maps[0], 20, 8), 0.0);
         assert!(at(&maps[0], 20, 15) < 0.05);
+    }
+
+    #[test]
+    fn gloss_contour_starting_high_leaves_the_flat_top_unshaded() {
+        // Rolling Slope - Descending starts at 100 %: the flat middle still gets no light, the
+        // slopes still go through the contour.
+        let descending = Contour::Custom {
+            name: "descending".into(),
+            points: vec![photocraft_doc::adjust::CurvePoint { input: 0.0, output: 1.0 }, photocraft_doc::adjust::CurvePoint { input: 1.0, output: 0.0 }],
+            corners: vec![],
+        };
+        let shape = square(40, 10, 30);
+        let maps = |gloss_contour: Contour| {
+            let b = Bevel { gloss_contour, ..bevel_of(BevelStyle::InnerBevel, BevelTechnique::Smooth) };
+            bevel_maps(&shape, &b, &GlobalLight::default(), &no_tex(), &PreparedPatterns::new(&[], PREPARED_PATTERN_BYTES)).0
+        };
+        let (linear, desc) = (maps(Contour::Linear), maps(descending));
+        let at = |m: &Map, x: usize, y: usize| m.v[y * 40 + x];
+        assert_eq!((at(&desc[0], 20, 20), at(&desc[1], 20, 20)), (0.0, 0.0));
+        let (lit, out) = (at(&linear[0], 20, 10), at(&desc[0], 20, 10));
+        assert!(lit > 0.5 && (out - (1.0 - lit)).abs() < 0.02, "{lit} → {out}");
     }
 
     /// Photoshop 27.11, measured across a straight edge (size 10, depth 100 %, light from the top
