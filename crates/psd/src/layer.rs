@@ -598,6 +598,15 @@ impl LayerRecord {
         Ok((LayerRecord { rect, channels, blend_mode, opacity, clipping, flags, filler, mask, blending_ranges, name, blocks, extra_trailing }, lens))
     }
 
+    /// Bytes of the mask data (without its length field).
+    fn mask_len(&self) -> u64 {
+        match &self.mask {
+            MaskData::None => 0,
+            MaskData::Mask(mask) => mask.encoded_len(),
+            MaskData::Raw(b) => b.len() as u64,
+        }
+    }
+
     /// Bytes [`Self::write`] produces, computed without serializing. Errors where `write` would.
     fn encoded_len(&self, version: Version) -> Result<u64> {
         let too_big = || PsdError::LimitExceeded("section too large for 32-bit length (use PSB)");
@@ -606,11 +615,7 @@ impl LayerRecord {
         if !version.is_psb() && self.channels.iter().any(|c| u32::try_from(c.stored_len()).is_err()) {
             return Err(too_big());
         }
-        let mask = match &self.mask {
-            MaskData::None => 0,
-            MaskData::Mask(mask) => mask.encoded_len(),
-            MaskData::Raw(b) => b.len() as u64,
-        };
+        let mask = self.mask_len();
         u32::try_from(mask).map_err(|_| too_big())?;
         let ranges = self.blending_ranges.data.len() as u64;
         u32::try_from(ranges).map_err(|_| too_big())?;
@@ -744,7 +749,7 @@ impl LayerInfo {
     }
 
     /// An upper bound of the body's length: the channel data plus every record, each with
-    /// generous room for its fixed fields (rect, blend mode, flags, mask data, lengths).
+    /// generous room for its fixed fields (rect, blend mode, flags, lengths).
     /// Saturates. Reserving it keeps a writer from doubling its buffer at the end (#6607).
     pub(crate) fn size_bound(&self) -> usize {
         const RECORD: usize = 256;
@@ -759,6 +764,7 @@ impl LayerInfo {
                 .saturating_add(l.blending_ranges.data.len())
                 .saturating_add(blocks)
                 .saturating_add(l.extra_trailing.len())
+                .saturating_add(usize::try_from(l.mask_len()).unwrap_or(usize::MAX))
         })
     }
 
@@ -1131,6 +1137,23 @@ mod tests {
             let mut out = Vec::new();
             info.write_unpadded(&mut out, version).unwrap();
             assert_eq!(info.unpadded_len(version).unwrap(), out.len() as u64, "{version:?}");
+        }
+    }
+
+    /// Large kept mask data (unparsed, or bytes after a parsed mask) is inside the size bound.
+    #[test]
+    fn size_bound_counts_mask_data() {
+        for version in [Version::Psd, Version::Psb] {
+            let mut mask = LayerMask::new(Rect::from_xywh(1, 2, 3, 4), 0, 0);
+            mask.trailing = vec![7; 4000];
+            let layers = vec![
+                LayerRecord { mask: MaskData::Raw(vec![5; 4000]), ..Default::default() },
+                LayerRecord { mask: MaskData::Mask(mask), ..Default::default() },
+            ];
+            let info = LayerInfo { layers, ..Default::default() };
+            let mut out = Vec::new();
+            info.write_unpadded(&mut out, version).unwrap();
+            assert!(info.size_bound() >= out.len(), "{version:?}: bound {} for {} bytes", info.size_bound(), out.len());
         }
     }
 
