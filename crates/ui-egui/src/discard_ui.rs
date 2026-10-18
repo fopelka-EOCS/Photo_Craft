@@ -340,6 +340,11 @@ fn apply(app: &mut PhotocraftApp, ctx: &egui::Context, doc: DocId, answer: Answe
 /// it by this id, so a control client can see and answer it like the window's buttons (#4920).
 pub const CONTROL_ID: &str = "discard";
 
+/// The document the unsaved-changes prompt is asking about now, if one is up.
+pub(crate) fn asking_about(app: &PhotocraftApp) -> Option<DocId> {
+    app.discard.as_ref().and_then(|p| p.docs.first().copied())
+}
+
 /// The prompt as `ui.inspect` lists it among the dialogs: the command waiting on it, the document
 /// it asks about, how many are still to answer, and the choices `ui.dialog.confirm` takes.
 pub fn inspect(app: &PhotocraftApp) -> Option<Value> {

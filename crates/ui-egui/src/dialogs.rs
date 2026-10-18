@@ -14,6 +14,38 @@ fn rects(ctx: &egui::Context) -> Vec<egui::Rect> {
     ctx.data(|m| m.get_temp(egui::Id::new(RECTS))).unwrap_or_default()
 }
 
+/// Set while the dialogs are drawn in their own OS window (`dialog_window`): the main window's
+/// area, which sizes them as it does in the main window. Laid out from the window's top-left,
+/// their title band moves the OS window, and they don't remember a place inside it.
+const HOSTED: &str = "pc-dialogs-hosted";
+/// The extent of the dialogs drawn in their own window, from its top-left: its size.
+const EXTENT: &str = "pc-dialogs-extent";
+
+pub(crate) fn set_hosted(ctx: &egui::Context, screen: Option<egui::Rect>) {
+    ctx.data_mut(|m| {
+        if let Some(r) = screen {
+            m.insert_temp(egui::Id::new(HOSTED), r);
+        } else {
+            m.remove::<egui::Rect>(egui::Id::new(HOSTED));
+        }
+    });
+}
+
+fn hosted(ctx: &egui::Context) -> Option<egui::Rect> {
+    ctx.data(|m| m.get_temp(egui::Id::new(HOSTED)))
+}
+
+/// The area dialogs are sized against: the window they're drawn in, or the main window's when
+/// they have their own.
+fn screen(ctx: &egui::Context) -> egui::Rect {
+    hosted(ctx).unwrap_or_else(|| ctx.content_rect())
+}
+
+/// How big the dialogs drawn in their own window were last frame.
+pub(crate) fn hosted_extent(ctx: &egui::Context) -> Option<egui::Vec2> {
+    ctx.data(|m| m.get_temp(egui::Id::new(EXTENT)))
+}
+
 /// The window drag target must not cover a dialog which has been moved into the title bar.
 pub(crate) fn titlebar_drag_area_is_clear(ctx: &egui::Context, area: egui::Rect) -> bool {
     rects(ctx).iter().all(|dialog| !dialog.intersects(area))
@@ -122,7 +154,7 @@ fn show_modal<T>(
             ui.disable();
         }
         if resizable {
-            let max = (ctx.content_rect().size() - egui::vec2(40.0, 40.0)).max(egui::vec2(560.0, 400.0));
+            let max = (screen(ctx).size() - egui::vec2(40.0, 40.0)).max(egui::vec2(560.0, 400.0));
             egui::Resize::default()
                 .id(id.with("resize"))
                 .default_size(egui::vec2(960.0, 900.0).min(max))
@@ -162,6 +194,8 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let dialogs = app.ui.dialogs.clone();
     let top = dialogs.last().map(|d| d.id);
     let mut shown = Vec::new();
+    let in_window = hosted(ctx).is_some();
+    let mut extent = egui::Vec2::ZERO;
     for d in dialogs {
         let lang = if crate::prefs_ui::is_preferences(&d.fields) {
             crate::i18n::Lang::from_pref(d.fields.get("values").and_then(|v| v.pointer("/interface/language")).and_then(Value::as_str).unwrap_or("auto"))
@@ -181,7 +215,11 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         // effects, extends down and right instead of re-centring.
         let pinned: Option<egui::Vec2> = ctx.data(|m| m.get_temp(id));
         let place = place_id(&d);
-        let start = pinned.or_else(|| ctx.data_mut(|m| m.get_persisted::<egui::Vec2>(place))).or_else(|| crate::blur_pins::first_place(&d.fields, ctx));
+        let start = if in_window {
+            Some(egui::Vec2::ZERO)
+        } else {
+            pinned.or_else(|| ctx.data_mut(|m| m.get_persisted::<egui::Vec2>(place))).or_else(|| crate::blur_pins::first_place(&d.fields, ctx))
+        };
         let mut drag = egui::Vec2::ZERO;
         let mut close_clicked = false;
         let mut sizing = false;
@@ -218,7 +256,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             if !compact {
                 ui.set_min_width(if curves { 300.0 } else { 380.0 });
             }
-            let wide = crate::prefs_ui::width(&d.fields, (ctx.content_rect().width() - 48.0).max(380.0));
+            let wide = crate::prefs_ui::width(&d.fields, (screen(ctx).width() - 48.0).max(380.0));
             if let Some(w) = wide {
                 ui.set_min_width(w.min(460.0));
             }
@@ -268,7 +306,15 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             let close_rect = CLOSE_BOX.then(|| close_box_rect(ui.max_rect().right(), t.center().y));
             let bar_right = close_rect.map_or(ui.max_rect().right() + 7.0, |r| r.left());
             let bar = egui::Rect::from_min_max(t.min - egui::vec2(7.0, 7.0), egui::pos2(bar_right, t.bottom() + 4.0));
-            drag = ui.interact(bar, id.with("title"), egui::Sense::drag()).drag_delta();
+            let band = ui.interact(bar, id.with("title"), egui::Sense::drag());
+            if in_window {
+                // In its own window the title band moves that window.
+                if band.drag_started() {
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                }
+            } else {
+                drag = band.drag_delta();
+            }
             if let Some(r) = close_rect {
                 close_clicked = close_box(ui, r);
             }
@@ -354,7 +400,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     // Long parameter lists (Flame, Lighting Effects) scroll, so the title and the
                     // OK / Cancel buttons stay inside a small window. The preview window below the
                     // parameters reserves its own space (#3769).
-                    let room = (ctx.content_rect().height() - DIALOG_CHROME - crate::filter_preview_ui::reserved_height(&fields)).max(120.0);
+                    let room = (screen(ctx).height() - DIALOG_CHROME - crate::filter_preview_ui::reserved_height(&fields)).max(120.0);
                     let body = |ui: &mut egui::Ui, fields: &mut serde_json::Map<String, Value>| {
                         egui::ScrollArea::vertical().id_salt(id.with("body")).max_height(room).show(ui, |ui| crate::filter_dialog::body(ui, fields));
                         // The in-dialog preview window sits under the scrolling parameters (#3769),
@@ -480,8 +526,9 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         });
         // The picker has a larger frame margin; include that whole frame in the canvas hit guard.
         shown.push(if color_picker { modal.response.rect } else { modal.inner });
+        extent = extent.max(modal.response.rect.max.to_vec2());
         // Pin once laid out at its real size (the first frame is an invisible sizing pass).
-        if !sizing && (web || pinned.is_none() || drag != egui::Vec2::ZERO) {
+        if !in_window && !sizing && (web || pinned.is_none() || drag != egui::Vec2::ZERO) {
             let screen = ctx.content_rect();
             // Keep the whole dialog (and so its title bar) on screen.
             let room = (screen.size() - modal.response.rect.size()).max(egui::Vec2::ZERO);
@@ -529,7 +576,15 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             }
         }
     }
-    ctx.data_mut(|m| m.insert_temp(egui::Id::new(RECTS), shown));
+    if in_window {
+        // The canvas guard reads these in its own window's coordinates: none of them hold here.
+        ctx.data_mut(|m| {
+            m.insert_temp(egui::Id::new(RECTS), Vec::<egui::Rect>::new());
+            m.insert_temp(egui::Id::new(EXTENT), extent);
+        });
+    } else {
+        ctx.data_mut(|m| m.insert_temp(egui::Id::new(RECTS), shown));
+    }
 }
 
 /// The About window's tabs, as stored in its `tab` field.
@@ -562,7 +617,7 @@ fn about_tab_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, tab: &str) {
 }
 
 /// The dialog title as shown: [`title`] in the UI language.
-fn display_title(d: &Dialog) -> String {
+pub(crate) fn display_title(d: &Dialog) -> String {
     match d.kind {
         DialogKind::Command => {
             let label = d.fields.get("__label").and_then(Value::as_str).unwrap_or("Command");

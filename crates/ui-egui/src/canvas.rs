@@ -5980,6 +5980,78 @@ pub(crate) fn finish_gesture(app: &mut PhotocraftApp, d: Drag) {
     }
 }
 
+/// How long PhotoCraft counts as focused after its last focused frame, so moving the focus between
+/// its own windows (a frame or two with neither focused) doesn't drop the document windows.
+const APP_FOCUS_GRACE_S: f64 = 0.3;
+
+/// Whether document windows stay above the main window this frame. Photoshop's floating
+/// document windows never go behind the main window; winit can't make them owned windows, so
+/// they are kept on top while PhotoCraft has the focus (the main window or one of them) and
+/// drop back to normal when another application has it, so they never cover other apps. While
+/// a prompt or dialog is open in the main window they don't cover it either.
+fn on_top_policy(own_windows: bool, since_focused: f64, modal: bool) -> bool {
+    own_windows && since_focused < APP_FOCUS_GRACE_S && !modal
+}
+
+/// The floating window that shows the unsaved-changes prompt: the one holding the document it asks
+/// about. Real OS windows only; embedded ones leave the prompt to the main window.
+pub(crate) fn prompt_window(app: &PhotocraftApp, ctx: &egui::Context) -> Option<u64> {
+    if ctx.embed_viewports() {
+        return None;
+    }
+    let asked = crate::discard_ui::asking_about(app)?;
+    let docs = app.session.documents();
+    app.ui.windows.iter().find(|w| w.open && w.floating && docs.get(w.document).is_some_and(|d| d.doc.id == asked)).map(|w| w.id)
+}
+
+/// While a dialog or prompt is up in another OS window, this window takes no clicks, as under a
+/// dialog of its own: no other document becomes active and no tool runs behind the question.
+/// Nothing is dimmed (Photoshop judges previews at true contrast); eyedroppers that sample the
+/// canvas for a dialog read the pointer directly and still work.
+pub(crate) fn block_main_window(ctx: &egui::Context) {
+    let screen = ctx.content_rect();
+    egui::Area::new(egui::Id::new("docwin-prompt-blocker")).order(egui::Order::Foreground).fixed_pos(screen.min).show(ctx, |ui| {
+        ui.allocate_rect(screen, Sense::click_and_drag());
+    });
+}
+
+fn doc_windows_on_top(app: &PhotocraftApp, ctx: &egui::Context, wins: &[crate::state::DocWindow]) -> bool {
+    if wins.is_empty() {
+        return false;
+    }
+    let now = ctx.input(|i| i.time);
+    let focused = ctx.input(|i| i.focused) || wins.iter().any(|w| ctx.data(|d| d.get_temp::<bool>(egui::Id::new(("docwin-focused", w.id)))).unwrap_or(false));
+    let seen = egui::Id::new("docwin-app-focused-at");
+    if focused {
+        ctx.data_mut(|d| d.insert_temp(seen, now));
+    }
+    let since = now - ctx.data(|d| d.get_temp::<f64>(seen)).unwrap_or(f64::NEG_INFINITY);
+    if !focused && since < APP_FOCUS_GRACE_S {
+        // Settle the level once the grace runs out, even if nothing else repaints.
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(APP_FOCUS_GRACE_S));
+    }
+    // The unsaved-changes prompt about a floating document shows in that window, above it: the
+    // windows stay on top of the main window then.
+    let modal = !app.ui.dialogs.is_empty() && !crate::dialog_window::hosts(app, ctx) || app.discard.is_some() && prompt_window(app, ctx).is_none();
+    let own_windows = !ctx.embed_viewports();
+    let on_top = on_top_policy(own_windows, since, modal);
+    // A prompt or dialog opened while a document window has the focus (closing a floating
+    // window with unsaved changes): bring the main window, which shows it, to the front. Only
+    // once the windows' level is back to normal (the frame after), or they'd stay over it.
+    let level_id = egui::Id::new("docwin-on-top");
+    let was_on_top = ctx.data(|d| d.get_temp::<bool>(level_id)).unwrap_or(false);
+    ctx.data_mut(|d| d.insert_temp(level_id, on_top));
+    let doc_window_focused = focused && !ctx.input(|i| i.focused);
+    if own_windows && modal && doc_window_focused {
+        if was_on_top {
+            ctx.request_repaint();
+        } else {
+            ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Focus);
+        }
+    }
+    on_top
+}
+
 /// Extra OS windows showing documents (multi-window / multi-monitor).
 ///
 /// A floating document (Float in Window, a tab dragged off the strip) is worked on in its window
@@ -5989,15 +6061,18 @@ pub(crate) fn finish_gesture(app: &mut PhotocraftApp, d: Drag) {
 /// second view (New Window for …) only shows the document and just closes.
 pub fn extra_windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let wins = app.ui.windows.clone();
+    let level = if doc_windows_on_top(app, ctx, &wins) { egui::WindowLevel::AlwaysOnTop } else { egui::WindowLevel::Normal };
     // Closing a floating window closes its document, after the loop: closing shifts the
     // document indices the remaining windows hold.
     let mut close_docs = Vec::new();
+    let prompt_in = prompt_window(app, ctx);
+    let dialogs_apart = crate::dialog_window::hosts(app, ctx);
     for w in wins.into_iter().filter(|w| w.open) {
         let Some(st) = app.session.documents().get(w.document) else { continue };
         let doc_id = st.doc.id;
         let title = if w.floating { pro_tab_title(app, w.document) } else { format!("{} — window {}", st.doc.name, w.id) };
         let vid = egui::ViewportId::from_hash_of(("docwin", w.id));
-        let mut builder = egui::ViewportBuilder::default().with_title(title).with_inner_size([800.0, 600.0]);
+        let mut builder = egui::ViewportBuilder::default().with_title(title).with_inner_size([800.0, 600.0]).with_window_level(level);
         if let Some([x, y]) = w.position {
             builder = builder.with_position([x, y]);
         }
@@ -6017,14 +6092,12 @@ pub fn extra_windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
             // A real OS window has its own focus and keyboard input. Embedded in the main window
             // (the web build, tests) it shares the main window's, whose shortcuts already ran.
             let own_window = !ctx.embed_viewports();
-            if w.floating && own_window {
-                let focused = wctx.input(|i| i.focused);
-                let was = wctx.data(|d| d.get_temp::<bool>(focus_id)).unwrap_or(false);
-                wctx.data_mut(|d| d.insert_temp(focus_id, focused));
-                if focused && !was && app.session.active_index() != Some(w.document) {
-                    app.session.set_active(w.document);
-                    ctx.request_repaint();
-                }
+            let focused = own_window && wctx.input(|i| i.focused);
+            let was = wctx.data(|d| d.get_temp::<bool>(focus_id)).unwrap_or(false);
+            wctx.data_mut(|d| d.insert_temp(focus_id, focused));
+            if w.floating && own_window && focused && !was && app.session.active_index() != Some(w.document) {
+                app.session.set_active(w.document);
+                ctx.request_repaint();
             }
             let primary = w.floating && app.session.active_index() == Some(w.document);
             // Keys typed into this window go to its own input, not the main window's.
@@ -6047,7 +6120,25 @@ pub fn extra_windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 }
                 view = canvas_view(app, ui, w.document, rect, view.clone(), primary);
             });
+            if dialogs_apart {
+                block_main_window(&wctx);
+            }
+            if prompt_in == Some(w.id) {
+                // The question needs this window's keys (Y / N / Esc): take the focus from the
+                // main window, never from another application.
+                if own_window && !wctx.input(|i| i.focused) && ctx.input(|i| i.focused) {
+                    wctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                }
+                crate::discard_ui::show(app, &wctx);
+            }
         });
+        // Answering the prompt can close the document, shifting the indices the other windows
+        // hold: leave them to the next frame.
+        if app.session.documents().get(w.document).map(|d| d.doc.id) != Some(doc_id) {
+            app.ui.windows.retain(|x| x.id != w.id);
+            ctx.request_repaint();
+            break;
+        }
         if w.floating
             && let Some(slot) = app.ui.views.get_mut(w.document)
         {
@@ -7194,6 +7285,99 @@ mod tests {
         assert_eq!(main_document(&mut app, 0), Some(1), "its tab floated too: the remaining tab");
         crate::menus::invoke(&mut app, &ctx, "window.arrange.floatInWindow", json!({"document": 1})).unwrap();
         assert_eq!(main_document(&mut app, 1), None, "every document floats");
+    }
+
+    /// Document windows stay above the main window while PhotoCraft has the focus, never above
+    /// other applications, and never over a prompt in the main window.
+    #[test]
+    fn document_windows_stay_above_the_main_window_only_while_photocraft_is_focused() {
+        assert!(on_top_policy(true, 0.0, false), "focused: above the main window");
+        assert!(on_top_policy(true, APP_FOCUS_GRACE_S / 2.0, false), "focus moving between its own windows");
+        assert!(!on_top_policy(true, APP_FOCUS_GRACE_S * 2.0, false), "another application has the focus");
+        assert!(!on_top_policy(true, f64::INFINITY, false), "never focused");
+        assert!(!on_top_policy(true, 0.0, true), "a prompt in the main window stays visible");
+        assert!(!on_top_policy(false, 0.0, false), "embedded viewports have no window level");
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        assert!(!doc_windows_on_top(&app, &egui::Context::default(), &app.ui.windows.clone()), "no windows, nothing to raise");
+        app.run("file.new", json!({"width": 8, "height": 8})).unwrap();
+        app.sync_views();
+        let ctx = egui::Context::default();
+        crate::menus::invoke(&mut app, &ctx, "window.arrange.floatInWindow", json!({})).unwrap();
+        assert!(!doc_windows_on_top(&app, &ctx, &app.ui.windows.clone()), "a default context embeds viewports");
+    }
+
+    /// A prompt about a document in the main window, asked while a document window has the
+    /// focus, shows in the main window: the main window comes forward, after the document windows
+    /// dropped back to the normal level (else they would stay over it). Dialogs don't do this:
+    /// they get their own window above the document windows (`dialog_window`).
+    #[test]
+    fn a_prompt_about_a_docked_document_brings_the_main_window_forward() {
+        let ctx = egui::Context::default();
+        ctx.set_embed_viewports(false);
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 8, "height": 8, "name": "docked"})).unwrap();
+        app.run("edit.fill", json!({"color": "#ff0000"})).unwrap();
+        app.run("file.new", json!({"width": 8, "height": 8, "name": "floating"})).unwrap();
+        app.sync_views();
+        crate::menus::invoke(&mut app, &ctx, "window.arrange.floatInWindow", json!({"document": 1})).unwrap();
+        let wins = app.ui.windows.clone();
+        let wid = wins[0].id;
+        // One frame with the document window focused: (kept on top, main window asked to focus).
+        let frame = |app: &PhotocraftApp| {
+            ctx.data_mut(|d| d.insert_temp(egui::Id::new(("docwin-focused", wid)), true));
+            let mut on_top = false;
+            let mut out = ctx.run_ui(egui::RawInput { focused: false, ..Default::default() }, |ui| on_top = doc_windows_on_top(app, ui.ctx(), &wins));
+            out.textures_delta.clear();
+            let focus = out.viewport_output.get(&egui::ViewportId::ROOT).is_some_and(|v| v.commands.contains(&egui::ViewportCommand::Focus));
+            (on_top, focus)
+        };
+        assert_eq!(frame(&app), (true, false), "working in the document window: on top, focus stays");
+        crate::menus::invoke(&mut app, &ctx, "edit.keyboardShortcuts", json!({})).unwrap();
+        assert_eq!(frame(&app), (true, false), "a dialog has its own window: the document windows stay on top");
+        app.ui.dialogs.clear();
+        crate::menus::invoke(&mut app, &ctx, "file.close", json!({"document": 0})).unwrap();
+        assert!(app.discard.is_some() && prompt_window(&app, &ctx).is_none(), "the main window asks about its own document");
+        assert_eq!(frame(&app), (false, false), "first the document windows drop to the normal level");
+        assert_eq!(frame(&app), (false, true), "then the main window, with the prompt, comes forward");
+    }
+
+    /// Closing a floating window with unsaved changes asks in that window, above the document,
+    /// while the main window stays beneath it (no focus jump, the windows stay on top). With the
+    /// windows embedded (web), the main window asks as before.
+    #[test]
+    fn the_unsaved_changes_prompt_of_a_floating_document_shows_in_its_window() {
+        let ctx = egui::Context::default();
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        for name in ["a", "b"] {
+            app.run("file.new", json!({"width": 8, "height": 8, "name": name})).unwrap();
+        }
+        app.run("edit.fill", json!({"color": "#ff0000"})).unwrap();
+        app.sync_views();
+        crate::menus::invoke(&mut app, &ctx, "window.arrange.floatInWindow", json!({"document": 1})).unwrap();
+        let wid = app.ui.windows[0].id;
+        crate::menus::invoke(&mut app, &ctx, "file.close", json!({"document": 1})).unwrap();
+        assert!(app.discard.is_some(), "unsaved: the prompt is up");
+        assert_eq!(app.session.documents().len(), 2, "nothing closed yet");
+        assert_eq!(prompt_window(&app, &ctx), None, "embedded windows: the main window asks");
+        ctx.set_embed_viewports(false);
+        assert_eq!(prompt_window(&app, &ctx), Some(wid), "the floating window asks about its own document");
+        let wins = app.ui.windows.clone();
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new(("docwin-focused", wid)), true));
+        for _ in 0..2 {
+            let mut on_top = false;
+            let mut out = ctx.run_ui(egui::RawInput { focused: false, ..Default::default() }, |ui| on_top = doc_windows_on_top(&app, ui.ctx(), &wins));
+            out.textures_delta.clear();
+            assert!(on_top, "the window stays above the main window while it asks");
+            let focus = out.viewport_output.get(&egui::ViewportId::ROOT).is_some_and(|v| v.commands.contains(&egui::ViewportCommand::Focus));
+            assert!(!focus, "the main window stays beneath");
+        }
+        // A prompt about a docked document is still the main window's.
+        app.discard = None;
+        app.session.set_active(0);
+        crate::menus::invoke(&mut app, &ctx, "file.close", json!({"document": 0})).unwrap();
+        if app.discard.is_some() {
+            assert_eq!(prompt_window(&app, &ctx), None);
+        }
     }
 
     /// A floating document is worked on in its own window, not just shown there: a brush stroke

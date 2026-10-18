@@ -72,6 +72,7 @@ pub mod crop_ui;
 pub mod delete_layer_prompt;
 pub mod dialog_alt_reset;
 pub mod dialog_blend_ui;
+mod dialog_window;
 pub mod dialogs;
 pub mod direct_select;
 pub mod direction;
@@ -2065,10 +2066,22 @@ impl eframe::App for PhotocraftApp {
         timeline_ui::windows(self, &ctx);
         workspace_ui::windows(self, &ctx);
         palette::show(self, &ctx);
-        dialogs::show(self, &ctx);
+        // Beside floating document windows, dialogs get an OS window of their own above them.
+        if dialog_window::hosts(self, &ctx) {
+            dialog_window::show(self, &ctx);
+            canvas::block_main_window(&ctx);
+        } else {
+            dialogs::show(self, &ctx);
+        }
         rasterize_prompt::run_pending(self, &ctx);
         jobs_ui::dialog(self, &ctx);
-        discard_ui::show(self, &ctx);
+        // About a document floating in its own window: that window asks (canvas::extra_windows),
+        // above the document and with the main window still beneath it.
+        if canvas::prompt_window(self, &ctx).is_none() {
+            discard_ui::show(self, &ctx);
+        } else {
+            canvas::block_main_window(&ctx);
+        }
         tiff_options_ui::show(self, &ctx);
         targa_options_ui::show(self, &ctx);
         distort_ui::show(self, &ctx);
