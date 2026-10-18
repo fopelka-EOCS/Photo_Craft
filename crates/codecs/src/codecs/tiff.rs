@@ -1243,8 +1243,9 @@ pub(crate) fn encode(src: &Image, plan: Plan, opts: &EncodeOptions) -> Result<Ve
     // as BigTIFF.
     let estimate = estimated_size(&img, &tags);
     let write = |big: bool| -> tiff::TiffResult<Vec<u8>> {
-        // Allocated once for the whole file (an upper bound: compression only shrinks the
-        // pixels). Grown as written, the buffer doubles near the end, copying the file (#6607).
+        // Allocated once for the whole file (usually an upper bound; compression can grow
+        // the data, see the BigTIFF retry below). Grown as written, the buffer doubles near
+        // the end, copying the file (#6607).
         let mut out = Vec::new();
         let _ = out.try_reserve(usize::try_from(estimate).unwrap_or(usize::MAX));
         let mut cursor = Cursor::new(out);
@@ -1255,7 +1256,13 @@ pub(crate) fn encode(src: &Image, plan: Plan, opts: &EncodeOptions) -> Result<Ve
             let mut enc = TiffEncoder::new(&mut cursor)?.with_compression(compression).with_predictor(predictor);
             write_image::<TiffKindStandard>(&mut enc, &img, &tags)?;
         }
-        Ok(cursor.into_inner())
+        // LZW or Deflate often writes a third of the estimate: the unused rest is given back
+        // instead of being held while the file is saved.
+        let mut out = cursor.into_inner();
+        if out.capacity() - out.len() > out.len() / 8 {
+            out.shrink_to_fit();
+        }
+        Ok(out)
     };
     let big = opts.tiff_bigtiff || estimate > CLASSIC_LIMIT;
     match write(big) {
