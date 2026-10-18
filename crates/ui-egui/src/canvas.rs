@@ -5935,7 +5935,7 @@ pub fn extra_windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
 /// Selection mode from the options bar, overridden by modifier keys (⇧ add, ⌥ subtract, ⇧⌥ intersect).
 /// The cursor badge announces the same mode (`tool_feedback`).
 pub(crate) fn selection_mode(app: &PhotocraftApp, m: egui::Modifiers) -> &'static str {
-    crate::tool_feedback::document_selection_mode(app, Tool::Lasso, m)
+    crate::tool_feedback::document_selection_mode(app, app.ui.tool, m)
 }
 
 /// Shift constrains a Polygonal Lasso segment to Photoshop's 45° directions.

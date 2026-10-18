@@ -4224,7 +4224,7 @@ fn effect_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, l: &Layer, depth: usi
 }
 
 /// New / add / subtract / intersect selection buttons (shared by selection tools).
-fn selection_mode_buttons(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+pub(crate) fn selection_mode_buttons(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     ui.spacing_mut().item_spacing.x = 2.0;
     for (i, (icon, tip)) in [
         ("square", tl!("New selection").to_string()),
