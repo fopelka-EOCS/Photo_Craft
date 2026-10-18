@@ -1537,10 +1537,8 @@ pub(crate) fn damage_since(app: &PhotocraftApp, idx: usize, seen: (u64, u64), no
 /// refreshes only that area instead of everything.
 pub(crate) fn shown_as_document(app: &mut PhotocraftApp, doc: photocraft_doc::DocId, was_preview: impl Fn(u64) -> bool) {
     let Some(d) = app.session.documents().iter().find(|st| st.doc.id == doc).map(|st| st.doc.clone()) else { return };
-    if let Some(c) = app.channel_views.get_mut(&doc.0)
-        && was_preview(c.preview_key)
-    {
-        c.preview_key = 0;
+    if let Some(c) = app.channel_views.get_mut(&doc.0) {
+        c.shown_as_document(&was_preview);
     }
     // Every display's cache of the document: the GPU state folds in the texture key, CPU
     // textures their display's key.
@@ -3176,7 +3174,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         }
         // Channels panel: alpha / Quick Mask overlays and single-channel views (channel_view.rs).
         if channel_texture.is_none()
-            && let Some(tex) = crate::channel_view::ensure(app, &ctx, idx)
+            && let Some(tex) = crate::channel_view::ensure_for_display(app, &ctx, idx, output)
         {
             if view.rotation.abs() > 0.05 {
                 paint_mapped_image(
