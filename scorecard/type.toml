@@ -49,9 +49,9 @@ note = "Alt+Left/Right at a collapsed caret kerns the pair (type_tool.rs kern_pa
 [[item]]
 id = "TYPE-218-7"
 target = "Warp Text dialog previews live and opens with the layer's current warp"
-status = "missing"
+status = "done"
 issue = 218
-note = "view_cmds.rs:834 always seeds arc, bend 50"
+note = "filter_dialog.rs warp_defaults opens Type > Warp Text on the type layer's own style, bend, distortions and orientation (None for a layer without warp; remembered dialog values never override it), and the dialog's Preview shows the warp live on the canvas without editing the document (#2539). warp_text_dialog_tests.rs: warp_text_opens_with_the_type_layers_current_warp, warp_text_dialog_previews_the_warp_without_editing_the_document"
 
 [[item]]
 id = "TYPE-218-8"
