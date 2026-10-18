@@ -173,10 +173,7 @@ pub fn install() -> Result<(), JsValue> {
         "readFile",
         Closure::<dyn Fn(String) -> Result<JsValue, JsValue>>::new(|name: String| {
             SAVED.with(|s| {
-                s.borrow()
-                    .get(&name)
-                    .map(|b| js_sys::Uint8Array::from(b).into())
-                    .ok_or_else(|| js_sys::Error::new(&format!("{name}: not found")).into())
+                s.borrow().get(&name).map(|b| js_sys::Uint8Array::from(b).into()).ok_or_else(|| js_sys::Error::new(&format!("{name}: not found")).into())
             })
         })
         .into_js_value(),
