@@ -4046,3 +4046,15 @@ layerLabel	No Color	Sem cor
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Adaptador de GPU
+
+# Help › System Info
+	PhotoCraft version: {value}	Versão do PhotoCraft: {value}
+	Operating system: {value}	Sistema operacional: {value}
+	System architecture: {value}	Arquitetura do sistema: {value}
+	Logical processor count: {value}	Número de processadores lógicos: {value}
+	Built-in memory: {value} MB	Memória integrada: {value} MB
+	Memory available to PhotoCraft: {value} MB	Memória disponível para o PhotoCraft: {value} MB
+	Memory used by PhotoCraft: {value} MB	Memória usada pelo PhotoCraft: {value} MB
+	History states: {value}	Estados do histórico: {value}
+	Cache levels: {value}	Níveis do cache: {value}
+	Cache tile size: {value} px	Tamanho do bloco do cache: {value} px

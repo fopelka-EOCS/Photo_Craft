@@ -3856,3 +3856,15 @@ curves	Smooth	Wygładź
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Karta GPU
+
+# Help › System Info
+	PhotoCraft version: {value}	Wersja PhotoCraft: {value}
+	Operating system: {value}	System operacyjny: {value}
+	System architecture: {value}	Architektura systemu: {value}
+	Logical processor count: {value}	Liczba procesorów logicznych: {value}
+	Built-in memory: {value} MB	Wbudowana pamięć: {value} MB
+	Memory available to PhotoCraft: {value} MB	Pamięć dostępna dla PhotoCraft: {value} MB
+	Memory used by PhotoCraft: {value} MB	Pamięć używana przez PhotoCraft: {value} MB
+	History states: {value}	Stany historii: {value}
+	Cache levels: {value}	Poziomy pamięci podręcznej: {value}
+	Cache tile size: {value} px	Rozmiar kafla pamięci podręcznej: {value} px

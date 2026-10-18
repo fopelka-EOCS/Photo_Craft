@@ -3448,7 +3448,16 @@ cameraRaw	Yellow	Sárga
 	Place Scale Marker	Méretarány-jelölő elhelyezése
 	Plane	Sík
 	Planes	Síkok
-	Platform: {os} {arch}	Platform: {os} {arch}
+	PhotoCraft version: {value}	PhotoCraft-verzió: {value}
+	Operating system: {value}	Operációs rendszer: {value}
+	System architecture: {value}	Rendszerarchitektúra: {value}
+	Logical processor count: {value}	Logikai processzorok száma: {value}
+	Built-in memory: {value} MB	Beépített memória: {value} MB
+	Memory available to PhotoCraft: {value} MB	A PhotoCraft számára elérhető memória: {value} MB
+	Memory used by PhotoCraft: {value} MB	A PhotoCraft által használt memória: {value} MB
+	History states: {value}	Előzményállapotok: {value}
+	Cache levels: {value}	Gyorsítótár-szintek: {value}
+	Cache tile size: {value} px	Gyorsítótár csempemérete: {value} px
 	Play selection	Kijelöltek lejátszása
 	Point	Pont
 	Point size	Pontméret

@@ -4065,7 +4065,16 @@ layerLabel	No Color	Nessun colore
 	unknown	sconosciuto
 	unknown type	tipo sconosciuto
 	auto	automatico
-	Platform: {os} {arch}	Piattaforma: {os} {arch}
+	PhotoCraft version: {value}	Versione di PhotoCraft: {value}
+	Operating system: {value}	Sistema operativo: {value}
+	System architecture: {value}	Architettura di sistema: {value}
+	Logical processor count: {value}	Numero di processori logici: {value}
+	Built-in memory: {value} MB	Memoria integrata: {value} MB
+	Memory available to PhotoCraft: {value} MB	Memoria disponibile per PhotoCraft: {value} MB
+	Memory used by PhotoCraft: {value} MB	Memoria usata da PhotoCraft: {value} MB
+	History states: {value}	Stati cronologia: {value}
+	Cache levels: {value}	Livelli cache: {value}
+	Cache tile size: {value} px	Dimensione tile cache: {value} px
 	previous reading kept; the last re-read failed: {reason}	lettura precedente mantenuta; l'ultima rilettura non è riuscita: {reason}
 	Monitor profile: {profile}	Profilo monitor: {profile}
 	Display profiles: {reason}	Profili dello schermo: {reason}

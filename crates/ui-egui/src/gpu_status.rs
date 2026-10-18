@@ -62,33 +62,42 @@ pub fn fall_back(app: &mut PhotocraftApp, fault: &photocraft_gpu::Fault) {
 
 /// English diagnostics for issue reports (Copy and the control API), independent of UI language.
 pub fn system_info(app: &PhotocraftApp) -> Vec<String> {
-    crate::i18n::with_language(crate::i18n::Lang::EN, || system_info_ui(app))
+    english(app, &crate::system_info_ui::machine())
 }
 
-/// Help › System Info's on-screen text, in Photoshop's order: version, operating system,
-/// processor, memory, the performance preferences, then the graphics and monitor state.
+/// [`report`] in English.
+fn english(app: &PhotocraftApp, machine: &crate::system_info_ui::Machine) -> Vec<String> {
+    crate::i18n::with_language(crate::i18n::Lang::EN, || report(app, machine))
+}
+
+/// Help › System Info's on-screen text, in the interface language.
 pub fn system_info_ui(app: &PhotocraftApp) -> Vec<String> {
-    let host = crate::system_info_ui::host();
+    report(app, &crate::system_info_ui::machine())
+}
+
+/// The System Info lines for `machine`, in Photoshop's order: version, operating system,
+/// processor, memory, the performance preferences, then the graphics and monitor state.
+pub(crate) fn report(app: &PhotocraftApp, machine: &crate::system_info_ui::Machine) -> Vec<String> {
     let line = |template: &str, value: &str| crate::i18n::fmt(tl!(template), &[("value", value)]);
     let mb = |bytes: u64| (bytes >> 20).to_string();
     let perf = &app.session.prefs().performance;
-    let arch = match &host.cpu {
+    let arch = match &machine.cpu {
         Some(cpu) => format!("{}, {cpu}", std::env::consts::ARCH),
         None => std::env::consts::ARCH.to_string(),
     };
     let mut v = vec![
         line("PhotoCraft version: {value}", &photocraft_engine::build_info::long_version()),
-        line("Operating system: {value}", &host.os),
+        line("Operating system: {value}", &machine.os),
         line("System architecture: {value}", &arch),
     ];
-    if let Some(n) = host.threads {
+    if let Some(n) = machine.threads {
         v.push(line("Logical processor count: {value}", &n.to_string()));
     }
-    if let Some(bytes) = crate::gpu_canvas::physical_memory() {
+    if let Some(bytes) = machine.installed_memory {
         v.push(line("Built-in memory: {value} MB", &mb(bytes)));
     }
     v.push(line("Memory available to PhotoCraft: {value} MB", &perf.memory_usage_mb.to_string()));
-    if let Some(bytes) = crate::system_info_ui::process_memory() {
+    if let Some(bytes) = machine.process_memory {
         v.push(line("Memory used by PhotoCraft: {value} MB", &mb(bytes)));
     }
     v.push(line("History states: {value}", &perf.history_states.to_string()));
@@ -99,22 +108,22 @@ pub fn system_info_ui(app: &PhotocraftApp) -> Vec<String> {
     v
 }
 
-/// The `help.systemInfo` result: the same facts as JSON.
+/// The `help.systemInfo` result: the same facts as JSON, read once so `lines` agrees with them.
 pub fn system_info_json(app: &PhotocraftApp) -> serde_json::Value {
-    let host = crate::system_info_ui::host();
+    let m = crate::system_info_ui::machine();
     json!({
         "version": photocraft_engine::build_info::long_version(),
         "os": std::env::consts::OS,
-        "osVersion": host.os,
+        "osVersion": m.os,
         "arch": std::env::consts::ARCH,
-        "cpu": host.cpu,
-        "logicalProcessors": host.threads,
-        "physicalMemory": crate::gpu_canvas::physical_memory(),
-        "processMemory": crate::system_info_ui::process_memory(),
+        "cpu": m.cpu,
+        "logicalProcessors": m.threads,
+        "physicalMemory": m.installed_memory,
+        "processMemory": m.process_memory,
         "gpu": app.perf.gpu_info,
         "monitor": app.session.color.monitor_status(),
         "displays": app.session.color.display_statuses(),
-        "lines": system_info(app),
+        "lines": english(app, &m),
     })
 }
 
@@ -186,22 +195,48 @@ pub fn show_fallback(app: &mut PhotocraftApp, ctx: &egui::Context) {
 mod tests {
     use super::*;
 
+    use crate::system_info_ui::Machine;
+
+    /// A machine with every fact known, so the report is fixed.
+    fn known() -> Machine {
+        Machine {
+            os: "macOS 26.5.1".into(),
+            cpu: Some("Apple M5 Pro".into()),
+            threads: Some(18),
+            installed_memory: Some(48 << 30),
+            process_memory: Some(231 << 20),
+        }
+    }
+
+    /// The process memory moves between two reads, so reports read moments apart differ there.
+    fn steady(lines: &[String]) -> Vec<String> {
+        lines.iter().filter(|l| !l.starts_with("Memory used by PhotoCraft:")).cloned().collect()
+    }
+
     #[test]
     fn system_info_copy_and_api_stay_english_in_czech_ui() {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         app.perf.gpu_info.adapter = "Test GPU".into();
         app.perf.gpu_info.preference = "auto".into();
-        let english = crate::i18n::with_language(crate::i18n::Lang::EN, || system_info(&app));
+        let en = crate::i18n::with_language(crate::i18n::Lang::EN, || report(&app, &known()));
         crate::i18n::with_language(crate::i18n::Lang::from_code("cs").unwrap(), || {
-            assert_eq!(system_info(&app), english, "clipboard diagnostics include English monitor profiles too");
+            assert_eq!(english(&app, &known()), en, "clipboard diagnostics include English monitor profiles too");
+            assert_eq!(steady(&system_info(&app)), steady(&english(&app, &machine_now())));
             let result = crate::menus::invoke(&mut app, &egui::Context::default(), "help.systemInfo", json!({})).unwrap();
-            assert_eq!(result["info"]["lines"], json!(english));
+            let api: Vec<String> = serde_json::from_value(result["info"]["lines"].clone()).unwrap();
+            assert_eq!(steady(&api), steady(&system_info(&app)), "the API lists the clipboard's lines");
+            assert!(api.iter().all(|l| !l.starts_with("Operační")), "{api:?}");
             assert_eq!(crate::i18n::current().code(), "cs", "diagnostics restore the drawing language");
-            let screen = system_info_ui(&app);
+            let screen = report(&app, &known());
             assert!(screen.iter().any(|line| line == "Grafický adaptér: Test GPU"), "{screen:?}");
             assert!(screen.iter().any(|line| line.starts_with("Profil monitoru:")), "{screen:?}");
-            assert!(english.iter().any(|line| line == "GPU backend preference: auto"));
+            assert!(screen.iter().any(|line| line == "Operační systém: macOS 26.5.1"), "{screen:?}");
+            assert!(en.iter().any(|line| line == "GPU backend preference: auto"));
         });
+    }
+
+    fn machine_now() -> Machine {
+        crate::system_info_ui::machine()
     }
 
     #[test]
@@ -210,15 +245,92 @@ mod tests {
         // Hardware names are opaque even when they happen to match a lookup key.
         app.perf.gpu_info.adapter = "auto".into();
         crate::i18n::with_language(crate::i18n::Lang::from_code("cs").unwrap(), || {
-            let empty = system_info_ui(&app);
+            let empty = report(&app, &known());
             app.perf.gpu_info.preference = "auto".into();
             app.perf.gpu_info.selected = "auto".into();
-            assert_eq!(system_info_ui(&app), empty);
+            assert_eq!(report(&app, &known()), empty);
             assert!(empty.iter().any(|line| line == "Grafický adaptér: auto"));
             assert!(empty.iter().any(|line| line == "Preferovaný backend GPU: automaticky"), "{empty:?}");
             assert_eq!(app.perf.gpu_info.preference, "auto");
             assert_eq!(app.perf.gpu_info.selected, "auto");
         });
+    }
+
+    /// Photoshop's order: version, OS, processor, memory, the performance preferences, then the
+    /// graphics and monitor lines.
+    #[test]
+    fn system_info_lists_the_machine_first_in_photoshops_order() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.perf.gpu_info.adapter = "Test GPU".into();
+        let lines = crate::i18n::with_language(crate::i18n::Lang::EN, || report(&app, &known()));
+        let perf = app.session.prefs().performance.clone();
+        let expected = [
+            format!("PhotoCraft version: {}", photocraft_engine::build_info::long_version()),
+            "Operating system: macOS 26.5.1".into(),
+            format!("System architecture: {}, Apple M5 Pro", std::env::consts::ARCH),
+            "Logical processor count: 18".into(),
+            "Built-in memory: 49152 MB".into(),
+            format!("Memory available to PhotoCraft: {} MB", perf.memory_usage_mb),
+            "Memory used by PhotoCraft: 231 MB".into(),
+            format!("History states: {}", perf.history_states),
+            format!("Cache levels: {}", perf.cache_levels),
+            format!("Cache tile size: {} px", perf.cache_tile_size),
+            "Graphics adapter: Test GPU".into(),
+        ];
+        assert_eq!(lines.get(..expected.len()), Some(&expected[..]), "{lines:#?}");
+        assert!(lines.last().is_some_and(|l| l.starts_with("Monitor profile")), "monitors come last: {lines:#?}");
+    }
+
+    /// A fact the platform doesn't report leaves its line out rather than printing a blank.
+    #[test]
+    fn system_info_leaves_out_what_the_platform_does_not_report() {
+        let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let unknown = Machine { os: "windows".into(), ..Machine::default() };
+        let lines = crate::i18n::with_language(crate::i18n::Lang::EN, || report(&app, &unknown));
+        assert_eq!(lines.get(1).map(String::as_str), Some("Operating system: windows"));
+        assert_eq!(lines.get(2), Some(&format!("System architecture: {}", std::env::consts::ARCH)));
+        for gone in ["Logical processor count:", "Built-in memory:", "Memory used by PhotoCraft:"] {
+            assert!(!lines.iter().any(|l| l.starts_with(gone)), "{gone} {lines:#?}");
+        }
+        assert!(lines.iter().any(|l| l.starts_with("Memory available to PhotoCraft:")), "a preference is always known");
+    }
+
+    /// Every language that has the System Info labels translates all of them and keeps `{value}`.
+    #[test]
+    fn system_info_lines_read_in_the_interface_language() {
+        let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let english = crate::i18n::with_language(crate::i18n::Lang::EN, || report(&app, &known()));
+        for lang in crate::i18n::Lang::all().filter(|l| l.code() != "en") {
+            let lines = crate::i18n::with_language(lang, || report(&app, &known()));
+            for (i, (l, en)) in lines.iter().zip(&english).take(10).enumerate() {
+                assert_ne!(l, en, "{}: line {i} is still English", lang.code());
+            }
+            assert!(lines.iter().any(|l| l.contains("macOS 26.5.1")), "{}: {lines:#?}", lang.code());
+            assert!(lines.iter().any(|l| l.contains("49152")), "{}: {lines:#?}", lang.code());
+        }
+    }
+
+    /// `help.systemInfo` returns the machine facts, and its lines say the same numbers.
+    #[test]
+    fn help_system_info_returns_the_machine_facts() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let result = crate::menus::invoke(&mut app, &egui::Context::default(), "help.systemInfo", json!({})).unwrap();
+        let info = &result["info"];
+        assert!(info["osVersion"].as_str().is_some_and(|s| !s.is_empty()), "{info}");
+        assert!(info["cpu"].is_string() || info["cpu"].is_null(), "{info}");
+        for key in ["logicalProcessors", "physicalMemory", "processMemory"] {
+            assert!(info[key].is_u64() || info[key].is_null(), "{key}: {info}");
+        }
+        let lines: Vec<String> = serde_json::from_value(info["lines"].clone()).unwrap();
+        assert_eq!(lines.get(1), Some(&format!("Operating system: {}", info["osVersion"].as_str().unwrap_or_default())));
+        if let Some(bytes) = info["processMemory"].as_u64() {
+            let line = format!("Memory used by PhotoCraft: {} MB", bytes >> 20);
+            assert!(lines.contains(&line), "the lines and the fields are one reading: {line} {lines:#?}");
+        }
+        if cfg!(any(target_os = "macos", target_os = "linux", windows)) {
+            assert!(info["logicalProcessors"].as_u64().is_some_and(|n| n >= 1), "{info}");
+            assert!(info["processMemory"].as_u64().is_some_and(|b| b > 1 << 20), "{info}");
+        }
     }
 
     #[test]

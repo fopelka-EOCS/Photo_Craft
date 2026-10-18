@@ -3934,3 +3934,15 @@ curves	Smooth	スムーズ
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	GPU アダプター
+
+# Help › System Info
+	PhotoCraft version: {value}	PhotoCraft のバージョン: {value}
+	Operating system: {value}	オペレーティングシステム: {value}
+	System architecture: {value}	システムアーキテクチャ: {value}
+	Logical processor count: {value}	論理プロセッサ数: {value}
+	Built-in memory: {value} MB	搭載メモリ: {value} MB
+	Memory available to PhotoCraft: {value} MB	PhotoCraft が使用できるメモリ: {value} MB
+	Memory used by PhotoCraft: {value} MB	PhotoCraft の使用メモリ: {value} MB
+	History states: {value}	ヒストリーの数: {value}
+	Cache levels: {value}	キャッシュレベル: {value}
+	Cache tile size: {value} px	キャッシュタイルのサイズ: {value} px

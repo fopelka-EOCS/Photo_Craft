@@ -84,19 +84,43 @@ pub fn host() -> &'static Host {
     })
 }
 
-/// Memory PhotoCraft's process is using right now (resident set), in bytes.
-pub fn process_memory() -> Option<u64> {
-    // The tests compare reports made moments apart, so they leave out a number that moves.
-    if cfg!(test) { None } else { sample_process_memory() }
+/// Everything the report says about the machine: the fixed [`Host`] facts plus memory, which
+/// [`machine`] reads at the moment it is called. Tests build one by hand for a fixed report.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Machine {
+    /// See [`Host::os`].
+    pub os: String,
+    /// See [`Host::cpu`].
+    pub cpu: Option<String>,
+    /// See [`Host::threads`].
+    pub threads: Option<usize>,
+    /// Installed RAM in bytes ([`crate::gpu_canvas::physical_memory`]).
+    pub installed_memory: Option<u64>,
+    /// Memory PhotoCraft's process is using (resident set), in bytes.
+    pub process_memory: Option<u64>,
 }
 
+/// The machine as it is now.
+pub fn machine() -> Machine {
+    let h = host();
+    Machine {
+        os: h.os.clone(),
+        cpu: h.cpu.clone(),
+        threads: h.threads,
+        installed_memory: crate::gpu_canvas::physical_memory(),
+        process_memory: process_memory(),
+    }
+}
+
+/// Memory PhotoCraft's process is using right now (resident set), in bytes.
 #[cfg(not(target_arch = "wasm32"))]
-fn sample_process_memory() -> Option<u64> {
+pub fn process_memory() -> Option<u64> {
     memory_stats::memory_stats().and_then(|s| u64::try_from(s.physical_mem).ok())
 }
 
+/// Memory PhotoCraft's process is using right now: the browser doesn't say.
 #[cfg(target_arch = "wasm32")]
-fn sample_process_memory() -> Option<u64> {
+pub fn process_memory() -> Option<u64> {
     None
 }
 
@@ -159,14 +183,58 @@ fn cpu_name() -> Option<String> {
     command_line("/sbin/sysctl", &["-n", "hw.model"])
 }
 
+/// A text or number value under `HKEY_LOCAL_MACHINE\key`.
 #[cfg(windows)]
-fn os_version() -> Option<String> {
-    Some("Windows".into())
+fn registry(key: &str, name: &str) -> Option<winsafe::RegistryValue> {
+    winsafe::HKEY::LOCAL_MACHINE.RegGetValue(Some(key), Some(name), winsafe::co::RRF::RT_REG_SZ | winsafe::co::RRF::RT_REG_DWORD).ok()
 }
 
 #[cfg(windows)]
+fn os_version() -> Option<String> {
+    use winsafe::RegistryValue;
+    const KEY: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion";
+    let text = |name| match registry(KEY, name)? {
+        RegistryValue::Sz(s) => Some(s),
+        _ => None,
+    };
+    let update = match registry(KEY, "UBR") {
+        Some(RegistryValue::Dword(n)) => Some(n),
+        _ => None,
+    };
+    Some(windows_name(&text("CurrentBuildNumber")?, text("DisplayVersion").as_deref(), update))
+}
+
+/// "Windows 11 24H2 (build 26100.2894)" from the CurrentVersion registry values: the build number,
+/// the feature update and the update revision. Windows 11 still says Windows 10 in its
+/// `ProductName`, so the build decides: 22000 and later is Windows 11.
+#[cfg(any(windows, test))]
+fn windows_name(build: &str, display_version: Option<&str>, update: Option<u32>) -> String {
+    let build = build.trim();
+    let name = match build.parse::<u32>() {
+        Ok(n) if n >= 22000 => "Windows 11",
+        Ok(n) if n >= 10240 => "Windows 10",
+        _ => "Windows",
+    };
+    let mut s = name.to_string();
+    if let Some(v) = display_version.map(str::trim).filter(|v| !v.is_empty()) {
+        s.push(' ');
+        s.push_str(v);
+    }
+    match update {
+        Some(u) => s.push_str(&format!(" (build {build}.{u})")),
+        None => s.push_str(&format!(" (build {build})")),
+    }
+    s
+}
+
+/// The processor's marketing name ("Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz"), or the vaguer
+/// family/model/stepping line Windows keeps in the environment.
+#[cfg(windows)]
 fn cpu_name() -> Option<String> {
-    std::env::var("PROCESSOR_IDENTIFIER").ok().map(|s| s.trim().to_string())
+    match registry(r"HARDWARE\DESCRIPTION\System\CentralProcessor\0", "ProcessorNameString") {
+        Some(winsafe::RegistryValue::Sz(s)) if !s.trim().is_empty() => Some(s.trim().to_string()),
+        _ => std::env::var("PROCESSOR_IDENTIFIER").ok().map(|s| s.trim().to_string()),
+    }
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "freebsd", windows)))]
@@ -182,6 +250,82 @@ fn cpu_name() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable;
+
+    /// The app with Help › System Info open, its interface in `lang`.
+    fn open(lang: &str) -> Harness<'static, PhotocraftApp> {
+        let mut session = photocraft_engine::Session::new();
+        session.execute("prefs.set", serde_json::json!({"path": "interface.language", "value": lang})).unwrap();
+        let mut h = Harness::builder().with_size(egui::vec2(1440.0, 900.0)).with_max_steps(64).build_eframe(move |cc| {
+            PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
+            PhotocraftApp::new(session, crate::Services::default())
+        });
+        let ctx = h.ctx.clone();
+        crate::menus::invoke(h.state_mut(), &ctx, "help.systemInfo", serde_json::json!({})).unwrap();
+        h.run_steps(4);
+        assert!(is_open(&h), "System Info opened");
+        h
+    }
+
+    fn is_open(h: &Harness<'_, PhotocraftApp>) -> bool {
+        h.state().ui.dialogs.iter().any(|d| owns(&d.fields))
+    }
+
+    fn label(lang: &str, english: &'static str) -> String {
+        crate::i18n::tr(crate::i18n::Lang::from_code(lang).unwrap(), english).to_string()
+    }
+
+    #[test]
+    fn copy_puts_the_english_report_on_the_clipboard_in_a_czech_ui() {
+        let mut h = open("cs");
+        h.get_by_label(&label("cs", "Copy")).click();
+        h.step();
+        let copied: Vec<String> = h
+            .output()
+            .platform_output
+            .commands
+            .iter()
+            .filter_map(|c| match c {
+                egui::OutputCommand::CopyText(t) => Some(t.clone()),
+                _ => None,
+            })
+            .collect();
+        let [text] = &copied[..] else { panic!("one copy: {copied:?}") };
+        assert!(text.lines().any(|l| l.starts_with("Operating system: ")), "{text}");
+        assert!(!text.contains("Operační systém"), "{text}");
+        let expected = crate::gpu_status::system_info(h.state());
+        let steady = |lines: Vec<&str>| lines.into_iter().filter(|l| !l.starts_with("Memory used by PhotoCraft:")).map(str::to_string).collect::<Vec<_>>();
+        assert_eq!(steady(text.lines().collect()), steady(expected.iter().map(String::as_str).collect()));
+        assert!(is_open(&h), "Copy leaves the dialog open");
+    }
+
+    #[test]
+    fn return_closes_system_info() {
+        let mut h = open("en");
+        h.key_press(egui::Key::Enter);
+        h.run_steps(2);
+        assert!(!is_open(&h));
+    }
+
+    #[test]
+    fn ok_closes_system_info() {
+        let mut h = open("de");
+        h.get_by_label(&label("de", "OK")).click();
+        h.run_steps(2);
+        assert!(!is_open(&h));
+    }
+
+    #[test]
+    fn windows_name_from_the_build_number() {
+        assert_eq!(windows_name("26100", Some("24H2"), Some(2894)), "Windows 11 24H2 (build 26100.2894)");
+        assert_eq!(windows_name("19045", Some("22H2"), Some(5011)), "Windows 10 22H2 (build 19045.5011)");
+        assert_eq!(windows_name("22000", None, None), "Windows 11 (build 22000)");
+        assert_eq!(windows_name(" 17763 ", Some(" "), None), "Windows 10 (build 17763)");
+        assert_eq!(windows_name("9600", None, Some(1)), "Windows (build 9600.1)");
+        assert_eq!(windows_name("abc", None, None), "Windows (build abc)");
+    }
 
     #[test]
     fn os_release_pretty_name_without_quotes() {
@@ -215,7 +359,7 @@ mod tests {
     #[test]
     fn samples_this_process_memory() {
         if cfg!(any(target_os = "macos", target_os = "linux", windows)) {
-            assert!(sample_process_memory().is_some_and(|b| b > 1 << 20), "a running test uses more than 1 MB");
+            assert!(process_memory().is_some_and(|b| b > 1 << 20), "a running test uses more than 1 MB");
         }
     }
 }

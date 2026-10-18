@@ -3956,3 +3956,15 @@ curves	Smooth	Εξομάλυνση
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Προσαρμογέας GPU
+
+# Help › System Info
+	PhotoCraft version: {value}	Έκδοση PhotoCraft: {value}
+	Operating system: {value}	Λειτουργικό σύστημα: {value}
+	System architecture: {value}	Αρχιτεκτονική συστήματος: {value}
+	Logical processor count: {value}	Πλήθος λογικών επεξεργαστών: {value}
+	Built-in memory: {value} MB	Ενσωματωμένη μνήμη: {value} MB
+	Memory available to PhotoCraft: {value} MB	Μνήμη διαθέσιμη στο PhotoCraft: {value} MB
+	Memory used by PhotoCraft: {value} MB	Μνήμη σε χρήση από το PhotoCraft: {value} MB
+	History states: {value}	Καταστάσεις ιστορικού: {value}
+	Cache levels: {value}	Επίπεδα προσωρινής μνήμης: {value}
+	Cache tile size: {value} px	Μέγεθος πλακιδίου προσωρινής μνήμης: {value} px

@@ -4026,7 +4026,16 @@ layerLabel	No Color	Bez boje
 	unknown	nepoznato
 	unknown type	nepoznata vrsta
 	auto	automatski
-	Platform: {os} {arch}	Platforma: {os} {arch}
+	PhotoCraft version: {value}	Verzija programa PhotoCraft: {value}
+	Operating system: {value}	Operativni sistem: {value}
+	System architecture: {value}	Arhitektura sistema: {value}
+	Logical processor count: {value}	Broj logičkih procesora: {value}
+	Built-in memory: {value} MB	Ugrađena memorija: {value} MB
+	Memory available to PhotoCraft: {value} MB	Memorija dostupna programu PhotoCraft: {value} MB
+	Memory used by PhotoCraft: {value} MB	Memorija koju koristi PhotoCraft: {value} MB
+	History states: {value}	Stanja istorije: {value}
+	Cache levels: {value}	Nivoi keša: {value}
+	Cache tile size: {value} px	Veličina pločice keša: {value} px
 	previous reading kept; the last re-read failed: {reason}	zadržano je prethodno očitavanje; poslednje ponovno očitavanje nije uspelo: {reason}
 	Monitor profile: {profile}	Profil monitora: {profile}
 	Display profiles: {reason}	Profili ekrana: {reason}

@@ -3965,3 +3965,15 @@ curves	Smooth	Згладити
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Адаптер GPU
+
+# Help › System Info
+	PhotoCraft version: {value}	Версія PhotoCraft: {value}
+	Operating system: {value}	Операційна система: {value}
+	System architecture: {value}	Архітектура системи: {value}
+	Logical processor count: {value}	Кількість логічних процесорів: {value}
+	Built-in memory: {value} MB	Вбудована пам'ять: {value} МБ
+	Memory available to PhotoCraft: {value} MB	Пам'ять, доступна PhotoCraft: {value} МБ
+	Memory used by PhotoCraft: {value} MB	Пам'ять, яку використовує PhotoCraft: {value} МБ
+	History states: {value}	Стани історії: {value}
+	Cache levels: {value}	Рівні кешу: {value}
+	Cache tile size: {value} px	Розмір плитки кешу: {value} px

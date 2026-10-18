@@ -3744,3 +3744,15 @@ curves	Smooth	Làm mượt
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Bộ điều hợp GPU
+
+# Help › System Info
+	PhotoCraft version: {value}	Phiên bản PhotoCraft: {value}
+	Operating system: {value}	Hệ điều hành: {value}
+	System architecture: {value}	Kiến trúc hệ thống: {value}
+	Logical processor count: {value}	Số bộ xử lý logic: {value}
+	Built-in memory: {value} MB	Bộ nhớ tích hợp: {value} MB
+	Memory available to PhotoCraft: {value} MB	Bộ nhớ dành cho PhotoCraft: {value} MB
+	Memory used by PhotoCraft: {value} MB	Bộ nhớ PhotoCraft đang dùng: {value} MB
+	History states: {value}	Số trạng thái lịch sử: {value}
+	Cache levels: {value}	Mức bộ nhớ đệm: {value}
+	Cache tile size: {value} px	Kích thước ô đệm: {value} px
