@@ -14,7 +14,7 @@ use photocraft_ui_egui::theme::ThemeKind;
 use photocraft_ui_egui::{FileDialogAnswer, FileDialogRequest, PhotocraftApp, Services};
 use wasm_bindgen::JsCast as _;
 
-type Inbox = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
+pub(crate) type Inbox = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
 
 /// Everything File › Open reads: PhotoCraft, Photoshop, OpenRaster, Krita and Affinity documents, flat images, and
 /// Photoshop brushes (.abr), gradients (.grd) and swatches (.aco, .ase), which go to the preset libraries.
@@ -87,7 +87,14 @@ pub fn start() {
                     let (session, warnings) = crate::preset_bridge::session(presets.clone());
                     preset_warnings.extend(warnings);
                     let drag = listen_drag(&pen_target);
-                    let mut app = PhotocraftApp::new(session, services(inbox.clone(), place_inbox.clone(), drag_pos_service(pen_target.clone(), drag)));
+                    let (control_tx, control_rx) = std::sync::mpsc::channel();
+                    let mut app = PhotocraftApp::new(session, services(inbox.clone(), place_inbox.clone(), drag_pos_service(pen_target.clone(), drag)))
+                        .with_control(control_rx);
+                    // `window.photocraft`: the page's control channel (crate::api).
+                    crate::api::connect(control_tx, inbox.clone(), cc.egui_ctx.clone());
+                    if let Err(e) = crate::api::install() {
+                        log::error!("couldn't install window.photocraft: {e:?}");
+                    }
                     if !preset_warnings.is_empty() {
                         photocraft_ui_egui::notices::post(&mut app, i18n::t("Some brush presets could not be loaded"), preset_warnings, true, None);
                     }
@@ -349,6 +356,7 @@ impl eframe::App for WebShell {
         }
         self.serve_fonts(ctx);
         self.app.logic(ctx, frame);
+        crate::api::poll_replies();
         self.save_presets(ctx);
     }
 
@@ -377,6 +385,7 @@ impl eframe::App for WebShell {
             });
         }
         self.app.ui(ui, frame);
+        crate::api::poll_replies();
         self.save_presets(ui.ctx());
     }
 }
@@ -427,6 +436,11 @@ fn services(inbox: Inbox, place_inbox: Inbox, cursor_pos: photocraft_ui_egui::Cu
             }
         })),
         write: Some(Box::new(|path: &str, bytes: &[u8]| download(path, bytes))),
+        // Control requests (`window.photocraft`) write into the page, never as downloads.
+        automation_write: Some(Box::new(|path: &str, bytes: &[u8]| {
+            crate::api::keep(path, bytes);
+            Ok(())
+        })),
         encode_png: Some(Box::new(|w, h, rgba| {
             let img = Image::from_u8(w, h, ChannelLayout::Rgba, rgba.to_vec()).map_err(|e| e.to_string())?;
             photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &EncodeOptions::default()).map_err(|e| e.to_string())
@@ -449,6 +463,9 @@ fn local_storage() -> Option<web_sys::Storage> {
 
 /// Trigger a browser download of `bytes` named after the last component of `path`.
 fn download(path: &str, bytes: &[u8]) -> Result<(), String> {
+    if crate::api::capture(path, bytes) {
+        return Ok(());
+    }
     let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
     let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "photocraft".into());
     let window = web_sys::window().ok_or("no window")?;
