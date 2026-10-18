@@ -42,6 +42,10 @@ pub struct AppMenu {
     /// Set true while a registrar holds a registration for one of our windows — a global menu
     /// host is *serving* the menus, and the app can then hide its in-window menu bar.
     hosted: Arc<AtomicBool>,
+    /// Set by the worker when it could not connect to the session bus and exited. `start`
+    /// returns before the connection is made (it runs on the UI thread and must not wait), so
+    /// this is how a caller learns that the export never came up.
+    failed: Arc<AtomicBool>,
 }
 
 impl AppMenu {
@@ -49,7 +53,8 @@ impl AppMenu {
     /// unavailable (the app then uses only its in-window menu bar). `wake` is called on
     /// the exporter's threads whenever a click is recorded or the hosted flag flips, so a
     /// reactive app renders the frame in which `try_event`/`hosted` are read at once
-    /// instead of at its next input event.
+    /// instead of at its next input event. The connection is made on the worker thread, so a
+    /// missing session bus does not fail here: poll [`AppMenu::failed`].
     pub fn start(app_name: &str, wake: MenuWake) -> Result<AppMenu, Error> {
         let state = Arc::new(Mutex::new(MenuState::default()));
         {
@@ -63,12 +68,14 @@ impl AppMenu {
         let worker_state = state.clone();
         let worker_bus = bus.clone();
         let worker_hosted = hosted.clone();
+        let failed = Arc::new(AtomicBool::new(false));
+        let worker_failed = failed.clone();
         let name = app_name.to_string();
         std::thread::Builder::new()
             .name("photocraft-appmenu".into())
-            .spawn(move || worker(&name, rx, worker_state, worker_bus, worker_hosted, wake))
+            .spawn(move || worker(&name, rx, worker_state, worker_bus, worker_hosted, worker_failed, wake))
             .map_err(|e| Error::Platform(format!("cannot start the appmenu thread: {e}")))?;
-        Ok(AppMenu { tx, state, bus, hosted })
+        Ok(AppMenu { tx, state, bus, hosted, failed })
     }
 
     /// The unique bus name the menu is served on, once the connection is up. A
@@ -76,6 +83,12 @@ impl AppMenu {
     /// diagnostics and tests; importers find us through the registrar, not by name.
     pub fn bus_name(&self) -> Option<String> {
         self.bus.lock().unwrap_or_else(PoisonError::into_inner).clone()
+    }
+
+    /// Whether the worker gave up because the session bus could not be reached. Once true the
+    /// handle is dead; drop it and keep the in-window menu bar.
+    pub fn failed(&self) -> bool {
+        self.failed.load(Ordering::Relaxed)
     }
 
     /// Publishes a new model: the worker diffs it against the last one and emits only what
@@ -115,10 +128,12 @@ impl Drop for AppMenu {
     }
 }
 
-fn worker(app_name: &str, rx: Receiver<Message>, state: Arc<Mutex<MenuState>>, bus: Arc<Mutex<Option<String>>>, hosted: Arc<AtomicBool>, wake: MenuWake) {
+fn worker(app_name: &str, rx: Receiver<Message>, state: Arc<Mutex<MenuState>>, bus: Arc<Mutex<Option<String>>>, hosted: Arc<AtomicBool>, failed: Arc<AtomicBool>, wake: MenuWake) {
     log::debug!("AppMenu: worker starting ({app_name})");
     let Ok(conn) = connection(&state, &bus) else {
         log::debug!("AppMenu: no D-Bus session bus; global menu stays off");
+        failed.store(true, Ordering::Relaxed);
+        wake();
         return;
     };
     let mut registrar = Registrar::new(conn.unique_name().map(|n| n.to_string()).as_deref().unwrap_or_default());

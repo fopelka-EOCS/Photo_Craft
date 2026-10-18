@@ -83,6 +83,16 @@ pub fn tick(app: &mut crate::PhotocraftApp, ctx: &egui::Context) {
     // the same second the host (or its service) disappears. With no exporter the field is
     // never touched (it is only ever flipped true here), so the in-window bar stays. The
     // mirror in `ui` state is what the control channel reads.
+    // The worker connects after `start` returned; if that failed it has already exited, so
+    // stop feeding a dead channel and keep the in-window bar for good.
+    if app.global_menu.as_ref().is_some_and(|m| m.failed()) {
+        app.global_menu = None;
+        app.global_menu_unavailable = true;
+        app.global_menu_hosted = false;
+        app.ui.global_menu_hosted = false;
+        log::debug!("AppMenu: exporter failed to connect; global menu stays off");
+        return;
+    }
     if let Some(menu) = &app.global_menu {
         app.global_menu_hosted = menu.hosted();
         app.ui.global_menu_hosted = app.global_menu_hosted;
@@ -159,15 +169,17 @@ fn entries(items: &[&MenuItem], depth: usize) -> Vec<MenuEntry> {
     let lang = crate::i18n::current();
     let mut out: Vec<MenuEntry> = Vec::new();
     let mut shown: Vec<String> = Vec::new();
-    let mut last_was_sep = true;
-    for (i, it) in items.iter().enumerate() {
+    // A separator is held back until something follows it, so doubled ones collapse and none
+    // is left trailing at the end of a level.
+    let mut pending_sep = false;
+    for it in items {
         if it.path.len() == depth {
             if it.label == "---" {
-                if !last_was_sep && i + 1 < items.len() {
-                    out.push(MenuEntry::Separator);
-                    last_was_sep = true;
-                }
+                pending_sep = !out.is_empty();
                 continue;
+            }
+            if std::mem::take(&mut pending_sep) {
+                out.push(MenuEntry::Separator);
             }
             let mut entry = MenuEntry::command(crate::i18n::tr_id(lang, &it.id, &it.label), &it.id, it.enabled);
             if let Some(c) = it.checked {
@@ -177,19 +189,20 @@ fn entries(items: &[&MenuItem], depth: usize) -> Vec<MenuEntry> {
                 entry = entry.shortcut(sc);
             }
             out.push(entry);
-            last_was_sep = false;
         } else if it.path.len() > depth {
             let Some(name) = it.path.get(depth) else { continue };
             if shown.iter().any(|s| s == name) {
                 continue;
             }
             shown.push(name.clone());
+            if std::mem::take(&mut pending_sep) {
+                out.push(MenuEntry::Separator);
+            }
             let child: Vec<&MenuItem> = items.iter().copied().filter(|c| c.path.len() > depth && c.path.get(depth).is_some_and(|p| p == name)).collect();
             // A title only ever opens its submenu; enablement is per item (the in-window
             // bar's expression reduces to the same — `child` always contains the title's
             // own items, so it is never empty).
             out.push(MenuEntry::command(crate::i18n::tr(lang, name), "", true).submenu(entries(&child, depth + 1)));
-            last_was_sep = false;
         }
     }
     out
@@ -305,8 +318,8 @@ Edit()\n  Undo(edit.undo)\nView()\n  Zoom In(view.zoomIn)\n  Extras()\n    Show 
             // No tops but File/Edit exist: the other eight top menus stay away.
         ];
         let printed = tree(&model(&items).children, 0);
-        // Two adjacent "---" become one separator (doubled collapse), and a separator with
-        // nothing printed before it within the level is suppressed.
-        assert_eq!(printed, "File()\n  New…(file.new)\n  |\nEdit()\n  Undo(edit.undo)\n", "{printed}");
+        // Adjacent "---" collapse, a separator with nothing before it is suppressed, and one
+        // with nothing after it is dropped.
+        assert_eq!(printed, "File()\n  New…(file.new)\nEdit()\n  Undo(edit.undo)\n", "{printed}");
     }
 }
