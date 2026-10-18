@@ -502,6 +502,18 @@ pub struct DocWindow {
     /// A tab dragged off the tab strip opens its window where it was dropped (#3733).
     #[serde(default)]
     pub position: Option<[f32; 2]>,
+    /// The document moved into this window and has no tab in the main window (Window › Arrange ›
+    /// Float in Window, a tab dragged off the strip). `false`: a second view of a document that
+    /// keeps its tab (Window › Arrange › New Window for …).
+    #[serde(default)]
+    pub floating: bool,
+}
+
+impl UiState {
+    /// Whether document `doc` floats in its own window, so the main window shows no tab for it.
+    pub fn floats(&self, doc: usize) -> bool {
+        self.windows.iter().any(|w| w.open && w.floating && w.document == doc)
+    }
 }
 
 /// Options-bar state for tools (Photoshop keeps these per tool).

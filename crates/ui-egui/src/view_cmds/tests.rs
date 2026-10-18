@@ -421,8 +421,9 @@ fn float_in_window_takes_a_document_and_position() {
     assert_eq!(r, json!({"window": w.id}));
     assert_eq!((w.document, w.position), (1, Some([1950.0, 40.5])));
     assert_eq!(app.session.active_index(), Some(1));
+    app.session.set_active(0);
     menu(&mut app, &ctx, "window.arrange.floatInWindow", json!({})).unwrap();
-    assert_eq!(app.ui.windows.last().map(|w| (w.document, w.position)), Some((1, None)), "defaults: the active document, placed by the OS");
+    assert_eq!(app.ui.windows.last().map(|w| (w.document, w.position)), Some((0, None)), "defaults: the active document, placed by the OS");
     for bad in [
         json!({"document": 3}),
         json!({"document": -1}),
@@ -435,6 +436,54 @@ fn float_in_window_takes_a_document_and_position() {
         assert!(menu(&mut app, &ctx, "window.arrange.floatInWindow", bad.clone()).is_err(), "{bad}");
     }
     assert_eq!(app.ui.windows.len(), 2, "rejected params open no window");
+}
+
+/// Float in Window moves a document into its own window, as in Photoshop: floating it again
+/// (another tab drag, Float All in Windows) never opens a copy, and the main window has no tab
+/// for it. New Window for … is the one that opens a second view, keeping the tab.
+#[test]
+fn float_in_window_moves_the_document_instead_of_copying_it() {
+    let (mut app, ctx) = app_with(3);
+    let first = menu(&mut app, &ctx, "window.arrange.floatInWindow", json!({"document": 1})).unwrap();
+    let again = menu(&mut app, &ctx, "window.arrange.floatInWindow", json!({"document": 1, "position": [300.0, 200.0]})).unwrap();
+    assert_eq!(first, again, "the floating document keeps its one window");
+    assert_eq!(app.ui.windows.len(), 1);
+    assert_eq!(app.ui.windows[0].position, Some([300.0, 200.0]), "floating it again moves the window");
+    assert!(app.ui.floats(1) && !app.ui.floats(0) && !app.ui.floats(2));
+    menu(&mut app, &ctx, "window.arrange.floatAllInWindows", json!({})).unwrap();
+    menu(&mut app, &ctx, "window.arrange.floatAllInWindows", json!({})).unwrap();
+    let mut docs: Vec<usize> = app.ui.windows.iter().map(|w| w.document).collect();
+    docs.sort_unstable();
+    assert_eq!(docs, [0, 1, 2], "one window per document");
+    menu(&mut app, &ctx, "window.arrange.consolidateAllToTabs", json!({})).unwrap();
+    assert!((0..3).all(|d| !app.ui.floats(d)), "consolidated documents are tabs again");
+    // A second view keeps the document's tab.
+    menu(&mut app, &ctx, "window.arrange.newWindowForDocument", json!({})).unwrap();
+    menu(&mut app, &ctx, "window.arrange.newWindowForDocument", json!({})).unwrap();
+    assert_eq!(app.ui.windows.len(), 2);
+    assert!((0..3).all(|d| !app.ui.floats(d)));
+    // Closing a floating window brings its document back as a tab (nothing is closed or lost).
+    menu(&mut app, &ctx, "window.arrange.floatInWindow", json!({"document": 2})).unwrap();
+    assert!(app.ui.floats(2));
+    app.ui.windows.iter_mut().filter(|w| w.document == 2).for_each(|w| w.open = false);
+    assert!(!app.ui.floats(2));
+    assert_eq!(app.session.documents().len(), 3);
+}
+
+/// Tiles in Window › Arrange leave out documents that float in their own window.
+#[test]
+fn arranged_tiles_skip_floating_documents() {
+    let (mut app, ctx) = app_with(3);
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 600.0));
+    menu(&mut app, &ctx, "window.arrange.threeUpStacked", json!({})).unwrap();
+    assert_eq!(crate::canvas::arranged_cells(&app, rect).map(|c| c.len()), Some(3));
+    menu(&mut app, &ctx, "window.arrange.floatInWindow", json!({"document": 0})).unwrap();
+    let shown: Vec<usize> = crate::canvas::arranged_cells(&app, rect).unwrap_or_default().into_iter().map(|(d, _)| d).collect();
+    assert_eq!(shown, [1, 2]);
+    menu(&mut app, &ctx, "window.arrange.floatInWindow", json!({"document": 1})).unwrap();
+    assert!(crate::canvas::arranged_cells(&app, rect).is_none(), "one docked document fills the area");
+    menu(&mut app, &ctx, "window.arrange.floatInWindow", json!({"document": 2})).unwrap();
+    assert!(crate::canvas::arranged_cells(&app, rect).is_none(), "every document floats: nothing to tile, no panic");
 }
 
 #[test]

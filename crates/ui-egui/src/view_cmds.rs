@@ -805,12 +805,24 @@ fn screen_position(v: &Value) -> Option<[f32; 2]> {
     Some([n(0)?, n(1)?])
 }
 
-pub(crate) fn float_window(app: &mut PhotocraftApp, doc: usize, offset: usize) -> u64 {
+/// A new OS window showing `doc`. `floating`: the document moves there and leaves the main
+/// window's tabs; otherwise it is a second view and keeps its tab.
+fn add_window(app: &mut PhotocraftApp, doc: usize, offset: usize, floating: bool) -> u64 {
     let wid = app.ui.alloc_id();
     let mut view = app.ui.views.get(doc).cloned().unwrap_or_default();
     view.fit_pending = offset > 0 || view.fit_pending;
-    app.ui.windows.push(crate::state::DocWindow { id: wid, document: doc, view, open: true, position: None });
+    app.ui.windows.push(crate::state::DocWindow { id: wid, document: doc, view, open: true, position: None, floating });
     wid
+}
+
+/// Float `doc` in its own window, as Photoshop's Float in Window: the document moves out of the
+/// main window's tabs. A document that already floats keeps its one window (dragging it off the
+/// strip again, or Float All in Windows, never adds a copy). Returns the window's id.
+pub(crate) fn float_window(app: &mut PhotocraftApp, doc: usize, offset: usize) -> u64 {
+    match app.ui.windows.iter().find(|w| w.open && w.floating && w.document == doc) {
+        Some(w) => w.id,
+        None => add_window(app, doc, offset, true),
+    }
 }
 
 fn arrange(app: &mut PhotocraftApp, k: &str, p: &Value) -> Result<Value, String> {
@@ -828,7 +840,7 @@ fn arrange(app: &mut PhotocraftApp, k: &str, p: &Value) -> Result<Value, String>
         }
         "newWindowForDocument" => {
             let doc = app.session.active_index().ok_or("no document")?;
-            Ok(json!({"window": float_window(app, doc, 0)}))
+            Ok(json!({"window": add_window(app, doc, 0, false)}))
         }
         // Optional `document` (index; default the active one) and `position` (`[x, y]`, the
         // window's screen position in points): dragging a tab off the tab strip uses both (#3733).
@@ -845,7 +857,9 @@ fn arrange(app: &mut PhotocraftApp, k: &str, p: &Value) -> Result<Value, String>
                 Some(v) => Some(screen_position(v).ok_or("position must be [x, y] in points")?),
             };
             let wid = float_window(app, doc, 0);
-            if let Some(w) = app.ui.windows.iter_mut().find(|w| w.id == wid) {
+            if let Some(w) = app.ui.windows.iter_mut().find(|w| w.id == wid)
+                && position.is_some()
+            {
                 w.position = position;
             }
             app.session.set_active(doc);

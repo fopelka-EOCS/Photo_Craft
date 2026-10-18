@@ -2110,11 +2110,25 @@ pub fn document_area(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 /// active document fills the area.
 pub(crate) fn arranged_cells(app: &PhotocraftApp, rect: Rect) -> Option<Vec<(usize, Rect)>> {
     let idx = app.session.active_index()?;
-    let n = app.session.documents().len();
-    let cells = crate::view_cmds::cells(&app.ui.view.arrange, rect, n)?;
-    let mut shown: Vec<(usize, Rect)> = (0..n).map(|k| (idx + k) % n).zip(cells).collect();
+    // Documents floating in their own window aren't tiled in the main one.
+    let docked: Vec<usize> = (0..app.session.documents().len()).filter(|&d| !app.ui.floats(d)).collect();
+    let cells = crate::view_cmds::cells(&app.ui.view.arrange, rect, docked.len())?;
+    let start = docked.iter().position(|&d| d == idx).unwrap_or(0);
+    let mut shown: Vec<(usize, Rect)> = (0..docked.len()).filter_map(|k| docked.get((start + k) % docked.len()).copied()).zip(cells).collect();
     shown.sort_by_key(|(d, _)| *d);
     Some(shown)
+}
+
+/// The document the main window shows: the active one unless it floats in its own window, then
+/// the main window's last selected tab; `None` when every document floats.
+fn main_document(app: &mut PhotocraftApp, active: usize) -> Option<usize> {
+    let docs = app.session.documents();
+    if !app.ui.floats(active) {
+        app.main_tab = docs.get(active).map(|d| d.doc.id);
+        return Some(active);
+    }
+    let last = app.main_tab.and_then(|id| docs.iter().position(|d| d.doc.id == id)).filter(|&d| !app.ui.floats(d));
+    last.or_else(|| (0..docs.len()).find(|&d| !app.ui.floats(d)))
 }
 
 fn documents(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
@@ -2176,8 +2190,23 @@ fn documents(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         }
         return;
     }
-    let view = app.ui.views[idx].clone();
-    canvas_view(app, ui, idx, rect, view, true);
+    // The active document floats in its own window: the main window keeps showing its own tab,
+    // and a click there makes that document active again.
+    let Some(main) = main_document(app, idx) else {
+        paint_dots(ui, rect, app.session.prefs().interface.show_canvas_dots);
+        open_on_double_click(app, ui, rect);
+        return;
+    };
+    let Some(view) = app.ui.views.get(main).cloned() else { return };
+    let v = canvas_view(app, ui, main, rect, view, main == idx);
+    if main != idx {
+        if let Some(slot) = app.ui.views.get_mut(main) {
+            *slot = v;
+        }
+        if ui.input(|i| i.pointer.primary_pressed() && i.pointer.interact_pos().is_some_and(|p| rect.contains(p))) {
+            app.session.set_active(main);
+        }
+    }
 }
 
 /// The tab strip; returns where its document tabs are.
@@ -2230,7 +2259,7 @@ fn tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> TabStrip {
         .map_or_else(|| app.session.active_index().unwrap_or(0), |p| tab_count + p);
     let frame = egui::Frame::NONE.fill(t.canvas).inner_margin(egui::Margin { left: 8, right: 8, top: 6, bottom: 4 }).show(ui, |ui| {
         let (row, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), tab_h), Sense::hover());
-        let f = fit_doc_tabs(&natural, selected, row.width());
+        let f = fit_doc_tabs(app, &natural, selected, row.width());
         let mut x = row.left();
         let mut placed: Vec<(usize, Rect)> = Vec::with_capacity(f.shown.len());
         for &(i, w) in &f.shown {
@@ -2515,9 +2544,19 @@ const STUDIO_TAB_GAP: f32 = 4.0;
 /// Fit document tabs as Photoshop does (#4487): a tab never shrinks below its whole title, so the
 /// tabs that don't fit move into the » menu instead. Only the active tab, when it alone is wider
 /// than the strip, is cut.
-fn fit_doc_tabs(natural: &[f32], selected: usize, avail: f32) -> crate::tab_strip::TabFit {
-    let widest = natural.iter().copied().filter(|w| w.is_finite()).fold(0.0, f32::max);
-    crate::tab_strip::fit(natural, selected, avail, widest, crate::tab_strip::CHEVRON_W)
+/// Fit the main window's tabs. `natural` is indexed by tab slot (documents, then files still
+/// opening), and so are the fit's indices. Documents floating in their own window have no tab
+/// here: they take no room and don't count as overflow.
+fn fit_doc_tabs(app: &PhotocraftApp, natural: &[f32], selected: usize, avail: f32) -> crate::tab_strip::TabFit {
+    let docs = app.session.documents().len();
+    let slots: Vec<usize> = (0..natural.len()).filter(|&i| i >= docs || !app.ui.floats(i)).collect();
+    let widths: Vec<f32> = slots.iter().filter_map(|&i| natural.get(i).copied()).collect();
+    let widest = widths.iter().copied().filter(|w| w.is_finite()).fold(0.0, f32::max);
+    let selected = slots.iter().position(|&i| i == selected).unwrap_or(0);
+    let mut f = crate::tab_strip::fit(&widths, selected, avail, widest, crate::tab_strip::CHEVRON_W);
+    f.shown = f.shown.into_iter().filter_map(|(k, w)| Some((*slots.get(k)?, w))).collect();
+    f.overflow = f.overflow.into_iter().filter_map(|k| slots.get(k).copied()).collect();
+    f
 }
 
 /// Photoshop's tab title: "name @ 50% (Layer 1, RGB/8)", "(Layer 1, Layer Mask/8)" when the mask
@@ -2581,7 +2620,7 @@ fn pro_tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> TabStrip {
         .focus
         .and_then(|job| opening.iter().position(|(open, _, _)| *open == job))
         .map_or_else(|| app.session.active_index().unwrap_or(0), |p| tab_count + p);
-    let f = fit_doc_tabs(&natural, selected, strip.width());
+    let f = fit_doc_tabs(app, &natural, selected, strip.width());
     let mut x = strip.left();
     let mut placed: Vec<(usize, Rect)> = Vec::with_capacity(f.shown.len());
     for &(i, w) in &f.shown {
@@ -7048,7 +7087,7 @@ mod tests {
             let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(700.0, 300.0)).build_ui_state(
                 |ui, (app, ready): &mut (PhotocraftApp, bool)| {
                     if *ready {
-                        tabs(app, ui);
+                        app.tab_strip = Some(tabs(app, ui));
                     }
                 },
                 (app, false),
@@ -7056,6 +7095,8 @@ mod tests {
             PhotocraftApp::setup_context(&h.ctx, kind);
             h.state_mut().1 = true;
             h.run_steps(2);
+            let tabbed = |app: &PhotocraftApp| app.tab_strip.as_ref().map(|s| s.tabs.iter().map(|(d, _)| *d).collect::<Vec<_>>());
+            assert_eq!(tabbed(&h.state().0), Some(vec![0, 1, 2]));
             let b = h.get_by_label_contains("b").rect();
             let target = egui::pos2(b.center().x, b.bottom() + 150.0);
             h.drag_at(b.center());
@@ -7069,7 +7110,29 @@ mod tests {
             assert_eq!(names, ["a", "b", "c"], "{kind:?}: tearing off doesn't reorder");
             assert_eq!(app.ui.windows.iter().map(|w| w.document).collect::<Vec<_>>(), [1], "{kind:?}: b floats in its own window");
             assert_eq!(app.session.active_index(), Some(1), "{kind:?}: the floated document is active");
+            assert_eq!(tabbed(app), Some(vec![0, 2]), "{kind:?}: b moved out of the main window's tabs, it isn't copied");
         }
+    }
+
+    /// While a floating document is active the main window keeps its own tab, and shows nothing
+    /// (instead of a second copy) once every document floats.
+    #[test]
+    fn the_main_window_never_shows_a_floating_document() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        for name in ["a", "b", "c"] {
+            app.run("file.new", json!({"width": 8, "height": 8, "name": name})).unwrap();
+        }
+        app.sync_views();
+        let ctx = egui::Context::default();
+        app.session.set_active(0);
+        assert_eq!(main_document(&mut app, 0), Some(0));
+        crate::menus::invoke(&mut app, &ctx, "window.arrange.floatInWindow", json!({"document": 2})).unwrap();
+        assert_eq!(app.session.active_index(), Some(2));
+        assert_eq!(main_document(&mut app, 2), Some(0), "the main window keeps its last tab");
+        crate::menus::invoke(&mut app, &ctx, "window.arrange.floatInWindow", json!({"document": 0})).unwrap();
+        assert_eq!(main_document(&mut app, 0), Some(1), "its tab floated too: the remaining tab");
+        crate::menus::invoke(&mut app, &ctx, "window.arrange.floatInWindow", json!({"document": 1})).unwrap();
+        assert_eq!(main_document(&mut app, 1), None, "every document floats");
     }
 
     #[test]

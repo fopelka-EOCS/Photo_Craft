@@ -682,6 +682,9 @@ pub struct PhotocraftApp {
     pub(crate) drop_places: std::collections::VecDeque<file_open::DropPlace>,
     /// The document each of `ui.views` belongs to, as of the last [`Self::sync_views`].
     view_docs: Vec<DocId>,
+    /// The main window's selected tab, kept while a document floating in its own window is
+    /// active (as in Photoshop, focusing a floating window leaves the tab group's selection alone).
+    pub(crate) main_tab: Option<DocId>,
     pub fps: f32,
     pub(crate) last_frame_time: f64,
     thumbs: HashMap<(photocraft_doc::LayerId, u8), (u64, egui::TextureHandle)>,
@@ -904,6 +907,7 @@ impl PhotocraftApp {
             tab_strip: None,
             drop_places: Default::default(),
             view_docs: Vec::new(),
+            main_tab: None,
             fps: 0.0,
             last_frame_time: 0.0,
             thumbs: HashMap::new(),
