@@ -64,14 +64,18 @@ pub enum Step {
 
 /// ⌘Z or ⇧⌘Z pressed this frame, consumed.
 fn take_step(ctx: &egui::Context) -> Option<Step> {
-    let cmd_shift = egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
-    if ctx.input_mut(|i| i.consume_key(cmd_shift, egui::Key::Z)) {
-        Some(Step::Redo)
-    } else if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Z)) {
-        Some(Step::Undo)
-    } else {
-        None
-    }
+    // egui's `consume_key` matches modifiers loosely (an extra Alt still matches ⌘Z), but ⌥⌘Z is
+    // another shortcut (Toggle Last State, or a key being assigned): only ⌘Z and ⇧⌘Z step, judged
+    // by the modifiers the key press itself carries.
+    ctx.input_mut(|i| {
+        let at = i
+            .events
+            .iter()
+            .position(|e| matches!(e, egui::Event::Key { key: egui::Key::Z, pressed: true, modifiers, .. } if modifiers.command && !modifiers.alt))?;
+        let shift = matches!(i.events.get(at), Some(egui::Event::Key { modifiers, .. }) if modifiers.shift);
+        i.events.remove(at);
+        Some(if shift { Step::Redo } else { Step::Undo })
+    })
 }
 
 /// A parameter dialog's settings: its fields without the private `__` keys (preview toggle,
@@ -102,6 +106,10 @@ pub fn keys(app: &mut PhotocraftApp, ctx: &egui::Context) {
     }
     if let Some(top) = app.ui.dialogs.last() {
         if top.kind != DialogKind::Command {
+            return;
+        }
+        // Keyboard Shortcuts waiting for a key: the key is the new shortcut, ⌘Z included.
+        if top.fields.get("capture").and_then(Value::as_bool) == Some(true) {
             return;
         }
         let id = top.id;
@@ -204,6 +212,11 @@ pub(crate) mod tests {
         }
         press_z(&mut app, &ctx, egui::Modifiers::COMMAND | egui::Modifiers::SHIFT);
         assert_eq!(field(&app, "vertical"), Some(json!(-50.0)));
+        // ⌥⌘Z and ⌥⇧⌘Z are other shortcuts: they don't step the dialog.
+        for m in [egui::Modifiers::COMMAND | egui::Modifiers::ALT, egui::Modifiers::COMMAND | egui::Modifiers::ALT | egui::Modifiers::SHIFT] {
+            press_z(&mut app, &ctx, m);
+            assert_eq!(field(&app, "vertical"), Some(json!(-50.0)), "{m:?}");
+        }
     }
 
     #[test]

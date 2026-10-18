@@ -346,3 +346,30 @@ fn accept_takes_the_key_from_every_command_holding_it() {
     let o = field(&h, id, "overrides");
     assert_eq!((o["edit.cut"].clone(), o["edit.copy"].clone(), o["edit.paste"].clone()), (json!(""), json!(""), json!("Cmd+X")), "{o}");
 }
+
+/// Ctrl+Alt+Z is recorded as Ctrl+Alt+Z, not taken as the dialog's own ⌘Z (which reverted the
+/// dialog to its previous key, so another shortcut seemed to be recorded). ⌘Z and ⇧⌘Z can be
+/// assigned too while a key is awaited.
+#[test]
+fn z_shortcuts_are_recorded_as_pressed() {
+    for (held, want) in [
+        (Modifiers::COMMAND | Modifiers::ALT, "Cmd+Alt+Z"),
+        (Modifiers::COMMAND, "Cmd+Z"),
+        (Modifiers::COMMAND | Modifiers::SHIFT, "Cmd+Shift+Z"),
+        (Modifiers::COMMAND | Modifiers::ALT | Modifiers::SHIFT, "Cmd+Alt+Shift+Z"),
+    ] {
+        let (mut h, id) = dialog(1.0, "edit.search", "search…");
+        h.get_by_label(&crate::shortcuts::pretty("Cmd+F")).click();
+        h.run_steps(2);
+        key(&mut h, Key::ControlLeft, true, Modifiers::COMMAND);
+        h.run_steps(1);
+        if held.alt {
+            key(&mut h, Key::AltLeft, true, Modifiers::COMMAND | Modifiers::ALT);
+            h.run_steps(1);
+        }
+        key(&mut h, Key::Z, true, held);
+        h.run_steps(2);
+        assert_eq!(field(&h, id, "overrides")["edit.search"], json!(want), "message: {}", field(&h, id, "message"));
+        h.get_by_label(&crate::shortcuts::pretty(want));
+    }
+}
