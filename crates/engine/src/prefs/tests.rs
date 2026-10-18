@@ -687,6 +687,14 @@ fn nudge_bundling_preferences() {
     assert_eq!(s.prefs().tools.nudge_bundle_pause_ms, 1000);
 }
 
+/// storytold/photocraft#7283: macOS Settings on ⌘,; Crop Tool on ⌘K (beside C).
+#[test]
+fn preferences_and_crop_shortcuts() {
+    assert_eq!(crate::commands::find("edit.preferences.general").and_then(|c| c.shortcut), Some("Cmd+,"));
+    assert_eq!(crate::commands::find("layer.hideLayers").and_then(|c| c.shortcut), None);
+    assert_eq!(Preferences::default().alternates("tools.select.crop", Some("C")), ["Cmd+K"]);
+}
+
 /// #3665: Photoshop's second default keys (F2/F3/F4, Shift+F7, Cmd++) are a command's
 /// alternates, beside the main key its menu shows.
 #[test]
@@ -701,6 +709,7 @@ fn commands_have_photoshops_alternate_keys() {
     assert_eq!(p.alternates("select.inverse", main("select.inverse")), ["Shift+F7"]);
     assert_eq!(p.alternates("edit.fill", main("edit.fill")), ["Shift+Backspace"]);
     assert_eq!(p.alternates("view.zoomIn", Some("Cmd+=")), ["Cmd++"]);
+    assert_eq!(p.alternates("tools.select.crop", Some("C")), ["Cmd+K"]);
     assert!(p.alternates("edit.undo", main("edit.undo")).is_empty());
     // No alternate is another command's main key or another command's alternate.
     let mut seen = std::collections::HashMap::new();

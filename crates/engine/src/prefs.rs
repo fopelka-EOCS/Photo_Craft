@@ -1502,6 +1502,7 @@ pub const ALTERNATE_SHORTCUTS: &[(&str, &str)] = &[
     ("edit.fill", "Shift+Backspace"),
     ("select.inverse", "Shift+F7"),
     ("view.zoomIn", "Cmd++"),
+    ("tools.select.crop", "Cmd+K"),
 ];
 
 /// A command's default alternate keys ([`ALTERNATE_SHORTCUTS`]).
@@ -2464,7 +2465,7 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         spec!("prefs.reset", "Reset Preferences", [], None, r##"{"path":"section|section.key"?=everything}"##, prefs_reset, false),
         // Photoshop: ⌘K opens Preferences › General (⌘, is Layer › Hide Layers).
-        section!("edit.preferences.general", "General…", Some("Cmd+K")),
+        section!("edit.preferences.general", "General…", Some("Cmd+,")),
         section!("edit.preferences.interface", "Interface…"),
         section!("edit.preferences.workspace", "Workspace…"),
         section!("edit.preferences.tools", "Tools…"),

@@ -1030,8 +1030,8 @@ pub fn specs() -> Vec<CommandSpec> {
             "layer.hideLayers",
             "Hide Layers",
             &["Layer"],
-            Some("Cmd+,"),
-            r##"{"layer":id?} (shows them instead when every targeted layer is already hidden, so ⌘, toggles)"##,
+            None,
+            r##"{"layer":id?} (shows them instead when every targeted layer is already hidden)"##,
             has_layer,
             hide_or_show
         ),
