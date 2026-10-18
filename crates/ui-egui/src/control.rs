@@ -1044,7 +1044,7 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                     continue;
                 }
                 // ⌘/Ctrl-click with Curves open adds a point at the pixel's tone, on press only (#7325).
-                if !secondary && mods.command && crate::adjust_dialog::curves_on_top(app) {
+                if !secondary && !space && button != "middle" && mods.command && crate::adjust_dialog::curves_on_top(app) {
                     if matches!(ev, ToolEvent::Down { .. }) {
                         crate::adjust_dialog::add_point_at(app, ctx, x, y, mods.shift);
                     }

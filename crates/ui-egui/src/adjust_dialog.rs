@@ -949,6 +949,14 @@ mod tests {
         let before = crate::filter_dialog::params_of(&app.ui.dialog_mut(id).unwrap().fields);
         pointer_down(&mut app, &ctx, 8.0, 8.0, json!({}));
         assert_eq!(crate::filter_dialog::params_of(&app.ui.dialog_mut(id).unwrap().fields), before, "no modifier, no point");
+        // Space and the middle button pan, as with the mouse.
+        for extra in [json!({"modifiers": {"command": true, "space": true}}), json!({"command": true, "button": "middle"})] {
+            let mut params = json!({"events": [{"kind": "down", "x": 8, "y": 8}]});
+            params.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            let (request, _receiver) = crate::control::ControlRequest::new("ui.pointer", params);
+            let _ = crate::control::handle(&mut app, &ctx, &request);
+            assert_eq!(crate::filter_dialog::params_of(&app.ui.dialog_mut(id).unwrap().fields), before, "{extra}");
+        }
 
         // Sixteen points (the most a curve holds), none within reach of level 86.
         let full: Vec<[f64; 2]> =
