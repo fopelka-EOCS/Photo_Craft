@@ -237,11 +237,12 @@ impl Stylus {
                 }
             }
         }
-        // A pen reports pressure 0 while it hovers and as it lifts (X11, macOS): that is no
-        // contact, so a frame that also touched keeps only its contact samples. A stroke's last
-        // moves then keep the pressure the pen left with, and a tap its own (#1798).
-        if self.frame.iter().any(|s| s.pressure > 0.0) {
-            self.frame.retain(|s| s.pressure > 0.0);
+        // A pen reports pressure 0 while hovering and as it lifts (X11, macOS). Zeroes after
+        // the final contact sample are no contact and would stretch the stroke over later pointer
+        // moves. Zeroes before or between contacts are part of the pressure timeline while the pen
+        // crosses its contact threshold, so keep them and discard only trailing zeroes (#1798).
+        if let Some(last_contact) = self.frame.iter().rposition(|s| s.pressure > 0.0) {
+            self.frame.truncate(last_contact + 1);
         }
         self.peak = self.frame.iter().fold(self.peak, |m, s| m.max(s.pressure));
     }
@@ -604,6 +605,46 @@ mod tests {
         assert!(got.iter().zip(want).all(|(g, w)| (g - w).abs() < 1e-6), "{got:?}");
         s.clear_selection();
         assert_eq!(s.pressure(), 0.8, "back to the current sample");
+    }
+
+    #[test]
+    fn zero_and_contact_samples_keep_the_frames_pressure_timeline() {
+        let mut s = Stylus::default();
+        s.feed.set(Some(pen(0.0)));
+        s.update(&[]);
+        s.begin_stroke();
+        for p in [0.0, 0.05, 0.10, 0.15] {
+            s.feed.set(Some(pen(p)));
+        }
+        s.update(&[]);
+        let got: Vec<f32> = (0..8)
+            .map(|k| {
+                s.select(k, 8);
+                s.pressure()
+            })
+            .collect();
+        let want = [0.0, 0.0, 0.025, 0.05, 0.075, 0.10, 0.125, 0.15];
+        assert!(got.iter().zip(want).all(|(g, w)| (g - w).abs() < 1e-6), "{got:?}");
+    }
+
+    #[test]
+    fn lift_zeroes_do_not_stretch_the_contact_timeline() {
+        let mut s = Stylus::default();
+        for p in [0.0, 0.05, 0.10, 0.0, 0.0] {
+            s.feed.set(Some(pen(p)));
+        }
+        s.update(&[]);
+        assert_eq!(s.frame.iter().map(|p| p.pressure).collect::<Vec<_>>(), vec![0.0, 0.05, 0.10]);
+    }
+
+    #[test]
+    fn a_contact_between_zeroes_keeps_its_leading_zero_but_drops_lift_zero() {
+        let mut s = Stylus::default();
+        for p in [0.0, 0.25, 0.0] {
+            s.feed.set(Some(pen(p)));
+        }
+        s.update(&[]);
+        assert_eq!(s.frame.iter().map(|p| p.pressure).collect::<Vec<_>>(), vec![0.0, 0.25]);
     }
 
     #[test]
