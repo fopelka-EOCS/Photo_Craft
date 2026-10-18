@@ -85,7 +85,27 @@ impl AuthorizedWorkspace {
         let tmp = parent.join(photocraft_format::atomic::temp_name(&leaf));
         let mut options = OpenOptions::new();
         options.write(true).create_new(true);
+        // Replacing a file: create the temporary file owner-only, so a refused chmod below never
+        // leaves the copy more open than the file it replaces.
+        #[cfg(unix)]
+        {
+            if root.dir.metadata(&relative).is_ok() {
+                cap_std::fs::OpenOptionsExt::mode(&mut options, 0o600);
+            }
+        }
         let written = root.dir.open_with(&tmp, &options).and_then(|mut file| {
+            // Replacing a file keeps its permissions (e.g. 0600), set before any byte is written;
+            // a new file keeps the process default. A file system that refuses chmod (vfat/exFAT,
+            // SMB/NTFS mounts) still saves. Unix only: copying the Windows read-only attribute
+            // would stop the temporary file from being removed if the save fails.
+            #[cfg(unix)]
+            {
+                match root.dir.metadata(&relative) {
+                    Ok(existing) => photocraft_format::atomic::tolerate_chmod_refusal(file.set_permissions(existing.permissions()))?,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(e),
+                }
+            }
             file.write_all(bytes)?;
             // Falls back to a plain fsync on shares that refuse a full flush (#1336).
             photocraft_format::atomic::sync_file(&file.into_std())
@@ -495,6 +515,19 @@ mod tests {
         assert_eq!(workspace.read("read.txt").unwrap(), b"canary");
         workspace.write("new-output.txt", b"created").unwrap();
         assert_eq!(std::fs::read(inside.join("new-output.txt")).unwrap(), b"created");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_keeps_the_mode_of_the_file_it_replaces() {
+        use std::os::unix::fs::PermissionsExt;
+        let (inside, _, workspace) = roots("keep-mode");
+        let target = inside.join("secret.txt");
+        std::fs::write(&target, b"old").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).unwrap();
+        workspace.write("secret.txt", b"new").unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"new");
+        assert_eq!(std::fs::metadata(&target).unwrap().permissions().mode() & 0o777, 0o600);
     }
 
     #[test]

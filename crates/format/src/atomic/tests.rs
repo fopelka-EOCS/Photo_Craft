@@ -41,6 +41,8 @@ struct Faulty {
     /// Fail the first N renames with PermissionDenied (a transient lock), then succeed.
     locked_renames: Cell<u32>,
     renames: Cell<u32>,
+    /// Fail copying the target's permissions onto the temporary file with this kind.
+    fail_copy_permissions: Option<io::ErrorKind>,
 }
 
 impl AtomicFs for Faulty {
@@ -70,6 +72,9 @@ impl AtomicFs for Faulty {
         RealFs.sync_dir(dir)
     }
     fn copy_permissions(&self, from: &Path, to: &Path) -> io::Result<()> {
+        if let Some(kind) = self.fail_copy_permissions {
+            return Err(io::Error::new(kind, "injected: cannot set permissions"));
+        }
         RealFs.copy_permissions(from, to)
     }
 }
@@ -281,6 +286,51 @@ fn keeps_the_original_file_mode() {
     std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
     atomic_write(&p, b"new").unwrap();
     assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
+}
+
+/// The temporary file gets the original's mode when it is created, not after the bytes are in.
+#[cfg(unix)]
+#[test]
+fn the_temporary_file_has_the_original_mode_while_it_is_written() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = TempDir::new("tmp-mode");
+    let p = d.0.join("doc.psd");
+    std::fs::write(&p, ORIGINAL).unwrap();
+    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let tmp = d.0.join(".doc.psd.tmp");
+    let seen = Cell::new(0);
+    RealFs.write_new_like(&tmp, b"new", &|_| seen.set(std::fs::metadata(&tmp).unwrap().permissions().mode() & 0o777), Some(&p)).unwrap();
+    assert_eq!(seen.get(), 0o600);
+    assert_eq!(std::fs::metadata(&tmp).unwrap().permissions().mode() & 0o777, 0o600);
+}
+
+/// A save that fails to copy the original file's permissions for a real reason fails and leaves the
+/// original alone, instead of publishing the new bytes under the default (possibly more open) mode.
+#[test]
+fn a_failed_permission_copy_fails_the_save() {
+    let d = TempDir::new("perm-fail");
+    let p = d.0.join("doc.psd");
+    std::fs::write(&p, ORIGINAL).unwrap();
+    let fs = Faulty { fail_copy_permissions: Some(io::ErrorKind::Other), ..Faulty::default() };
+    let err = atomic_write_with(&fs, NO_RETRY, &p, b"new").unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::Other);
+    assert_eq!(std::fs::read(&p).unwrap(), ORIGINAL);
+    assert_no_temp(&d.0);
+}
+
+/// A file system that refuses `chmod` (vfat/exFAT drives, many SMB/NTFS mounts: EPERM or ENOTSUP)
+/// still saves, as it did before permissions were kept.
+#[test]
+fn a_file_system_that_refuses_chmod_still_saves() {
+    for kind in [io::ErrorKind::PermissionDenied, io::ErrorKind::Unsupported] {
+        let d = TempDir::new("chmod-refused");
+        let p = d.0.join("doc.psd");
+        std::fs::write(&p, ORIGINAL).unwrap();
+        let fs = Faulty { fail_copy_permissions: Some(kind), ..Faulty::default() };
+        atomic_write_with(&fs, NO_RETRY, &p, b"new").unwrap();
+        assert_eq!(std::fs::read(&p).unwrap(), b"new", "{kind:?}");
+        assert_no_temp(&d.0);
+    }
 }
 
 #[cfg(unix)]
