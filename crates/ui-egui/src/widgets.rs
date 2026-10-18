@@ -386,7 +386,8 @@ struct LabelScrub {
     max_gap: f32,
     /// Options captions defer interaction until the adjacent field bounds are known.
     option_area: bool,
-    /// Whole steps to move the value (left negative; Shift ×10, Alt a tenth as fast).
+    /// Whole steps to move the value (left negative; Shift ×10, Alt a tenth as fast, a fast plain
+    /// drag faster with Scrubby Slider Acceleration on).
     steps: f32,
     started: bool,
     dragging: bool,
@@ -397,9 +398,43 @@ fn label_scrub_id() -> egui::Id {
     egui::Id::new("pc-label-scrub")
 }
 
+fn scrub_acceleration_id() -> egui::Id {
+    egui::Id::new("pc-scrub-acceleration")
+}
+
+/// Preferences › Enhanced Controls › Scrubby Slider Acceleration (#204). The app sets it each
+/// frame (`prefs_ui::tick`); off, or never set (a bare widget, a test), a scrubby label moves its
+/// value a step a point however fast it is dragged.
+pub fn set_scrub_acceleration(ctx: &egui::Context, on: bool) {
+    ctx.data_mut(|d| d.insert_temp(scrub_acceleration_id(), on));
+}
+
+/// Is Scrubby Slider Acceleration on for this context (see [`set_scrub_acceleration`])?
+pub(crate) fn scrub_acceleration_on(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(scrub_acceleration_id())).unwrap_or(false)
+}
+
+/// Drag speed (points per second) up to which a scrubby label keeps exactly a step a point.
+const SCRUB_ACCEL_FROM: f32 = 400.0;
+/// The most Scrubby Slider Acceleration multiplies a scrubby label's rate by.
+const SCRUB_ACCEL_MAX: f32 = 8.0;
+
+/// Scrubby Slider Acceleration: the factor a drag at `speed` points per second multiplies a
+/// scrubby label's rate by. Slow, careful drags keep a step a point; past [`SCRUB_ACCEL_FROM`] the
+/// rate grows in proportion to the speed, up to [`SCRUB_ACCEL_MAX`], so a quick flick crosses a
+/// wide range without a long drag.
+fn scrub_acceleration(speed: f32) -> f32 {
+    if !speed.is_finite() {
+        return 1.0;
+    }
+    (speed.abs() / SCRUB_ACCEL_FROM).clamp(1.0, SCRUB_ACCEL_MAX)
+}
+
 /// Makes `label` scrubby: dragging it left or right moves the value field drawn right after it on
 /// the same row (one step a point, ×10 with Shift, a tenth as fast with Alt), with Photoshop's
-/// scrubby cursor. A label with no value field right after it stays a plain label.
+/// scrubby cursor. With Preferences › Enhanced Controls › Scrubby Slider Acceleration on, a fast
+/// plain drag moves further ([`scrub_acceleration`]). A label with no value field right after it
+/// stays a plain label.
 pub fn scrub_label(ui: &Ui, label: &Response) -> Response {
     scrub_label_within(ui, label, 24.0)
 }
@@ -455,7 +490,14 @@ fn label_scrub_response(ui: &Ui, resp: &Response, original_rect: Rect, max_gap: 
             (true, Some(origin), Some(pos)) => pos.x - origin.x,
             _ => resp.drag_delta().x,
         };
-        acc += dx * rate;
+        // Scrubby Slider Acceleration: a fast plain drag covers more of the range. Shift and Alt
+        // keep their fixed rates, and the few points that start the drag aren't sped up.
+        let gain = if !mods.shift && !mods.alt && !resp.drag_started() && scrub_acceleration_on(ui.ctx()) {
+            scrub_acceleration(ui.input(|i| i.pointer.velocity().x))
+        } else {
+            1.0
+        };
+        acc += dx * rate * gain;
         if !acc.is_finite() {
             acc = 0.0;
         }
@@ -2193,6 +2235,55 @@ mod tests {
         assert_eq!(h.state().0, 90.0);
         drag(&mut h, "Mode:", 20.0, Modifiers::NONE);
         assert_eq!(h.state().1, 100.0, "the field isn't right after the label");
+    }
+
+    /// Preferences › Enhanced Controls › Scrubby Slider Acceleration (#204): on, a fast drag on a
+    /// scrubby label moves its value further than the points dragged; a slow drag, or any drag with
+    /// the preference off, still moves exactly a step a point.
+    #[test]
+    fn scrubby_slider_acceleration_speeds_up_fast_label_drags() {
+        // 200 points to the right in ten frames, `step_dt` seconds apart.
+        let scrub = |accelerate: bool, step_dt: f32| -> f32 {
+            let mut h = Harness::builder().with_step_dt(step_dt).build_ui_state(
+                |ui, v: &mut f32| {
+                    ui.horizontal(|ui| {
+                        let l = ui.label("Size:");
+                        super::scrub_label(ui, &l);
+                        super::value_field(ui, v, 0.0..=10_000.0, "px", 80.0);
+                    });
+                },
+                1000.0,
+            );
+            super::set_scrub_acceleration(&h.ctx, accelerate);
+            h.run();
+            let at = h.get_by_label("Size:").rect().center();
+            h.hover_at(at);
+            h.step();
+            h.drag_at(at);
+            h.step();
+            for i in 1..=10u8 {
+                h.event(egui::Event::PointerMoved(at + egui::vec2(20.0 * f32::from(i), 0.0)));
+                h.step();
+            }
+            h.drop_at(at + egui::vec2(200.0, 0.0));
+            h.run();
+            *h.state()
+        };
+        assert_eq!(scrub(false, 1.0 / 60.0), 1200.0, "off: a step a point, however fast");
+        let fast = scrub(true, 1.0 / 60.0);
+        assert!(fast > 1400.0 && fast <= 1000.0 + 200.0 * super::SCRUB_ACCEL_MAX, "on: a fast drag (1200 pt/s) goes further: {fast}");
+        assert_eq!(scrub(true, 0.25), 1200.0, "on: a slow drag (80 pt/s) is still a step a point");
+    }
+
+    #[test]
+    fn scrub_acceleration_is_one_when_slow_and_capped_when_fast() {
+        assert_eq!(super::scrub_acceleration(0.0), 1.0);
+        assert_eq!(super::scrub_acceleration(super::SCRUB_ACCEL_FROM), 1.0);
+        assert_eq!(super::scrub_acceleration(-2.0 * super::SCRUB_ACCEL_FROM), 2.0, "leftward drags too");
+        assert_eq!(super::scrub_acceleration(1.0e9), super::SCRUB_ACCEL_MAX);
+        for hostile in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert_eq!(super::scrub_acceleration(hostile), 1.0, "{hostile}");
+        }
     }
 
     /// A right-aligned OK / Cancel / Apply row as `os` draws it: labels left to right, and the

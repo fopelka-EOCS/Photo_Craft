@@ -449,6 +449,8 @@ pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
     presets_store(app);
     sync_tooltips(app, ctx);
     sync_animations(app, ctx);
+    // Enhanced Controls › Scrubby Slider Acceleration, for the scrubby labels (widgets.rs).
+    crate::widgets::set_scrub_acceleration(ctx, app.session.prefs().enhanced_controls.scrubby_slider_acceleration);
     app.sync_recent();
     if let Some(wait) = persist(app, ctx.input(|i| i.time)) {
         ctx.request_repaint_after(std::time::Duration::try_from_secs_f64(wait).unwrap_or_default());
@@ -3434,6 +3436,20 @@ mod tests {
             tick(&mut app, &ctx);
             assert_eq!(ctx.global_style().interaction.tooltip_delay, crate::theme::TOOLTIP_DELAY);
         }
+    }
+
+    /// Enhanced Controls › Scrubby Slider Acceleration (#204) is shown and reaches the scrubby
+    /// labels every frame: on by default, off once turned off.
+    #[test]
+    fn scrubby_slider_acceleration_reaches_the_scrubby_labels() {
+        assert!(!prefs::is_hidden("enhancedControls.scrubbySliderAcceleration"));
+        let (mut app, _) = app_with_store();
+        let ctx = egui::Context::default();
+        tick(&mut app, &ctx);
+        assert!(crate::widgets::scrub_acceleration_on(&ctx));
+        app.run("prefs.set", json!({"values": {"enhancedControls.scrubbySliderAcceleration": false}})).unwrap();
+        tick(&mut app, &ctx);
+        assert!(!crate::widgets::scrub_acceleration_on(&ctx));
     }
 
     #[test]
