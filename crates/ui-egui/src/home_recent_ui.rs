@@ -5,6 +5,8 @@
 //! Grid/List view switching matching Photoshop 2026 Home screen.
 
 use std::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
+use std::collections::HashSet;
 use std::path::Path;
 
 use egui::{Color32, ColorImage, Rect, Response, Sense, Stroke, TextureHandle, TextureOptions, Ui, Vec2, pos2, vec2};
@@ -25,6 +27,7 @@ pub(crate) enum CacheKey {
     },
 }
 
+#[derive(Clone)]
 pub(crate) struct ThumbnailEntry {
     pub(crate) key: CacheKey,
     pub(crate) texture: Option<TextureHandle>,
@@ -38,17 +41,31 @@ pub(crate) struct ThumbnailCache {
     pub(crate) entries: HashMap<String, ThumbnailEntry>,
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) was_focused: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) in_flight: HashSet<String>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) pending: Vec<(String, CacheKey, Option<ColorImage>)>,
 }
 
 impl ThumbnailCache {
     /// Invalidate the cached thumbnail for a single path (e.g. after save, open, or remove).
     pub(crate) fn invalidate(&mut self, path: &str) {
         self.entries.remove(path);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.in_flight.remove(path);
+            self.pending.retain(|(p, ..)| p != path);
+        }
     }
 
     /// Clear all cached thumbnails (e.g. on Clear Recent Files).
     pub(crate) fn clear(&mut self) {
         self.entries.clear();
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.in_flight.clear();
+            self.pending.clear();
+        }
     }
 }
 
@@ -91,8 +108,12 @@ fn downsample_rgba(w: u32, h: u32, src_data: &[u8], max_dim: u32) -> Option<Colo
                 let sx = ((x as f32 / tw as f32) * w as f32) as usize;
                 let src_idx = (sy * w as usize + sx) * 4;
                 let dst_idx = (y as usize * tw as usize + x as usize) * 4;
-                if src_idx + 4 <= src_data.len() && dst_idx + 4 <= thumb_px.len() {
-                    thumb_px[dst_idx..dst_idx + 4].copy_from_slice(&src_data[src_idx..src_idx + 4]);
+                if src_idx + 4 <= src_data.len()
+                    && dst_idx + 4 <= thumb_px.len()
+                    && let Some(src) = src_data.get(src_idx..src_idx + 4)
+                    && let Some(dst) = thumb_px.get_mut(dst_idx..dst_idx + 4)
+                {
+                    dst.copy_from_slice(src);
                 }
             }
         }
@@ -100,33 +121,55 @@ fn downsample_rgba(w: u32, h: u32, src_data: &[u8], max_dim: u32) -> Option<Colo
     }
 }
 
-/// Try to load a thumbnail image for `path` as an egui `ColorImage`.
+/// Read a PSD/PSB thumbnail preview by streaming only the header and image resources section.
+///
+/// Bounded range reader: inspects the 26-byte header and reads only the resource blocks
+/// section (up to 32 MB), extracting resource 1036 (JFIF JPEG) or 1033 without reading
+/// the layer records, channel data, or multi-gigabyte merged payload. If no embedded thumbnail
+/// exists, fallback composite decoding is only permitted if header dimensions are <= 2048x2048
+/// and the total file size on disk is <= 64 MB.
 #[cfg(not(target_arch = "wasm32"))]
-fn load_thumbnail_image(path: &str) -> Option<ColorImage> {
-    {
-        let std_path = Path::new(path);
-        let bytes = std::fs::read(std_path).ok()?;
-        let ext = std_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+fn read_psd_thumbnail_bounded(path: &Path, file_len: u64) -> Option<ColorImage> {
+    use std::fs::File;
+    use std::io::{Read, Seek, SeekFrom};
 
-        // 1. If .pcraft, read the embedded thumbnail PNG
-        if ext.eq_ignore_ascii_case("pcraft")
-            && let Ok(Some(png_bytes)) = photocraft_format::read_thumbnail(&bytes)
-            && let Ok(img) = photocraft_codecs::decode(&png_bytes)
-        {
-            let rgba = img.convert(photocraft_codecs::ChannelLayout::Rgba, photocraft_codecs::SampleType::U8);
-            if rgba.data().len() == rgba.width() as usize * rgba.height() as usize * 4 {
-                return Some(ColorImage::from_rgba_unmultiplied(
-                    [rgba.width() as usize, rgba.height() as usize],
-                    rgba.data(),
-                ));
-            }
-        }
+    let mut file = File::open(path).ok()?;
 
-        // 2. If PSD/PSB, inspect resource 1036 (JFIF JPEG) or decode composite
-        if (ext.eq_ignore_ascii_case("psd") || ext.eq_ignore_ascii_case("psb"))
-            && let Ok(file) = photocraft_psd::PsdFile::from_bytes(&bytes)
+    // 1. Read 26-byte header
+    let mut header = [0u8; 26];
+    file.read_exact(&mut header).ok()?;
+
+    if &header[0..4] != b"8BPS" {
+        return None;
+    }
+    let version = u16::from_be_bytes([header[4], header[5]]);
+    if version != 1 && version != 2 {
+        return None;
+    }
+    let height = u32::from_be_bytes([header[14], header[15], header[16], header[17]]);
+    let width = u32::from_be_bytes([header[18], header[19], header[20], header[21]]);
+
+    // 2. Read color mode data length (4 bytes)
+    let mut cmd_len_buf = [0u8; 4];
+    file.read_exact(&mut cmd_len_buf).ok()?;
+    let cmd_len = u32::from_be_bytes(cmd_len_buf);
+    if cmd_len > 16 * 1024 * 1024 {
+        return None;
+    }
+    file.seek(SeekFrom::Current(cmd_len as i64)).ok()?;
+
+    // 3. Read image resources section length (4 bytes)
+    let mut res_len_buf = [0u8; 4];
+    file.read_exact(&mut res_len_buf).ok()?;
+    let res_len = u32::from_be_bytes(res_len_buf);
+
+    // 4. Read only the resources section (bounded up to 32 MB)
+    if res_len > 0 && res_len <= 32 * 1024 * 1024 {
+        let mut res_bytes = vec![0u8; res_len as usize];
+        if file.read_exact(&mut res_bytes).is_ok()
+            && let Ok((resources, _)) = photocraft_psd::tiff::resources_from_bytes(&res_bytes)
         {
-            for r in &file.resources {
+            for r in &resources {
                 if (r.id == photocraft_psd::resources::ids::THUMBNAIL || r.id == photocraft_psd::resources::ids::THUMBNAIL_PS4)
                     && let Some(jfif) = r.data.get(28..)
                     && let Ok(img) = photocraft_codecs::decode(jfif)
@@ -140,37 +183,131 @@ fn load_thumbnail_image(path: &str) -> Option<ColorImage> {
                     }
                 }
             }
-            // Fallback for PSDs without embedded JFIF previews: decode merged composite
-            // only if within safe dimensions (<= 2048x2048) to avoid memory spikes on massive files.
-            if file.header.width <= 2048 && file.header.height <= 2048
-                && let Ok(comp) = photocraft_io::merged_composite(&file)
+        }
+    }
+
+    // 5. Fallback for PSDs without embedded JFIF preview:
+    // First, check header dimensions: must be <= 2048x2048 before reading any more of the file!
+    if width == 0 || height == 0 || width > 2048 || height > 2048 {
+        return None;
+    }
+
+    // Second, enforce input budget: if the file size on disk exceeds 64 MB, do NOT allocate/read the whole document
+    const MAX_FALLBACK_FILE_SIZE: u64 = 64 * 1024 * 1024;
+    if file_len > MAX_FALLBACK_FILE_SIZE {
+        return None;
+    }
+
+    // Third, within budget and safe dimensions: read file and decode merged composite
+    let bytes = std::fs::read(path).ok()?;
+    if let Ok(file) = photocraft_psd::PsdFile::from_bytes(&bytes)
+        && let Ok(comp) = photocraft_io::merged_composite(&file)
+    {
+        let w = file.header.width;
+        let h = file.header.height;
+        if w > 0 && h > 0 && comp.len() == (w as usize) * (h as usize) {
+            let mut raw_bytes = Vec::with_capacity(comp.len() * 4);
+            for &[r, g, b, a] in comp.iter() {
+                raw_bytes.push((r.clamp(0.0, 1.0) * 255.0).round() as u8);
+                raw_bytes.push((g.clamp(0.0, 1.0) * 255.0).round() as u8);
+                raw_bytes.push((b.clamp(0.0, 1.0) * 255.0).round() as u8);
+                raw_bytes.push((a.clamp(0.0, 1.0) * 255.0).round() as u8);
+            }
+            return downsample_rgba(w, h, &raw_bytes, 256);
+        }
+    }
+
+    None
+}
+
+/// Load thumbnail image with bounded streaming I/O and strict size limits.
+#[cfg(not(target_arch = "wasm32"))]
+fn load_thumbnail_image_bounded(path: &str, file_len: u64) -> Option<ColorImage> {
+    let std_path = Path::new(path);
+    let ext = std_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+
+    // 1. PSD / PSB: read header and resources with bounded range reading
+    if ext.eq_ignore_ascii_case("psd") || ext.eq_ignore_ascii_case("psb") {
+        return read_psd_thumbnail_bounded(std_path, file_len);
+    }
+
+    // Enforce 64 MB input budget for all other file types (.pcraft, PNG, JPEG, TIFF, etc.)
+    const MAX_THUMBNAIL_FILE_SIZE: u64 = 64 * 1024 * 1024;
+    if file_len > MAX_THUMBNAIL_FILE_SIZE {
+        return None;
+    }
+
+    // 2. If .pcraft, read the embedded thumbnail PNG
+    if ext.eq_ignore_ascii_case("pcraft") {
+        if std_path.is_dir() {
+            let thumb_path = std_path.join("thumb.png");
+            if let Ok(bytes) = std::fs::read(thumb_path)
+                && let Ok(img) = photocraft_codecs::decode(&bytes)
             {
-                let w = file.header.width;
-                let h = file.header.height;
-                if w > 0 && h > 0 && comp.len() == (w as usize) * (h as usize) {
-                    let mut raw_bytes = vec![0u8; comp.len() * 4];
-                    for (i, &[r, g, b, a]) in comp.iter().enumerate() {
-                        let idx = i * 4;
-                        raw_bytes[idx] = (r.clamp(0.0, 1.0) * 255.0).round() as u8;
-                        raw_bytes[idx + 1] = (g.clamp(0.0, 1.0) * 255.0).round() as u8;
-                        raw_bytes[idx + 2] = (b.clamp(0.0, 1.0) * 255.0).round() as u8;
-                        raw_bytes[idx + 3] = (a.clamp(0.0, 1.0) * 255.0).round() as u8;
-                    }
-                    return downsample_rgba(w, h, &raw_bytes, 256);
+                let rgba = img.convert(photocraft_codecs::ChannelLayout::Rgba, photocraft_codecs::SampleType::U8);
+                if rgba.data().len() == rgba.width() as usize * rgba.height() as usize * 4 {
+                    return Some(ColorImage::from_rgba_unmultiplied(
+                        [rgba.width() as usize, rgba.height() as usize],
+                        rgba.data(),
+                    ));
                 }
             }
-        }
-
-        // 3. Flat raster formats (PNG, JPG, WebP, TIFF, GIF, BMP, etc.)
-        if let Ok(img) = photocraft_codecs::decode(&bytes) {
-            let (w, h) = img.dimensions();
-            if w > 0 && h > 0 {
-                let rgba = img.convert(photocraft_codecs::ChannelLayout::Rgba, photocraft_codecs::SampleType::U8);
-                return downsample_rgba(w, h, rgba.data(), 256);
+        } else if let Ok(bytes) = std::fs::read(std_path)
+            && let Ok(Some(png_bytes)) = photocraft_format::read_thumbnail(&bytes)
+            && let Ok(img) = photocraft_codecs::decode(&png_bytes)
+        {
+            let rgba = img.convert(photocraft_codecs::ChannelLayout::Rgba, photocraft_codecs::SampleType::U8);
+            if rgba.data().len() == rgba.width() as usize * rgba.height() as usize * 4 {
+                return Some(ColorImage::from_rgba_unmultiplied(
+                    [rgba.width() as usize, rgba.height() as usize],
+                    rgba.data(),
+                ));
             }
         }
+        return None;
+    }
 
-        None
+    // 3. Flat raster formats (PNG, JPG, WebP, TIFF, GIF, BMP, etc.)
+    if let Ok(bytes) = std::fs::read(std_path)
+        && let Ok(img) = photocraft_codecs::decode(&bytes)
+    {
+        let (w, h) = img.dimensions();
+        if w > 0 && h > 0 {
+            let rgba = img.convert(photocraft_codecs::ChannelLayout::Rgba, photocraft_codecs::SampleType::U8);
+            return downsample_rgba(w, h, rgba.data(), 256);
+        }
+    }
+
+    None
+}
+
+/// Drain completed asynchronous thumbnail results and update the texture cache on the UI thread.
+#[cfg(not(target_arch = "wasm32"))]
+fn drain_pending_thumbnails(app: &PhotocraftApp, ctx: &egui::Context, opts: TextureOptions) {
+    let pending: Vec<(String, CacheKey, Option<ColorImage>)> = {
+        let mut cache = app.thumbnail_cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if cache.pending.is_empty() {
+            return;
+        }
+        std::mem::take(&mut cache.pending)
+    };
+
+    let mut cache = app.thumbnail_cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    for (path, key, opt_img) in pending {
+        cache.in_flight.remove(&path);
+        let tex = opt_img.map(|ci| {
+            if let Some(existing) = cache.entries.get_mut(&path).and_then(|e| e.texture.as_mut()) {
+                existing.set(ci, opts);
+                existing.clone()
+            } else {
+                ctx.load_texture(format!("recent_thumb_{path}"), ci, opts)
+            }
+        });
+        cache.entries.insert(path, ThumbnailEntry {
+            key,
+            texture: tex,
+            last_checked: std::time::Instant::now(),
+        });
     }
 }
 
@@ -178,8 +315,8 @@ fn load_thumbnail_image(path: &str) -> Option<ColorImage> {
 ///
 /// If `path` is currently open in `app.session`, the thumbnail is rendered from
 /// the live document composite and re-rendered whenever its revision changes.
-/// If `path` is closed, the thumbnail is decoded from the file on disk, automatically
-/// re-loading if the file's modification timestamp or length on disk changes.
+/// If `path` is closed, the thumbnail is decoded from disk in the background (or inline
+/// in non-background test environments), with bounded range reads and input budgets.
 pub(crate) fn get_or_load_thumbnail(app: &PhotocraftApp, ctx: &egui::Context, path: &str) -> Option<TextureHandle> {
     let opts = TextureOptions {
         magnification: egui::TextureFilter::Linear,
@@ -187,6 +324,9 @@ pub(crate) fn get_or_load_thumbnail(app: &PhotocraftApp, ctx: &egui::Context, pa
         wrap_mode: egui::TextureWrapMode::ClampToEdge,
         mipmap_mode: Some(egui::TextureFilter::Linear),
     };
+
+    #[cfg(not(target_arch = "wasm32"))]
+    drain_pending_thumbnails(app, ctx, opts);
 
     // 1. Is this document currently open in the session?
     if let Some(st) = app.session.documents().iter().find(|d| d.path.as_deref().is_some_and(|p| paths_match(p, path))) {
@@ -228,21 +368,25 @@ pub(crate) fn get_or_load_thumbnail(app: &PhotocraftApp, ctx: &egui::Context, pa
         #[cfg(not(test))]
         const RECHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(3);
 
-        let mut cache = app.thumbnail_cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (focus_gained, cached_entry, is_in_flight) = {
+            let mut cache = app.thumbnail_cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let focused = ctx.input(|i| i.focused);
+            let focus_gained = focused && !cache.was_focused;
+            if focus_gained {
+                cache.was_focused = true;
+            } else if !focused {
+                cache.was_focused = false;
+            }
 
-        // Detect window regaining focus from an external application
-        let focused = ctx.input(|i| i.focused);
-        let focus_gained = focused && !cache.was_focused;
-        if focus_gained {
-            cache.was_focused = true;
-        } else if !focused {
-            cache.was_focused = false;
-        }
+            let entry = cache.entries.get(path).cloned();
+            let in_flight = cache.in_flight.contains(path);
+            (focus_gained, entry, in_flight)
+        };
 
         // Fast path: if already cached and neither focus gained nor recheck interval elapsed,
         // return the texture immediately from memory without touching the filesystem.
         if !focus_gained
-            && let Some(entry) = cache.entries.get(path)
+            && let Some(entry) = &cached_entry
             && entry.last_checked.elapsed() < RECHECK_INTERVAL
         {
             return entry.texture.clone();
@@ -250,7 +394,9 @@ pub(crate) fn get_or_load_thumbnail(app: &PhotocraftApp, ctx: &egui::Context, pa
 
         let std_path = Path::new(path);
         let Ok(meta) = std::fs::metadata(std_path) else {
+            let mut cache = app.thumbnail_cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             cache.entries.remove(path);
+            cache.in_flight.remove(path);
             return None;
         };
 
@@ -259,29 +405,58 @@ pub(crate) fn get_or_load_thumbnail(app: &PhotocraftApp, ctx: &egui::Context, pa
             len: meta.len(),
         };
 
-        if let Some(entry) = cache.entries.get_mut(path)
+        if let Some(entry) = &cached_entry
             && entry.key == current_key
         {
-            entry.last_checked = std::time::Instant::now();
+            let mut cache = app.thumbnail_cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(e) = cache.entries.get_mut(path) {
+                e.last_checked = std::time::Instant::now();
+            }
             return entry.texture.clone();
         }
 
-        let opt_img = load_thumbnail_image(path);
-        let tex = opt_img.map(|ci| {
-            if let Some(existing) = cache.entries.get_mut(path).and_then(|e| e.texture.as_mut()) {
-                existing.set(ci, opts);
-                existing.clone()
-            } else {
-                ctx.load_texture(format!("recent_thumb_{path}"), ci, opts)
-            }
-        });
+        if is_in_flight {
+            return cached_entry.and_then(|e| e.texture);
+        }
 
-        cache.entries.insert(path.to_string(), ThumbnailEntry {
-            key: current_key,
-            texture: tex.clone(),
-            last_checked: std::time::Instant::now(),
-        });
-        tex
+        if app.background_jobs {
+            {
+                let mut cache = app.thumbnail_cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                cache.in_flight.insert(path.to_string());
+            }
+            let cache_arc = std::sync::Arc::clone(&app.thumbnail_cache);
+            let ctx_clone = ctx.clone();
+            let path_str = path.to_string();
+            let key_clone = current_key;
+            let file_len = meta.len();
+            std::thread::spawn(move || {
+                let opt_img = load_thumbnail_image_bounded(&path_str, file_len);
+                {
+                    let mut cache = cache_arc.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    cache.pending.push((path_str, key_clone, opt_img));
+                }
+                ctx_clone.request_repaint();
+            });
+            cached_entry.and_then(|e| e.texture)
+        } else {
+            let opt_img = load_thumbnail_image_bounded(path, meta.len());
+            let tex = opt_img.map(|ci| {
+                let mut cache = app.thumbnail_cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                if let Some(existing) = cache.entries.get_mut(path).and_then(|e| e.texture.as_mut()) {
+                    existing.set(ci, opts);
+                    existing.clone()
+                } else {
+                    ctx.load_texture(format!("recent_thumb_{path}"), ci, opts)
+                }
+            });
+            let mut cache = app.thumbnail_cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            cache.entries.insert(path.to_string(), ThumbnailEntry {
+                key: current_key,
+                texture: tex.clone(),
+                last_checked: std::time::Instant::now(),
+            });
+            tex
+        }
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -564,6 +739,17 @@ pub(crate) fn render_list_row(
 
 /// The main entry point to render the Home Recent Files visual grid or list.
 pub(crate) fn show_home_recent(app: &mut PhotocraftApp, ui: &mut Ui, recent: &[String], avail_width: f32) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let opts = TextureOptions {
+            magnification: egui::TextureFilter::Linear,
+            minification: egui::TextureFilter::Linear,
+            wrap_mode: egui::TextureWrapMode::ClampToEdge,
+            mipmap_mode: Some(egui::TextureFilter::Linear),
+        };
+        drain_pending_thumbnails(app, ui.ctx(), opts);
+    }
+
     let is_grid = app.ui.chrome.home_recent_grid;
     let content_width = avail_width;
 
@@ -983,12 +1169,124 @@ mod tests {
                 data: Vec::new(),
             },
         };
-        let bytes = file.to_bytes().unwrap();
+        let mut bytes = file.to_bytes().unwrap();
+        // Append a 2 MB dummy/corrupt image payload to simulate a real multi-megabyte payload
+        bytes.extend_from_slice(&vec![0xAA; 2 * 1024 * 1024]);
         std::fs::write(&file_path, &bytes).unwrap();
 
-        // load_thumbnail_image should return None due to <= 2048 bound, safely falling back to document icon
-        let thumb = load_thumbnail_image(&path_str);
-        assert!(thumb.is_none(), "oversized PSD without embedded preview must skip composite fallback");
+        // load_thumbnail_image_bounded should return None due to <= 2048 bound checked from 26-byte header,
+        // without attempting to read or parse the 2 MB payload.
+        let thumb = load_thumbnail_image_bounded(&path_str, bytes.len() as u64);
+        assert!(thumb.is_none(), "oversized PSD with payload must skip composite fallback");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn recent_thumbnail_extracts_embedded_preview_from_large_psd_without_reading_payload() {
+        let temp_dir = std::env::temp_dir().join(format!("photocraft_psd_large_preview_test_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let file_path = temp_dir.join("large_payload.psd");
+        let path_str = file_path.to_string_lossy().into_owned();
+
+        let img = photocraft_codecs::Image::from_raw(
+            4,
+            4,
+            photocraft_codecs::ChannelLayout::Rgb,
+            photocraft_codecs::SampleType::U8,
+            [255, 0, 0].repeat(16),
+        ).unwrap();
+        let jfif = photocraft_codecs::encode(&img, photocraft_codecs::Format::Jpeg, &photocraft_codecs::EncodeOptions::default()).unwrap();
+        let mut res_data = vec![0u8; 28];
+        res_data[0..4].copy_from_slice(&1u32.to_be_bytes()); // format: 1 (kJpegRGB)
+        res_data[4..8].copy_from_slice(&4u32.to_be_bytes()); // width: 4
+        res_data[8..12].copy_from_slice(&4u32.to_be_bytes()); // height: 4
+        res_data.extend_from_slice(&jfif);
+        let resource = photocraft_psd::resources::ImageResource::new(
+            photocraft_psd::resources::ids::THUMBNAIL,
+            res_data,
+        );
+
+        let header = photocraft_psd::Header::new(
+            photocraft_psd::Version::Psd,
+            400,
+            400,
+            3,
+            8,
+            photocraft_psd::ColorMode::Rgb,
+        );
+        let file = photocraft_psd::PsdFile {
+            header,
+            color_mode_data: Vec::new(),
+            resources: vec![resource],
+            layer_info: None,
+            layer_info_placement: photocraft_psd::LayerInfoPlacement::Section,
+            global_layer_mask: None,
+            global_blocks: Vec::new(),
+            layer_mask_trailing: Vec::new(),
+            image_data: photocraft_psd::ImageData {
+                compression: photocraft_psd::Compression::Raw,
+                data: Vec::new(),
+            },
+        };
+        let mut bytes = file.to_bytes().unwrap();
+        // Append 3 MB of corrupt payload bytes after the resources section
+        bytes.extend_from_slice(&vec![0xEE; 3 * 1024 * 1024]);
+        std::fs::write(&file_path, &bytes).unwrap();
+
+        // The bounded streaming range reader must extract the embedded 1036 JFIF preview
+        // from the initial resources section without erroring on or allocating the 3 MB trailing payload.
+        let thumb = load_thumbnail_image_bounded(&path_str, bytes.len() as u64);
+        assert!(thumb.is_some(), "must extract embedded JFIF preview despite trailing multi-megabyte payload");
+        let thumb_img = thumb.unwrap();
+        assert_eq!(thumb_img.size, [4, 4]);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn recent_thumbnail_loads_in_background_when_background_jobs_enabled() {
+        let temp_dir = std::env::temp_dir().join(format!("photocraft_async_thumb_test_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let file_path = temp_dir.join("bg_test.png");
+        let path_str = file_path.to_string_lossy().into_owned();
+
+        let img = photocraft_codecs::Image::from_raw(
+            8,
+            8,
+            photocraft_codecs::ChannelLayout::Rgba,
+            photocraft_codecs::SampleType::U8,
+            [0, 0, 255, 255].repeat(64),
+        ).unwrap();
+        let png = photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &photocraft_codecs::EncodeOptions::default()).unwrap();
+        std::fs::write(&file_path, &png).unwrap();
+
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.background_jobs = true;
+
+        let ctx = egui::Context::default();
+        // First call on cache miss: should dispatch to background worker and return None immediately (no UI stall)
+        let tex1 = get_or_load_thumbnail(&app, &ctx, &path_str);
+        assert!(tex1.is_none(), "cache miss with background_jobs must not block the UI thread");
+
+        // Wait for worker thread to complete
+        let start = std::time::Instant::now();
+        while start.elapsed() < std::time::Duration::from_secs(2) {
+            let pending_done = {
+                let cache = app.thumbnail_cache.lock().unwrap();
+                !cache.pending.is_empty() || cache.entries.contains_key(&path_str)
+            };
+            if pending_done {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+
+        // Second call: drains pending and returns the loaded texture
+        let tex2 = get_or_load_thumbnail(&app, &ctx, &path_str);
+        assert!(tex2.is_some(), "subsequent frame receives the loaded thumbnail from background worker");
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
