@@ -1167,7 +1167,9 @@ mod preference_resize_tests {
         use egui_kittest::kittest::Queryable;
         let f = frame(h);
         let row = ["OK", "Cancel", "Apply"].map(|l| h.get_by_label(l).rect()).into_iter().reduce(|a, b| a.union(b)).unwrap();
-        assert!(f.bottom() - row.bottom() < 24.0 && f.right() - row.right() < 24.0, "{when}: frame {f:?}, buttons {row:?}");
+        // Inside the frame (not past its edge) and near it.
+        let near = |gap: f32| (0.0..24.0).contains(&gap);
+        assert!(near(f.bottom() - row.bottom()) && near(f.right() - row.right()), "{when}: frame {f:?}, buttons {row:?}");
     }
 
     #[test]
