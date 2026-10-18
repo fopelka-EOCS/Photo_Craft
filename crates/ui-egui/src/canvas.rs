@@ -3093,13 +3093,16 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         // Live adjustment previews on big documents use a downsampled proxy (see proxy.rs), unless
         // Preferences › Performance › Low Resolution Previews is off.
         let mut on_gpu = false;
-        let channel_texture = crate::channel_transform_preview::texture(app, &ctx, idx);
+        let channel_texture = crate::channel_transform_preview::texture(app, &ctx, idx, output);
         // A flipped or pixel-aspect-corrected view draws through the CPU path (the GPU canvas shader
         // has no mirroring or non-square pixels). Rotation stays on the GPU: it is a view uniform.
         let gpu_ok = crate::gpu_canvas::gpu_view_ok(flip, view.rotation, aspect);
         if let Some(tex) = channel_texture {
             let checkerboard = app.session.prefs().transparency_and_gamut.square().map(|square| (checker(app, &ctx), square));
             paint_cpu_document(&painter, &xf, doc.bounds(), view.rotation.abs() > 0.05, checkerboard, Some(tex));
+            for &c in &pattern {
+                paint_cpu_document(&painter, &pattern_xf(&xf, c, size), doc.bounds(), view.rotation.abs() > 0.05, checkerboard, Some(tex));
+            }
         } else if app.gpu.is_some()
             && gpu_ok
             && let Some((k, key, preview_size)) =
@@ -6585,6 +6588,37 @@ mod tests {
             Display { id: 4, name: "B".into(), frame: [100.0, 0.0, 100.0, 100.0], profile_name: None, icc: icc("display-p3") },
         ]));
         app
+    }
+
+    #[test]
+    fn pattern_preview_keeps_its_copies_during_a_channel_transform() {
+        let ctx = egui::Context::default();
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        app.run("file.new", json!({"width": 64, "height": 64})).unwrap();
+        app.run("channel.target", json!({"channel":"green"})).unwrap();
+        app.ui.extras.rulers = false;
+        app.sync_views();
+        crate::transform_tool::begin(&mut app, &ctx).unwrap();
+        let tex = crate::channel_transform_preview::texture(&mut app, &ctx, 0, None).unwrap();
+        let mut view = app.ui.views[0].clone();
+        view.zoom = 1.0;
+        view.center = [32.0, 32.0];
+        view.fit_pending = false;
+        view.fill_pending = false;
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(256.0, 256.0));
+        let mut draw = |pattern: bool| {
+            app.ui.view.pattern_preview = pattern;
+            let input = egui::RawInput { screen_rect: Some(rect), ..Default::default() };
+            let mut out = ctx.run_ui(input, |ui| {
+                canvas_view(&mut app, ui, 0, rect, view.clone(), false);
+            });
+            let copies = out.shapes.iter().filter(|s| matches!(&s.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == tex)).count();
+            out.textures_delta.clear();
+            copies
+        };
+        assert_eq!(draw(false), 1, "ordinary transform preview draws the centre tile");
+        assert!(draw(true) > 1, "Pattern Preview draws its surrounding copies during a channel transform");
+        crate::transform_tool::cancel(&mut app);
     }
 
     #[test]

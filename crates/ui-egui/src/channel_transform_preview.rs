@@ -1,6 +1,7 @@
 //! Channel transforms preview through the normal compositor and current channel eyes.
 //! The captured proxy is immutable; geometry is resampled only when it changes, never per frame.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use egui::{Color32, ColorImage, TextureHandle, TextureOptions};
@@ -19,10 +20,14 @@ pub(crate) struct Preview {
     geometry: Value,
     failed: Option<String>,
     shown: Arc<Document>,
-    view: Option<(ChannelView, bool, u64)>,
-    texture: Option<TextureHandle>,
+    textures: HashMap<Option<u32>, CpuTexture>,
     gpu: Option<crate::channel_transform_gpu::Preview>,
     gpu_attempted: bool,
+}
+
+struct CpuTexture {
+    view: Option<(ChannelView, bool, u64)>,
+    texture: TextureHandle,
 }
 
 impl Preview {
@@ -39,8 +44,7 @@ impl Preview {
             factor,
             geometry: Value::Null,
             failed: None,
-            view: None,
-            texture: None,
+            textures: HashMap::new(),
             gpu: None,
             gpu_attempted: false,
         }
@@ -90,7 +94,9 @@ impl Preview {
         self.shown = session.active().ok_or("no channel preview document")?.doc.clone();
         self.geometry = params;
         self.failed = None;
-        self.view = None;
+        for entry in self.textures.values_mut() {
+            entry.view = None;
+        }
         Ok(())
     }
 
@@ -131,11 +137,11 @@ fn limit_image(image: ColorImage, max_side: usize) -> ColorImage {
 }
 
 /// Current preview texture: the eyes affect rendering only, never the captured source or target.
-pub(crate) fn texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize) -> Option<egui::TextureId> {
+pub(crate) fn texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize, output: Option<u32>) -> Option<egui::TextureId> {
     if app.session.active_index() != Some(idx) {
         return None;
     }
-    let (display, display_key) = crate::canvas::canvas_display(app, &app.session.documents().get(idx)?.doc, None);
+    let (display, display_key) = crate::canvas::canvas_display(app, &app.session.documents().get(idx)?.doc, output);
     let t = app.ui.transform.as_ref()?;
     let pv = app.transform_preview.as_mut()?;
     let preview = pv.channel.as_mut()?;
@@ -167,17 +173,23 @@ pub(crate) fn texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize) 
     if let Err(error) = preview.update(t) {
         app.ui.status = error;
         app.ui.status_error = true;
-        return preview.texture.as_ref().map(TextureHandle::id);
+        return preview.textures.get(&output).map(|entry| entry.texture.id());
     }
-    if preview.view.as_ref() != Some(&(view.clone(), in_color, display_key)) {
+    let key = (view.clone(), in_color, display_key);
+    if preview.textures.get(&output).is_none_or(|entry| entry.view.as_ref() != Some(&key)) {
         let image = limit_image(preview.image(&view, in_color, display.as_deref()), ctx.input(|i| i.max_texture_side));
-        match preview.texture.as_mut() {
-            Some(texture) => texture.set(image, TextureOptions::LINEAR),
-            None => preview.texture = Some(ctx.load_texture(format!("channel-transform-{}", t.session), image, TextureOptions::LINEAR)),
+        match preview.textures.get_mut(&output) {
+            Some(entry) => {
+                entry.texture.set(image, TextureOptions::LINEAR);
+                entry.view = Some(key);
+            }
+            None => {
+                let texture = ctx.load_texture(format!("channel-transform-{}-{:?}", t.session, output), image, TextureOptions::LINEAR);
+                preview.textures.insert(output, CpuTexture { view: Some(key), texture });
+            }
         }
-        preview.view = Some((view, in_color, display_key));
     }
-    preview.texture.as_ref().map(TextureHandle::id)
+    preview.textures.get(&output).map(|entry| entry.texture.id())
 }
 
 #[cfg(test)]
@@ -618,6 +630,61 @@ mod tests {
         let mut app = PhotocraftApp::new(session, crate::Services::default());
         app.sync_views();
         app
+    }
+
+    #[test]
+    fn cpu_preview_keeps_each_window_display_profile_and_texture() {
+        use photocraft_engine::color_cmds::resolve_profile;
+        use photocraft_engine::display_color::Display;
+
+        let mut a = app();
+        let icc = |id: &str| Some(resolve_profile(id, None, None).unwrap().to_bytes());
+        a.session.color.set_displays(Ok(vec![
+            Display { id: 1, name: "sRGB".into(), frame: [0.0, 0.0, 100.0, 100.0], profile_name: None, icc: icc("srgb") },
+            Display { id: 4, name: "Display P3".into(), frame: [100.0, 0.0, 100.0, 100.0], profile_name: None, icc: icc("display-p3") },
+        ]));
+        a.session.color.main_display = Some(1);
+        a.run("channel.target", json!({"channel":"green"})).unwrap();
+        a.run("channel.setVisible", json!({"channel":"composite","visible":true})).unwrap();
+        assert_eq!(a.session.active().unwrap().channel_view.visible_colors(3), 3);
+        let ctx = egui::Context::default();
+        crate::transform_tool::begin(&mut a, &ctx).unwrap();
+        let doc = a.session.active().unwrap().doc.clone();
+        let (display_a, key_a) = crate::canvas::canvas_display(&a, &doc, Some(1));
+        let (display_b, key_b) = crate::canvas::canvas_display(&a, &doc, Some(4));
+        assert_ne!(key_a, key_b);
+
+        let tex_a = texture(&mut a, &ctx, 0, Some(1)).unwrap();
+        let tex_b = texture(&mut a, &ctx, 0, Some(4)).unwrap();
+        assert_ne!(tex_a, tex_b, "simultaneous windows keep separate display pixels");
+        let mut delta = ctx.tex_manager().write().take_delta();
+        let image = |id| {
+            let egui::ImageData::Color(image) = &delta.set.get(&id).unwrap()[0].image;
+            image.pixels.clone()
+        };
+        let pixels_a = image(tex_a);
+        let pixels_b = image(tex_b);
+        delta.clear();
+        let preview = a.transform_preview.as_ref().unwrap().channel.as_ref().unwrap();
+        let view = &a.session.active().unwrap().channel_view;
+        assert_eq!(pixels_a, preview.image(view, false, display_a.as_deref()).pixels);
+        assert_eq!(pixels_b, preview.image(view, false, display_b.as_deref()).pixels);
+        assert_ne!(pixels_a, pixels_b, "the two monitor profiles produce different preview colours");
+
+        assert_eq!(texture(&mut a, &ctx, 0, Some(1)), Some(tex_a));
+        assert_eq!(texture(&mut a, &ctx, 0, Some(4)), Some(tex_b));
+        let mut idle = ctx.tex_manager().write().take_delta();
+        assert!(idle.set.is_empty(), "steady previews need no new upload");
+        idle.clear();
+
+        let transform = a.ui.transform.as_mut().unwrap();
+        transform.quad = transform.quad.map(|[x, y]| [x + 2.0, y]);
+        assert_eq!(texture(&mut a, &ctx, 0, Some(1)), Some(tex_a));
+        assert_eq!(texture(&mut a, &ctx, 0, Some(4)), Some(tex_b));
+        let mut changed = ctx.tex_manager().write().take_delta();
+        assert!(changed.set.contains_key(&tex_a) && changed.set.contains_key(&tex_b), "geometry changes refresh both windows in place");
+        changed.clear();
+        crate::transform_tool::cancel(&mut a);
     }
 
     #[test]

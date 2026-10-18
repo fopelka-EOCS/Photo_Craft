@@ -786,6 +786,29 @@ fn rejecting_a_mask_eye_preserves_gray_mask_view_and_revision() {
 }
 
 #[test]
+fn nonexistent_quick_mask_eye_preserves_view_and_revision() {
+    for gray_mask in [false, true] {
+        let mut s = session();
+        if gray_mask {
+            s.execute("layer.layerMask.revealAll", json!({})).unwrap();
+            s.execute("view.layerMask", json!({"mode":"gray"})).unwrap();
+        }
+        assert!(s.active().unwrap().doc.quick_mask.is_none());
+        let st = s.active().unwrap();
+        let before = st.doc.clone();
+        let view = st.channel_view.clone();
+        let revision = st.revision;
+        let steps = st.history.past_len();
+        assert!(s.execute("channel.setVisible", json!({"channel":"quickMask","visible":true})).is_err());
+        let st = s.active().unwrap();
+        assert!(std::sync::Arc::ptr_eq(&before, &st.doc));
+        assert_eq!(st.channel_view, view);
+        assert_eq!(st.revision, revision);
+        assert_eq!(st.history.past_len(), steps);
+    }
+}
+
+#[test]
 fn clear_with_a_colour_channel_targeted_clears_only_that_channel() {
     let near = |a: &[f32], b: &[f32]| a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-3);
     // The Background, then a normal layer (Delete there can't make one channel transparent).

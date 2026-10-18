@@ -1434,7 +1434,8 @@ fn set_visible(s: &mut Session, p: &Value) -> Result<Value> {
     let colors = color_count(doc);
     let n = doc.channels.len();
     match r {
-        ChanRef::Composite | ChanRef::QuickMask => {}
+        ChanRef::Composite => {}
+        ChanRef::QuickMask if doc.quick_mask.is_some() => {}
         ChanRef::Color(k) if k < colors => {}
         ChanRef::Alpha(i) if i < n => {}
         _ => return Err(bad(cmd, "that channel has no visibility")),
