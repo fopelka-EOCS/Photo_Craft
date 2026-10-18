@@ -36,6 +36,13 @@ wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "DomRect", "HtmlAnchorElement", "Blob", "BlobPropertyBag", "Url", "Location", "CssStyleDeclaration", "Storage", "Event", "EventTarget", "MouseEvent", "PointerEvent", "BeforeUnloadEvent", "AbortController", "AbortSignal", "DomException", "Response", "IdbFactory", "IdbOpenDbRequest", "IdbDatabase", "IdbRequest", "IdbTransaction", "IdbTransactionMode", "IdbObjectStore", "IdbCursor", "IdbCursorWithValue", "RequestInit", "Navigator"] }
 
+# The threads build (wasm with `atomics`: cargo xtask web-threads): a rayon pool of Web Workers on
+# shared memory. `web_spin_lock` makes rayon spin rather than block on the browser's main thread,
+# which may never block; `no-bundler` lets the workers find this module wherever it is served.
+[target.'cfg(all(target_arch = "wasm32", target_feature = "atomics"))'.dependencies]
+rayon = { workspace = true, features = ["web_spin_lock"] }
+wasm-bindgen-rayon = { version = "1.3", features = ["no-bundler"] }
+
 [dev-dependencies]
 serde_json = { workspace = true }
 photocraft-paint = { workspace = true }

@@ -12,7 +12,8 @@
 //! - dropped files are read asynchronously by `web::WebShell` and delivered through `Services::inbox`.
 //!
 //! URL query flags: `?cpu` forces the CPU canvas path (same as `PHOTOCRAFT_CPU_CANVAS=1`);
-//! `?webgl` forces the WebGL2 backend instead of WebGPU.
+//! `?webgl` forces the WebGL2 backend instead of WebGPU; in the threads build, `?threads=N` sets
+//! the number of worker threads.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
@@ -25,9 +26,18 @@ mod indexed_presets;
 #[cfg(target_arch = "wasm32")]
 mod web;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
+mod threads;
+
+#[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
 fn main() {
     web::start();
+}
+
+/// The threads build (`cargo xtask web-threads`) starts its Web Worker pool first ([`threads`]).
+#[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+fn main() {
+    threads::start();
 }
 
 #[cfg(not(target_arch = "wasm32"))]
