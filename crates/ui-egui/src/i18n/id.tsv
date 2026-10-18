@@ -2784,6 +2784,7 @@ cameraRaw	Blending	Pembauran
 	Color Picker (Fill Color)	Pemilih Warna (Warna Isian)
 	Fill color	Warna isian
 	Color Picker (Stroke Color)	Pemilih Warna (Warna Stroke)
+	Color Picker	Pemilih Warna
 	Stroke color	Warna stroke
 	Pick screen color	Pilih warna layar
 	Sample a pixel anywhere on the screen	Ambil sampel piksel di mana saja pada layar
@@ -3225,4 +3226,3 @@ curves	Smooth	Haluskan
 	Increase Brush Size	Perbesar ukuran kuas
 	Decrease Brush Hardness	Kurangi kekerasan kuas
 	Increase Brush Hardness	Tambah kekerasan kuas
-	Color Picker	Pemilih Warna

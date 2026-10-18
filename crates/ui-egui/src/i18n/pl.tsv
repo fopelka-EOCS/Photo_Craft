@@ -3381,6 +3381,7 @@ cameraRaw	Roughness	Chropowatość
 	Color Picker (Fill Color)	Próbnik kolorów (Kolor wypełnienia)
 	Fill color	Kolor wypełnienia
 	Color Picker (Stroke Color)	Próbnik kolorów (Kolor obrysu)
+	Color Picker	Próbnik kolorów
 	Stroke color	Kolor obrysu
 	Pick screen color	Wybierz kolor z ekranu
 	Sample a pixel anywhere on the screen	Pobierz kolor piksela w dowolnym miejscu ekranu
@@ -3829,4 +3830,3 @@ curves	Smooth	Wygładź
 	Increase Brush Size	Zwiększ rozmiar pędzla
 	Decrease Brush Hardness	Zmniejsz twardość pędzla
 	Increase Brush Hardness	Zwiększ twardość pędzla
-	Color Picker	Próbnik kolorów

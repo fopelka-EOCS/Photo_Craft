@@ -2386,6 +2386,7 @@ cameraRaw	Blending	混合
 	Color Picker (Fill Color)	拾色器（填充颜色）
 	Fill color	填充颜色
 	Color Picker (Stroke Color)	拾色器（描边颜色）
+	Color Picker	拾色器
 	Stroke color	描边颜色
 	Pick screen color	选取屏幕颜色
 	Sample a pixel anywhere on the screen	在屏幕任意位置采样像素
@@ -2851,4 +2852,3 @@ curves	Smooth	平滑
 	Increase Brush Size	增大画笔大小
 	Decrease Brush Hardness	减小画笔硬度
 	Increase Brush Hardness	增大画笔硬度
-	Color Picker	拾色器
