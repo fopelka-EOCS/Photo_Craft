@@ -112,6 +112,7 @@ pub fn warp_from_params(cmd: &str, p: &Value, rect: [f64; 4]) -> Result<Warp> {
 
 /// A Background is turned into a normal layer by the caller first
 /// ([`crate::extra_cmds::background_to_layer`]).
+/// Warp a whole layer, carrying its linked masks without the isolated-channel area cap.
 fn warp_layer(doc_sel: Option<&Surface>, group: Locks, l: &mut Layer, w: &Warp, rect: Rect, interp: Interp, frames: Option<&Frames>) -> Result<()> {
     let locks = l.locks.union(group);
     if locks.position || locks.all {
@@ -185,10 +186,18 @@ fn warp_layer(doc_sel: Option<&Surface>, group: Locks, l: &mut Layer, w: &Warp, 
         && m.linked
     {
         m.surface = match mask_sel {
+            // Use the selection directly when its frame fits the warp box. An explicit
+            // smaller box still needs the clipped coverage built by `warp_scalar`.
+            Some(sel) if sel.content_bounds().intersect(&rect) == sel.content_bounds() => {
+                crate::transform_cmds::move_gray_selected(&m.surface, sel, &|lifted, src| Ok(warp_mesh_surface(lifted, src, &map, interp)), &|s| {
+                    Ok(warp_mesh_gray(s, &map, interp))
+                })?
+            }
             Some(sel) => warp_scalar(&m.surface, Some(sel), rect, w, interp)?,
             // Whole-layer transforms carry the complete linked mask, whose content can
-            // extend beyond the layer's pixel bounds (or the explicit warp frame).
-            None => warp_scalar(&m.surface, None, m.surface.content_bounds(), w, interp)?,
+            // extend beyond the layer's pixel bounds (or the explicit warp frame). The
+            // scalar-channel working-area cap must not reject an ordinary layer warp.
+            None => warp_mesh_gray(&m.surface, &map, interp),
         };
     }
     if let Some(vm) = l.vector_mask.as_mut()
@@ -340,7 +349,6 @@ fn warp_type_layer(s: &mut Session, cmd: &str, id: LayerId, w: &Warp) -> Result<
 /// Coverage also includes default-valued samples, which must move with a selected mask.
 fn warp_scalar(s: &Surface, selection: Option<&Surface>, frame: Rect, w: &Warp, interp: Interp) -> Result<Surface> {
     let area = selection.map_or(frame, |sel| frame.intersect(&sel.content_bounds()));
-    crate::channel_transform::validate_area(area)?;
     let mut coverage = Surface::new(photocraft_color::PixelFormat::new(photocraft_color::ColorMode::Grayscale, photocraft_color::SampleType::F32, false));
     for tile in area.tiles() {
         let r = tile.rect().intersect(&area);

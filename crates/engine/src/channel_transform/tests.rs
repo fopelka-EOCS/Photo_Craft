@@ -187,7 +187,10 @@ fn invalid_targets_allocation_failure_and_locks_leave_pixels_unchanged() {
     crate::allocation::fail_next_for_test();
     assert!(s.execute("edit.transform", json!({"target":{"color":0},"matrix":[1,0,0,1,2,0]})).is_err());
     assert!(Arc::ptr_eq(&before, &s.active().unwrap().doc));
+    let steps = s.active().unwrap().history.past_len();
     assert!(s.execute("edit.transform", json!({"target":{"color":0},"matrix":[1e8,0,0,1e8,0,0]})).is_err());
+    assert!(Arc::ptr_eq(&before, &s.active().unwrap().doc));
+    assert_eq!(s.active().unwrap().history.past_len(), steps);
     let id = s.active().unwrap().active_layer.unwrap();
     s.edit("lock", |doc, _| {
         doc.layer_mut(id).unwrap().locks.all = true;
@@ -200,7 +203,11 @@ fn invalid_targets_allocation_failure_and_locks_leave_pixels_unchanged() {
         Ok(())
     })
     .unwrap();
+    let locked = s.active().unwrap().doc.clone();
+    let steps = s.active().unwrap().history.past_len();
     assert!(s.execute("edit.transform", json!({"target":{"color":0},"matrix":[1,0,0,1,2,0]})).is_err());
+    assert!(Arc::ptr_eq(&locked, &s.active().unwrap().doc));
+    assert_eq!(s.active().unwrap().history.past_len(), steps);
 }
 
 #[test]

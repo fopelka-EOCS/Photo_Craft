@@ -724,6 +724,7 @@ pub fn specs() -> Vec<CommandSpec> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     fn session() -> Session {
         session_depth(8)
@@ -1170,12 +1171,16 @@ mod tests {
     fn transform_targets_fail_gracefully() {
         let mut s = session();
         let m = json!([1, 0, 0, 1, 5, 5]);
+        let before = s.active().unwrap().doc.clone();
+        let steps = s.active().unwrap().history.past_len();
         assert!(s.execute("edit.transform", json!({"matrix": m, "target": "mask"})).is_err(), "no mask");
         assert!(s.execute("edit.transform", json!({"matrix": m, "target": {"channel": 9}})).is_err());
         assert!(s.execute("edit.transform", json!({"matrix": m, "target": "quickMask"})).is_err());
         // Malformed explicit targets fail without falling through to layer pixels.
         assert!(s.execute("edit.transform", json!({"matrix": m, "target": 7})).is_err());
         assert!(s.execute("edit.transform", json!({"matrix": m, "target": {"channel": "x"}})).is_err());
+        assert!(Arc::ptr_eq(&before, &s.active().unwrap().doc));
+        assert_eq!(s.active().unwrap().history.past_len(), steps);
         // Selections that miss the mask entirely transform nothing, without panicking.
         let mut s = masked(&[Rect::new(10, 10, 20, 20)], false);
         s.execute("select.rect", json!({"x": 80, "y": 80, "width": 5, "height": 5})).unwrap();

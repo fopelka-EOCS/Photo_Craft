@@ -17,6 +17,7 @@ pub(crate) struct Preview {
     background: [f32; 4],
     factor: u32,
     geometry: Value,
+    failed: Option<String>,
     shown: Arc<Document>,
     view: Option<(ChannelView, bool, u64)>,
     texture: Option<TextureHandle>,
@@ -25,17 +26,31 @@ pub(crate) struct Preview {
 }
 
 impl Preview {
+    /// Capture an immutable source at a scale suitable for interactive CPU resampling.
     pub(crate) fn new(doc: &Document, layer: Option<LayerId>, background: [f32; 4], reduced: bool) -> Self {
         // Effects and vector masks need document-space geometry, so retain full resolution there.
         let factor = if photocraft_compose::proxy::proxy_faithful(doc) { crate::proxy::preview_factor(doc, reduced) } else { 1 };
         let base = Arc::new(crate::proxy::proxy_document(doc, factor));
-        Self { shown: base.clone(), base, layer, background, factor, geometry: Value::Null, view: None, texture: None, gpu: None, gpu_attempted: false }
+        Self {
+            shown: base.clone(),
+            base,
+            layer,
+            background,
+            factor,
+            geometry: Value::Null,
+            failed: None,
+            view: None,
+            texture: None,
+            gpu: None,
+            gpu_attempted: false,
+        }
     }
 
     pub(crate) fn background(&self) -> [f32; 4] {
         self.background
     }
 
+    /// Resample only when geometry changes; cache deterministic geometry failures as well.
     fn update(&mut self, t: &TransformSession) -> Result<(), String> {
         let k = f64::from(self.factor);
         let mut params = json!({"target": t.target, "rect": t.rect.map(|v| v / k), "interpolation": t.interpolation});
@@ -53,7 +68,7 @@ impl Preview {
             "edit.transform"
         };
         if self.geometry == params {
-            return Ok(());
+            return self.failed.clone().map_or(Ok(()), Err);
         }
         let mut session = photocraft_engine::Session::new();
         session.tools.background = self.background;
@@ -61,13 +76,25 @@ impl Preview {
         if let Some(layer) = self.layer {
             session.select_layer(layer).map_err(|e| e.to_string())?;
         }
-        session.execute(command, params.clone()).map_err(|e| e.to_string())?;
+        if let Err(error) = session.execute(command, params.clone()) {
+            // Invalid geometry is stable for this captured source. An allocation or other
+            // transient failure must remain retryable when memory becomes available.
+            let stable = matches!(&error, photocraft_engine::EngineError::BadParams { .. });
+            let error = error.to_string();
+            if stable {
+                self.geometry = params;
+                self.failed = Some(error.clone());
+            }
+            return Err(error);
+        }
         self.shown = session.active().ok_or("no channel preview document")?.doc.clone();
         self.geometry = params;
+        self.failed = None;
         self.view = None;
         Ok(())
     }
 
+    /// Composite the captured pixels through the current eyes without changing the source.
     fn image(&self, view: &ChannelView, in_color: bool, display: Option<&photocraft_engine::display_color::CanvasDisplay>) -> ColorImage {
         let overlay = match crate::channel_view::render(&self.shown, view, self.shown.bounds(), 1, in_color, self.layer) {
             // Solo/partial colour views already contain the opaque composite. Do not render it twice.
@@ -591,6 +618,30 @@ mod tests {
         let mut app = PhotocraftApp::new(session, crate::Services::default());
         app.sync_views();
         app
+    }
+
+    #[test]
+    fn invalid_preview_geometry_is_cached_until_the_geometry_changes() {
+        let mut a = app();
+        a.run("channel.target", json!({"channel":"green"})).unwrap();
+        crate::transform_tool::begin(&mut a, &egui::Context::default()).unwrap();
+        let st = a.session.active().unwrap();
+        let mut preview = Preview::new(&st.doc, st.active_layer, [1.0; 4], false);
+        let mut t = a.ui.transform.clone().unwrap();
+        let valid = t.clone();
+        let [x0, y0, x1, y1] = t.rect;
+        let (w, h) = (x1 - x0, y1 - y0);
+        t.quad = [[x0, y0], [x0 + 3.0 * w, y0], [x0 + 0.6 * w, y0 + 0.6 * h], [x0, y0 + 3.0 * h]];
+        let shown = preview.shown.clone();
+        let error = preview.update(&t).unwrap_err();
+        assert!(error.contains("perspective horizon"), "{error}");
+        assert!(preview.failed.is_some());
+        assert_eq!(preview.update(&t), Err(error));
+        assert!(Arc::ptr_eq(&shown, &preview.shown));
+        preview.update(&valid).unwrap();
+        assert!(preview.failed.is_none());
+        assert!(!Arc::ptr_eq(&shown, &preview.shown));
+        crate::transform_tool::cancel(&mut a);
     }
 
     #[test]

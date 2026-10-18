@@ -3114,12 +3114,7 @@ fn layer_row(
         actions.push(("select.loadSelection".into(), p));
     } else if let Some(cmd) = mask_toggle {
         actions.push(cmd);
-    } else if resp.clicked()
-        && !eye_resp.clicked()
-        && !toggled
-        && !fx_toggled
-        && !masks.clicked
-        && app.session.active().is_none_or(|st| st.channel_transform.is_none())
+    } else if resp.clicked() && !eye_resp.clicked() && !toggled && !fx_toggled && !masks.clicked && !photocraft_engine::channel_transform::locked(&app.session)
     {
         let mode = select_mode(ui.input(|i| i.modifiers));
         actions.push(("layer.select".into(), json!({"layer": l.id.0, "mode": mode})));

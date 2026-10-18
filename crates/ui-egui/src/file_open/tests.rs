@@ -203,6 +203,37 @@ fn web_drops_onto_the_canvas_are_placed_from_their_bytes() {
 }
 
 #[test]
+fn web_drop_does_not_commit_an_isolated_channel_transform() {
+    let ctx = egui::Context::default();
+    let mut app = app_with_canvas();
+    app.run("layer.new.layer", json!({})).unwrap();
+    app.run("edit.fill", json!({"color":"#123456"})).unwrap();
+    app.run("channel.target", json!({"channel":"green"})).unwrap();
+    crate::transform_tool::begin(&mut app, &ctx).unwrap();
+    let shifted = app.ui.transform.as_ref().unwrap().quad.map(|[x, y]| [x + 1.0, y]);
+    app.ui.transform.as_mut().unwrap().quad = shifted;
+    let captured = app.ui.transform.clone();
+    let before = app.session.active().unwrap().doc.clone();
+    let steps = history_steps(&app);
+    let layers = layer_count(&app);
+    let view = app.session.active().unwrap().channel_view.clone();
+    app.services.cursor_pos = Some(Box::new(|_| Some(egui::pos2(400.0, 300.0))));
+    assert_eq!(app.dropped_on_canvas(&ctx, &["next.png".into()]), [true]);
+    assert!(std::sync::Arc::ptr_eq(&before, &app.session.active().unwrap().doc));
+    assert_eq!(history_steps(&app), steps);
+    assert_eq!(app.session.active().unwrap().channel_view, view);
+    assert_eq!(app.ui.transform, captured);
+    assert!(photocraft_engine::channel_transform::locked(&app.session));
+    app.drop_places.push_back(crate::file_open::DropPlace::Bytes("next.png".into(), png_bytes(2, 2)));
+    app.place_next_dropped(&ctx);
+    assert_eq!(app.drop_places.len(), 1);
+    crate::transform_tool::cancel(&mut app);
+    app.place_next_dropped(&ctx);
+    assert!(app.drop_places.is_empty());
+    assert_eq!(layer_count(&app), layers + 1);
+}
+
+#[test]
 fn pcraft_documents_save_in_place_but_flat_files_ask() {
     let (mut app, written) = app_with(vec![None]);
     let ctx = egui::Context::default();
