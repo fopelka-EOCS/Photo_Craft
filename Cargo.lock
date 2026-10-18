@@ -1225,7 +1225,7 @@ dependencies = [
 [[package]]
 name = "craft-credits"
 version = "0.1.0"
-source = "git+https://github.com/zuujiscom/craft-libs?rev=3d8dca51d78f8a875b379aec7a23afcd3ec30391#3d8dca51d78f8a875b379aec7a23afcd3ec30391"
+source = "git+https://github.com/zuujiscom/craft-libs?rev=4a3f21ae27791a2bdb79f607bdf3de96d812b6b3#4a3f21ae27791a2bdb79f607bdf3de96d812b6b3"
 dependencies = [
  "serde_json",
  "toml",
