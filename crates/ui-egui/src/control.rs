@@ -326,6 +326,14 @@ fn run_waiting(app: &mut PhotocraftApp, wait: bool, run: impl FnOnce(&mut Photoc
     }
 }
 
+/// The top dialog samples the image itself (Color Picker, Levels/Curves Set Point, Replace Color,
+/// Color Range): `ui.pointer` gives it the gesture, as the canvas does under it.
+fn dialog_takes_pointer(app: &PhotocraftApp, secondary: bool) -> bool {
+    crate::color_picker_ui::top(app).is_some()
+        || (!secondary && (crate::adjust_dialog::picker_armed(app) || crate::filter_dialog::color_eyedropper_armed(app)))
+        || app.ui.dialogs.last().is_some_and(|d| crate::color_range_ui::owns(&d.fields))
+}
+
 /// Screen position of document point (x, y) on the main canvas, where a `ui.pointer` right-click
 /// opens its menu (the mouse's opens at the pointer); the canvas centre when it can't be mapped.
 fn screen_point(app: &PhotocraftApp, x: f64, y: f64) -> [f32; 2] {
@@ -1019,6 +1027,13 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
             };
             let secondary = matches!(button.as_str(), "secondary" | "right");
             let mods = modifiers_from(&m);
+            // Under a modal the canvas starts no gesture but the dialog's eyedroppers' (`canvas_view`):
+            // refused before anything changes, unless a press already reached the tool before the
+            // dialog opened and this request carries it on.
+            let carries_press = app.control_press && !matches!(events.first(), Some((ToolEvent::Down { .. }, ..)));
+            if crate::menus::modal_open(app) && !dialog_takes_pointer(app, secondary) && !carries_press {
+                return err("pointer gestures are unavailable while a modal dialog is open (only a dialog's own eyedropper takes them)");
+            }
             if let Some(t) = tool {
                 crate::tool_memory::select(app, t);
             }
@@ -1050,10 +1065,10 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                     }
                     continue;
                 }
-                // A Properties Levels/Curves eyedropper owns the primary button the same way.
-                if app.ui.dialogs.is_empty() && !matches!(s("button"), Some("secondary" | "right")) && crate::layer_picker::armed(app).is_some() {
+                // Replace Color's eyedropper, the same way.
+                if !secondary && crate::filter_dialog::color_eyedropper_armed(app) {
                     if matches!(ev, ToolEvent::Down { .. }) {
-                        crate::layer_picker::sample_at(app, x, y);
+                        crate::filter_dialog::color_eyedropper_sample(app, x, y);
                     }
                     continue;
                 }
@@ -1068,6 +1083,25 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                     }
                     if !up && (down || held) && !space && !secondary && button != "middle" {
                         crate::color_range_ui::pick_top(app, [x, y], mods);
+                    }
+                    continue;
+                }
+                // Per event, not once per request: a click can open a dialog (Create Rectangle, the
+                // Rasterize prompt) and the rest of the request then lands on the inert canvas. As
+                // in egui, a press that reached the tool before the dialog opened keeps its moves
+                // and release (`control_press`); a new press there never starts, and doesn't end
+                // the one still held either (a mouse has no second primary press).
+                let down = matches!(ev, ToolEvent::Down { .. });
+                if crate::menus::modal_open(app) && (down || !app.control_press) {
+                    continue;
+                }
+                if down {
+                    app.control_press = false;
+                }
+                // A Properties Levels/Curves eyedropper owns the primary button the same way.
+                if !secondary && crate::layer_picker::armed(app).is_some() {
+                    if down {
+                        crate::layer_picker::sample_at(app, x, y);
                     }
                     continue;
                 }
@@ -1134,7 +1168,15 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                     }
                     down => down,
                 };
+                let up = matches!(ev, ToolEvent::Up { .. });
                 tool_event(app, ev, mods);
+                // A press that opened a dialog itself (the Rasterize prompt) is not carried on:
+                // with the mouse it was a click the modal swallows, never a drag.
+                if down {
+                    app.control_press = !crate::menus::modal_open(app);
+                } else if up {
+                    app.control_press = false;
+                }
             }
             app.stylus.feed.set(None);
             ok(json!({"status": app.ui.status}))
@@ -3009,6 +3051,126 @@ mod tests {
             assert_eq!(r["ok"], true, "{button}: {r}");
         }
         assert!(app.ui.layer_menu.is_some(), "a right click with Move still opens the layer menu");
+    }
+
+    fn pointer_app(width: u32) -> (PhotocraftApp, egui::Context) {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": width, "height": width, "background": "#00ff00"})).unwrap();
+        app.ui.tool = Tool::Brush;
+        (app, egui::Context::default())
+    }
+
+    fn past_len(app: &PhotocraftApp) -> usize {
+        app.session.active().unwrap().history.past_len()
+    }
+
+    fn pointer_stroke() -> Value {
+        json!([{"kind": "down", "x": 5, "y": 5}, {"kind": "move", "x": 30, "y": 30}, {"kind": "up", "x": 30, "y": 30}])
+    }
+
+    /// Under a modal dialog the canvas is inert but for the dialog's own eyedroppers: a gesture
+    /// never reaches the tool there, and the `tool` param isn't applied either.
+    #[test]
+    fn ui_pointer_is_refused_under_a_modal_dialog() {
+        let (mut app, ctx) = pointer_app(64);
+        assert_eq!(call(&mut app, &ctx, "ui.menu.invoke", json!({"id": "image.adjustments.curves"}))["ok"], true);
+        assert!(!crate::adjust_dialog::picker_armed(&app));
+        let steps = past_len(&app);
+        rejected(&mut app, &ctx, "ui.pointer", json!({"events": pointer_stroke()}), "modal dialog");
+        rejected(&mut app, &ctx, "ui.pointer", json!({"tool": "pen", "events": pointer_stroke()}), "modal dialog");
+        assert_eq!(past_len(&app), steps, "no history step");
+        assert_eq!(app.ui.dialogs.len(), 1, "Curves is still the only dialog");
+    }
+
+    /// A click that opens a dialog (Create Rectangle) makes the rest of the same request land on
+    /// the inert canvas: decided per event, not once for the request.
+    #[test]
+    fn ui_pointer_stops_at_a_dialog_its_own_click_opened() {
+        let (mut app, ctx) = pointer_app(128);
+        let revision = app.session.active().unwrap().revision;
+        let events = json!([
+            {"kind": "down", "x": 40, "y": 50}, {"kind": "up", "x": 40, "y": 50},
+            {"kind": "down", "x": 60, "y": 60}, {"kind": "move", "x": 90, "y": 90}, {"kind": "up", "x": 90, "y": 90}
+        ]);
+        let r = call(&mut app, &ctx, "ui.pointer", json!({"tool": "rectangle", "events": events}));
+        assert_eq!(r["ok"], true, "the click acted: {r}");
+        assert_eq!(app.ui.dialogs.len(), 1, "one Create Rectangle dialog");
+        assert_eq!(app.session.active().unwrap().revision, revision, "no shape drawn under the dialog");
+    }
+
+    #[test]
+    fn ui_pointer_is_refused_under_the_unsaved_changes_prompt() {
+        let (mut app, ctx) = pointer_app(64);
+        app.run("layer.new.layer", json!({})).unwrap();
+        crate::menus::invoke(&mut app, &ctx, "file.close", json!({})).unwrap();
+        assert!(app.discard.is_some() && app.ui.dialogs.is_empty());
+        rejected(&mut app, &ctx, "ui.pointer", json!({"events": pointer_stroke()}), "modal dialog");
+    }
+
+    #[test]
+    fn ui_pointer_is_refused_under_camera_raw() {
+        let (mut app, ctx) = pointer_app(64);
+        crate::camera_raw_ui::open(&mut app, &ctx).unwrap();
+        assert!(app.camera_raw.is_some() && app.ui.dialogs.is_empty());
+        rejected(&mut app, &ctx, "ui.pointer", json!({"events": pointer_stroke()}), "modal dialog");
+    }
+
+    /// As with egui's drag on the canvas, a stroke pressed before a dialog opened still finishes
+    /// under it; only a new press is refused.
+    #[test]
+    fn ui_pointer_finishes_a_stroke_pressed_before_a_dialog_opened() {
+        let (mut app, ctx) = pointer_app(64);
+        let steps = past_len(&app);
+        let pressed = call(&mut app, &ctx, "ui.pointer", json!({"events": [{"kind": "down", "x": 5, "y": 5}, {"kind": "move", "x": 20, "y": 20}]}));
+        assert_eq!(pressed["ok"], true, "{pressed}");
+        assert_eq!(call(&mut app, &ctx, "ui.menu.invoke", json!({"id": "image.adjustments.curves"}))["ok"], true);
+        let released = call(&mut app, &ctx, "ui.pointer", json!({"events": [{"kind": "move", "x": 30, "y": 30}, {"kind": "up", "x": 30, "y": 30}]}));
+        assert_eq!(released["ok"], true, "{released}");
+        assert_eq!(past_len(&app), steps + 1, "the stroke is committed once");
+        rejected(&mut app, &ctx, "ui.pointer", json!({"events": [{"kind": "move", "x": 40, "y": 40}, {"kind": "up", "x": 40, "y": 40}]}), "modal dialog");
+    }
+
+    /// A press refused under the dialog doesn't end the stroke still held from before it.
+    #[test]
+    fn ui_pointer_keeps_a_held_stroke_past_a_refused_press() {
+        let (mut app, ctx) = pointer_app(64);
+        let steps = past_len(&app);
+        let pressed = call(&mut app, &ctx, "ui.pointer", json!({"events": [{"kind": "down", "x": 5, "y": 5}, {"kind": "move", "x": 20, "y": 20}]}));
+        assert_eq!(pressed["ok"], true, "{pressed}");
+        assert_eq!(call(&mut app, &ctx, "ui.menu.invoke", json!({"id": "image.adjustments.curves"}))["ok"], true);
+        let refused = call(&mut app, &ctx, "ui.pointer", json!({"events": [{"kind": "move", "x": 30, "y": 30}, {"kind": "down", "x": 50, "y": 50}]}));
+        assert_eq!(refused["ok"], true, "{refused}");
+        let released = call(&mut app, &ctx, "ui.pointer", json!({"events": [{"kind": "up", "x": 30, "y": 30}]}));
+        assert_eq!(released["ok"], true, "{released}");
+        assert_eq!(past_len(&app), steps + 1, "the held stroke is committed once");
+    }
+
+    /// Replace Color's eyedropper samples where the canvas would, on the press.
+    #[test]
+    fn ui_pointer_drives_the_replace_color_eyedropper() {
+        let (mut app, ctx) = pointer_app(16);
+        app.run("tools.setColors", json!({"foreground": "#ff0000"})).unwrap();
+        assert_eq!(call(&mut app, &ctx, "ui.menu.invoke", json!({"id": "image.adjustments.replaceColor"}))["ok"], true);
+        assert!(crate::filter_dialog::color_eyedropper_armed(&app));
+        let revision = app.session.active().unwrap().revision;
+        let r = call(&mut app, &ctx, "ui.pointer", json!({"events": [{"kind": "down", "x": 4, "y": 4}, {"kind": "up", "x": 4, "y": 4}]}));
+        assert_eq!(r["ok"], true, "{r}");
+        let fields = &app.ui.dialogs.last().unwrap().fields;
+        assert_eq!((fields.get("color"), fields.get("points")), (Some(&json!("#00ff00")), Some(&json!([[4.0, 4.0]]))));
+        assert_eq!(app.session.active().unwrap().revision, revision, "the Brush did not paint");
+    }
+
+    /// A Properties Levels/Curves eyedropper isn't modal, but the save prompt over it is.
+    #[test]
+    fn ui_pointer_refuses_a_properties_eyedropper_under_the_save_prompt() {
+        let (mut app, ctx) = pointer_app(32);
+        app.run("layer.newAdjustmentLayer.curves", json!({})).unwrap();
+        let layer = app.session.active().unwrap().active_layer.unwrap();
+        app.ui.layer_picker = Some(crate::layer_picker::LayerPicker { layer: layer.0, point: "white".into(), tool: app.ui.tool });
+        assert!(crate::layer_picker::armed(&app).is_some());
+        crate::menus::invoke(&mut app, &ctx, "file.close", json!({})).unwrap();
+        assert!(app.discard.is_some());
+        rejected(&mut app, &ctx, "ui.pointer", json!({"events": [{"kind": "down", "x": 10, "y": 10}, {"kind": "up", "x": 10, "y": 10}]}), "modal dialog");
     }
 
     #[test]

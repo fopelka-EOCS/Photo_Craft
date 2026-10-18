@@ -16,6 +16,13 @@ pub(crate) fn modal_allows(app: &PhotocraftApp, id: &str) -> bool {
     (app.ui.dialogs.is_empty() && app.discard.is_none()) || crate::shortcuts::NAV_COMMANDS.contains(&id)
 }
 
+/// A modal dialog, the unsaved-changes prompt or Camera Raw is up: the canvas under it starts no
+/// gesture but its own eyedroppers' (`ui.pointer` follows it). Workspace › New Workspace's window
+/// is not modal and does not count.
+pub(crate) fn modal_open(app: &PhotocraftApp) -> bool {
+    !app.ui.dialogs.is_empty() || app.discard.is_some() || app.camera_raw.is_some()
+}
+
 /// Top-level menus in Photoshop order.
 pub const TOP_MENUS: [&str; 10] = ["File", "Edit", "Image", "Layer", "Type", "Select", "Filter", "View", "Window", "Help"];
 
