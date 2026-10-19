@@ -114,13 +114,46 @@ fn is_selection_tool(tool: Tool) -> bool {
 
 /// Put `tool`'s fields of `o` back to their defaults.
 pub fn reset_options(o: &mut ToolOptions, tool: Tool) {
-    let d = ToolOptions::default();
-    macro_rules! reset {
-        ($($f:ident),* $(,)?) => {{ $( o.$f = d.$f.clone(); )* }};
+    let keys = option_keys(tool);
+    if keys.is_empty() {
+        return;
     }
-    // Sample All Layers is each tool's own: only `tool`'s goes back.
+    let (Ok(Value::Object(mut cur)), Ok(Value::Object(d))) = (serde_json::to_value(&*o), serde_json::to_value(ToolOptions::default())) else {
+        return;
+    };
+    for k in keys {
+        if let Some(v) = d.get(*k) {
+            cur.insert((*k).to_string(), v.clone());
+        }
+    }
+    if let Ok(n) = serde_json::from_value(Value::Object(cur)) {
+        *o = n;
+    }
+    // Sample All Layers is each tool's own (#5524): only `tool`'s goes back.
+    let d = ToolOptions::default();
     if let Some(all) = o.sample_all.slot(tool) {
         *all = d.sample_all.get(tool);
+    }
+}
+
+/// The serialized name of `tool`'s own Sample All Layers inside `sample_all`, if it has one: a
+/// tool preset stores that one alone, not the other tools' (#5524, #7356).
+pub fn sample_all_key(tool: Tool) -> Option<String> {
+    let mut probe = crate::state::SampleAllLayers::default();
+    *probe.slot(tool)? = true;
+    let Ok(Value::Object(m)) = serde_json::to_value(probe) else { return None };
+    m.into_iter().find(|(_, v)| v.as_bool() == Some(true)).map(|(k, _)| k)
+}
+
+/// The [`ToolOptions`] fields `tool` shows, by their serialized names: what Reset Tool resets and
+/// what a tool preset made with + stores (#7356).
+pub fn option_keys(tool: Tool) -> &'static [&'static str] {
+    // `reset!` names each field once; one that is misspelt or gone fails to compile.
+    macro_rules! reset {
+        ($($f:ident),* $(,)?) => {{
+            let _ = |o: &ToolOptions| { $(let _ = &o.$f;)* };
+            &[$(stringify!($f)),*]
+        }};
     }
     match tool {
         Tool::Move => reset!(move_auto_select, move_target, move_show_transform),
@@ -149,7 +182,10 @@ pub fn reset_options(o: &mut ToolOptions, tool: Tool) {
         ),
         Tool::PerspectiveCrop => reset!(crop_width, crop_height, crop_resolution, crop_resolution_unit, perspective_crop_grid),
         Tool::Eyedropper => reset!(eyedropper_size, eyedropper_sample, eyedropper_ring),
-        Tool::Pencil => reset!(pencil_auto_erase),
+        Tool::Brush => reset!(brush_clear),
+        Tool::Pencil => reset!(pencil_auto_erase, pencil_clear),
+        Tool::Eraser => reset!(eraser_mode),
+        Tool::Remove => reset!(remove_new_layer, remove_after_each_stroke),
         Tool::BackgroundEraser => reset!(bg_sampling, bg_limits, bg_tolerance, bg_protect_fg),
         Tool::ColorReplacement => reset!(cr_mode, cr_sampling, cr_limits, cr_tolerance, cr_anti_alias),
         Tool::MagicEraser => reset!(tolerance, anti_alias, contiguous, magic_eraser_opacity),
@@ -160,7 +196,7 @@ pub fn reset_options(o: &mut ToolOptions, tool: Tool) {
         Tool::SpotHealing => reset!(spot_type),
         Tool::Healing => reset!(clone_aligned, clone_sample),
         Tool::Patch => reset!(patch_mode, patch_content_aware, patch_structure, patch_color),
-        Tool::ContentAwareMove => reset!(cam_mode, cam_structure, cam_color),
+        Tool::ContentAwareMove => reset!(cam_mode, cam_structure, cam_color, cam_transform_on_drop),
         Tool::RedEye => reset!(red_eye_pupil_size, red_eye_darken),
         Tool::CloneStamp => reset!(clone_aligned, clone_sample),
         Tool::PatternStamp => reset!(pattern_stamp_aligned, pattern_stamp_impressionist, pattern_stamp_scale, pattern_stamp_angle),
@@ -178,12 +214,9 @@ pub fn reset_options(o: &mut ToolOptions, tool: Tool) {
         | Tool::Ruler
         | Tool::Note
         | Tool::Count
-        | Tool::Brush
         | Tool::MixerBrush
-        | Tool::Eraser
         | Tool::Hand
         | Tool::RotateView
-        | Tool::Remove
         | Tool::HistoryBrush
         | Tool::PathSelection
         | Tool::DirectSelection
@@ -193,7 +226,7 @@ pub fn reset_options(o: &mut ToolOptions, tool: Tool) {
         | Tool::DeleteAnchorPoint
         | Tool::ConvertPoint
         | Tool::Artboard
-        | Tool::Frame => {}
+        | Tool::Frame => &[],
     }
 }
 
@@ -205,6 +238,22 @@ mod tests {
         let mut s = photocraft_engine::Session::new();
         s.execute("file.new", json!({"width": 8, "height": 8})).unwrap();
         PhotocraftApp::new(s, crate::Services::default())
+    }
+
+    /// Every option belongs to a tool, so Reset Tool and tool presets (#7356) miss none, and every
+    /// listed name is a real serialized field. `sample_all` holds one Sample All Layers per tool,
+    /// which `reset_options` and `sample_all_key` handle tool by tool (#5524).
+    #[test]
+    fn every_option_belongs_to_a_tool() {
+        let all = serde_json::to_value(ToolOptions::default()).unwrap();
+        let all = all.as_object().unwrap();
+        let listed: std::collections::BTreeSet<&str> = Tool::ALL.iter().flat_map(|t| option_keys(*t).iter().copied()).collect();
+        for k in all.keys().filter(|k| *k != "sample_all") {
+            assert!(listed.contains(k.as_str()), "{k} is no tool's option");
+        }
+        for k in listed {
+            assert!(all.contains_key(k), "{k} is not a ToolOptions field");
+        }
     }
 
     /// Reset Tool resets only the current tool's options; Reset All Tools asks, then resets all.
@@ -245,5 +294,16 @@ mod tests {
         assert!(o.sample_all.magic_wand);
         reset_options(&mut o, Tool::MagicWand);
         assert_eq!(o.sample_all, Default::default());
+    }
+
+    /// Every tool with a Sample All Layers names its own key, and a tool without one names none.
+    #[test]
+    fn sample_all_key_names_the_tools_own() {
+        assert_eq!(sample_all_key(Tool::MagicWand).as_deref(), Some("magic_wand"));
+        assert_eq!(sample_all_key(Tool::Blur).as_deref(), Some("blur"));
+        assert_eq!(sample_all_key(Tool::Brush), None);
+        let keys: Vec<String> = Tool::ALL.iter().filter_map(|t| sample_all_key(*t)).collect();
+        let distinct: std::collections::BTreeSet<&String> = keys.iter().collect();
+        assert_eq!((keys.len(), distinct.len()), (12, 12), "one key per tool with the option");
     }
 }
