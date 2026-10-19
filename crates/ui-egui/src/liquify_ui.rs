@@ -529,6 +529,8 @@ pub fn open(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String> 
     if let Some(saved) = app.session.prefs().dialogs.get(REMEMBERED) {
         let _ = d.opts.apply(saved);
     }
+    // Layer ids belong to one document: a remembered backdrop Use starts at All Layers.
+    d.opts.backdrop_layer = None;
     d.upload(ctx);
     app.distort.liquify = Some(d);
     Ok(())
@@ -762,10 +764,27 @@ fn backdrop_doc(doc: &Document, of: Option<u64>) -> std::borrow::Cow<'_, Documen
         Some(id) => {
             let mut d = doc.clone();
             crate::transform_tool::solo_layer(&mut d.layers, id);
+            // A hidden layer, or one in a hidden group, shows too: Use lists every layer.
+            reveal(&mut d.layers, id);
             std::borrow::Cow::Owned(d)
         }
         None => std::borrow::Cow::Borrowed(doc),
     }
+}
+
+/// Makes layer `id` and the groups holding it visible; whether it was found.
+fn reveal(layers: &mut [photocraft_doc::Layer], id: LayerId) -> bool {
+    layers.iter_mut().any(|l| {
+        let found = l.id == id
+            || match &mut l.content {
+                photocraft_doc::LayerContent::Group(g) => reveal(&mut g.children, id),
+                _ => false,
+            };
+        if found {
+            l.visible = true;
+        }
+        found
+    })
 }
 
 /// How the preview layers the image and the backdrop texture `T`: the image's tint, and the
@@ -1227,6 +1246,17 @@ mod tests {
         assert_eq!(at(&backdrop_doc(&st.doc, Some(layer.0))), own, "the liquified layer alone");
         assert_ne!(at(&backdrop_doc(&st.doc, Some(background.0))), own, "the Background alone");
         assert_eq!(at(&backdrop_doc(&st.doc, Some(9999))), own, "a layer that's gone: All Layers");
+        // A hidden layer shows when it is the one used.
+        let mut hidden = (*st.doc).clone();
+        hidden.layer_mut(layer).unwrap().visible = false;
+        assert_eq!(at(&backdrop_doc(&hidden, Some(layer.0))), own, "the hidden liquified layer, alone");
+        // A remembered Use is a layer of another document: Liquify opens on All Layers.
+        let ctx = egui::Context::default();
+        let mut app = app_with_layer();
+        app.session.prefs.edit(|p| p.dialogs.insert(REMEMBERED.into(), json!({"backdropUse": 42, "backdropMode": "blend"})));
+        open(&mut app, &ctx).unwrap();
+        let o = &app.distort.liquify.as_ref().unwrap().opts;
+        assert_eq!((o.backdrop_layer, o.backdrop_mode), (None, BackdropMode::Blend), "the mode is kept, the layer is not");
     }
 
     /// #418: the brush settings survive Cancel, OK and Esc, and come back the next time Liquify
