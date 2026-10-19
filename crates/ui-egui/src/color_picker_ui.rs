@@ -509,7 +509,7 @@ fn color_field(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     ui.painter().rect_stroke(field, 0.0, Stroke::new(1.0, t.field_border), StrokeKind::Outside);
     let marker = pos2(field.left() + fx * field.width(), field.top() + fy * field.height());
     ui.painter().circle_stroke(marker, 5.0, Stroke::new(1.5, if hsv[2] > 0.6 && hsv[1] < 0.4 { Color32::BLACK } else { Color32::WHITE }));
-    if let Some(p) = resp.interact_pointer_pos().filter(|_| resp.dragged() || resp.clicked()) {
+    if let Some(p) = widgets::pick_pos(&resp) {
         let (x, y) = (((p.x - field.left()) / field.width()).clamp(0.0, 1.0), ((p.y - field.top()) / field.height()).clamp(0.0, 1.0));
         let c = field_color(&mode, fz, x, y);
         let keep = match mode.as_str() {
@@ -528,7 +528,7 @@ fn color_field(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
         let tri = vec![pos2(x, sy), pos2(x - 6.0 * dir, sy - 4.0), pos2(x - 6.0 * dir, sy + 4.0)];
         ui.painter().add(egui::Shape::convex_polygon(tri, t.text, Stroke::NONE));
     }
-    if let Some(p) = sresp.interact_pointer_pos().filter(|_| sresp.dragged() || sresp.clicked()) {
+    if let Some(p) = widgets::pick_pos(&sresp) {
         let z = 1.0 - ((p.y - strip.top()) / strip.height()).clamp(0.0, 1.0);
         let h = match mode.as_str() {
             "h" => Some([z * 360.0, hsv[1], hsv[2]]),
@@ -886,6 +886,59 @@ mod tests {
 
     fn color(h: &Harness<'static, Map<String, Value>>) -> String {
         h.state().get("color").and_then(Value::as_str).unwrap().to_string()
+    }
+
+    /// Press at `at` and hold, with no release and no time passing, then run one frame.
+    fn press<S>(h: &mut Harness<'static, S>, at: egui::Pos2) {
+        h.event(egui::Event::PointerMoved(at));
+        h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+        h.run_steps(1);
+    }
+
+    /// #7793: the field and the slider pick on the frame the button goes down, not after the
+    /// pointer has travelled past egui's click threshold or been held for a while, and follow
+    /// moves of a few points.
+    #[test]
+    fn field_and_slider_pick_on_press_and_follow_small_moves() {
+        let mut f = Map::new();
+        f.insert("color".into(), json!("#336699"));
+        let mut h = Harness::builder().with_size(vec2(400.0, 300.0)).build_ui_state(
+            |ui, f: &mut Map<String, Value>| {
+                ui.horizontal(|ui| {
+                    let o = ui.cursor().min;
+                    let gap = ui.spacing().item_spacing.x;
+                    ui.data_mut(|d| d.insert_temp(egui::Id::new("test-origin"), (o, gap)));
+                    color_field(ui, f);
+                });
+            },
+            f,
+        );
+        h.run_steps(2);
+        let (o, gap) = h.ctx.data(|d| d.get_temp::<(egui::Pos2, f32)>(egui::Id::new("test-origin"))).unwrap();
+        // Field: saturation across, brightness down (hue mode).
+        let at = o + vec2(FIELD * 0.5, FIELD * 0.5);
+        press(&mut h, at);
+        let picked = color(&h);
+        assert_ne!(picked, "#336699", "the press itself picks");
+        let hsv = rgb_to_hsv(parse_hex(&picked).unwrap());
+        assert!((hsv[1] - 0.5).abs() < 0.02 && (hsv[2] - 0.5).abs() < 0.02, "{picked} {hsv:?}");
+        // A 3-point nudge (under the 6-point click threshold) moves the pick.
+        h.event(egui::Event::PointerMoved(at + vec2(3.0, 0.0)));
+        h.run_steps(1);
+        assert_ne!(color(&h), picked, "a small drag adjusts the pick");
+        h.event(egui::Event::PointerButton {
+            pos: at + vec2(3.0, 0.0),
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.run_steps(2);
+        // Hue slider: a press near the bottom picks a hue near 0 at once.
+        let before = color(&h);
+        press(&mut h, o + vec2(FIELD + gap + 9.0, FIELD * 0.95));
+        assert_ne!(color(&h), before, "the slider picks on press");
+        let hue = rgb_to_hsv(parse_hex(&color(&h)).unwrap())[0];
+        assert!(hue < 30.0 || hue > 330.0, "hue {hue}");
     }
 
     #[test]
