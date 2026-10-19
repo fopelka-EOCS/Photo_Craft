@@ -27,7 +27,7 @@ pub struct Prompt {
 
 #[cfg(test)]
 pub(crate) fn parked_for_tests() -> Prompt {
-    Prompt { id: "file.close".into(), params: Value::Null, target: None, docs: vec![] }
+    Prompt { id: "file.close".into(), params: Value::Null, target: None, docs: vec![], focused: None }
 }
 
 fn index_of(app: &PhotocraftApp, id: DocId) -> Option<usize> {
