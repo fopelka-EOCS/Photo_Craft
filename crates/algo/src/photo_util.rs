@@ -159,6 +159,7 @@ pub(crate) fn par_map<T: Send>(n: usize, f: impl Fn(usize) -> T + Sync + Send) -
     (0..n).map(f).collect()
 }
 
+/// Advances `state` one SplitMix64 step and returns the mixed output.
 pub(crate) fn splitmix64(state: &mut u64) -> u64 {
     *state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
     let mut z = *state;
@@ -170,6 +171,7 @@ pub(crate) fn splitmix64(state: &mut u64) -> u64 {
 /// Deterministic 64-bit generator (SplitMix64).
 pub(crate) struct Rng(pub u64);
 impl Rng {
+    /// The next value of the SplitMix64 sequence.
     pub fn next(&mut self) -> u64 {
         splitmix64(&mut self.0)
     }
@@ -221,8 +223,10 @@ pub(crate) fn catmull_rom(t: f32) -> [f32; 4] {
 mod tests {
     use super::*;
 
+    /// The shared step and [`Rng`] reproduce the inlined copies they replaced, bit for bit.
     #[test]
     fn splitmix64_output_is_unchanged() {
+        /// The SplitMix64 step as each generator inlined it before.
         fn inlined(state: &mut u64) -> u64 {
             *state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
             let mut z = *state;

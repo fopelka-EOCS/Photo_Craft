@@ -45,6 +45,7 @@ pub const PATCH_RADIUS: usize = 15;
 
 struct Rng(u64);
 impl Rng {
+    /// The next value of the SplitMix64 sequence.
     fn next(&mut self) -> u64 {
         crate::photo_util::splitmix64(&mut self.0)
     }

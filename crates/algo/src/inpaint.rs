@@ -65,9 +65,11 @@ const SOURCE_MOMENTS_MAX: usize = 1 << 20;
 #[derive(Clone)]
 pub(crate) struct Rng(u64);
 impl Rng {
+    /// A generator whose sequence is fixed by `seed`.
     pub(crate) fn new(seed: u64) -> Self {
         Rng(seed ^ 0x9E37_79B9_7F4A_7C15)
     }
+    /// The next value of the SplitMix64 sequence.
     pub(crate) fn next(&mut self) -> u64 {
         crate::photo_util::splitmix64(&mut self.0)
     }
