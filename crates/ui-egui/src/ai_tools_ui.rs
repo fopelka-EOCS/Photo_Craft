@@ -96,7 +96,7 @@ pub fn finish_ai_object_selection(app: &mut PhotocraftApp, start: [f64; 2], end:
         (false, true) => "subtract",
         (false, false) => "replace",
     };
-    let mut p = json!({"mode": mode, "sampleAllLayers": app.ui.tool_options.sample_all_layers, "model": model_param(app, Tool::AiObjectSelection)});
+    let mut p = json!({"mode": mode, "sampleAllLayers": app.ui.tool_options.sample_all.ai_object_selection, "model": model_param(app, Tool::AiObjectSelection)});
     if w < 2.0 || h < 2.0 {
         p["point"] = json!([end[0], end[1]]);
     } else {
@@ -115,7 +115,7 @@ pub fn finish_stroke(app: &mut PhotocraftApp, tool: Tool, points: &[[f64; 3]], m
         }
         let mode = crate::tool_feedback::selection_mode(tool, 0, mods);
         let pts: Vec<[f64; 2]> = points.iter().map(|p| [p[0], p[1]]).collect();
-        let p = json!({"points": pts, "mode": mode, "sampleAllLayers": app.ui.tool_options.sample_all_layers, "model": model_param(app, tool)});
+        let p = json!({"points": pts, "mode": mode, "sampleAllLayers": app.ui.tool_options.sample_all.object_selection_brush, "model": model_param(app, tool)});
         let r = app.run("select.aiObject", p);
         crate::retouch_ui::report_smart_result(app, r, tl!("The Object Selection Brush found nothing there — paint over more of the object"));
         return true;
@@ -132,7 +132,7 @@ pub fn finish_stroke(app: &mut PhotocraftApp, tool: Tool, points: &[[f64; 3]], m
         return true;
     }
     let o = &app.ui.tool_options;
-    let mut p = json!({"points": points, "sampleAllLayers": o.sample_all_layers, "newLayer": o.gen_new_layer});
+    let mut p = json!({"points": points, "sampleAllLayers": o.sample_all.get(tool), "newLayer": o.gen_new_layer});
     p["model"] = model_param(app, tool);
     p["target"] = crate::canvas::paint_target(app);
     if tool == Tool::GenerativeInfill {
@@ -317,7 +317,9 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: Tool) -> bo
     crate::widgets::vline(ui, 22.0);
     let t = Tokens::get(ui.ctx());
     let o = &mut app.ui.tool_options;
-    crate::widgets::checkbox(ui, &mut o.sample_all_layers, tl!("Sample All Layers"));
+    if let Some(all) = o.sample_all.slot(tool) {
+        crate::widgets::checkbox(ui, all, tl!("Sample All Layers"));
+    }
     let hint = match tool {
         Tool::AiObjectSelection => tl!("Drag a box around the object, or click it"),
         Tool::GenerativeRemoval => {
