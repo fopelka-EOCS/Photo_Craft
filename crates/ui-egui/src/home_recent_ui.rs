@@ -146,8 +146,10 @@ fn read_psd_thumbnail_bounded(path: &Path, file_len: u64) -> Option<ColorImage> 
     if version != 1 && version != 2 {
         return None;
     }
+    let channels = u16::from_be_bytes([header[12], header[13]]);
     let height = u32::from_be_bytes([header[14], header[15], header[16], header[17]]);
     let width = u32::from_be_bytes([header[18], header[19], header[20], header[21]]);
+    let depth = u16::from_be_bytes([header[22], header[23]]);
 
     // 2. Read color mode data length (4 bytes)
     let mut cmd_len_buf = [0u8; 4];
@@ -207,7 +209,23 @@ fn read_psd_thumbnail_bounded(path: &Path, file_len: u64) -> Option<ColorImage> 
         return None;
     }
 
-    // Third, within budget and safe dimensions: read file and decode merged composite
+    // Third, guard against uncompressed memory spikes / bombs from high channel counts or 32-bit depth:
+    let sample_bytes: u64 = match depth {
+        1 | 8 => 1,
+        16 => 2,
+        32 => 4,
+        _ => return None,
+    };
+    const MAX_FALLBACK_DECODED_BYTES: u64 = 64 * 1024 * 1024;
+    let decoded_bytes = (width as u64)
+        .checked_mul(height as u64)?
+        .checked_mul(channels as u64)?
+        .checked_mul(sample_bytes)?;
+    if decoded_bytes > MAX_FALLBACK_DECODED_BYTES {
+        return None;
+    }
+
+    // Fourth, within budget and safe dimensions: read file and decode merged composite
     let bytes = std::fs::read(path).ok()?;
     if let Ok(file) = photocraft_psd::PsdFile::from_bytes(&bytes)
         && let Ok(comp) = photocraft_io::merged_composite(&file)
@@ -1219,6 +1237,46 @@ mod tests {
         // without attempting to read or parse the 2 MB payload.
         let thumb = load_thumbnail_image_bounded(&path_str, bytes.len() as u64);
         assert!(thumb.is_none(), "oversized PSD with payload must skip composite fallback");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn recent_thumbnail_skips_composite_for_high_channel_psd_without_preview() {
+        let temp_dir = std::env::temp_dir().join(format!("photocraft_psd_channels_test_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let file_path = temp_dir.join("high_channels.psd");
+        let path_str = file_path.to_string_lossy().into_owned();
+
+        // 2000 x 2000 with 56 channels: decoded uncompressed size = 2000 * 2000 * 56 = 224 MB (> 64 MB cap)
+        let header = photocraft_psd::Header::new(
+            photocraft_psd::Version::Psd,
+            2000,
+            2000,
+            56,
+            8,
+            photocraft_psd::ColorMode::Rgb,
+        );
+        let file = photocraft_psd::PsdFile {
+            header,
+            color_mode_data: Vec::new(),
+            resources: Vec::new(),
+            layer_info: None,
+            layer_info_placement: photocraft_psd::LayerInfoPlacement::Section,
+            global_layer_mask: None,
+            global_blocks: Vec::new(),
+            layer_mask_trailing: Vec::new(),
+            image_data: photocraft_psd::ImageData {
+                compression: photocraft_psd::Compression::Raw,
+                data: Vec::new(),
+            },
+        };
+        let bytes = file.to_bytes().unwrap();
+        std::fs::write(&file_path, &bytes).unwrap();
+
+        let thumb = load_thumbnail_image_bounded(&path_str, bytes.len() as u64);
+        assert!(thumb.is_none(), "high-channel PSD exceeding decoded memory budget must skip composite fallback");
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
