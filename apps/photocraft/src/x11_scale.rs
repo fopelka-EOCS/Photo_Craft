@@ -58,7 +58,7 @@ fn apply_impl() {
 }
 
 fn valid_scale_factor(factor: f64) -> bool {
-    factor.is_finite() && factor >= 0.5 && factor <= 4.0
+    factor.is_finite() && (0.5..=4.0).contains(&factor)
 }
 
 fn format_factor(factor: f64) -> String {
@@ -103,7 +103,7 @@ pub fn parse_xft_dpi(xrdb: &str) -> Option<f64> {
         let Some(rest) = line.strip_prefix("Xft.dpi:").or_else(|| line.strip_prefix("Xft/dpi:")) else {
             continue;
         };
-        if let Ok(dpi) = rest.trim().split_whitespace().next().unwrap_or("").parse::<f64>()
+        if let Ok(dpi) = rest.split_whitespace().next().unwrap_or("").parse::<f64>()
             && dpi.is_finite()
             && dpi > 0.0
             && dpi <= 768.0
@@ -138,7 +138,7 @@ pub fn parse_xdpyinfo_dimensions(xdpyinfo: &str) -> Option<((u32, u32), (u64, u6
         let Some(rest) = line.strip_prefix("dimensions:") else {
             continue;
         };
-        let mut parts = rest.trim().split_whitespace();
+        let mut parts = rest.split_whitespace();
         let pixels = parts.next().unwrap_or("");
         let mut px = pixels.split('x');
         let (Ok(w), Ok(h)): (Result<u32, _>, Result<u32, _>) = (px.next().unwrap_or("").parse(), px.next().unwrap_or("").parse()) else {
