@@ -135,15 +135,16 @@ fn shifted(k: Key) -> Option<Key> {
 /// Does a key press match a shortcut, the way Photoshop matches them?
 ///
 /// - Modifiers match exactly (⌘⌥I is not ⌘I), with ⌘ = Ctrl off the Mac.
-/// - `=` also matches `+` (⌘+ with ⇧ on a US layout, the numpad `+`, the `+` key of Nordic and
-///   German layouts): Photoshop zooms in on both.
+/// - `=` and `+` match each other (⌘+ with ⇧ on a US layout, the numpad `+`, the `+` key of
+///   Nordic and German layouts): Photoshop zooms in on both. A shortcut saved as ⌘+ (Photoshop's
+///   own spelling, which a .kys import or a ⇧ capture keeps) is pressed as ⌘= without ⇧.
 /// - Delete also matches Backspace (the Mac's "delete" key), and Backspace matches Delete (⌥⌫
 ///   and ⌥Delete both fill on Windows).
 /// - A ⇧ shortcut on a punctuation key matches the shifted character (⌘⇧; arrives as ⌘`:`).
 pub fn key_matches(sc: &KeyboardShortcut, key: Key, mods: Modifiers) -> bool {
     let k = sc.logical_key;
     let direct = key == k || (k == Key::Delete && key == Key::Backspace) || (k == Key::Backspace && key == Key::Delete);
-    let plus = k == Key::Equals && key == Key::Plus;
+    let plus = (k == Key::Equals && key == Key::Plus) || (k == Key::Plus && key == Key::Equals);
     let via_shift = sc.modifiers.shift && shifted(k) == Some(key);
     if !(direct || plus || via_shift) {
         return false;
@@ -909,6 +910,16 @@ mod tests {
         assert!(key_matches(&parse("Cmd+0").unwrap(), Key::Num0, cmd));
         // Ctrl (Windows) is ⌘.
         assert!(key_matches(&zoom_in, Key::Plus, Modifiers::CTRL | Modifiers { command: true, ..Default::default() }));
+        // Saved as ⌘+ (Photoshop's spelling, a .kys import): the =/+ key without ⇧ zooms in too.
+        for saved in ["Cmd++", "Ctrl++"] {
+            let plus = parse(saved).unwrap();
+            let held = if saved.starts_with("Ctrl") { Modifiers::CTRL } else { cmd };
+            assert!(key_matches(&plus, Key::Equals, held), "{saved}: = without ⇧");
+            assert!(key_matches(&plus, Key::Plus, held | Modifiers::SHIFT), "{saved}: + with ⇧");
+            assert!(key_matches(&plus, Key::Plus, held), "{saved}: a + key");
+            assert!(!key_matches(&plus, Key::Equals, Modifiers::NONE), "{saved}: no modifier");
+            assert!(!key_matches(&plus, Key::Equals, held | Modifiers::ALT), "{saved}: ⌥ is another shortcut");
+        }
         // Exact modifiers: ⌘⌥I is Image Size, never Invert (⌘I); ⇧⌘Z is not ⌘Z.
         let invert = parse("Cmd+I").unwrap();
         assert!(key_matches(&invert, Key::I, cmd));
