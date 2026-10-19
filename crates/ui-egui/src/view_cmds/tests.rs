@@ -214,6 +214,11 @@ fn window_panels_select_dock_tabs() {
     assert!(!app.ui.panels.layers);
     menu(&mut app, &ctx, "type.panels.character", json!({})).unwrap();
     assert!(app.ui.panels.properties && app.ui.dock_tabs.properties == 0);
+    // Adjustments is the Properties group's other tab, not an alias of Properties (#7265).
+    menu(&mut app, &ctx, "window.panel.adjustments", json!({})).unwrap();
+    assert!(app.ui.panels.properties && app.ui.dock_tabs.properties == 1);
+    assert_eq!(checked(&app, "window.panel.adjustments"), Some(true));
+    assert_eq!(checked(&app, "window.panel.properties"), Some(false));
     for id in ["window.panel.channels", "window.panel.swatches", "window.panel.adjustments", "window.panel.paragraph"] {
         assert!(is_live(id), "{id}");
     }

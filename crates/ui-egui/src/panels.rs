@@ -3578,16 +3578,22 @@ pub fn properties_window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let shown = egui::Area::new(card_id).order(egui::Order::Middle).fixed_pos(pos + offset).show(ctx, |ui| {
         frame.show(ui, |ui| {
             ui.set_width(width - 28.0);
-            let title = ui.horizontal(|ui| {
-                ui.label(RichText::new(tl!("Properties")).font(theme::semibold(13.5)).color(t.text));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if icons::button(ui, "minus", 22.0, false, tl!("Hide Properties")).clicked() {
-                        app.ui.panels.properties = false;
-                    }
-                });
-            });
-            let bar = title.response.rect.with_max_x(title.response.rect.right() - 28.0);
+            // Its title is the group's tabs, Properties | Adjustments as in the Pro dock, so
+            // Window › Adjustments shows the Adjustments grid here too (#7265).
+            let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::hover());
+            let hide = Rect::from_min_max(pos2(row.right() - 22.0, row.top() + 1.0), pos2(row.right(), row.bottom() - 1.0));
+            let bar = Rect::from_min_max(row.min, pos2(hide.left() - 6.0, row.bottom()));
+            // Registered before the tabs so they keep their clicks; drags fall through to it.
             let grip = ui.interact(bar, card_id.with("title"), Sense::drag());
+            let visible = app.ui.dock.visible_tabs(crate::dock::Group::Properties, false);
+            let (indices, tabs): (Vec<usize>, Vec<&str>) = visible.into_iter().unzip();
+            let mut sel = indices.iter().position(|i| *i == app.ui.dock_tabs.properties).unwrap_or(0);
+            crate::tab_strip::pill_tabs(ui, card_id.with("tabs"), bar, &tabs, &mut sel, false);
+            let tab = indices.get(sel).copied().unwrap_or(0);
+            app.ui.dock_tabs.properties = tab;
+            if icons::button(&mut ui.new_child(egui::UiBuilder::new().max_rect(hide)), "minus", 22.0, false, tl!("Hide Properties")).clicked() {
+                app.ui.panels.properties = false;
+            }
             if grip.hovered() || grip.dragged() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
             }
@@ -3595,7 +3601,11 @@ pub fn properties_window(app: &mut PhotocraftApp, ctx: &egui::Context) {
             ui.add_space(6.0);
             widgets::hairline(ui);
             ui.add_space(8.0);
-            properties_body(app, ui);
+            if tab == 0 {
+                properties_body(app, ui);
+            } else {
+                adjustments_grid(app, ui);
+            }
         });
     });
     if drag != egui::Vec2::ZERO && canvas.is_positive() {
@@ -5675,6 +5685,42 @@ mod toolbar_hidden_tests {
 mod properties_card_tests {
     use super::*;
     use egui_kittest::{Harness, kittest::Queryable};
+
+    /// #7265: Studio's floating card holds the Adjustments grid too, as a tab beside Properties.
+    /// Window › Adjustments shows it on that tab, Window › Properties on its own, choosing the
+    /// shown one again hides the card, and its tabs switch between them.
+    #[test]
+    fn window_adjustments_shows_the_cards_adjustments_tab() {
+        let mut s = photocraft_engine::Session::new();
+        s.execute("file.new", json!({"width": 64, "height": 64})).unwrap();
+        let app = PhotocraftApp::new(s, crate::Services::default());
+        let mut h = Harness::builder().with_size(vec2(800.0, 600.0)).build_ui_state(
+            |ui, app: &mut PhotocraftApp| {
+                if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("semibold".into()))) {
+                    properties_window(app, ui.ctx());
+                }
+            },
+            app,
+        );
+        PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::Studio);
+        h.run_steps(2);
+        let menu = |h: &mut Harness<'_, PhotocraftApp>, id: &str| {
+            let ctx = h.ctx.clone();
+            crate::menus::invoke(h.state_mut(), &ctx, id, json!({})).unwrap();
+            h.run_steps(3);
+        };
+        let grid = |h: &Harness<'_, PhotocraftApp>| h.query_by_label(tl!("Add an adjustment")).is_some();
+        menu(&mut h, "window.panel.adjustments");
+        assert!(h.state().ui.panels.properties && grid(&h), "Window › Adjustments shows the grid");
+        menu(&mut h, "window.panel.properties");
+        assert!(h.state().ui.panels.properties && !grid(&h), "Window › Properties shows its own tab");
+        menu(&mut h, "window.panel.properties");
+        assert!(!h.state().ui.panels.properties, "chosen again, the shown panel hides");
+        menu(&mut h, "window.panel.properties");
+        h.get_by_label("Adjustments").click();
+        h.run_steps(3);
+        assert!(grid(&h), "the card's Adjustments tab");
+    }
 
     /// Arithmetic left uncommitted in one fill layer's card never lands on the layer selected next.
     #[test]
