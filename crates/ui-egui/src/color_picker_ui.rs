@@ -221,6 +221,19 @@ pub fn open_for_command_param(app: &mut PhotocraftApp, label: &str, rgb: [f32; 3
     app.ui.open_dialog(DialogKind::Command, f)
 }
 
+/// The `layer.setAdjustment` params of the adjustment layer `p["layer"]` as it is now, or `None`
+/// when that layer is gone or isn't an adjustment layer.
+fn current_adjustment(app: &PhotocraftApp, p: &Value) -> Option<Value> {
+    let id = p.get("layer")?.as_u64()?;
+    let layer = app.session.active()?.doc.layer(photocraft_doc::LayerId(id))?;
+    let photocraft_doc::LayerContent::Adjustment(adj) = &layer.content else {
+        return None;
+    };
+    let mut now = photocraft_engine::adjust_params::to_params(adj);
+    now.as_object_mut()?.insert("layer".into(), json!(id));
+    Some(now)
+}
+
 /// Open the picker on `rgb` for a colour field of another dialog (e.g. Edit › Fill's Color…): OK
 /// writes `"#rrggbb"` into `field` of dialog `dialog`, which stays open; Cancel leaves it alone.
 pub fn open_for_field(app: &mut PhotocraftApp, label: &str, rgb: [f32; 3], dialog: u64, field: &str) -> u64 {
@@ -804,6 +817,13 @@ pub fn confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value,
     let color = f.get("color").and_then(Value::as_str).unwrap_or("#000000");
     if let Some(cmd) = f.get("__command").and_then(Value::as_str) {
         let mut p = f.get("__params").cloned().filter(Value::is_object).unwrap_or_else(|| json!({}));
+        // An adjustment layer's colour goes onto the adjustment as it is now, so a change made
+        // while the picker was open (by an agent, say) isn't undone.
+        if cmd == "layer.setAdjustment"
+            && let Some(now) = current_adjustment(app, &p)
+        {
+            p = now;
+        }
         // A key of the params, or a JSON pointer into them (a Gradient Map stop's colour).
         let key = f.get("__commandKey").and_then(Value::as_str).unwrap_or("color");
         if key.starts_with('/') {

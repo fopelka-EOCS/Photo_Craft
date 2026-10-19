@@ -918,6 +918,24 @@ fn adjustment_colour_swatches_open_the_color_picker() {
     }
 }
 
+/// A change made to the adjustment while its Color Picker is open (by an agent, say) stays when
+/// the picker's OK sets the colour.
+#[test]
+fn the_color_picker_keeps_changes_made_while_it_was_open() {
+    let mut h = app_harness("photoFilter", "rgb", 8);
+    let color = h.get_by_label("Color:").rect().center();
+    click(&mut h, color);
+    let picker = open_swatch(&mut h, "Color Picker (Photo Filter Color)");
+    let id = layer(&h).0;
+    h.state_mut().run("layer.setAdjustment", json!({"layer": id.0, "density": 80})).unwrap();
+    h.state_mut().ui.dialog_mut(picker).unwrap().fields.insert("color".into(), json!("#336699"));
+    crate::dialogs::confirm(h.state_mut(), picker).unwrap();
+    h.run_steps(3);
+    let after = params(&h);
+    assert_eq!(after["color"], json!("#336699"), "{after}");
+    assert_eq!(after["density"], json!(80.0), "{after}");
+}
+
 /// Image › Adjustments › Photo Filter: the Color swatch opens the Color Picker over the dialog,
 /// whose OK sets the dialog's colour (the dialog stays open); the dialog's OK applies it.
 #[test]
