@@ -1,5 +1,6 @@
 use super::*;
 
+/// Painting commands: strokes and the foreground and background colors.
 pub(super) fn specs() -> Vec<CommandSpec> {
     vec![
         cmd!(

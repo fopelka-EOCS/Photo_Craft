@@ -1,5 +1,6 @@
 use super::*;
 
+/// The adjustment layers and the Image › Adjustments commands, generated from one table.
 pub(super) fn specs() -> Vec<CommandSpec> {
     let mut v = Vec::new();
     // Adjustment layers + destructive adjustments, generated from one list.

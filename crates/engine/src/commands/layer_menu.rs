@@ -1,5 +1,6 @@
 use super::*;
 
+/// Layer menu commands, in registry order.
 pub(super) fn specs() -> Vec<CommandSpec> {
     [creation(), duplication(), deletion_and_selection(), order_and_clipping(), masks(), merging(), fill_layers(), adjustments(), placement()]
         .into_iter()
@@ -7,6 +8,7 @@ pub(super) fn specs() -> Vec<CommandSpec> {
         .collect()
 }
 
+/// New layers and groups, and grouping the selected layers.
 fn creation() -> Vec<CommandSpec> {
     vec![
         cmd!(
@@ -40,6 +42,7 @@ fn creation() -> Vec<CommandSpec> {
     ]
 }
 
+/// Duplicate Layer, into the same document or a new one.
 fn duplication() -> Vec<CommandSpec> {
     vec![cmd!(
         "layer.duplicate",
@@ -89,6 +92,7 @@ fn duplication() -> Vec<CommandSpec> {
     )]
 }
 
+/// Deleting and selecting layers, and setting their properties.
 fn deletion_and_selection() -> Vec<CommandSpec> {
     vec![
         cmd!("layer.delete", "Delete Layer", ["Layer", "Delete"], None, r##"{"layer":id?} (no layer: every selected layer)"##, has_layer, |s, p| {
@@ -132,6 +136,7 @@ fn deletion_and_selection() -> Vec<CommandSpec> {
     ]
 }
 
+/// Arranging layers and clipping masks.
 fn order_and_clipping() -> Vec<CommandSpec> {
     vec![
         cmd!("layer.arrange.bringForward", "Bring Forward", ["Layer", "Arrange"], Some("Cmd+]"), r##"{"layer":id?}"##, has_layer, |s, p| arrange(s, p, 1)),
@@ -167,6 +172,7 @@ fn order_and_clipping() -> Vec<CommandSpec> {
     ]
 }
 
+/// Layer mask commands.
 fn masks() -> Vec<CommandSpec> {
     vec![
         cmd!(
@@ -212,6 +218,7 @@ fn masks() -> Vec<CommandSpec> {
     ]
 }
 
+/// Merge Down, Merge Group and Flatten Image.
 fn merging() -> Vec<CommandSpec> {
     vec![
         cmd!("layer.mergeDown", "Merge Down", ["Layer"], None, r##"{"layer":id?}"##, has_layer, |s, p| {
@@ -257,6 +264,7 @@ fn merging() -> Vec<CommandSpec> {
     ]
 }
 
+/// Solid color and gradient fill layers.
 fn fill_layers() -> Vec<CommandSpec> {
     vec![
         cmd!(
@@ -315,6 +323,7 @@ fn fill_layers() -> Vec<CommandSpec> {
     ]
 }
 
+/// Editing an adjustment layer's properties.
 fn adjustments() -> Vec<CommandSpec> {
     vec![cmd!(
         "layer.setAdjustment",
@@ -349,6 +358,7 @@ fn adjustments() -> Vec<CommandSpec> {
     )]
 }
 
+/// Moving layers in the stack and on the canvas.
 fn placement() -> Vec<CommandSpec> {
     vec![
         cmd!(
@@ -372,6 +382,7 @@ fn placement() -> Vec<CommandSpec> {
     ]
 }
 
+/// Applies layer.setProps to its target layers as one history step.
 fn set_props(s: &mut Session, p: &Value) -> Result<Value> {
     let ids = prop_targets(s, p)?;
     if ids.len() > 1 && p.get("name").is_some() {
@@ -402,9 +413,9 @@ fn set_props(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(Value::Null)
 }
 
+/// Several layers at once (the Layers panel with several selected, as in Photoshop),
+/// else the given or active one.
 fn prop_targets(s: &Session, p: &Value) -> Result<Vec<LayerId>> {
-    // Several layers at once (the Layers panel with several selected, as in Photoshop),
-    // else the given or active one.
     match p.get("layers") {
         None | Some(Value::Null) => Ok(vec![layer_param(s, p)?]),
         Some(Value::Array(a)) if !a.is_empty() && a.len() <= 10_000 => {
@@ -425,8 +436,8 @@ fn prop_targets(s: &Session, p: &Value) -> Result<Vec<LayerId>> {
     }
 }
 
-// Opacity and Fill are fractions here, while the Layer Style commands take
-// percentages: a value outside 0..1 is refused, never clamped to 100 % (#5242).
+/// Opacity and Fill are fractions here, while the Layer Style commands take
+/// percentages: a value outside 0..1 is refused, never clamped to 100 % (#5242).
 fn unit_prop(p: &Value, key: &str) -> Result<Option<f32>> {
     let Some(v) = p.get(key) else { return Ok(None) };
     match v.as_f64() {
@@ -435,8 +446,8 @@ fn unit_prop(p: &Value, key: &str) -> Result<Option<f32>> {
     }
 }
 
+/// Photoshop's History names for a single kind of change; a mix is "Layer Properties".
 fn props_label(p: &Value) -> &'static str {
-    // Photoshop's History names for a single kind of change; a mix is "Layer Properties".
     let changed: Vec<&str> =
         p.as_object().map(|o| o.keys().map(String::as_str).filter(|k| !matches!(*k, "layer" | "layers" | "coalesce")).collect()).unwrap_or_default();
     match changed.as_slice() {
@@ -449,6 +460,7 @@ fn props_label(p: &Value) -> &'static str {
     }
 }
 
+/// Sets the requested name, visibility, opacity, fill and blend mode on one layer.
 fn apply_props(l: &mut Layer, p: &Value, opacity: Option<f32>, fill: Option<f32>) -> Result<()> {
     if let Some(v) = p.get("name").and_then(Value::as_str) {
         l.name = v.to_string();
@@ -468,6 +480,7 @@ fn apply_props(l: &mut Layer, p: &Value, opacity: Option<f32>, fill: Option<f32>
     apply_clip_and_locks(l, p)
 }
 
+/// Sets the requested clipping, channel and lock flags on one layer.
 fn apply_clip_and_locks(l: &mut Layer, p: &Value) -> Result<()> {
     if let Some(v) = p.get("clipped").and_then(Value::as_bool) {
         l.clipped = v;
@@ -485,6 +498,7 @@ fn apply_clip_and_locks(l: &mut Layer, p: &Value) -> Result<()> {
     Ok(())
 }
 
+/// Parses a blend mode for the layer, refusing Pass Through on anything but a group.
 fn blend_prop(l: &Layer, v: &str) -> Result<BlendMode> {
     let b = blend_from_str(v).ok_or_else(|| bad("layer.setProps", format!("unknown blend mode `{v}`")))?;
     // Pass Through is a group's mode only, as in Photoshop.
@@ -494,6 +508,7 @@ fn blend_prop(l: &Layer, v: &str) -> Result<BlendMode> {
     Ok(b)
 }
 
+/// Sets each named lock, refusing an unknown name.
 fn set_locks(l: &mut Layer, m: &Map<String, Value>) -> Result<()> {
     for (k, v) in m {
         let v = v.as_bool().unwrap_or(false);

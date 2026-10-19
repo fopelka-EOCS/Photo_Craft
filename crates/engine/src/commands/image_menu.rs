@@ -1,5 +1,6 @@
 use super::*;
 
+/// Image menu commands: canvas rotations and flips, and Desaturate.
 pub(super) fn specs() -> Vec<CommandSpec> {
     vec![
         cmd!("image.imageRotation.flipCanvasHorizontal", "Flip Canvas Horizontal", ["Image", "Image Rotation"], None, "{}", has_doc, |s, _| {

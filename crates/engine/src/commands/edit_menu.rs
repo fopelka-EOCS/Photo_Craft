@@ -1,5 +1,6 @@
 use super::*;
 
+/// Edit menu commands: Undo, Redo, Fill and Clear.
 pub(super) fn specs() -> Vec<CommandSpec> {
     vec![
         cmd!("edit.undo", "Undo", ["Edit"], Some("Cmd+Z"), "{}", can_undo, |s, _| Ok(json!(s.undo()))),

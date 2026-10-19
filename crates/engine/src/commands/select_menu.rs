@@ -1,5 +1,6 @@
 use super::*;
 
+/// Select menu commands: All, Deselect, Inverse and rectangular selections.
 pub(super) fn specs() -> Vec<CommandSpec> {
     vec![
         cmd!("select.all", "All", ["Select"], Some("Cmd+A"), "{}", has_doc, |s, _| {

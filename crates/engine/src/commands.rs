@@ -654,6 +654,7 @@ const SPECS: &[fn() -> Vec<CommandSpec>] = &[
     crate::actions_cmds::specs,
 ];
 
+/// Every registered command, in the order of SPECS.
 fn build() -> Vec<CommandSpec> {
     let specs = SPECS.iter().flat_map(|specs| specs());
     // The dispatch guard's unit test needs a command that panics on purpose (REL-3).

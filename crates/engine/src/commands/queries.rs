@@ -1,5 +1,6 @@
 use super::*;
 
+/// Commands that report session and document state or switch documents.
 pub(super) fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec {

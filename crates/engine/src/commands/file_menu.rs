@@ -1,5 +1,6 @@
 use super::*;
 
+/// File menu commands: New and Close.
 pub(super) fn specs() -> Vec<CommandSpec> {
     vec![
         cmd!(
