@@ -3934,6 +3934,7 @@ cameraData	Lens	Lens
 	There are too many sets: delete one first.	Çok fazla küme var: önce birini silin.
 	set name	küme adı
 	{set} (modified)	{set} (değiştirildi)
+	Show file name in title	Başlıkta dosya adını göster
 	Accept and Go to Conflict	Kabul Et ve Çakışmaya Git
 	Changes undone.	Değişiklikler geri alındı.
 	Choose a new shortcut for this command, or leave it without one.	Bu komut için yeni bir kısayol seçin veya kısayolsuz bırakın.
@@ -3966,3 +3967,6 @@ cameraData	Lens	Lens
 	Limits each open document's pixels plus History. Oldest undo states are discarded when the limit is exceeded.	Her açık belgenin piksellerini ve Geçmişini sınırlar. Sınır aşılınca en eski geri alma durumları atılır.
 	Applies immediately when saved. Memory is not reserved in advance.	Kaydedilince hemen uygulanır. Bellek önceden ayrılmaz.
 	With GPU Memory set to Automatic, this also limits the GPU layer budget. That budget is capped at one quarter of installed RAM and, when known, three eighths of the graphics card's memory, with a 512 MB minimum. Raising this limit beyond those caps does not increase the GPU budget.	GPU Belleği Otomatikken GPU katman bütçesini de sınırlar. Tavan, RAM’in dörtte biri ve biliniyorsa kart belleğinin sekizde üçü, en az 512 MB. Sınırı yükseltmek GPU bütçesini artırmaz.
+	Use	Kullan
+	In Front	Önde
+	Behind	Arkada

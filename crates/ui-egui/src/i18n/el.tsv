@@ -3904,6 +3904,7 @@ curves	Smooth	Εξομάλυνση
 	There are too many sets: delete one first.	Υπάρχουν πάρα πολλά σύνολα: διαγράψτε πρώτα ένα.
 	set name	όνομα συνόλου
 	{set} (modified)	{set} (τροποποιημένο)
+	Show file name in title	Εμφάνιση ονόματος αρχείου στον τίτλο
 	Accept and Go to Conflict	Αποδοχή και μετάβαση στη σύγκρουση
 	Changes undone.	Οι αλλαγές αναιρέθηκαν.
 	Choose a new shortcut for this command, or leave it without one.	Επιλέξτε νέα συντόμευση για αυτήν την εντολή ή αφήστε την χωρίς.
@@ -3936,3 +3937,6 @@ curves	Smooth	Εξομάλυνση
 	Limits each open document's pixels plus History. Oldest undo states are discarded when the limit is exceeded.	Περιορίζει τα pixel συν το Ιστορικό κάθε ανοιχτού εγγράφου. Οι παλαιότερες καταστάσεις αναίρεσης απορρίπτονται όταν ξεπεραστεί το όριο.
 	Applies immediately when saved. Memory is not reserved in advance.	Ισχύει αμέσως με την αποθήκευση. Η μνήμη δεν δεσμεύεται εκ των προτέρων.
 	With GPU Memory set to Automatic, this also limits the GPU layer budget. That budget is capped at one quarter of installed RAM and, when known, three eighths of the graphics card's memory, with a 512 MB minimum. Raising this limit beyond those caps does not increase the GPU budget.	Με Μνήμη GPU σε Αυτόματο, περιορίζει και τον προϋπολογισμό GPU. Ανώτατο όριο το 1/4 της RAM και, αν είναι γνωστό, τα 3/8 της μνήμης κάρτας, ελάχιστο 512 MB. Μεγαλύτερο όριο δεν αυξάνει τον προϋπολογισμό GPU.
+	Use	Χρήση
+	In Front	Μπροστά
+	Behind	Πίσω

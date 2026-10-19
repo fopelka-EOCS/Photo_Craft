@@ -3690,6 +3690,7 @@ curves	Smooth	Làm mượt
 	There are too many sets: delete one first.	Có quá nhiều bộ: hãy xóa một bộ trước.
 	set name	tên bộ
 	{set} (modified)	{set} (đã sửa đổi)
+	Show file name in title	Hiển thị tên tệp trong tiêu đề
 	Accept and Go to Conflict	Chấp nhận và đến xung đột
 	Changes undone.	Đã hoàn tác thay đổi.
 	Choose a new shortcut for this command, or leave it without one.	Chọn phím tắt mới cho lệnh này, hoặc để lệnh không có phím tắt.
@@ -3723,3 +3724,6 @@ curves	Smooth	Làm mượt
 	Limits each open document's pixels plus History. Oldest undo states are discarded when the limit is exceeded.	Giới hạn pixel cộng Lịch sử của mỗi tài liệu đang mở. Các trạng thái hoàn tác cũ nhất bị bỏ khi vượt giới hạn.
 	Applies immediately when saved. Memory is not reserved in advance.	Áp dụng ngay khi lưu. Bộ nhớ không được dành trước.
 	With GPU Memory set to Automatic, this also limits the GPU layer budget. That budget is capped at one quarter of installed RAM and, when known, three eighths of the graphics card's memory, with a 512 MB minimum. Raising this limit beyond those caps does not increase the GPU budget.	Khi Bộ nhớ GPU là Tự động, cũng giới hạn ngân sách GPU. Trần là 1/4 RAM và, nếu biết, 3/8 bộ nhớ card, tối thiểu 512 MB. Tăng giới hạn không làm tăng ngân sách GPU.
+	Use	Dùng
+	In Front	Phía trước
+	Behind	Phía sau

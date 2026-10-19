@@ -3208,6 +3208,7 @@ curves	Smooth	Glätten
 	There are too many sets: delete one first.	Zu viele Sätze: Löschen Sie zuerst einen.
 	set name	Name des Satzes
 	{set} (modified)	{set} (geändert)
+	Show file name in title	Dateiname im Titel anzeigen
 	Accept and Go to Conflict	Übernehmen und zum Konflikt
 	Changes undone.	Änderungen rückgängig gemacht.
 	Choose a new shortcut for this command, or leave it without one.	Wählen Sie einen neuen Kurzbefehl für diesen Befehl oder lassen Sie ihn ohne.
@@ -3236,3 +3237,7 @@ curves	Smooth	Glätten
 	Limits each open document's pixels plus History. Oldest undo states are discarded when the limit is exceeded.	Begrenzt Pixel plus Verlauf jedes offenen Dokuments. Die ältesten Widerrufsschritte werden verworfen, wenn das Limit überschritten wird.
 	Applies immediately when saved. Memory is not reserved in advance.	Gilt sofort nach dem Speichern. Speicher wird nicht im Voraus reserviert.
 	With GPU Memory set to Automatic, this also limits the GPU layer budget. That budget is capped at one quarter of installed RAM and, when known, three eighths of the graphics card's memory, with a 512 MB minimum. Raising this limit beyond those caps does not increase the GPU budget.	Bei GPU-Speicher = Automatisch begrenzt dies auch das GPU-Ebenenbudget. Das Budget ist auf ein Viertel des RAM und, wenn bekannt, drei Achtel des Grafikspeichers begrenzt, mindestens 512 MB. Ein höheres Limit erhöht das GPU-Budget nicht.
+	Use	Verwenden
+	In Front	Davor
+	Behind	Dahinter
+	Blend	Mischen

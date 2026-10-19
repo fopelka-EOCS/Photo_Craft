@@ -4277,6 +4277,7 @@ shape	Appearance	Izgled
 	There are too many sets: delete one first.	Previše skupova: prvo obrišite jedan.
 	set name	ime skupa
 	{set} (modified)	{set} (izmenjen)
+	Show file name in title	Prikaži naziv datoteke u naslovu
 	Accept and Go to Conflict	Prihvati i idi na sukob
 	Changes undone.	Izmene su poništene.
 	Choose a new shortcut for this command, or leave it without one.	Izaberite novu prečicu za ovu komandu ili je ostavite bez prečice.
@@ -4309,3 +4310,6 @@ shape	Appearance	Izgled
 	Limits each open document's pixels plus History. Oldest undo states are discarded when the limit is exceeded.	Ograničava piksele plus Istoriju svakog otvorenog dokumenta. Najstarija stanja opoziva se odbacuju kad se prekorači limit.
 	Applies immediately when saved. Memory is not reserved in advance.	Važi odmah po čuvanju. Memorija se unapred ne rezerviše.
 	With GPU Memory set to Automatic, this also limits the GPU layer budget. That budget is capped at one quarter of installed RAM and, when known, three eighths of the graphics card's memory, with a 512 MB minimum. Raising this limit beyond those caps does not increase the GPU budget.	Kad je GPU memorija Automatski, ograničava i GPU budžet. Plafon je četvrtina RAM-a i, ako je poznato, tri osmine memorije kartice, najmanje 512 MB. Veći limit ne povećava GPU budžet.
+	Use	Koristi
+	In Front	Ispred
+	Behind	Iza

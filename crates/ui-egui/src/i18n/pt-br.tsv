@@ -3994,6 +3994,7 @@ layerLabel	No Color	Sem cor
 	There are too many sets: delete one first.	Há conjuntos demais: exclua um primeiro.
 	set name	nome do conjunto
 	{set} (modified)	{set} (modificado)
+	Show file name in title	Exibir nome do arquivo no título
 	Accept and Go to Conflict	Aceitar e ir para o conflito
 	Changes undone.	Alterações desfeitas.
 	Choose a new shortcut for this command, or leave it without one.	Escolha um novo atalho para este comando ou deixe-o sem atalho.
@@ -4026,3 +4027,6 @@ layerLabel	No Color	Sem cor
 	Limits each open document's pixels plus History. Oldest undo states are discarded when the limit is exceeded.	Limita os pixels mais o Histórico de cada documento aberto. Os estados de desfazer mais antigos são descartados ao exceder o limite.
 	Applies immediately when saved. Memory is not reserved in advance.	Aplica-se ao salvar. A memória não é reservada antecipadamente.
 	With GPU Memory set to Automatic, this also limits the GPU layer budget. That budget is capped at one quarter of installed RAM and, when known, three eighths of the graphics card's memory, with a 512 MB minimum. Raising this limit beyond those caps does not increase the GPU budget.	Com Memória GPU Automática, também limita o orçamento GPU. O teto é um quarto da RAM e, se conhecido, três oitavos da memória da placa, mínimo 512 MB. Aumentar o limite não aumenta o orçamento GPU.
+	Use	Usar
+	In Front	Na frente
+	Behind	Atrás

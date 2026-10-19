@@ -3176,6 +3176,7 @@ curves	Smooth	Сгладить
 	set name	имя набора
 	{set} (modified)	{set} (изменён)
 	Random	Случайно
+	Show file name in title	Показывать имя файла в заголовке
 	Accept and Go to Conflict	Принять и перейти к конфликту
 	Changes undone.	Изменения отменены.
 	Choose a new shortcut for this command, or leave it without one.	Выберите новую комбинацию для этой команды или оставьте её без комбинации.
@@ -3209,3 +3210,7 @@ curves	Smooth	Сгладить
 	Limits each open document's pixels plus History. Oldest undo states are discarded when the limit is exceeded.	Ограничивает пиксели и историю каждого открытого документа. Старые состояния отмены удаляются при превышении лимита.
 	Applies immediately when saved. Memory is not reserved in advance.	Применяется сразу после сохранения. Память заранее не резервируется.
 	With GPU Memory set to Automatic, this also limits the GPU layer budget. That budget is capped at one quarter of installed RAM and, when known, three eighths of the graphics card's memory, with a 512 MB minimum. Raising this limit beyond those caps does not increase the GPU budget.	При GPU-памяти «Авто» это также ограничивает бюджет GPU. Потолок — четверть ОЗУ и, если известно, три восьмых памяти карты, минимум 512 МБ. Больший лимит GPU-бюджет не увеличивает.
+	Command	Command
+	Use	Использовать
+	In Front	Спереди
+	Behind	Сзади
