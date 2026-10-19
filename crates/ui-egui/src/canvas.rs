@@ -6092,15 +6092,40 @@ pub fn extra_windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
     // A real OS window has its own focus and keyboard input. Embedded in the main window (the
     // web build, tests) it shares the main window's, whose shortcuts already ran.
     let own_window = !ctx.embed_viewports();
+    // The documents as the windows' indices know them. Answering the unsaved-changes prompt in
+    // one window can close a document, which shifts every index after it.
+    let docs_at_start: Vec<photocraft_doc::DocId> = app.session.documents().iter().map(|d| d.doc.id).collect();
     for (key, idx) in bar::groups(&wins) {
         let members: Vec<crate::state::DocWindow> = idx.iter().filter_map(|&i| wins.get(i).cloned()).collect();
         let Some(first) = members.first() else { continue };
         let floating = first.floating;
+        let title_id = egui::Id::new(("docwin-title", key));
+        if !app.session.documents().iter().map(|d| d.doc.id).eq(docs_at_start.iter().copied()) {
+            // A document closed above: this frame's indices are out of date. Keep the window
+            // anyway (a window not shown in a frame is closed, and would come back at its
+            // default size and place) and draw its document again next frame.
+            let anchor = members.iter().find(|m| m.id == key).unwrap_or(first);
+            let mut builder = egui::ViewportBuilder::default()
+                .with_title(ctx.data(|d| d.get_temp::<String>(title_id)).unwrap_or_default())
+                .with_inner_size([800.0, 600.0])
+                .with_window_level(level)
+                .with_decorations(!(floating && own_window));
+            if let Some([x, y]) = anchor.position {
+                builder = builder.with_position([x, y]);
+            }
+            ctx.show_viewport_immediate(bar::viewport(key), builder, |ui, _class| {
+                let fill = crate::theme::Tokens::get(ui.ctx()).canvas;
+                egui::CentralPanel::default().frame(egui::Frame::NONE.fill(fill)).show(ui, |_| {});
+            });
+            ctx.request_repaint();
+            continue;
+        }
         let front = bar::shown(&members, app.session.active_index(), asked.filter(|_| prompt_in == Some(key)), bar::picked(ctx, key));
         let Some(w) = members.get(front).cloned() else { continue };
         let Some(st) = app.session.documents().get(w.document) else { continue };
         let doc_id = st.doc.id;
         let title = if floating { pro_tab_title(app, w.document) } else { format!("{} — window {}", st.doc.name, w.id) };
+        ctx.data_mut(|d| d.insert_temp(title_id, title.clone()));
         // The window opens where its first document's window was.
         let anchor = members.iter().find(|m| m.id == key).unwrap_or(first);
         let mut builder = egui::ViewportBuilder::default()
@@ -6166,7 +6191,9 @@ pub fn extra_windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 // No system frame: the window's edges resize it.
                 crate::titlebar::resize_zones(ui);
             }
-            if dialogs_apart {
+            // A dialog in its own window, or the unsaved-changes prompt in another window:
+            // nothing in this one runs meanwhile (the prompt's own window is behind its modal).
+            if dialogs_apart || (app.discard.is_some() && prompt_in != Some(key)) {
                 block_main_window(&wctx);
             }
             if prompt_in == Some(key) {
@@ -6179,12 +6206,12 @@ pub fn extra_windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
             }
         });
         // Answering the prompt can close the document, shifting the indices the other windows
-        // hold: leave them to the next frame.
+        // hold: the windows after this one keep their viewports but draw next frame (above), and
+        // this frame's tab actions, which name documents by those indices, are dropped.
         if app.session.documents().get(w.document).map(|d| d.doc.id) != Some(doc_id) {
-            app.ui.windows.retain(|x| x.id != w.id);
             ctx.request_repaint();
             actions.clear();
-            break;
+            continue;
         }
         if floating && let Some(slot) = app.ui.views.get_mut(w.document) {
             *slot = view.clone();
@@ -7502,6 +7529,55 @@ mod tests {
         assert_eq!(frame(&wins, false), Some(egui::WindowLevel::Normal), "it closes: back to normal");
         wins.clear();
         assert_eq!(frame(&wins, true), None, "no document windows: the main window is left alone");
+    }
+
+    /// While the unsaved-changes prompt is up, the document windows take no tool input: a brush
+    /// stroke in a floating window paints nothing behind the question.
+    #[test]
+    fn the_unsaved_changes_prompt_blocks_the_document_windows() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        for name in ["a", "b"] {
+            app.run("file.new", json!({"width": 300, "height": 200, "name": name})).unwrap();
+            app.run("layer.new.layer", json!({})).unwrap();
+        }
+        app.run("tools.setBrush", json!({"brush": {"size": 20, "hardness": 1.0}})).unwrap();
+        app.ui.tool = crate::state::Tool::Brush;
+        app.sync_views();
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1400.0, 900.0)).with_step_dt(1.0 / 60.0).build_ui_state(
+            |ui, app: &mut PhotocraftApp| {
+                let ctx = ui.ctx().clone();
+                if !ctx.fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                    return;
+                }
+                egui::CentralPanel::default().show(ui, |ui| document_area(app, ui));
+                extra_windows(app, &ctx);
+            },
+            app,
+        );
+        PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ALL[0]);
+        h.run_steps(4);
+        let ctx = h.ctx.clone();
+        crate::menus::invoke(h.state_mut(), &ctx, "window.arrange.floatInWindow", json!({"document": 1})).unwrap();
+        h.run_steps(6);
+        let window = h.state().last_canvas_rect;
+        // Closing the main window's document (it has a new layer: unsaved) asks first.
+        crate::menus::invoke(h.state_mut(), &ctx, "file.close", json!({"document": 0})).unwrap();
+        assert!(h.state().discard.is_some(), "the prompt is up");
+        h.state_mut().session.set_active(1);
+        h.run_steps(3);
+        let before = h.state().session.documents()[1].history.past_len();
+        let (a, b) = (window.center() - egui::vec2(60.0, 0.0), window.center() + egui::vec2(60.0, 0.0));
+        h.event(egui::Event::PointerMoved(a));
+        h.run_steps(1);
+        h.event(egui::Event::PointerButton { pos: a, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+        h.run_steps(1);
+        for i in 1..=8 {
+            h.event(egui::Event::PointerMoved(a + (b - a) * (i as f32 / 8.0)));
+            h.run_steps(1);
+        }
+        h.event(egui::Event::PointerButton { pos: b, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+        h.run_steps(4);
+        assert_eq!(h.state().session.documents()[1].history.past_len(), before, "nothing was painted behind the prompt");
     }
 
     /// A floating document is worked on in its own window, not just shown there: a brush stroke

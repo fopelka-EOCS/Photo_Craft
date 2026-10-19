@@ -10,6 +10,32 @@
 
 use crate::PhotocraftApp;
 
+/// The dialog window's viewport.
+fn viewport() -> egui::ViewportId {
+    egui::ViewportId::from_hash_of("pc-dialog-window")
+}
+
+/// How long PhotoCraft counts as focused after its last focused frame (focus moving between its
+/// windows takes a frame or two).
+const FOCUS_GRACE_S: f64 = 0.3;
+
+/// Whether the dialog window stays on top: while PhotoCraft (any of its windows) has the focus,
+/// as the document windows do, and not over other applications. `focused`: one of them has it
+/// this frame.
+fn on_top(ctx: &egui::Context, focused: bool) -> bool {
+    let id = egui::Id::new("pc-dialog-window-focused-at");
+    let now = ctx.input(|i| i.time);
+    if focused {
+        ctx.data_mut(|d| d.insert_temp(id, now));
+    }
+    let since = now - ctx.data(|d| d.get_temp::<f64>(id)).unwrap_or(f64::NEG_INFINITY);
+    if !focused && since < FOCUS_GRACE_S {
+        // Settle the level once the grace runs out, even if nothing else repaints.
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(FOCUS_GRACE_S));
+    }
+    since < FOCUS_GRACE_S
+}
+
 /// The dialogs' size before they were laid out once.
 const FIRST_SIZE: egui::Vec2 = egui::vec2(480.0, 360.0);
 
@@ -57,6 +83,11 @@ pub(crate) fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             p
         }
     };
+    // PhotoCraft has the focus in its main window or a document window: the dialog takes it, as
+    // a modal dialog does (never from another application).
+    let app_focused = ctx.input(|i| i.focused)
+        || app.ui.windows.iter().any(|w| ctx.data(|d| d.get_temp::<bool>(egui::Id::new(("docwin-focused", w.key())))).unwrap_or(false));
+    let level = if on_top(ctx, app_focused || ctx.input_for(viewport(), |i| i.focused)) { egui::WindowLevel::AlwaysOnTop } else { egui::WindowLevel::Normal };
     let builder = egui::ViewportBuilder::default()
         .with_title(title)
         .with_decorations(false)
@@ -64,13 +95,9 @@ pub(crate) fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         .with_taskbar(false)
         .with_inner_size(size)
         .with_position(pos)
-        .with_window_level(egui::WindowLevel::AlwaysOnTop);
-    // PhotoCraft has the focus in its main window or a document window: the dialog takes it, as
-    // a modal dialog does (never from another application).
-    let app_focused = ctx.input(|i| i.focused)
-        || app.ui.windows.iter().any(|w| ctx.data(|d| d.get_temp::<bool>(egui::Id::new(("docwin-focused", w.key())))).unwrap_or(false));
+        .with_window_level(level);
     let mut close = false;
-    ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("pc-dialog-window"), builder, |ui, _class| {
+    ctx.show_viewport_immediate(viewport(), builder, |ui, _class| {
         let vctx = ui.ctx().clone();
         if vctx.input(|i| i.viewport().close_requested()) {
             // Alt+F4 on the dialog's window is its Cancel.
@@ -116,6 +143,24 @@ mod tests {
         ctx.set_embed_viewports(false);
         app.ui.dialogs.clear();
         assert!(!hosts(&app, &ctx), "no dialog, no window");
+    }
+
+    /// The dialog window is on top only while PhotoCraft has the focus (with a short grace for
+    /// focus moving between its windows), never over another application.
+    #[test]
+    fn the_dialog_window_stays_on_top_only_while_photocraft_is_focused() {
+        let ctx = egui::Context::default();
+        let at = |t: f64, focused: bool| {
+            let mut on = false;
+            let mut out = ctx.run_ui(egui::RawInput { time: Some(t), ..Default::default() }, |ui| on = on_top(ui.ctx(), focused));
+            out.textures_delta.clear();
+            on
+        };
+        assert!(!at(0.0, false), "never focused");
+        assert!(at(1.0, true), "focused");
+        assert!(at(1.1, false), "focus moving between its windows");
+        assert!(!at(2.0, false), "another application has the focus");
+        assert!(at(3.0, true), "back");
     }
 
     #[test]
