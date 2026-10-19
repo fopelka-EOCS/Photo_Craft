@@ -576,10 +576,12 @@ pub fn control(app: &mut PhotocraftApp, ui: &Value) -> Result<Value, String> {
     let missing = |id: u64| app.session.active().is_none_or(|st| st.doc.layer(LayerId(id)).is_none());
     let unknown_use = ui.get("backdropUse").and_then(Value::as_u64).is_some_and(missing);
     let d = app.distort.liquify.as_mut().ok_or(tl!("Liquify is not open"))?;
-    d.opts.apply(ui)?;
+    // `apply` takes every setting it can before a bad one fails it, so normalize first.
+    let applied = d.opts.apply(ui);
     if unknown_use {
         d.opts.backdrop_layer = None;
     }
+    applied?;
     let num = |k: &str| ui.get(k).and_then(Value::as_f64).map(|v| v as f32);
     let flag = |k: &str| ui.get(k).and_then(Value::as_bool);
     if flag("undo") == Some(true) {
@@ -1269,6 +1271,9 @@ mod tests {
         assert_eq!(app.distort.liquify.as_ref().unwrap().opts.backdrop_layer, Some(layer));
         control(&mut app, &json!({"backdropUse": 4242})).unwrap();
         assert_eq!(app.distort.liquify.as_ref().unwrap().opts.backdrop_layer, None, "no such layer: All Layers");
+        control(&mut app, &json!({"backdropUse": layer})).unwrap();
+        assert!(control(&mut app, &json!({"backdropUse": 4242, "tool": "nope"})).is_err());
+        assert_eq!(app.distort.liquify.as_ref().unwrap().opts.backdrop_layer, None, "also when another setting fails");
     }
 
     /// #418: the brush settings survive Cancel, OK and Esc, and come back the next time Liquify
