@@ -20,7 +20,7 @@ const TOOL_SECTIONS: &[&[&[Tool]]] = &[
     &[
         &[Tool::RectMarquee, Tool::EllipseMarquee, Tool::SingleRowMarquee, Tool::SingleColumnMarquee],
         &[Tool::Lasso, Tool::PolygonLasso, Tool::MagneticLasso],
-        &[Tool::ObjectSelection, Tool::AiObjectSelection, Tool::QuickSelection, Tool::MagicWand],
+        &[Tool::ObjectSelection, Tool::AiObjectSelection, Tool::ObjectSelectionBrush, Tool::QuickSelection, Tool::MagicWand],
         &[Tool::Crop, Tool::PerspectiveCrop, Tool::Slice, Tool::SliceSelect],
         &[Tool::Frame],
         &[Tool::Eyedropper, Tool::ColorSampler, Tool::Ruler, Tool::Note, Tool::Count],
@@ -47,7 +47,7 @@ const TOOL_SECTIONS: &[&[&[Tool]]] = &[
 ];
 
 /// The Generative Brush button's brushes.
-pub(crate) const GENERATIVE_BRUSHES: &[Tool] = &[Tool::GenerativeInfill, Tool::GenerativeRemoval, Tool::ReflectionRemoval];
+pub(crate) const GENERATIVE_BRUSHES: &[Tool] = &[Tool::GenerativeInfill, Tool::GenerativeRemoval, Tool::ReflectionRemoval, Tool::GenerativeEnhance];
 
 /// The Generative Brush slot: its button always shows the Generative Brush and a click opens its
 /// box of brushes, centred on the button, instead of picking a tool.

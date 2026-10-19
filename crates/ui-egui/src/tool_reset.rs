@@ -109,6 +109,7 @@ fn is_selection_tool(tool: Tool) -> bool {
             | Tool::QuickSelection
             | Tool::ObjectSelection
             | Tool::AiObjectSelection
+            | Tool::ObjectSelectionBrush
     )
 }
 
@@ -151,7 +152,8 @@ pub fn option_keys(tool: Tool) -> &'static [&'static str] {
         Tool::MagicWand => reset!(tolerance, anti_alias, contiguous, sample_all_layers),
         Tool::QuickSelection => reset!(sample_all_layers, enhance_edge),
         Tool::ObjectSelection => reset!(sample_all_layers, enhance_edge, object_finder),
-        Tool::AiObjectSelection => reset!(sample_all_layers, ai_select_model),
+        Tool::AiObjectSelection | Tool::ObjectSelectionBrush => reset!(sample_all_layers, ai_select_model),
+        Tool::GenerativeEnhance => reset!(sample_all_layers, enhance_model, enhance_detail, enhance_seed, gen_new_layer),
         Tool::GenerativeInfill => reset!(sample_all_layers, infill_model, infill_prompt, infill_negative, infill_seed, gen_new_layer),
         Tool::GenerativeRemoval => reset!(sample_all_layers, gen_removal_model, gen_new_layer),
         Tool::ReflectionRemoval => reset!(sample_all_layers, reflection_model, gen_new_layer),

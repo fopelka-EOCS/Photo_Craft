@@ -118,11 +118,15 @@ pub enum Tool {
     ObjectSelection,
     /// Object Selection with a local AI model (Edit › Preferences › AI Models).
     AiObjectSelection,
+    /// Paint over an object and the AI selection model selects it.
+    ObjectSelectionBrush,
     /// The Generative Brushes (one toolbar button, a box of brushes beside it): a local AI
     /// model fills what the stroke covers when it ends. Infill fills it from a prompt.
     GenerativeInfill,
     GenerativeRemoval,
     ReflectionRemoval,
+    /// Paints sharpness and detail back into an area (an Enhance model).
+    GenerativeEnhance,
     Pen,
     FreeformPen,
     CurvaturePen,
@@ -145,7 +149,7 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Tool; 71] = [
+    pub const ALL: [Tool; 73] = [
         Tool::Move,
         Tool::Artboard,
         Tool::RectMarquee,
@@ -197,9 +201,11 @@ impl Tool {
         Tool::QuickSelection,
         Tool::ObjectSelection,
         Tool::AiObjectSelection,
+        Tool::ObjectSelectionBrush,
         Tool::GenerativeInfill,
         Tool::GenerativeRemoval,
         Tool::ReflectionRemoval,
+        Tool::GenerativeEnhance,
         Tool::Pen,
         Tool::FreeformPen,
         Tool::CurvaturePen,
@@ -275,6 +281,8 @@ impl Tool {
             Tool::QuickSelection => "Quick Selection Tool",
             Tool::ObjectSelection => "Object Selection Tool",
             Tool::AiObjectSelection => "AI Object Selection Tool",
+            Tool::ObjectSelectionBrush => "Object Selection Brush Tool",
+            Tool::GenerativeEnhance => "Generative Enhance Brush Tool",
             Tool::GenerativeInfill => "Infill Brush Tool",
             Tool::GenerativeRemoval => "Generative Removal Brush Tool",
             Tool::ReflectionRemoval => "Reflection Removal Brush Tool",
@@ -320,6 +328,8 @@ impl Tool {
                 | Tool::GenerativeInfill
                 | Tool::GenerativeRemoval
                 | Tool::ReflectionRemoval
+                | Tool::GenerativeEnhance
+                | Tool::ObjectSelectionBrush
                 | Tool::SpotHealing
                 | Tool::Healing
                 | Tool::CloneStamp
@@ -357,9 +367,9 @@ impl Tool {
             // In the Marquee flyout, but M cycles only the Rectangular and Elliptical Marquee.
             Tool::SingleRowMarquee | Tool::SingleColumnMarquee => '\0',
             Tool::Dodge | Tool::Burn | Tool::Sponge => 'O',
-            Tool::QuickSelection | Tool::ObjectSelection | Tool::AiObjectSelection => 'W',
+            Tool::QuickSelection | Tool::ObjectSelection | Tool::AiObjectSelection | Tool::ObjectSelectionBrush => 'W',
             // Chosen from the Generative Brush box.
-            Tool::GenerativeInfill | Tool::GenerativeRemoval | Tool::ReflectionRemoval => '\0',
+            Tool::GenerativeInfill | Tool::GenerativeRemoval | Tool::ReflectionRemoval | Tool::GenerativeEnhance => '\0',
             Tool::Pen | Tool::FreeformPen | Tool::CurvaturePen | Tool::AddAnchorPoint | Tool::DeleteAnchorPoint | Tool::ConvertPoint => 'P',
             Tool::PathSelection | Tool::DirectSelection => 'A',
             Tool::Rectangle | Tool::EllipseShape | Tool::Triangle | Tool::Polygon | Tool::Line | Tool::CustomShape => 'U',
@@ -557,6 +567,10 @@ pub struct ToolOptions {
     pub infill_prompt: String,
     pub infill_negative: String,
     pub infill_seed: String,
+    /// Generative Enhance brush: its model, how strong (0–1) and seed (empty = new each time).
+    pub enhance_model: String,
+    pub enhance_detail: f32,
+    pub enhance_seed: String,
     pub feather: f32,
     /// linear | radial | angle | reflected | diamond
     pub gradient_style: String,
@@ -817,6 +831,9 @@ impl Default for ToolOptions {
             infill_prompt: String::new(),
             infill_negative: String::new(),
             infill_seed: String::new(),
+            enhance_model: String::new(),
+            enhance_detail: 0.5,
+            enhance_seed: String::new(),
             feather: 0.0,
             gradient_style: "linear".into(),
             gradient_reverse: false,
@@ -1506,7 +1523,9 @@ mod tests {
         assert!(!Tool::RedEye.is_brushlike());
         assert_eq!(Tool::from_name("patternStamp"), Some(Tool::PatternStamp));
         assert_eq!(Tool::from_name("Pattern Stamp Tool"), Some(Tool::PatternStamp));
-        assert_eq!(Tool::ALL.len(), 71);
+        assert_eq!(Tool::ALL.len(), 73);
+        assert_eq!(Tool::from_name("objectSelectionBrush"), Some(Tool::ObjectSelectionBrush));
+        assert_eq!(Tool::from_name("Generative Enhance Brush Tool"), Some(Tool::GenerativeEnhance));
         assert_eq!(Tool::from_name("AI Object Selection Tool"), Some(Tool::AiObjectSelection));
         assert_eq!(Tool::from_name("generativeRemoval"), Some(Tool::GenerativeRemoval));
         assert_eq!(Tool::from_name("generativeInfill"), Some(Tool::GenerativeInfill));

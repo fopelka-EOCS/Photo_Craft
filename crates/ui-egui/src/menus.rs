@@ -210,6 +210,7 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
         // Edit › Generative Fill… opens its dialog; with parameters it runs at once (actions,
         // agents).
         "edit.generativeFill" if params.as_object().is_none_or(|o| o.is_empty()) => crate::generative_fill_ui::open(app),
+        "edit.generativeSharpen" if params.as_object().is_none_or(|o| o.is_empty()) => crate::generative_fill_ui::open_sharpen(app),
         "file.new" if params.as_object().is_none_or(|o| o.is_empty()) => {
             let fields = app.new_document_fields();
             let d = app.ui.open_dialog(DialogKind::NewDocument, fields);

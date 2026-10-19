@@ -254,6 +254,7 @@ pub const SELECTION_MENU: &[Row] = &[
     Some(("Stroke…", "edit.stroke")),
     Some(("Content-Aware Fill…", "edit.contentAwareFill")),
     Some(("Generative Fill…", "edit.generativeFill")),
+    Some(("Generative Sharpen…", "edit.generativeSharpen")),
     None,
     Some(("Last Filter", "filter.lastFilter")),
     None,
@@ -317,6 +318,7 @@ pub fn applies(tool: Tool) -> bool {
             | Tool::MagicWand
             | Tool::ObjectSelection
             | Tool::AiObjectSelection
+            | Tool::ObjectSelectionBrush
     ) || path_menu(tool)
 }
 
@@ -1398,6 +1400,7 @@ mod tests {
                 Some("Stroke…"),
                 Some("Content-Aware Fill…"),
                 Some("Generative Fill…"),
+                Some("Generative Sharpen…"),
                 None,
                 Some("Last Filter"),
                 None,
