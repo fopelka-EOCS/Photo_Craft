@@ -32,6 +32,7 @@ fn cross_backend_documents() {
 #[test]
 #[ignore = "manual 24 MP release benchmark; compare default and native-zstd"]
 fn benchmark_backend() {
+    let backend = if cfg!(feature = "native-zstd") { "native" } else { "rust" };
     for pattern in ["ramp", "noise"] {
         let mut doc = Document::new("benchmark", Size::new(6000, 4000), ColorMode::Rgb, SampleType::U8);
         let mut seed = 0x9e3779b9u32;
@@ -57,10 +58,10 @@ fn benchmark_backend() {
         for trial in 0..6 {
             let start = Instant::now();
             let encoded = black_box(save_to_bytes(black_box(&doc), &opts).unwrap());
-            println!("native,{pattern}-save,{trial},{:.3},{}", start.elapsed().as_secs_f64() * 1000.0, encoded.len());
+            println!("{backend},{pattern}-save,{trial},{:.3},{}", start.elapsed().as_secs_f64() * 1000.0, encoded.len());
             let start = Instant::now();
             black_box(load_from_bytes(black_box(&bytes)).unwrap());
-            println!("native,{pattern}-load,{trial},{:.3},{}", start.elapsed().as_secs_f64() * 1000.0, bytes.len());
+            println!("{backend},{pattern}-load,{trial},{:.3},{}", start.elapsed().as_secs_f64() * 1000.0, bytes.len());
         }
     }
 }
