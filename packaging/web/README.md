@@ -250,16 +250,26 @@ in one of `formats` POSTs it to `server.url` in Photopea's body (a 2000-byte JSO
 `{"source","versions":[{"format","start","size"}]}` padded with spaces, then the file) instead of
 downloading it.
 
-The config is only read on a page opened with `?embed=<origin>`, unlike Photopea's: it decides
-where saves go, so a plain link must not set it. `server.url` has to be on that origin, and each
+The config is only read when the app is in a frame whose page is on the origin named by
+`?embed=<origin>`, unlike Photopea's: it decides where saves go, and a link anyone can send sets
+the hash and `?embed=` alike, so the app checks the framing page's origin as the browser reports
+it (`location.ancestorOrigins`, or in Firefox the origin of the frame's referrer). For Firefox the
+embedding page must let that referrer through: not `Referrer-Policy: no-referrer` or
+`same-origin` (header, `<meta name="referrer">` or the iframe's `referrerpolicy`), and not an
+`https` page framing an `http` copy of the app. `server.url` has to be on that origin, and each
 of `files` on it or on an origin listed in `?embed_files=` (comma-separated, for example
 `&embed_files=https%3A%2F%2Fcdn.example.com`). Otherwise the app ignores the config, says why in
-the browser console, and opens as usual.
+the browser console only, and opens as usual: the page gets no `"done"`.
 
-The parent window gets the same strings as from Photopea: `"done"` once the files
-are open, then for a save `"saving"` and the text of an `app.echoToOE("…")` in the server's JSON
+This stops a link from sending someone's work elsewhere, not a site from framing the app: a page
+that frames it can name itself in `?embed=`, list any origin in `?embed_files=`, and receive what
+the user saves inside it, as it could by hosting its own copy. `frame-ancestors` on the app's host
+(above) is what limits who may frame it.
+
+The parent window gets the same strings as from Photopea: `"done"` once it has gone through the
+files, then for a save `"saving"` and the text of an `app.echoToOE("…")` in the server's JSON
 `script` reply, else `"saved"` or `"error"`. PhotoCraft adds `"loading:<name>"` and
-`"open-error:<name>"`. They go only to the `?embed=` origin. A save to the server leaves the
+`"open-error:<name>"`, so `"done"` also follows files that couldn't be opened. They go only to the `?embed=` origin. A save to the server leaves the
 document unsaved in the app, as a download does, and if the upload fails the app says so.
 
 ## Renderer selection and fallback flags

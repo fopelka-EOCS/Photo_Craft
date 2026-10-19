@@ -293,14 +293,32 @@ fn listen(window: &web_sys::Window, origin: &str) {
 
 // ---------- the Photopea-compatible mode ----------
 
-/// The Photopea-compatible config in the URL hash, if any and if `query` trusts it
-/// ([`PhotopeaConfig::trusted`]); a refused one is logged and ignored, so the app opens as usual.
+/// The Photopea-compatible config in the URL hash, if any and if `query` and the page that frames
+/// the app trust it ([`PhotopeaConfig::trusted`]); a refused one is logged and ignored, so the app
+/// opens as usual.
 pub fn photopea_config(query: &str) -> Option<PhotopeaConfig> {
     let hash = web_sys::window().and_then(|w| w.location().hash().ok())?;
-    PhotopeaConfig::trusted(&hash, query).unwrap_or_else(|e| {
+    PhotopeaConfig::trusted(&hash, query, parent_origin().as_deref()).unwrap_or_else(|e| {
         log::error!("embed: ignoring the config in the URL: {e}");
         None
     })
+}
+
+/// The origin of the page that frames the app, as the browser tells it: `None` at top level.
+/// `location.ancestorOrigins` where the browser has it (Chromium, Safari), else the origin of
+/// `document.referrer`, which a frame's first load gets from its parent (Firefox; a parent page
+/// that sends `Referrer-Policy: no-referrer` leaves it empty, and the config unread).
+fn parent_origin() -> Option<String> {
+    let window = web_sys::window()?;
+    let parent = window.parent().ok().flatten()?;
+    if JsValue::from(parent) == JsValue::from(window.clone()) {
+        return None;
+    }
+    let ancestors = js_sys::Reflect::get(&window.location(), &"ancestorOrigins".into()).ok().filter(|v| !v.is_undefined() && !v.is_null());
+    if let Some(list) = ancestors {
+        return js_sys::Reflect::get(&list, &0.into()).ok().and_then(|o| o.as_string());
+    }
+    protocol::url_origin(&window.document()?.referrer())
 }
 
 /// Posts a Photopea-style status string to the parent window, only ever to the `?embed=` origin

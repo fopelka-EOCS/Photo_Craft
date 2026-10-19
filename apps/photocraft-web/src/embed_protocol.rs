@@ -129,20 +129,30 @@ impl PhotopeaConfig {
         })
     }
 
-    /// The config in the URL hash, honoured only on a page opened with `?embed=<origin>` in `query`:
-    /// it sends the user's saves to `server.url`, so a link anyone can send must not set one
-    /// (photocraft#2263 review). `server.url` has to be on the embed origin, and each of `files` on
-    /// it or on an origin listed in `?embed_files=` (comma-separated, percent-encoded). `Ok(None)`
-    /// when the hash holds no config; `Err` says why one was refused.
-    pub fn trusted(hash: &str, query: &str) -> Result<Option<Self>, String> {
+    /// The config in the URL hash, honoured only on a page opened with `?embed=<origin>` in `query`
+    /// inside a frame whose parent page is on that origin (`parent_origin`, `None` when the app
+    /// isn't framed or the parent's origin can't be told): the config sends the user's saves to
+    /// `server.url`, and a link anyone can send sets both the hash and `?embed=`, so only the
+    /// browser's word on who embeds the app counts (photocraft#2263 review). `server.url` has to be
+    /// on the embed origin, and each of `files` on it or on an origin listed in `?embed_files=`
+    /// (comma-separated, percent-encoded). `Ok(None)` when the hash holds no config; `Err` says why
+    /// one was refused.
+    pub fn trusted(hash: &str, query: &str, parent_origin: Option<&str>) -> Result<Option<Self>, String> {
         let Some(config) = Self::from_hash(hash) else { return Ok(None) };
         let embed = allowed_origin(query).ok_or("the Photopea-style config in the URL needs ?embed=<origin of the page that embeds PhotoCraft>")?;
+        let parent = parent_origin.ok_or("the Photopea-style config in the URL is only read in a frame whose page is on the ?embed= origin, and the app isn't framed or its page's origin is unknown")?;
+        if origin(parent).as_deref() != Some(embed.as_str()) {
+            return Err(format!("the page embedding the app is on {parent}, not on the ?embed= origin {embed}"));
+        }
         let mut file_origins = vec![embed.clone()];
         if let Some(list) = param(query, "embed_files") {
             for o in list.split(',').map(percent_decode) {
                 file_origins.push(origin(&o).ok_or_else(|| format!("?embed_files= has {o:?}, which isn't an http(s) origin"))?);
             }
         }
+        // Keep server.url on the embed origin even though the parent was checked: in Firefox the
+        // parent's origin comes from the referrer, which a client-side redirect on that origin can
+        // hand to a page framed by someone else.
         if let Some(url) = &config.server_url
             && url_origin(url).as_deref() != Some(embed.as_str())
         {
@@ -284,37 +294,50 @@ mod tests {
     }
 
     #[test]
-    fn the_photopea_config_needs_a_trusted_embed_origin() {
+    fn the_photopea_config_needs_a_frame_on_the_embed_origin() {
         let config = |server: &str, files: &str| format!(r#"{{"files":[{files}],"server":{{"url":"{server}","formats":["psd"]}}}}"#);
         let ok = config("https://admin.test/save/1", r#""https://admin.test/a.psd""#);
         let embed = "embed=https%3A%2F%2Fadmin.test";
-        assert!(PhotopeaConfig::trusted(&ok, embed).expect("trusted").is_some());
-        assert_eq!(PhotopeaConfig::trusted("", ""), Ok(None), "no config, nothing to refuse");
-        assert_eq!(PhotopeaConfig::trusted("#section", "cpu"), Ok(None));
+        let admin = Some("https://admin.test");
+        assert!(PhotopeaConfig::trusted(&ok, embed, admin).expect("trusted").is_some());
+        assert_eq!(PhotopeaConfig::trusted("", "", None), Ok(None), "no config, nothing to refuse");
+        assert_eq!(PhotopeaConfig::trusted("#section", "cpu", None), Ok(None));
         // The link from the review: a bare link can't send saves anywhere.
         let attack = config("https://attacker.example/s", "");
-        assert!(PhotopeaConfig::trusted(&attack, "").is_err(), "no ?embed=");
-        assert!(PhotopeaConfig::trusted(&ok, "").is_err(), "not even to a plausible server");
-        assert!(PhotopeaConfig::trusted(&attack, embed).is_err(), "server on another origin");
+        assert!(PhotopeaConfig::trusted(&attack, "", admin).is_err(), "no ?embed=");
+        assert!(PhotopeaConfig::trusted(&ok, "", admin).is_err(), "not even to a plausible server");
+        assert!(PhotopeaConfig::trusted(&attack, embed, admin).is_err(), "server on another origin");
         for server in
             ["https://admin.test.attacker.example/s", "https://admin.test@attacker.example/s", "http://admin.test/s", "/save/1", "javascript:alert(1)"]
         {
-            assert!(PhotopeaConfig::trusted(&config(server, ""), embed).is_err(), "{server}");
+            assert!(PhotopeaConfig::trusted(&config(server, ""), embed, admin).is_err(), "{server}");
         }
-        assert!(PhotopeaConfig::trusted(&config("https://ADMIN.test:443/save", ""), embed).is_ok(), "the origin as a browser writes it");
+        assert!(PhotopeaConfig::trusted(&config("https://ADMIN.test:443/save", ""), embed, admin).is_ok(), "the origin as a browser writes it");
+        // A link sets ?embed= too: only the page that really frames the app counts (the CodeRabbit
+        // link, opened as a page or framed by someone else).
+        let theirs = config("https://attacker.example/s", "");
+        let their_embed = "embed=https%3A%2F%2Fattacker.example";
+        assert!(PhotopeaConfig::trusted(&theirs, their_embed, None).is_err(), "not framed");
+        assert!(PhotopeaConfig::trusted(&ok, their_embed, admin).is_err(), "framed by another page than ?embed= names");
+        assert!(PhotopeaConfig::trusted(&ok, embed, None).is_err(), "not framed, even with plausible values");
+        assert!(PhotopeaConfig::trusted(&ok, embed, Some("https://admin.test.attacker.example")).is_err());
+        assert!(PhotopeaConfig::trusted(&ok, embed, Some("null")).is_err(), "an opaque origin");
+        assert!(PhotopeaConfig::trusted(&ok, embed, Some("https://ADMIN.test:443")).is_ok(), "written as the browser may write it");
         // Files: the embed origin, or one listed in ?embed_files=.
         let cdn = config("https://admin.test/save/1", r#""https://admin.test/a.psd","https://cdn.test/b.psd""#);
-        assert!(PhotopeaConfig::trusted(&cdn, embed).is_err());
-        assert!(PhotopeaConfig::trusted(&cdn, &format!("{embed}&embed_files=https%3A%2F%2Fcdn.test")).is_ok());
-        assert!(PhotopeaConfig::trusted(&cdn, &format!("{embed}&embed_files=https://other.test,https://cdn.test")).is_ok());
-        assert!(PhotopeaConfig::trusted(&cdn, &format!("{embed}&embed_files=*")).is_err());
-        assert!(PhotopeaConfig::trusted(&config("https://admin.test/save/1", r#""file:///etc/passwd""#), embed).is_err());
+        assert!(PhotopeaConfig::trusted(&cdn, embed, admin).is_err());
+        assert!(PhotopeaConfig::trusted(&cdn, &format!("{embed}&embed_files=https%3A%2F%2Fcdn.test"), admin).is_ok());
+        assert!(PhotopeaConfig::trusted(&cdn, &format!("{embed}&embed_files=https://other.test,https://cdn.test"), admin).is_ok());
+        assert!(PhotopeaConfig::trusted(&cdn, &format!("{embed}&embed_files=*"), admin).is_err());
+        assert!(PhotopeaConfig::trusted(&config("https://admin.test/save/1", r#""file:///etc/passwd""#), embed, admin).is_err());
         // No server: files still have to be trusted, since opening one posts its name to the page.
-        assert!(PhotopeaConfig::trusted(r#"{"files":["https://cdn.test/b.psd"]}"#, embed).is_err());
+        assert!(PhotopeaConfig::trusted(r#"{"files":["https://cdn.test/b.psd"]}"#, embed, admin).is_err());
     }
 
     #[test]
     fn url_origins() {
+        assert_eq!(url_origin("http://[::1]:8080/x").as_deref(), Some("http://[::1]:8080"));
+        assert_eq!(url_origin("https://admin.test/login?next=/a").as_deref(), Some("https://admin.test"), "a referrer is a full URL");
         assert_eq!(url_origin("https://Admin.test:443/a/b?c#d").as_deref(), Some("https://admin.test"));
         assert_eq!(url_origin("http://localhost:8080").as_deref(), Some("http://localhost:8080"));
         assert_eq!(url_origin("https://a.test?x").as_deref(), Some("https://a.test"));
