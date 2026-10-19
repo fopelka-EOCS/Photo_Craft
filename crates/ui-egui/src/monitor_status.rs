@@ -455,7 +455,7 @@ mod tests {
     fn displays_without_profiles_share_one_notice() {
         // Two profile-less monitors (a Linux desk: DP-4 and DP-5) gave two identical cards.
         let mut app = app();
-        let desk = |id, name: &str, x| Display { id, name: name.into(), frame: [x, 0.0, 1920.0, 1080.0], profile_name: None, icc: None };
+        let desk = |id, name: &str, x| Display { key: None, id, name: name.into(), frame: [x, 0.0, 1920.0, 1080.0], profile_name: None, icc: None };
         apply(&mut app, Ok(vec![desk(1, "DP-4", 0.0), desk(2, "DP-5", 1920.0)]));
         assert_eq!(app.ui.notices.len(), 1);
         let lines = &app.ui.notices[0].lines;
