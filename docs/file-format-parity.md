@@ -42,7 +42,7 @@ XL are missing (gap G10). Remaining: 300–500 h including PSD fidelity.
 | Photoshop EPS, DCS 1.0/2.0, EPS TIFF/PICT preview | R/W | no | no | |
 | Generic EPS / AI | R (rasterize) | no | no | |
 | SVG | R (rasterize) | yes, as editable shape layers or a vector smart object | no | Better than Photoshop for editing; gradients approximated (FILE-215-9) |
-| JPEG 2000 | R/W | no (#1047) | no | |
+| JPEG 2000 | R/W (`.jp2`, `.j2k`); R (`.jpx`, `.jpf`, `.jpm`, `.mj2`) | yes (pure-Rust `j2k`, no C) | yes | `.jp2` files and bare `.j2k`/`.j2c` codestreams; `.jpx`/`.jpf` open too (their codestream is a Part 1 one) but a save writes the Part 1 container. `.jpm` (Part 6 multi-page compound) and `.mj2` (Part 3 motion) open their first page or frame, with a `MorePages`/`MoreFrames` warning, but are not written. 8/16-bit gray and RGB with alpha, ICC profile in the JP2 `colr` box. Lossless (reversible 5/3) by default, irreversible 9/7 with a rate target below JPEG 2000 Quality 100. A third-party CMYK or CMYK+alpha stream opens as CMYK; CMYK and Lab documents are converted to RGB on save, because Part 1 names only sRGB/greyscale/sYCC. No resolution (`res `), EXIF/XMP or JPX features |
 | Cineon / DPX | R (DPX), R/W (CIN) | DPX: luma, RGB, RGBA at 8/10/12/16 bits, both byte orders (#1049); Cineon: 10-bit gray/RGB, read-only | DPX: 8/10/12/16 bits (`dpxBits`, `--dpx-bits`); Cineon no | Writes DPX, which Photoshop only reads; header fields (creator, project, copyright, transfer, frame rate, time code…) round-trip; Cineon read-only, no RLE |
 | DICOM | R/W | no | no | |
 | PCX | R/W | no | no | |
@@ -142,7 +142,6 @@ remaining gaps in #1606 stay tracked with per-sample corpus ceilings.
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-15 | minor | PNG: a stereo PNG's `sTER` pairing (PNG Extensions 1.4.0 §3.6) is read on open and written back on save, so the file still says it is a stereo pair (#6063) |
 | 2026-10-14 | minor | PSD smart filter masks: Photoshop stores a smart object's filtered pixels without its filter mask and mixes the unfiltered ones (`FEid`) back in; import now mixes them and export writes them that way, so sf-filter-mask-hard, -gradient and sf-stack-blend-and-mask pass; Photoshop-oracle floor 185 → 188 of 258 |
 | 2026-10-13 | minor | Lossy DNG (compression 34892) decodes: 8-bit baseline JPEG tiles and strips, CFA and LinearRaw, partial edge tiles; the stored values take the normal levels and LinearizationTable (FILE-215-11, lossy DNG part) |
 | 2026-10-14 | minor | Corpus floors raised to the measured results of the CMYK, Lab, 32-bit, Levels, Threshold, Posterize, feather and pass-through fixes landed together: Photoshop-authored 165 → 185 of 258, io 146 → 148 of 170, psd-tools 242 → 249 of 309 |
