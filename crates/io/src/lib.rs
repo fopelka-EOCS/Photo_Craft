@@ -46,6 +46,8 @@ pub mod exr_parts;
 mod flat;
 mod gradient_bake;
 pub use gradient_bake::{Method as GradientMethod, bake as bake_gradient};
+mod import_options;
+pub use import_options::{CameraProfilePolicy, ImportOptions};
 mod kra;
 pub mod linked;
 mod multichannel_map;
@@ -242,7 +244,8 @@ pub fn is_psd(bytes: &[u8]) -> bool {
 }
 
 /// Imports a file. PSD/PSB, Affinity containers and camera raws are detected by magic; everything
-/// else is decoded with `photocraft-codecs`.
+/// else is decoded with `photocraft-codecs`. Camera profiles are bundled-only: bytes do not
+/// grant permission to read installed profiles. Trusted local opens use [`import_with_options`].
 pub fn import(name: &str, bytes: &[u8]) -> Result<ImportResult, IoError> {
     import_with_svg_group_depth(name, bytes, photocraft_doc::MAX_GROUP_DEPTH)
 }
@@ -266,14 +269,22 @@ pub fn import_with_svg_group_depth_and_interrupt(
     max_group_depth: usize,
     ctl: &photocraft_raster::Interrupt,
 ) -> Result<ImportResult, IoError> {
+    import_with_options(name, bytes, &ImportOptions { max_svg_group_depth: max_group_depth, ..Default::default() }, ctl)
+}
+
+/// Imports bytes with explicit top-level camera-profile authority and SVG depth settings.
+/// Recursive embedded sources remain bundled-only. Cancellation is checked between stages.
+pub fn import_with_options(name: &str, bytes: &[u8], options: &ImportOptions, ctl: &photocraft_raster::Interrupt) -> Result<ImportResult, IoError> {
     ctl.check().map_err(|_| IoError::Cancelled)?;
-    let r = import_stages(name, bytes, ctl, max_group_depth)?;
+    let r = import_stages(name, bytes, ctl, options)?;
     ctl.check().map_err(|_| IoError::Cancelled)?;
     ctl.progress(1.0);
     Ok(r)
 }
 
-fn import_stages(name: &str, bytes: &[u8], ctl: &photocraft_raster::Interrupt, max_group_depth: usize) -> Result<ImportResult, IoError> {
+/// Dispatch supported formats by signature while applying caller options to the top-level import.
+/// Nested sources use their separate bundled-only defaults rather than inheriting installed-profile access.
+fn import_stages(name: &str, bytes: &[u8], ctl: &photocraft_raster::Interrupt, options: &ImportOptions) -> Result<ImportResult, IoError> {
     // A declared native extension must reach its loader so malformed bundles retain format errors.
     if has_extension(name, photocraft_format::EXTENSION) || photocraft_format::is_pcraft(bytes) {
         return Ok(ImportResult { document: photocraft_format::load_from_bytes(bytes)?, warnings: Vec::new(), source_read_only: false, preview_only: false });
@@ -310,10 +321,10 @@ fn import_stages(name: &str, bytes: &[u8], ctl: &photocraft_raster::Interrupt, m
         return pdn::import(name, bytes, ctl);
     }
     if raw::is_raw(bytes) {
-        return raw::import_raw(name, bytes);
+        return raw::import_raw_default_policy(name, bytes, options.camera_profiles);
     }
     if is_svg_input(name, bytes) {
-        return svg::import_svg_with_group_depth(name, bytes, max_group_depth);
+        return svg::import_svg_with_group_depth(name, bytes, options.max_svg_group_depth);
     }
     flat::import_flat(name, bytes)
 }

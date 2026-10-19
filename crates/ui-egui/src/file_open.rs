@@ -84,10 +84,16 @@ impl PhotocraftApp {
         }
         if self.background_jobs {
             // The path and Open Recent are recorded when the background open finishes.
-            crate::jobs_ui::start_open(self, &display_name(path), Some(path.to_string()), crate::jobs_ui::bytes(bytes))?;
+            crate::jobs_ui::start_open(
+                self,
+                &display_name(path),
+                Some(path.to_string()),
+                crate::jobs_ui::bytes(bytes),
+                photocraft_io::CameraProfilePolicy::Installed,
+            )?;
             return Ok(Vec::new());
         }
-        self.open_bytes_from(&display_name(path), bytes, Some(path))
+        self.open_bytes_from(&display_name(path), bytes, Some(path), photocraft_io::CameraProfilePolicy::Installed)
     }
 
     /// Record that the active document was just opened from `path`: File › Save writes back to it
@@ -123,7 +129,13 @@ impl PhotocraftApp {
         // would block the window). Preset files (brushes, gradients) go the usual way.
         let ext = std::path::Path::new(path).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
         if self.background_jobs && !crate::preset_files_ui::PRESET_EXTS.contains(&ext.as_str()) {
-            crate::jobs_ui::start_open(self, &display_name(path), Some(path.to_string()), photocraft_engine::jobs::OpenSource::Path(path.to_string()))?;
+            crate::jobs_ui::start_open(
+                self,
+                &display_name(path),
+                Some(path.to_string()),
+                photocraft_engine::jobs::OpenSource::Path(path.to_string()),
+                photocraft_io::CameraProfilePolicy::Installed,
+            )?;
             return Ok(Vec::new());
         }
         let bytes = photocraft_format::read_file(std::path::Path::new(path)).map_err(|e| format!("{path}: {e}"))?;

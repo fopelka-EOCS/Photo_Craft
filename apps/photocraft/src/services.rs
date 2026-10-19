@@ -490,6 +490,7 @@ fn shell_word(s: &str) -> String {
     if s.bytes().all(|b| b.is_ascii_alphanumeric() || b"/._-+:,@".contains(&b)) { s.to_string() } else { format!("'{}'", s.replace('\'', r"'\''")) }
 }
 
+/// Bind native desktop services and optional capability-scoped automation callbacks.
 pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) -> Services {
     let clip: Rc<RefCell<Option<arboard::Clipboard>>> = Rc::default();
     let automation_read = automation.clone().map(|workspace| {
@@ -524,7 +525,10 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) ->
     Services {
         import: Some(Box::new(|name: &str, bytes: &[u8], max_svg_group_depth: usize| {
             crate::crash_guard::guard("Open", || {
-                photocraft_io::import_with_svg_group_depth(name, bytes, max_svg_group_depth).map(|r| (r.document, r.warnings)).map_err(|e| e.to_string())
+                let options = photocraft_io::ImportOptions { max_svg_group_depth, camera_profiles: photocraft_io::CameraProfilePolicy::Installed };
+                photocraft_io::import_with_options(name, bytes, &options, &photocraft_raster::Interrupt::NONE)
+                    .map(|r| (r.document, r.warnings))
+                    .map_err(|e| e.to_string())
             })
         })),
         export: Some(Box::new(|doc: &Document, path: &str, settings: &photocraft_ui_egui::ExportSettings| {

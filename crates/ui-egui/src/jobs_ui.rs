@@ -42,6 +42,8 @@ pub struct OpenTab {
     pub slot: Option<usize>,
     /// Its place in a set of files opened together, when it is one of several (see [`OpenOrder`]).
     pub order: Option<OpenOrder>,
+    /// Profile-source authority captured before the opening request leaves its dispatch scope.
+    pub camera_profiles: photocraft_io::CameraProfilePolicy,
 }
 
 /// A file's place in a set opened together (File › Open with several files, paths on the command
@@ -191,13 +193,20 @@ pub fn run(app: &mut PhotocraftApp, id: &str, params: Value) -> Result<Value, St
 
 /// Open a file in the background: a tab appears at once and shows the progress; the document
 /// replaces it when decoded. `path` is remembered for File › Save and Open Recent.
-pub fn start_open(app: &mut PhotocraftApp, name: &str, path: Option<String>, source: OpenSource) -> Result<(), String> {
+pub fn start_open(
+    app: &mut PhotocraftApp,
+    name: &str,
+    path: Option<String>,
+    source: OpenSource,
+    camera_profiles: photocraft_io::CameraProfilePolicy,
+) -> Result<(), String> {
     let name = &app.open_name(name);
-    match app.session.start_open(name, source).map_err(|e| e.to_string())? {
+    let camera_profiles = if app.session.authorize.is_some() { photocraft_io::CameraProfilePolicy::BundledOnly } else { camera_profiles };
+    match app.session.start_open_with_profile_policy(name, source, camera_profiles).map_err(|e| e.to_string())? {
         // Inline (wasm): finish now, like a background open that ended at once.
-        Started::Done(v) => finish_open(app, name, path.as_deref(), &v, None),
+        Started::Done(v) => finish_open(app, name, path.as_deref(), &v, None, camera_profiles),
         Started::Job(job) => {
-            app.jobs.opens.push(OpenTab { job, name: name.to_string(), path, slot: None, order: None });
+            app.jobs.opens.push(OpenTab { job, name: name.to_string(), path, slot: None, order: None, camera_profiles });
             app.jobs.focus = Some(job);
             app.ui.chrome.home = None;
             app.ui.status = crate::i18n::fmt(tl!("Opening {name}…"), &[("name", name)]);
@@ -244,7 +253,7 @@ fn batch_slot(jobs: &mut JobsUi, order: OpenOrder) -> Option<usize> {
 /// [`JobsUi::opens`]: the document goes to the tab's slot, or to its place in its set.
 pub(crate) fn finish_open_tab(app: &mut PhotocraftApp, tab: &OpenTab, v: &Value) -> Result<(), String> {
     let slot = tab.slot.or_else(|| tab.order.and_then(|o| batch_slot(&mut app.jobs, o)));
-    let r = finish_open(app, &tab.name, tab.path.as_deref(), v, slot);
+    let r = finish_open(app, &tab.name, tab.path.as_deref(), v, slot, tab.camera_profiles);
     end_batch(&mut app.jobs);
     r
 }
@@ -526,7 +535,14 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
 
 /// What [`crate::PhotocraftApp::open_bytes`] does after decoding, for a background open's result
 /// (`{document, warnings, color}`).
-fn finish_open(app: &mut PhotocraftApp, name: &str, path: Option<&str>, v: &Value, slot: Option<usize>) -> Result<(), String> {
+fn finish_open(
+    app: &mut PhotocraftApp,
+    name: &str,
+    path: Option<&str>,
+    v: &Value,
+    slot: Option<usize>,
+    camera_profiles: photocraft_io::CameraProfilePolicy,
+) -> Result<(), String> {
     let warnings: Vec<String> =
         v.get("warnings").and_then(Value::as_array).map(|a| a.iter().filter_map(|w| w.as_str().map(str::to_string)).collect()).unwrap_or_default();
     let held = |doc, read_only, question, policy_applied| crate::open_prompt::Held {
@@ -539,6 +555,7 @@ fn finish_open(app: &mut PhotocraftApp, name: &str, path: Option<&str>, v: &Valu
         slot,
         question,
         policy_applied,
+        camera_profiles,
     };
     // Held back for the profile prompt (Ask When Opening).
     if let Some(id) = v.get("held").and_then(Value::as_u64) {
@@ -562,14 +579,21 @@ fn finish_open(app: &mut PhotocraftApp, name: &str, path: Option<&str>, v: &Valu
         index = moved.get("document").and_then(Value::as_u64).map_or(index, |i| i as usize);
     }
     app.session.set_active(index);
-    after_open(app, name, path, &warnings, None);
+    after_open(app, name, path, &warnings, None, camera_profiles);
     Ok(())
 }
 
 /// What every open does once its document is the active one: remember where it came from, say
 /// so, show the import warnings (a raw opens in Camera Raw first, developed from `path` or
 /// `bytes`) and fire the "Open Document" script events.
-pub(crate) fn after_open(app: &mut PhotocraftApp, name: &str, path: Option<&str>, warnings: &[String], bytes: Option<&[u8]>) {
+pub(crate) fn after_open(
+    app: &mut PhotocraftApp,
+    name: &str,
+    path: Option<&str>,
+    warnings: &[String],
+    bytes: Option<&[u8]>,
+    camera_profiles: photocraft_io::CameraProfilePolicy,
+) {
     if let Some(p) = path {
         app.opened_from(p);
     }
@@ -582,7 +606,7 @@ pub(crate) fn after_open(app: &mut PhotocraftApp, name: &str, path: Option<&str>
     app.ui.status_error = false;
     // A raw opens in Camera Raw first; the dialog says how it was developed.
     if crate::camera_raw_ui::wants_open_dialog(app, warnings) {
-        crate::camera_raw_ui::queue_open_dialog(app, name, path, bytes);
+        crate::camera_raw_ui::queue_open_dialog(app, name, path, bytes, camera_profiles);
         notices::io_warnings(app, &opened, &crate::camera_raw_ui::without_develop_note(warnings));
     } else {
         notices::io_warnings(app, &opened, warnings);

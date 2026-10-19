@@ -32,6 +32,8 @@ pub struct Held {
     /// The Color Settings policy was already applied (a background open added it before it had
     /// to wait); otherwise opening applies it.
     pub policy_applied: bool,
+    /// Camera-profile authority of the original request, retained while a prompt delays opening.
+    pub camera_profiles: photocraft_io::CameraProfilePolicy,
 }
 
 /// Whether a file that just finished reading has to wait: one earlier in the queue does.
@@ -157,7 +159,7 @@ pub fn answer_remembering(app: &mut PhotocraftApp, action: &str) -> Result<Value
 /// Opens a queued file, applying `action` (the prompt's answer) or else the Color Settings
 /// policy, then does what any open does afterwards.
 fn open(app: &mut PhotocraftApp, held: Held, action: Option<&str>) -> Result<Value, String> {
-    let Held { mut doc, read_only, name, path, warnings, bytes, slot, question, policy_applied } = held;
+    let Held { mut doc, read_only, name, path, warnings, bytes, slot, question, policy_applied, camera_profiles } = held;
     let index = if question.is_some() || policy_applied {
         if let Some(action) = action
             && let Err(e) = app.session.color.resolve_open(&mut doc, action)
@@ -181,6 +183,6 @@ fn open(app: &mut PhotocraftApp, held: Held, action: Option<&str>) -> Result<Val
         None => index,
     };
     app.session.set_active(index);
-    crate::jobs_ui::after_open(app, &name, path.as_deref(), &warnings, bytes.as_deref().map(Vec::as_slice));
+    crate::jobs_ui::after_open(app, &name, path.as_deref(), &warnings, bytes.as_deref().map(Vec::as_slice), camera_profiles);
     Ok(json!({"document": index, "action": action}))
 }

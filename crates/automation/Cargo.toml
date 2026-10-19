@@ -28,6 +28,8 @@ getrandom = { workspace = true }
 cap-std = "4"
 
 [dev-dependencies]
+photocraft-raw = { workspace = true, features = ["testgen"] }
+flate2 = { workspace = true }
 rmcp = { version = "3.5", default-features = false, features = ["client", "server", "macros", "transport-io"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "sync", "net", "io-util", "time"] }
 

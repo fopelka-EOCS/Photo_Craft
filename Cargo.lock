@@ -4702,6 +4702,7 @@ version = "0.10.0"
 dependencies = [
  "base64 0.22.1",
  "cap-std",
+ "flate2",
  "getrandom 0.3.4",
  "photocraft-codecs",
  "photocraft-compose",
@@ -4710,6 +4711,7 @@ dependencies = [
  "photocraft-format",
  "photocraft-geom",
  "photocraft-io",
+ "photocraft-raw",
  "rmcp",
  "rustix 1.1.5",
  "schemars",

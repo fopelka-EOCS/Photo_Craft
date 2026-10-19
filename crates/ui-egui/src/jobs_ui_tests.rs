@@ -343,7 +343,14 @@ fn the_opening_card_keeps_a_long_name_and_cancel_inside() {
     let long = "a7rv-test_2024_02_17_shot_30_3705_with_an_even_longer_suffix_that_never_ends.psb";
     for name in ["short.psd", long] {
         h.state_mut().jobs.opens.clear();
-        h.state_mut().jobs.opens.push(crate::jobs_ui::OpenTab { job, name: name.to_string(), path: None, slot: None, order: None });
+        h.state_mut().jobs.opens.push(crate::jobs_ui::OpenTab {
+            job,
+            name: name.to_string(),
+            path: None,
+            slot: None,
+            order: None,
+            camera_profiles: photocraft_io::CameraProfilePolicy::BundledOnly,
+        });
         h.state_mut().jobs.focus = Some(job);
         h.run_steps(4);
         let r = crate::jobs_ui::open_card_rects(&h.ctx).expect("the opening card was drawn");
@@ -795,7 +802,8 @@ fn background_open_warns_about_missing_fonts() {
     let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
     // What the open job leaves behind: the decoded document in the session, then its result.
     let (index, _) = app.session.open_document(doc, None);
-    super::finish_open(&mut app, "poster.psd", None, &json!({"document": index, "warnings": []}), None).unwrap();
+    super::finish_open(&mut app, "poster.psd", None, &json!({"document": index, "warnings": []}), None, photocraft_io::CameraProfilePolicy::BundledOnly)
+        .unwrap();
     let want = vec!["font 'NoSuchFamily4559' is not installed; text may render using a fallback face".to_string()];
     assert!(app.ui.notices.last().is_some_and(|n| n.title.contains("poster.psd") && n.lines == want), "{:?}", app.ui.notices);
 }
