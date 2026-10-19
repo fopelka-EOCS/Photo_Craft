@@ -107,6 +107,38 @@ fn cr3_opens_its_upright_camera_jpeg_with_explicit_preview_warning() {
 }
 
 #[test]
+fn damaged_raw_opens_its_camera_jpeg_with_a_warning() {
+    use photocraft_raw::testgen::{RafPacking, RafSpec, XTRANS};
+    let img = Image::from_u8(32, 20, ChannelLayout::Rgb, vec![120; 32 * 20 * 3]).unwrap();
+    let jpeg = photocraft_codecs::encode(&img, Format::Jpeg, &EncodeOptions::default()).unwrap();
+    // A lossless compressed RAF (all-zero samples) with a real camera JPEG.
+    let mut spec = RafSpec::new(780, 18, vec![0; 780 * 18], XTRANS.to_vec());
+    spec.packing = RafPacking::Compressed { lossy: false };
+    spec.black = vec![0];
+    spec.preview_jpeg = Some(jpeg);
+    let mut b = spec.build();
+    assert_eq!(import("DSCF0001.RAF", &b).unwrap().document.depth, SampleType::U16, "intact: developed");
+
+    // Zero bits inside the first stripe overrun the residual escape: malformed sensor data.
+    let at = b.windows(5).position(|w| w == b"IS\x01\x10\x0e").unwrap();
+    b[at + 96..at + 160].fill(0);
+    let r = import("DSCF0001.RAF", &b).unwrap();
+    assert_eq!((r.document.size.width, r.document.size.height, r.document.depth), (32, 20, SampleType::U8));
+    assert!(r.warnings[0].contains("damaged") && r.warnings[0].contains("8-bit, not the raw sensor data"), "{:?}", r.warnings);
+
+    // Without a usable preview it stays an error.
+    spec.preview_jpeg = None;
+    let mut b = spec.build();
+    let at = b.windows(5).position(|w| w == b"IS\x01\x10\x0e").unwrap();
+    b[at + 96..at + 160].fill(0);
+    match import("DSCF0001.RAF", &b) {
+        Err(e @ IoError::Raw(_)) => assert!(e.to_string().contains("malformed"), "{e}"),
+        Err(e) => panic!("expected a raw error, got {e}"),
+        Ok(_) => panic!("damaged sensor data without a preview must not open"),
+    }
+}
+
+#[test]
 fn truncated_raws_do_not_panic() {
     let b = nef_with_preview();
     for n in (0..b.len()).step_by(7) {

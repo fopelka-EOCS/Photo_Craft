@@ -1423,6 +1423,8 @@ pub struct RafSpec {
     pub orientation: u16,
     /// `false` writes an early-FinePix-style file without the CFA TIFF.
     pub cfa_tiff: bool,
+    /// A real JPEG to embed as the preview; `None` writes a tiny header-only stand-in.
+    pub preview_jpeg: Option<Vec<u8>>,
 }
 
 impl RafSpec {
@@ -1440,6 +1442,7 @@ impl RafSpec {
             exposure_bias: None,
             orientation: 1,
             cfa_tiff: true,
+            preview_jpeg: None,
         }
     }
 
@@ -1543,6 +1546,9 @@ impl RafSpec {
     /// A tiny baseline-JPEG preview (APP1 EXIF with make, model and
     /// orientation; SOF0 32×24; EOI).
     fn preview(&self) -> Vec<u8> {
+        if let Some(jpeg) = &self.preview_jpeg {
+            return jpeg.clone();
+        }
         let mut t = TiffBuilder::default();
         let ifd0 = t.ifd(vec![(271, Val::Ascii("FUJIFILM".into())), (272, Val::Ascii("X-Synthetic".into())), (274, Val::Short(vec![self.orientation]))]);
         t.chain = vec![ifd0];

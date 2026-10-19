@@ -270,6 +270,18 @@ pub fn import_raw_with(name: &str, bytes: &[u8], opts: &DevelopOptions) -> Resul
             }
             None => Err(IoError::Raw(RawError::Unsupported(reason))),
         },
+        // Damaged sensor data: the camera's JPEG is often still intact, so the photo opens.
+        Err(RawError::Malformed(reason)) => match photocraft_raw::embedded_preview(bytes).map(|p| (p.width, p.height, upright_preview(bytes, p.jpeg))) {
+            Some((w, h, Ok(img))) => {
+                let mut r = image_to_document(name, &img)?;
+                r.warnings.insert(
+                    0,
+                    format!("{format}: the raw sensor data is damaged ({reason}); opened the camera's embedded {w}x{h} JPEG preview instead (8-bit, not the raw sensor data)"),
+                );
+                Ok(r)
+            }
+            _ => Err(IoError::Raw(RawError::Malformed(reason))),
+        },
         Err(e) => Err(IoError::Raw(e)),
     }
 }
