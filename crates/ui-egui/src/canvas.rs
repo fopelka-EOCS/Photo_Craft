@@ -3395,7 +3395,8 @@ pub(crate) enum CanvasRole {
     Main,
     /// An extra window showing the active document (#6022): the tools work in the window's own
     /// view, so [`extra_windows`] lends it the app slots the tools read the canvas from. The
-    /// pop-up menus, rulers and the Type tool's keyboard editing stay with the main window.
+    /// pop-up menus, guides dragged out of the rulers and the Type tool's keyboard editing stay
+    /// with the main window.
     Window,
     /// Only shows its document: a tile that isn't active, a window of another document.
     View,
@@ -3408,13 +3409,28 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
 }
 
 /// How long (seconds of input time) a canvas that owns the drag in flight may go without running
-/// before the drag is nobody's. A window closed mid-drag must not leave every other canvas waiting
-/// on a gesture only it could finish.
+/// its tools before the drag is abandoned. A window closed mid-drag must not leave every other
+/// canvas waiting on a gesture only it could finish.
 pub(crate) const DRAG_OWNER_TTL: f64 = 2.0;
 
 /// Is the drag in flight another canvas's to carry on? `owner` is `PhotocraftApp::drag_canvas`.
 pub(crate) fn drag_is_foreign(owner: Option<(egui::Id, f64)>, me: egui::Id, now: f64) -> bool {
     owner.is_some_and(|(canvas, last_run)| canvas != me && now - last_run < DRAG_OWNER_TTL)
+}
+
+/// Did the canvas that owns the drag in flight stop running its tools (its window closed
+/// mid-gesture)? Then the drag is nobody's to carry on: [`end_abandoned_drag`] ends it.
+pub(crate) fn drag_is_abandoned(owner: Option<(egui::Id, f64)>, me: egui::Id, now: f64) -> bool {
+    owner.is_some_and(|(canvas, last_run)| canvas != me && now - last_run >= DRAG_OWNER_TTL)
+}
+
+/// End an abandoned drag where it last was, as its release would have: what it drew is kept, and
+/// no other canvas feeds it moves mapped through its own view.
+fn end_abandoned_drag(app: &mut PhotocraftApp) {
+    app.drag_canvas = None;
+    app.press_stroke = false;
+    let Some((p, mods)) = app.drag.as_ref().map(|d| (d.points.last().map_or(d.start, |q| [q[0], q[1]]), d.live)) else { return };
+    tool_event(app, ToolEvent::Up { x: p[0], y: p[1] }, mods);
 }
 
 /// [`canvas_view`] for a [`CanvasRole`].
@@ -3435,10 +3451,18 @@ pub(crate) fn canvas_view_as(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: us
     // drawn in the same frame and share egui's temporary data (and, where windows are embedded, as
     // on the web, its widget ids).
     let canvas_id = ui.id().with(("pc-canvas", idx));
-    // A drag belongs to the canvas it started in (`PhotocraftApp::drag_canvas`).
+    // A drag belongs to the canvas it started in (`PhotocraftApp::drag_canvas`), which keeps its
+    // claim fresh while it runs tools. One whose canvas stopped ends here, before a canvas that
+    // runs tools could take it over.
     let now = ui.input(|i| i.time);
     if app.drag.is_none() {
         app.drag_canvas = None;
+    }
+    if tools && app.drag_canvas.is_some_and(|(c, _)| c == canvas_id) {
+        app.drag_canvas = Some((canvas_id, now));
+    }
+    if tools && app.drag.is_some() && drag_is_abandoned(app.drag_canvas, canvas_id, now) {
+        end_abandoned_drag(app);
     }
     let foreign_drag = app.drag.is_some() && drag_is_foreign(app.drag_canvas, canvas_id, now);
     // The camera as the app holds it before this frame's input. The canvas works on its own copy
@@ -6594,23 +6618,25 @@ pub(crate) fn finish_gesture(app: &mut PhotocraftApp, d: Drag) {
     }
 }
 
-/// Where window `id`'s canvas was laid out in its own viewport's points, as of the last frame
-/// (what the tests aim their pointer at).
+/// Where window `id`'s canvas was laid out in its own viewport's points, rulers included, as of
+/// the last frame (what the tests aim their pointer at).
 #[cfg(test)]
 pub(crate) fn window_canvas_rect(ctx: &egui::Context, id: u64) -> Option<Rect> {
     ctx.data(|d| d.get_temp(window_canvas_id(id)))
 }
 
+/// The temporary-data key [`extra_windows`] stores window `id`'s canvas rectangle under.
 fn window_canvas_id(id: u64) -> egui::Id {
     egui::Id::new(("docwin-canvas", id))
 }
 
 /// One document window's canvas (#6022). In a window of the active document the tools work, in
 /// the window's own view. A press in a window of another document brings that document forward
-/// first, as a click on a tile does in a tiled layout, and goes on to use the tool there.
+/// first, as a click on a tile does in a tiled layout, and goes on to use the tool there. While a
+/// dialog is open the press changes nothing: the dialog stays with the document it was opened on.
 fn window_canvas(app: &mut PhotocraftApp, ui: &mut egui::Ui, doc: usize, rect: Rect, view: View) -> View {
     let pressed = ui.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| rect.contains(p)));
-    if pressed && app.session.active_index() != Some(doc) {
+    if pressed && app.ui.dialogs.is_empty() && app.session.active_index() != Some(doc) {
         app.session.set_active(doc);
     }
     if app.session.active_index() != Some(doc) {
@@ -6625,14 +6651,14 @@ fn window_canvas(app: &mut PhotocraftApp, ui: &mut egui::Ui, doc: usize, rect: R
 }
 
 /// The app slots the tools read "the canvas" from: the active document's view, the display scale,
-/// the canvas rectangle (`ViewXform::active`, `point_zoom`, drag and drop), the rulers' inset and
-/// where the pointer is in the document. They hold the main window's. While a window's tools run
-/// they hold the window's instead, and the main window's come back afterwards.
+/// the canvas rectangle (`ViewXform::active`, `point_zoom`, drag and drop) and where the pointer
+/// is in the document. They hold the main window's. While a window's tools run they hold the
+/// window's instead, and the main window's come back afterwards. View › Rulers stays as it is:
+/// the window has rulers too (#6017), so its canvas is inset by them like the main one.
 struct MainCanvas {
     view: View,
     ppp: f32,
     rect: Rect,
-    rulers: bool,
     hover: Option<[f64; 2]>,
 }
 
@@ -6641,23 +6667,16 @@ impl MainCanvas {
     /// document has no view (nothing is changed).
     fn lend(app: &mut PhotocraftApp, doc: usize, view: &View, rect: Rect) -> Option<Self> {
         let main_view = std::mem::replace(app.ui.views.get_mut(doc)?, view.clone());
-        Some(Self {
-            view: main_view,
-            ppp: app.ppp,
-            rect: std::mem::replace(&mut app.last_canvas_rect, rect),
-            // The window has no rulers, so its canvas isn't inset by them.
-            rulers: std::mem::replace(&mut app.ui.extras.rulers, false),
-            hover: app.hover_doc,
-        })
+        Some(Self { view: main_view, ppp: app.ppp, rect: std::mem::replace(&mut app.last_canvas_rect, rect), hover: app.hover_doc })
     }
 
+    /// Give the main window its slots back once the window's tools have run.
     fn restore(self, app: &mut PhotocraftApp, doc: usize) {
         if let Some(slot) = app.ui.views.get_mut(doc) {
             *slot = self.view;
         }
         app.ppp = self.ppp;
         app.last_canvas_rect = self.rect;
-        app.ui.extras.rulers = self.rulers;
         // One pointer: the window's position when it is over the window, else the main canvas's.
         app.hover_doc = app.hover_doc.or(self.hover);
     }

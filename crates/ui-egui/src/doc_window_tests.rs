@@ -43,13 +43,16 @@ fn harness(tool: Tool) -> Harness<'static, PhotocraftApp> {
     h
 }
 
-/// Where document point `(x, y)` is on screen in the window (100 %, centred on (200, 150)).
+/// Where document point `(x, y)` is on screen in the window (100 %, centred on (200, 150) inside
+/// the rulers when they are shown).
 fn in_window(h: &Harness<'static, PhotocraftApp>, x: f32, y: f32) -> Pos2 {
     let rect = crate::canvas::window_canvas_rect(&h.ctx, WINDOW).expect("the window's canvas was laid out");
+    let rect = crate::rulers::content_rect(h.state(), rect);
     assert!(rect.width() > 120.0 && rect.height() > 90.0, "room to draw in: {rect:?}");
     rect.center() + vec2(x - 200.0, y - 150.0)
 }
 
+/// Press or release the left button at `p`.
 fn button(h: &mut Harness<'static, PhotocraftApp>, p: Pos2, pressed: bool) {
     h.event(egui::Event::PointerButton { pos: p, button: PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
     h.run_steps(2);
@@ -68,16 +71,25 @@ fn drag(h: &mut Harness<'static, PhotocraftApp>, from: Pos2, to: Pos2) {
     h.run_steps(2);
 }
 
+/// The document points of the one `paint.stroke` the journal holds.
+fn stroke_points(h: &Harness<'static, PhotocraftApp>) -> Vec<(f64, f64)> {
+    let strokes: Vec<_> = h.state().session.journal.iter().filter(|(id, _)| id == "paint.stroke").collect();
+    assert_eq!(strokes.len(), 1, "one stroke");
+    strokes[0].1["points"].as_array().unwrap().iter().map(|pt| (pt[0].as_f64().unwrap(), pt[1].as_f64().unwrap())).collect()
+}
+
 /// [`drag`] between two document points.
 fn drag_doc(h: &mut Harness<'static, PhotocraftApp>, from: (f32, f32), to: (f32, f32)) {
     let (a, b) = (in_window(h, from.0, from.1), in_window(h, to.0, to.1));
     drag(h, a, b);
 }
 
+/// The active document's selection bounds (empty without one).
 fn selection(h: &Harness<'static, PhotocraftApp>) -> Rect {
     h.state().session.active().unwrap().doc.selection.as_ref().map_or(Rect::EMPTY, |s| s.content_bounds())
 }
 
+/// The active layer's alpha at document pixel `(x, y)` of the active document.
 fn alpha_at_doc(h: &Harness<'static, PhotocraftApp>, x: i32, y: i32) -> f32 {
     let st = h.state().session.active().unwrap();
     st.doc.layer(st.active_layer.unwrap()).unwrap().surface().unwrap().rgba(x, y)[3]
@@ -107,6 +119,21 @@ fn a_brush_stroke_in_a_document_window_paints_the_document() {
     }
     assert!(alpha_at_doc(&h, 200, 150) > 0.9, "the middle of the stroke is painted");
     assert_eq!(alpha_at_doc(&h, 200, 40), 0.0, "and nothing beside it");
+}
+
+#[test]
+fn a_brush_stroke_in_a_window_with_rulers_lands_under_the_pointer() {
+    // The window shows the rulers too (#6017), so its image sits inside them while its tools run,
+    // as it does in every other frame.
+    let mut h = harness(Tool::Brush);
+    h.state_mut().ui.extras.rulers = true;
+    h.run_steps(4);
+    drag_doc(&mut h, (120.0, 150.0), (280.0, 150.0));
+    for (x, y) in stroke_points(&h) {
+        assert!((119.0..=281.0).contains(&x) && (y - 150.0).abs() < 1.0, "a point under the pointer: ({x}, {y})");
+    }
+    assert!(alpha_at_doc(&h, 200, 150) > 0.9);
+    assert!(h.state().ui.extras.rulers, "and View › Rulers stays on");
 }
 
 #[test]
@@ -172,6 +199,47 @@ fn a_window_is_inert_while_a_dialog_is_open_in_the_main_window() {
 }
 
 #[test]
+fn a_press_in_another_documents_window_under_a_dialog_keeps_the_active_document() {
+    // The dialog belongs to the document it was opened on.
+    let mut h = harness(Tool::Brush);
+    h.state_mut().run("file.new", json!({"width": 400, "height": 300})).unwrap();
+    h.state_mut().run("layer.new.layer", json!({})).unwrap();
+    h.run_steps(4);
+    assert_eq!(h.state().session.active_index(), Some(1));
+    h.state_mut().ui.open_dialog(crate::state::DialogKind::About, Default::default());
+    drag_doc(&mut h, (120.0, 150.0), (280.0, 150.0));
+    assert_eq!(h.state().session.active_index(), Some(1), "the press doesn't bring the window's document forward");
+    assert!(h.state().session.journal.iter().all(|(id, _)| id != "paint.stroke"));
+}
+
+#[test]
+fn a_drag_whose_window_closes_ends_where_it_was() {
+    // Nothing else carries the gesture on: the main canvas, at another zoom, would map the pointer
+    // somewhere else in the document.
+    let mut h = harness(Tool::Brush);
+    let (from, to) = (in_window(&h, 120.0, 150.0), in_window(&h, 200.0, 150.0));
+    h.event(egui::Event::PointerMoved(from));
+    h.run_steps(2);
+    button(&mut h, from, true);
+    for i in 1..=4 {
+        h.event(egui::Event::PointerMoved(from + (to - from) * (i as f32 / 4.0)));
+        h.run_steps(1);
+    }
+    assert!(h.state().drag.is_some(), "the stroke is in flight");
+    h.state_mut().ui.windows.clear();
+    // The pointer, still down, moves over the main canvas while the window's claim runs out.
+    h.event(egui::Event::PointerMoved(egui::pos2(300.0, 300.0)));
+    h.run_steps((crate::canvas::DRAG_OWNER_TTL * 60.0) as usize + 10);
+    assert!(h.state().drag.is_none(), "the abandoned stroke ended");
+    for (x, y) in stroke_points(&h) {
+        assert!((119.0..=201.0).contains(&x) && (y - 150.0).abs() < 1.0, "only the window's points: ({x}, {y})");
+    }
+    button(&mut h, egui::pos2(300.0, 300.0), false);
+    let strokes = h.state().session.journal.iter().filter(|(id, _)| id == "paint.stroke").count();
+    assert_eq!(strokes, 1, "the release adds no second stroke");
+}
+
+#[test]
 fn every_tool_survives_a_drag_in_a_document_window() {
     // A press and drag over the image: an error or a no-op for a tool that needs more than that,
     // never a panic.
@@ -186,10 +254,13 @@ fn every_tool_survives_a_drag_in_a_document_window() {
 
 #[test]
 fn a_drag_belongs_to_its_canvas_until_that_canvas_stops_running() {
-    use crate::canvas::{DRAG_OWNER_TTL, drag_is_foreign};
+    use crate::canvas::{DRAG_OWNER_TTL, drag_is_abandoned, drag_is_foreign};
     let (a, b) = (egui::Id::new("a"), egui::Id::new("b"));
     assert!(!drag_is_foreign(None, a, 10.0), "a drag no canvas started (the control channel's) is anyone's");
     assert!(!drag_is_foreign(Some((a, 10.0)), a, 10.5), "its own canvas carries it on");
     assert!(drag_is_foreign(Some((a, 10.0)), b, 10.5), "another canvas leaves it alone");
     assert!(!drag_is_foreign(Some((a, 10.0)), b, 10.0 + DRAG_OWNER_TTL), "but not one whose canvas stopped running");
+    assert!(drag_is_abandoned(Some((a, 10.0)), b, 10.0 + DRAG_OWNER_TTL), "which is abandoned");
+    assert!(!drag_is_abandoned(Some((a, 10.0)), a, 10.0 + DRAG_OWNER_TTL), "a canvas never abandons its own drag");
+    assert!(!drag_is_abandoned(None, a, 100.0), "nor is a drag no canvas started");
 }
