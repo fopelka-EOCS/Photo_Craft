@@ -139,6 +139,7 @@ mod tests {
         for (make, model, row) in [
             ("Canon", "Canon EOS 400D DIGITAL", "Digital Rebel XTi"),
             ("Canon", "Canon EOS REBEL T3i", "EOS 600D"),
+            ("Canon", "Canon EOS R6 Mark II", "EOS R6m2"),
             ("NIKON CORPORATION", "NIKON D800", "D800E"),
             ("SONY", "ILCE-7RM4A", "ILCE-7RM4"),
             ("FUJIFILM", "GFX100S", "GFX 100"),

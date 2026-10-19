@@ -126,8 +126,10 @@ Fujifilm, 5 others) plus their aliases and same-sensor bodies (the X-T30, X-T30 
 X-S10 and X-E4 take the X-T3's), DNG ColorMatrix1/2 and ForwardMatrix1/2 for Standard Illuminant A
 and D65, fitted by LightCraft to the cameras' measured spectral sensitivities from rawtoaces-data
 (Academy Software Foundation, Apache-2.0; the table is copied from LightCraft, see `ATTRIBUTION.md`).
-When no fitted look is used (the fit was rejected), `develop` uses them through the DNG colour model
-instead of the neutral fallback and notes "colour from the measured spectral sensitivities of …".
+When no fitted look is used (the fit was rejected) and the file carries no calibration of its own
+(a DNG's, or a measured profile in `cameras.rs`, which always win), `develop` uses them through the
+DNG colour model instead of the neutral fallback and notes "colour from the measured spectral
+sensitivities of …".
 When the camera's JPEG is black and white (a film simulation such as Acros, a monochrome picture
 style), `fit_look` keeps the matrices' colour and fits only the tone curve, from the lightness of
 the same cells; it is used when it lowers the held-out mean L\* error to at most 85 % of the

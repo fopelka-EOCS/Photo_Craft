@@ -989,10 +989,7 @@ mod tests {
             if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
         };
         let enc = |v: f64| ((if v <= 0.0031308 { 12.92 * v } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 }) * 255.0).round() as u8;
-        let grey: Vec<u8> = rgb
-            .chunks(3)
-            .flat_map(|p| [enc(0.2126 * dec(p[0]) + 0.7152 * dec(p[1]) + 0.0722 * dec(p[2])); 3])
-            .collect();
+        let grey: Vec<u8> = rgb.chunks(3).flat_map(|p| [enc(0.2126 * dec(p[0]) + 0.7152 * dec(p[1]) + 0.0722 * dec(p[2])); 3]).collect();
         let reference = Reference { width: w as u32, height: h as u32, rgb: &grey };
 
         // A camera without measured matrices: nothing to fit.
