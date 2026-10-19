@@ -1,11 +1,13 @@
 use photocraft_color::{Color, PixelFormat, SampleType};
 use photocraft_doc::TextLayer;
-use photocraft_doc::text::{Caps, CharStyle, FontFeature, Orientation, ParagraphRun, ParagraphStyle, TextAlign, TextDirection, TextRun, TextShape};
+use photocraft_doc::text::{
+    Caps, CharStyle, FitLine, FontFeature, Orientation, ParagraphRun, ParagraphStyle, TextAlign, TextDirection, TextFit, TextRun, TextShape,
+};
 use photocraft_geom::Affine;
 
 use crate::{TextEngine, fonts};
 
-fn point(text: &str, size_pt: f32) -> TextLayer {
+pub(crate) fn point(text: &str, size_pt: f32) -> TextLayer {
     TextLayer { text: text.into(), font_family: "Inter".into(), size_pt, ..Default::default() }
 }
 
@@ -2062,6 +2064,703 @@ fn hyphenless_postscript_names_split_trailing_styles() {
         let r = fonts::guess_from_postscript(ps);
         assert_eq!((r.family.as_str(), r.weight, r.italic), (family, weight, italic), "{ps}");
     }
+}
+
+/// Closed polygon in text space.
+fn area_poly(pts: &[(f64, f64)]) -> photocraft_doc::vector::Path {
+    photocraft_doc::vector::Path::new(vec![photocraft_doc::vector::Subpath::polygon(pts)])
+}
+
+/// An ellipse from four kappa curves inside `[x, y, w, h]`.
+pub(crate) fn area_ellipse(x: f64, y: f64, w: f64, h: f64) -> photocraft_doc::vector::Path {
+    use photocraft_doc::vector::{Knot, Subpath};
+    use photocraft_geom::Point;
+    let (rx, ry, cx, cy) = (w / 2.0, h / 2.0, x + w / 2.0, y + h / 2.0);
+    let (kx, ky) = (0.552_284_75 * rx, 0.552_284_75 * ry);
+    let p = Point::new;
+    let knots = vec![
+        Knot::smooth(p(cx, y), p(cx - kx, y), p(cx + kx, y)),
+        Knot::smooth(p(x + w, cy), p(x + w, cy - ky), p(x + w, cy + ky)),
+        Knot::smooth(p(cx, y + h), p(cx + kx, y + h), p(cx - kx, y + h)),
+        Knot::smooth(p(x, cy), p(x, cy + ky), p(x, cy - ky)),
+    ];
+    photocraft_doc::vector::Path::new(vec![Subpath { closed: true, knots, op: Default::default() }])
+}
+
+const BUBBLE_TEXT: &str = "Well, that went better than expected. Now where did the cat hide the keys this time?";
+
+/// Every laid-out line sits inside a span of the shape across its band.
+fn assert_lines_inside(l: &crate::TextLayout, path: &photocraft_doc::vector::Path) {
+    let a = crate::area::AreaShape::new(path, false).unwrap();
+    for line in &l.lines {
+        let spans = a.spans(line.baseline - line.ascent, line.baseline + line.descent, 0.0);
+        assert!(spans.iter().any(|&(s0, s1)| line.x0 >= s0 - 0.5 && line.x1 <= s1 + 0.5), "{line:?} not inside {spans:?}");
+    }
+}
+
+#[test]
+fn area_text_stays_inside_an_ellipse() {
+    let mut e = TextEngine::new();
+    let mut t = point(BUBBLE_TEXT, 18.0);
+    let path = area_ellipse(0.0, 0.0, 260.0, 160.0);
+    t.shape = TextShape::Area { path: path.clone() };
+    let l = e.layout(&t, 72.0);
+    assert!(l.lines.len() >= 4, "{}", l.lines.len());
+    assert_lines_inside(&l, &path);
+    // The top of an ellipse is too narrow for a line at its very edge: the first line starts lower.
+    assert!(l.lines[0].baseline - l.lines[0].ascent > 1.0, "{:?}", l.lines[0]);
+    // Lines go down the shape in text order.
+    for w in l.lines.windows(2) {
+        assert!(w[1].baseline >= w[0].baseline && w[1].range.start >= w[0].range.end, "{w:?}");
+    }
+    // Middle lines are wider than the first (the ellipse is widest in the middle).
+    let width = |i: usize| l.lines[i].x1 - l.lines[i].x0;
+    assert!(width(l.lines.len() / 2) > width(0), "{l:?}");
+}
+
+#[test]
+fn area_overflow_is_hidden() {
+    let mut e = TextEngine::new();
+    let mut t = point(&BUBBLE_TEXT.repeat(10), 14.0);
+    let path = area_ellipse(0.0, 0.0, 200.0, 80.0);
+    t.shape = TextShape::Area { path: path.clone() };
+    let l = e.layout(&t, 72.0);
+    assert!(!l.lines.is_empty());
+    assert!(l.lines.last().unwrap().range.end < t.text.len(), "the rest is hidden");
+    assert_lines_inside(&l, &path);
+}
+
+#[test]
+fn area_lines_center_in_their_span() {
+    let mut e = TextEngine::new();
+    let mut t = point(BUBBLE_TEXT, 12.0);
+    t.paragraphs = vec![ParagraphRun { len: t.text.len(), style: ParagraphStyle { align: TextAlign::Center, ..Default::default() } }];
+    // A diamond: every row's span is centred on x = 100.
+    t.shape = TextShape::Area { path: area_poly(&[(100.0, 0.0), (200.0, 100.0), (100.0, 200.0), (0.0, 100.0)]) };
+    let l = e.layout(&t, 72.0);
+    assert!(l.lines.len() >= 3);
+    for line in &l.lines {
+        assert!(((line.x0 + line.x1) / 2.0 - 100.0).abs() < 1.5, "{line:?}");
+    }
+}
+
+/// Horizontal scale applies after shaping, so area lines break at the span width divided by it:
+/// widened text stays inside the shape and centred lines stay centred (#5565).
+#[test]
+fn horizontally_scaled_area_text_stays_inside_its_spans() {
+    let mut e = TextEngine::new();
+    let style = CharStyle { font_family: "Inter".into(), size_pt: 12.0, horizontal_scale: 1.5, ..Default::default() };
+    let mut t = styled(BUBBLE_TEXT, style);
+    let path = area_ellipse(0.0, 0.0, 240.0, 200.0);
+    t.shape = TextShape::Area { path: path.clone() };
+    let l = e.layout(&t, 72.0);
+    assert!(l.lines.len() >= 3, "{:?}", l.lines);
+    assert_lines_inside(&l, &path);
+    t.paragraphs = vec![ParagraphRun { len: t.text.len(), style: ParagraphStyle { align: TextAlign::Center, ..Default::default() } }];
+    t.shape = TextShape::Area { path: area_poly(&[(100.0, 0.0), (200.0, 100.0), (100.0, 200.0), (0.0, 100.0)]) };
+    let l = e.layout(&t, 72.0);
+    assert!(l.lines.len() >= 2, "{:?}", l.lines);
+    for line in &l.lines {
+        assert!(((line.x0 + line.x1) / 2.0 - 100.0).abs() < 1.5, "{line:?}");
+    }
+}
+
+#[test]
+fn area_rows_split_around_a_hole() {
+    use photocraft_doc::vector::{PathOp, Subpath};
+    let mut e = TextEngine::new();
+    let mut t = point(&BUBBLE_TEXT.repeat(6), 12.0);
+    let path = photocraft_doc::vector::Path::new(vec![
+        Subpath::polygon(&[(0.0, 0.0), (300.0, 0.0), (300.0, 300.0), (0.0, 300.0)]),
+        Subpath::polygon(&[(120.0, 100.0), (180.0, 100.0), (180.0, 200.0), (120.0, 200.0)]).with_op(PathOp::Subtract),
+    ]);
+    t.shape = TextShape::Area { path: path.clone() };
+    let l = e.layout(&t, 72.0);
+    assert_lines_inside(&l, &path);
+    // Some baseline carries two lines: one left of the hole, one right of it, left first.
+    let w = l.lines.windows(2).find(|w| (w[0].baseline - w[1].baseline).abs() < 1e-3).expect("a row split around the hole");
+    let (left, right) = (&w[0], &w[1]);
+    assert!(left.x1 <= 120.5 && right.x0 >= 179.5, "{left:?} {right:?}");
+}
+
+#[test]
+fn vertical_area_text_stays_inside() {
+    use photocraft_doc::text::Orientation;
+    let mut e = TextEngine::new();
+    let mut t = point(BUBBLE_TEXT, 12.0);
+    t.orientation = Orientation::Vertical;
+    t.shape = TextShape::Area { path: area_poly(&[(0.0, 0.0), (120.0, 0.0), (120.0, 200.0), (0.0, 200.0)]) };
+    let l = e.layout(&t, 72.0);
+    assert!(l.lines.len() >= 2, "several columns");
+    for g in &l.glyphs {
+        assert!(g.x > -1.0 && g.x < 121.0 && g.y > -1.0 && g.y < 201.0, "{g:?}");
+    }
+}
+
+#[test]
+fn area_without_room_lays_out_nothing_and_a_bad_path_lays_out_as_point_text() {
+    let mut e = TextEngine::new();
+    let mut t = point("Hello", 40.0);
+    // 10 px tall: no 40 pt line fits.
+    t.shape = TextShape::Area { path: area_poly(&[(0.0, 0.0), (300.0, 0.0), (300.0, 10.0), (0.0, 10.0)]) };
+    assert!(e.layout(&t, 72.0).lines.is_empty());
+    // An open path encloses nothing (only reachable from a hostile file): point text, no panic.
+    t.shape = TextShape::Area { path: photocraft_doc::vector::Path::new(vec![photocraft_doc::vector::Subpath::polyline(&[(0.0, 0.0), (9.0, 9.0)])]) };
+    let point_layout = e.layout(&point("Hello", 40.0), 72.0);
+    assert_eq!(e.layout(&t, 72.0).lines.len(), point_layout.lines.len());
+}
+
+#[test]
+fn area_word_wider_than_every_span_overflows_instead_of_hiding_the_text() {
+    use photocraft_doc::vector::Subpath;
+    let mut e = TextEngine::new();
+    // Two 40 px columns 120 px apart: their bounding box is 200 px wide, but no span is wider
+    // than 40 px, so no row can ever hold the long word.
+    let mut t = point("Wonderfulness is a long word", 12.0);
+    let path = photocraft_doc::vector::Path::new(vec![
+        Subpath::polygon(&[(0.0, 0.0), (40.0, 0.0), (40.0, 200.0), (0.0, 200.0)]),
+        Subpath::polygon(&[(160.0, 0.0), (200.0, 0.0), (200.0, 200.0), (160.0, 200.0)]),
+    ]);
+    t.shape = TextShape::Area { path };
+    let l = e.layout(&t, 72.0);
+    let first = l.lines.first().expect("the text is shown");
+    // The word overflows its 40 px span, as in a text box, on the first row.
+    assert!(first.x1 - first.x0 > 40.0 && first.x1 - first.x0 < 200.0, "{first:?}");
+    assert!(first.x0 >= -0.5, "{first:?}");
+    // Nothing is hidden.
+    assert_eq!(l.lines.last().map(|line| line.range.end), Some(t.text.len()), "{:?}", l.lines);
+}
+
+#[test]
+fn single_size_area_paragraph_breaks_in_one_pass() {
+    let mut e = TextEngine::new();
+    let mut t = point(BUBBLE_TEXT, 12.0);
+    t.shape = TextShape::Area { path: area_poly(&[(0.0, 0.0), (300.0, 0.0), (300.0, 300.0), (0.0, 300.0)]) };
+    crate::layout::AREA_PASSES.with(|c| c.set(0));
+    let l = e.layout(&t, 72.0);
+    assert!(l.lines.len() >= 2);
+    // Rows are planned with the paragraph's real metrics: no re-plan and no skipped spans.
+    assert_eq!(crate::layout::AREA_PASSES.with(|c| c.get()), 1);
+}
+
+#[test]
+fn area_word_skips_a_narrow_span_for_a_wider_one_on_the_same_row() {
+    let mut e = TextEngine::new();
+    let mut t = point("Wonderful things happen in speech bubbles every single day.", 12.0);
+    // A U: a 24 px left arm and a wide right arm above y = 150, joined below it.
+    let path = area_poly(&[(0.0, 0.0), (24.0, 0.0), (24.0, 150.0), (80.0, 150.0), (80.0, 0.0), (300.0, 0.0), (300.0, 200.0), (0.0, 200.0)]);
+    t.shape = TextShape::Area { path: path.clone() };
+    let l = e.layout(&t, 72.0);
+    assert_lines_inside(&l, &path);
+    let first = l.lines.first().expect("the text is shown");
+    // "Wonderful" is wider than the left arm: it starts the text in the right arm, on the first
+    // row, and nothing is put in the left arm's span on that row.
+    assert_eq!(first.range.start, 0);
+    assert!(first.x0 >= 79.5, "{first:?}");
+    assert!(first.baseline < 30.0, "first row: {first:?}");
+    assert_eq!(l.lines.iter().filter(|line| (line.baseline - first.baseline).abs() < 1e-3).count(), 1, "{:?}", l.lines);
+    assert_eq!(l.lines.last().map(|line| line.range.end), Some(t.text.len()), "nothing hidden");
+}
+
+#[test]
+fn area_stacks_paragraphs_with_leading_and_space_before() {
+    let mut e = TextEngine::new();
+    let text = "First paragraph of the bubble text.\nSecond paragraph goes right after it.";
+    let mut t = point(text, 12.0);
+    let style = ParagraphStyle { space_before_pt: 6.0, ..Default::default() };
+    let leading = style.auto_leading * 12.0;
+    t.paragraphs = vec![ParagraphRun { len: text.len(), style }];
+    let path = area_poly(&[(0.0, 0.0), (120.0, 0.0), (120.0, 300.0), (0.0, 300.0)]);
+    t.shape = TextShape::Area { path: path.clone() };
+    let l = e.layout(&t, 72.0);
+    assert_lines_inside(&l, &path);
+    let (p0, p1): (Vec<_>, Vec<_>) = l.lines.iter().partition(|line| line.paragraph == 0);
+    assert!(p0.len() >= 2 && p1.len() >= 2, "both paragraphs wrap: {:?}", l.lines);
+    assert!(p1.iter().all(|line| line.paragraph == 1));
+    // The second paragraph starts right after the break, one leading plus space before lower.
+    let second = text.find('\n').unwrap() + 1;
+    assert_eq!(p1[0].range.start, second);
+    let gap = p1[0].baseline - p0.last().unwrap().baseline;
+    assert!((gap - (leading + 6.0)).abs() < 1.0, "gap {gap}, want {}", leading + 6.0);
+    // Lines within a paragraph are one leading apart.
+    for w in p0.windows(2) {
+        assert!((w[1].baseline - w[0].baseline - leading).abs() < 1.0, "{w:?}");
+    }
+    assert_eq!(l.lines.last().map(|line| line.range.end), Some(text.len()));
+}
+
+#[test]
+fn area_justify_fills_each_span_but_the_last_line() {
+    let mut e = TextEngine::new();
+    let mut t = point(&BUBBLE_TEXT.repeat(2), 12.0);
+    t.paragraphs = vec![ParagraphRun { len: t.text.len(), style: ParagraphStyle { align: TextAlign::JustifyLeft, ..Default::default() } }];
+    let path = area_ellipse(0.0, 0.0, 260.0, 160.0);
+    t.shape = TextShape::Area { path: path.clone() };
+    let l = e.layout(&t, 72.0);
+    assert!(l.lines.len() >= 4, "{}", l.lines.len());
+    assert_lines_inside(&l, &path);
+    let a = crate::area::AreaShape::new(&path, false).unwrap();
+    let span_of = |line: &crate::LineInfo| {
+        a.spans(line.baseline - line.ascent, line.baseline + line.descent, 0.0)
+            .into_iter()
+            .find(|&(s0, s1)| line.x0 >= s0 - 0.5 && line.x1 <= s1 + 0.5)
+            .unwrap()
+    };
+    let (last, rest) = l.lines.split_last().unwrap();
+    for line in rest {
+        // Justified: the glyphs run from one edge of the line's span to the other.
+        let (s0, s1) = span_of(line);
+        let ink = l.glyphs.iter().filter(|g| (g.y - line.baseline).abs() < 1e-3).map(|g| g.x).fold(f32::MIN, f32::max);
+        assert!((line.x0 - s0).abs() < 1.0, "{line:?} in {s0}..{s1}");
+        assert!(ink > s1 - 12.0, "last glyph at {ink}, span ends {s1}: {line:?}");
+    }
+    // The last line is set flush left, not stretched.
+    let (s0, s1) = span_of(last);
+    assert!((last.x0 - s0).abs() < 1.0 && last.x1 < s1 - 12.0, "{last:?} in {s0}..{s1}");
+}
+
+// Dynamic Text: overflow reporting and fit gaps.
+
+pub(crate) fn box_layer(text: &str, size_pt: f32, (x, y, width, height): (f32, f32, f32, f32)) -> TextLayer {
+    let mut t = point(text, size_pt);
+    t.shape = TextShape::Box { x, y, width, height };
+    t
+}
+
+pub(crate) fn area_ellipse_layer(text: &str, size_pt: f32, w: f64, h: f64) -> TextLayer {
+    let mut t = point(text, size_pt);
+    t.shape = TextShape::Area { path: area_ellipse(0.0, 0.0, w, h) };
+    t
+}
+
+fn layout_of(t: &TextLayer) -> crate::TextLayout {
+    TextEngine::new().layout(t, 72.0)
+}
+
+#[test]
+fn fit_none_layout_is_unchanged_by_gaps_code() {
+    let t = box_layer("alpha beta gamma delta", 20.0, (0.0, 0.0, 150.0, 300.0));
+    let a = layout_of(&t);
+    let mut t2 = t.clone();
+    t2.fit = Some(TextFit::default());
+    let b = layout_of(&t2);
+    // fit Some with zero gaps uses natural line height instead of auto leading, so only the
+    // fit-None layout is pinned to the old numbers: compare against a snapshot taken before
+    // this change.
+    assert_eq!(a.lines.len(), 2);
+    // Baselines and extents read before the gaps code existed.
+    for (line, (baseline, x0, x1)) in a.lines.iter().zip([(14.550781, 0.0, 98.7793), (38.55078, 0.0, 122.30469)]) {
+        assert!((line.baseline - baseline).abs() < 1e-3 && (line.x0 - x0).abs() < 1e-3 && (line.x1 - x1).abs() < 1e-3, "{line:?}");
+    }
+    assert!(!a.overflowed);
+    assert!(!b.lines.is_empty());
+}
+
+#[test]
+fn box_overflow_is_reported() {
+    let mut t = box_layer("one two three four five six seven eight nine ten", 24.0, (0.0, 0.0, 120.0, 40.0));
+    assert!(layout_of(&t).overflowed, "ten words at 24pt can't fit 120x40");
+    t.shape = TextShape::Box { x: 0.0, y: 0.0, width: 2000.0, height: 2000.0 };
+    assert!(!layout_of(&t).overflowed);
+}
+
+#[test]
+fn too_wide_word_breaks_and_is_not_overflow() {
+    // Broken at the box edge (#6694), the word fits a tall enough box.
+    let l = layout_of(&box_layer("Supercalifragilistic", 48.0, (0.0, 0.0, 60.0, 2000.0)));
+    assert!(l.lines.len() > 1 && !l.overflowed, "{:?}", l.lines);
+}
+
+#[test]
+fn area_overflow_is_reported() {
+    let t = area_ellipse_layer(&"word ".repeat(200), 18.0, 200.0, 120.0);
+    assert!(layout_of(&t).overflowed);
+    let t = area_ellipse_layer("hi", 18.0, 200.0, 120.0);
+    assert!(!layout_of(&t).overflowed);
+}
+
+#[test]
+fn area_word_wider_than_every_span_is_overflow() {
+    use photocraft_doc::vector::Subpath;
+    // Two 40 px columns: the long word is shown overflowing its span, not hidden.
+    let mut t = point("Wonderfulness is a long word", 12.0);
+    t.shape = TextShape::Area {
+        path: photocraft_doc::vector::Path::new(vec![
+            Subpath::polygon(&[(0.0, 0.0), (40.0, 0.0), (40.0, 200.0), (0.0, 200.0)]),
+            Subpath::polygon(&[(160.0, 0.0), (200.0, 0.0), (200.0, 200.0), (160.0, 200.0)]),
+        ]),
+    };
+    let l = layout_of(&t);
+    assert_eq!(l.lines.last().map(|line| line.range.end), Some(t.text.len()), "nothing hidden");
+    assert!(l.overflowed);
+}
+
+#[test]
+fn point_and_path_text_never_overflow() {
+    let t = point(&"word ".repeat(200), 48.0);
+    assert!(!layout_of(&t).overflowed);
+}
+
+#[test]
+fn line_gap_spreads_lines() {
+    let mut t = box_layer(
+        "a
+b",
+        20.0,
+        (0.0, 0.0, 400.0, 400.0),
+    );
+    t.fit = Some(TextFit { word_gap: 0.0, line_gap: 0.0, lines: vec![], area_scale: 1.0 });
+    let l0 = layout_of(&t);
+    t.fit = Some(TextFit { word_gap: 0.0, line_gap: 100.0, lines: vec![], area_scale: 1.0 });
+    let l1 = layout_of(&t);
+    let step = |l: &crate::TextLayout| l.lines[1].baseline - l.lines[0].baseline;
+    let px = 20.0 * l0.px_per_pt;
+    assert!((step(&l1) - step(&l0) - px).abs() < 0.5, "100% line gap adds one size: {} vs {}", step(&l1), step(&l0));
+}
+
+#[test]
+fn word_gap_widens_lines() {
+    let mut t = box_layer("aa bb cc dd", 20.0, (0.0, 0.0, 4000.0, 400.0));
+    t.fit = Some(TextFit::default());
+    let l0 = layout_of(&t);
+    let w0 = l0.lines[0].x1 - l0.lines[0].x0;
+    // The word gap is a percent of each space's own width: +100 % doubles every space.
+    let space = l0.clusters.iter().find(|c| c.range.start == 2).map(|c| c.advance).unwrap();
+    assert!(space > 1.0 && space < 0.5 * 20.0 * l0.px_per_pt, "a space is narrower than the size: {space}");
+    t.fit = Some(TextFit { word_gap: 100.0, line_gap: 0.0, lines: vec![], area_scale: 1.0 });
+    let w1 = {
+        let l = layout_of(&t);
+        l.lines[0].x1 - l.lines[0].x0
+    };
+    assert!((w1 - w0 - 3.0 * space).abs() < 1.0, "three spaces each widen by one space: {w0} -> {w1} (space {space})");
+}
+
+#[test]
+fn hanging_first_line_indent_that_fits_is_not_overflow() {
+    // Photoshop's hanging indent: the first line starts 30 px left of the others and is 30 px
+    // wider than them.
+    // Short words fill each line to within a few px of its width.
+    let t = box_layer(&"ab ".repeat(80), 12.0, (0.0, 0.0, 200.0, 1000.0));
+    let t = with_para(t, ParagraphStyle { start_indent_pt: 30.0, first_line_indent_pt: -30.0, ..Default::default() });
+    let l = layout_of(&t);
+    assert!(l.lines.len() >= 2);
+    assert!(l.lines[0].x1 - l.lines[0].x0 > 170.5, "the first line uses its extra width: {:?}", l.lines[0]);
+    assert!(!l.overflowed, "{:?}", l.lines);
+}
+
+#[test]
+fn first_word_too_wide_for_a_positive_first_line_indent_breaks_inside_the_box() {
+    // The word is broken at the indented box edge (#6694), so nothing overflows.
+    let t = box_layer("Wonderfulness is a long word", 12.0, (0.0, 0.0, 200.0, 1000.0));
+    let t = with_para(t, ParagraphStyle { first_line_indent_pt: 150.0, ..Default::default() });
+    let l = layout_of(&t);
+    assert!(l.lines[0].x1 <= 200.5, "{:?}", l.lines[0]);
+    assert!(!l.overflowed, "{:?}", l.lines);
+}
+
+#[test]
+fn horizontal_scale_does_not_count_as_overflow() {
+    let style = CharStyle { font_family: "Inter".into(), size_pt: 12.0, horizontal_scale: 1.2, ..Default::default() };
+    let mut t = styled(BUBBLE_TEXT, style);
+    t.shape = TextShape::Box { x: 0.0, y: 0.0, width: 200.0, height: 1000.0 };
+    let l = layout_of(&t);
+    assert!(l.lines.len() >= 2);
+    assert!(width(&l) <= 200.5, "lines break at the scaled width (#5565): {:?}", l.lines);
+    assert!(!l.overflowed, "every line is inside the box");
+}
+
+#[test]
+fn hidden_empty_trailing_line_is_not_overflow() {
+    // Two 20 pt lines fill a 40 px box (baselines 14.6 and 38.6); the empty paragraph after
+    // the final break would sit below it.
+    let t = box_layer("alpha beta gamma delta\n", 20.0, (0.0, 0.0, 150.0, 40.0));
+    let l = layout_of(&t);
+    assert_eq!(l.lines.len(), 2, "{:?}", l.lines);
+    assert!(!l.overflowed);
+    let t = box_layer("alpha beta gamma delta\n\n", 20.0, (0.0, 0.0, 150.0, 40.0));
+    assert!(!layout_of(&t).overflowed);
+    // Real text after the break is hidden: overflow.
+    let t = box_layer("alpha beta gamma delta\n\nx", 20.0, (0.0, 0.0, 150.0, 40.0));
+    assert!(layout_of(&t).overflowed);
+}
+
+#[test]
+fn hidden_empty_trailing_area_paragraph_is_not_overflow() {
+    // A 30 px tall rectangle holds one 18 pt line and nothing more.
+    let mut t = point("hi\n", 18.0);
+    t.shape = TextShape::Area { path: area_poly(&[(0.0, 0.0), (300.0, 0.0), (300.0, 30.0), (0.0, 30.0)]) };
+    let l = layout_of(&t);
+    assert_eq!(l.lines.len(), 1, "{:?}", l.lines);
+    assert!(!l.overflowed);
+    t.text = "hi\nthere".into();
+    assert!(layout_of(&t).overflowed);
+}
+
+#[test]
+fn area_line_gap_spreads_rows() {
+    let mut t = point(BUBBLE_TEXT, 12.0);
+    t.shape = TextShape::Area { path: area_poly(&[(0.0, 0.0), (120.0, 0.0), (120.0, 600.0), (0.0, 600.0)]) };
+    let step = |gap: f32| {
+        let mut t = t.clone();
+        t.fit = Some(TextFit { word_gap: 0.0, line_gap: gap, lines: vec![], area_scale: 1.0 });
+        let l = layout_of(&t);
+        assert!(l.lines.len() >= 3 && !l.overflowed, "{:?}", l.lines);
+        l.lines[1].baseline - l.lines[0].baseline
+    };
+    let (s0, s1) = (step(0.0), step(100.0));
+    assert!((s1 - s0 - 12.0).abs() < 0.5, "100% line gap adds one size: {s0} -> {s1}");
+}
+
+#[test]
+fn fit_ignores_explicit_and_auto_leading() {
+    let base = |leading_pt: Option<f32>, auto_leading: f32| {
+        let style = CharStyle { font_family: "Inter".into(), size_pt: 20.0, leading_pt, ..Default::default() };
+        let mut t = styled("a\nb", style);
+        t.shape = TextShape::Box { x: 0.0, y: 0.0, width: 400.0, height: 400.0 };
+        let mut t = with_para(t, ParagraphStyle { auto_leading, ..Default::default() });
+        t.fit = Some(TextFit::default());
+        let l = layout_of(&t);
+        l.lines[1].baseline - l.lines[0].baseline
+    };
+    let natural = base(None, 1.2);
+    assert!((base(Some(60.0), 1.2) - natural).abs() < 1e-3);
+    assert!((base(None, 3.0) - natural).abs() < 1e-3);
+    // The natural height is the line's ascent plus descent, less than 1.2 × size here.
+    assert!(natural > 15.0 && natural < 30.0, "{natural}");
+}
+
+// Dynamic Text box lines: the solver's `lines` force the breaks and size each line.
+
+fn fit_lines(lines: &[(u32, f32)]) -> Option<TextFit> {
+    Some(TextFit {
+        word_gap: 0.0,
+        line_gap: 0.0,
+        lines: lines.iter().map(|&(start, scale)| photocraft_doc::text::FitLine { start, scale }).collect(),
+        area_scale: 1.0,
+    })
+}
+
+/// Em sizes (px) of the glyphs sitting on each line's baseline.
+fn line_sizes(l: &crate::TextLayout) -> Vec<Vec<f32>> {
+    l.lines.iter().map(|ln| l.glyphs.iter().filter(|g| (g.y - ln.baseline).abs() < 0.5).map(|g| l.faces[g.face as usize].size_px).collect()).collect()
+}
+
+fn same_layout(a: &crate::TextLayout, b: &crate::TextLayout) -> bool {
+    format!("{:?}{:?}{:?}{:?}", a.lines, a.glyphs, a.clusters, a.overflowed) == format!("{:?}{:?}{:?}{:?}", b.lines, b.glyphs, b.clusters, b.overflowed)
+}
+
+#[test]
+fn fit_lines_force_breaks() {
+    let mut t = box_layer("aa bb cc", 20.0, (0.0, 0.0, 4000.0, 400.0));
+    t.fit = fit_lines(&[(0, 1.0), (3, 1.0), (6, 1.0)]);
+    let l = layout_of(&t);
+    let starts: Vec<usize> = l.lines.iter().map(|ln| ln.range.start).collect();
+    assert_eq!(starts, [0, 3, 6], "{:?}", l.lines);
+    assert!(!l.overflowed);
+}
+
+#[test]
+fn fit_lines_keep_paragraphs() {
+    let mut t = box_layer("aa bb\ncc", 20.0, (0.0, 0.0, 4000.0, 400.0));
+    t.fit = fit_lines(&[(0, 1.0), (3, 1.0), (6, 1.0)]);
+    let l = layout_of(&t);
+    let got: Vec<(usize, usize)> = l.lines.iter().map(|ln| (ln.range.start, ln.paragraph)).collect();
+    assert_eq!(got, [(0, 0), (3, 0), (6, 1)], "{:?}", l.lines);
+}
+
+#[test]
+fn fit_lines_scale_sizes() {
+    let mut t = box_layer("aa bb", 20.0, (0.0, 0.0, 4000.0, 400.0));
+    t.fit = fit_lines(&[(0, 1.0)]);
+    let base = layout_of(&t);
+    t.fit = fit_lines(&[(0, 2.0), (3, 0.5)]);
+    let l = layout_of(&t);
+    assert_eq!(l.lines.len(), 2, "{:?}", l.lines);
+    let px = 20.0 * l.px_per_pt;
+    let sizes = line_sizes(&l);
+    assert!(!sizes[0].is_empty() && sizes[0].iter().all(|s| (s / (2.0 * px) - 1.0).abs() < 0.02), "{sizes:?}");
+    assert!(!sizes[1].is_empty() && sizes[1].iter().all(|s| (s / (0.5 * px) - 1.0).abs() < 0.02), "{sizes:?}");
+    let a = base.lines[0].ascent;
+    assert!((l.lines[0].ascent / a - 2.0).abs() < 0.04 && (l.lines[1].ascent / a - 0.5).abs() < 0.01, "{:?} vs {a}", l.lines);
+}
+
+#[test]
+fn fit_lines_advance_uses_each_lines_scaled_size() {
+    let mut t = box_layer("aa bb", 20.0, (0.0, 0.0, 4000.0, 400.0));
+    t.fit = fit_lines(&[(0, 2.0), (3, 0.5)]);
+    t.fit.as_mut().unwrap().line_gap = 100.0;
+    let l = layout_of(&t);
+    let (l0, l1) = (&l.lines[0], &l.lines[1]);
+    // The second line's advance: the big line's (scaled) descent, its own (scaled) ascent and
+    // 100% of the larger scaled size, so the big line's descenders never reach it.
+    let want = l0.descent + l1.ascent + 2.0 * 20.0 * l.px_per_pt;
+    assert!((l1.baseline - l0.baseline - want).abs() < 0.5, "{:?}", l.lines);
+}
+
+#[test]
+fn fit_lines_scale_word_gap_and_baseline_shift() {
+    let style = CharStyle { font_family: "Inter".into(), size_pt: 20.0, baseline_shift_pt: 4.0, ..Default::default() };
+    let mut t = styled("aa bb", style);
+    t.shape = TextShape::Box { x: 0.0, y: 0.0, width: 4000.0, height: 400.0 };
+    t.fit = fit_lines(&[(0, 2.0)]);
+    let l0 = layout_of(&t);
+    let w0 = l0.lines[0].x1;
+    let space = l0.clusters.iter().find(|c| c.range.start == 2).map(|c| c.advance).unwrap();
+    t.fit.as_mut().unwrap().word_gap = 100.0;
+    let l = layout_of(&t);
+    assert!((l.lines[0].x1 - w0 - space).abs() < 1.0, "the space doubles at its scaled width: {w0} -> {} (space {space})", l.lines[0].x1);
+    assert!(l.glyphs.iter().all(|g| l.styles[g.style as usize].baseline_shift_pt == 8.0), "baseline shift scales with the line");
+}
+
+#[test]
+fn fit_lines_wider_than_box_do_not_rewrap() {
+    // A clamped line wider than the box keeps its words together and reports overflow.
+    let mut t = box_layer("aa bb cc", 20.0, (0.0, 0.0, 60.0, 400.0));
+    t.fit = fit_lines(&[(0, 1.0), (3, 3.0)]);
+    let l = layout_of(&t);
+    let starts: Vec<usize> = l.lines.iter().map(|ln| ln.range.start).collect();
+    assert_eq!(starts, [0, 3], "{:?}", l.lines);
+    assert!(l.lines[1].x1 - l.lines[1].x0 > 60.5);
+    assert!(l.overflowed);
+}
+
+/// Area type inside the polygon `pts` (text space).
+pub(crate) fn area_layer(text: &str, size_pt: f32, pts: &[(f64, f64)]) -> TextLayer {
+    let mut t = point(text, size_pt);
+    t.shape = TextShape::Area { path: area_poly(pts) };
+    t
+}
+
+#[test]
+fn fit_lines_apply_to_area_type() {
+    // A rectangle area path with two solved lines: the second line starts at "world" and is
+    // twice the size of the first, in its own row.
+    let mut t = area_layer("hello world", 20.0, &[(0.0, 0.0), (400.0, 0.0), (400.0, 300.0), (0.0, 300.0)]);
+    t.fit = Some(TextFit { lines: vec![FitLine { start: 0, scale: 1.0 }, FitLine { start: 6, scale: 2.0 }], ..TextFit::default() });
+    let out = layout_of(&t);
+    assert_eq!(out.lines.len(), 2, "{:?}", out.lines);
+    assert_eq!(out.lines[1].range.start, 6);
+    let h0 = out.lines[0].ascent + out.lines[0].descent;
+    let h1 = out.lines[1].ascent + out.lines[1].descent;
+    assert!((h1 / h0 - 2.0).abs() < 0.05, "{h0} {h1}");
+    // Stacked as solved box lines are: the previous descent, this ascent (line gap 0).
+    let (l0, l1) = (&out.lines[0], &out.lines[1]);
+    assert!((l1.baseline - l0.baseline - (l0.descent + l1.ascent)).abs() < 0.5, "{:?}", out.lines);
+}
+
+#[test]
+fn fit_lines_box_height_still_stops_lines() {
+    let mut t = box_layer("aa bb cc", 20.0, (0.0, 0.0, 4000.0, 40.0));
+    t.fit = fit_lines(&[(0, 1.0), (3, 1.0), (6, 1.0)]);
+    let l = layout_of(&t);
+    assert!(l.lines.len() < 3, "{:?}", l.lines);
+    assert!(l.overflowed);
+}
+
+#[test]
+fn fit_lines_ignored_without_fit_or_for_point_text() {
+    let lines = fit_lines(&[(0, 2.0), (3, 0.5), (6, 1.0)]);
+    let text = "aa bb cc dd ee ff";
+    // No fit: plain box text.
+    let plain = layout_of(&box_layer(text, 20.0, (0.0, 0.0, 60.0, 400.0)));
+    assert!(plain.lines.len() > 1 && plain.glyphs.iter().all(|g| plain.faces[g.face as usize].size_px == 20.0 * plain.px_per_pt));
+    // Area text lays its solved lines out (`fit_lines_apply_to_area_type`): one per line start.
+    let mut a = area_ellipse_layer(text, 12.0, 300.0, 300.0);
+    a.fit = Some(TextFit::default());
+    let without = layout_of(&a);
+    a.fit = lines.clone();
+    let solved = layout_of(&a);
+    assert!(!same_layout(&without, &solved));
+    assert_eq!(solved.lines.iter().map(|ln| ln.range.start).collect::<Vec<_>>(), [0, 3, 6], "{:?}", solved.lines);
+    // Point text ignores them.
+    let mut p = point(text, 20.0);
+    p.fit = Some(TextFit::default());
+    let without = layout_of(&p);
+    p.fit = lines;
+    assert!(same_layout(&without, &layout_of(&p)));
+}
+
+#[test]
+fn fit_lines_not_solved_yet_wrap_normally() {
+    // Refresh always fills `lines`; until it has run, a fitted box wraps at its width.
+    let mut t = box_layer("alpha beta gamma delta", 20.0, (0.0, 0.0, 150.0, 300.0));
+    t.fit = Some(TextFit::default());
+    let l = layout_of(&t);
+    assert_eq!(l.lines.len(), 2, "{:?}", l.lines);
+    assert!(l.lines.iter().all(|ln| ln.x1 - ln.x0 <= 150.5));
+}
+
+#[test]
+fn fit_lines_invalid_for_the_text_are_ignored() {
+    // Out of order: laid out as if not solved yet, never panicking on a bad offset.
+    let mut t = box_layer("héllo world", 20.0, (0.0, 0.0, 4000.0, 300.0));
+    t.fit = Some(TextFit::default());
+    let unsolved = layout_of(&t);
+    for bad in [&[(0, 1.0), (2, 1.0)][..], &[(0, 1.0), (7, 1.0), (3, 1.0)], &[(0, 1.0), (99, 1.0)]] {
+        t.fit = fit_lines(bad);
+        assert!(same_layout(&unsolved, &layout_of(&t)), "{bad:?}");
+    }
+}
+
+#[test]
+fn fit_line_after_a_forced_line_break_adds_no_blank_line() {
+    let mut t = box_layer("aa\u{3}bb", 20.0, (0.0, 0.0, 4000.0, 400.0));
+    t.fit = fit_lines(&[(0, 1.0), (3, 1.0)]);
+    let l = layout_of(&t);
+    let starts: Vec<usize> = l.lines.iter().map(|ln| ln.range.start).collect();
+    assert_eq!(starts, [0, 3], "{:?}", l.lines);
+}
+
+#[test]
+fn fit_lines_narrower_than_the_box_follow_the_alignment() {
+    let t = box_layer("aa bb", 20.0, (0.0, 0.0, 400.0, 400.0));
+    let mut t = with_para(t, ParagraphStyle { align: TextAlign::Center, ..Default::default() });
+    t.fit = fit_lines(&[(0, 1.0), (3, 0.5)]);
+    let l = layout_of(&t);
+    for ln in &l.lines {
+        assert!(((ln.x0 + ln.x1) / 2.0 - 200.0).abs() < 1.0, "centred in the box: {ln:?}");
+    }
+}
+
+#[test]
+fn fit_lines_keep_the_paragraphs_auto_direction() {
+    // A Hebrew paragraph whose second solved line starts with a Latin word: that line still has
+    // the paragraph's RTL base, so the Hebrew after "abc" sits to its left.
+    let text = "שלום abc דג";
+    let mut t = box_layer(text, 20.0, (0.0, 0.0, 4000.0, 400.0));
+    t.fit = fit_lines(&[(0, 1.0), (9, 1.0)]);
+    let l = layout_of(&t);
+    let starts: Vec<usize> = l.lines.iter().map(|ln| ln.range.start).collect();
+    assert_eq!(starts, [0, 9], "{:?}", l.lines);
+    assert!(l.clusters.iter().all(|c| c.range.end <= text.len() && text.is_char_boundary(c.range.start)));
+    let at = |b: usize| l.clusters.iter().find(|c| c.range.start == b).unwrap_or_else(|| panic!("no cluster at {b}: {:?}", l.clusters));
+    assert!(at(9).line == 1 && at(13).line == 1);
+    assert!(at(13).rtl);
+    assert!(at(9).x > at(13).x, "RTL base: 'abc' right of the Hebrew: {:?} vs {:?}", at(9), at(13));
+}
+
+#[test]
+fn clamped_wide_fit_line_overflows_without_hiding() {
+    let mut t = box_layer("aa bb cc", 20.0, (0.0, 0.0, 60.0, 400.0));
+    t.fit = fit_lines(&[(0, 1.0), (3, 3.0)]);
+    let l = layout_of(&t);
+    assert!(l.overflowed && !l.hidden, "{:?}", l.lines);
+}
+
+#[test]
+fn hidden_reports_text_past_the_box_or_shape() {
+    let mut t = box_layer("aa bb cc", 20.0, (0.0, 0.0, 4000.0, 40.0));
+    t.fit = fit_lines(&[(0, 1.0), (3, 1.0), (6, 1.0)]);
+    let l = layout_of(&t);
+    assert!(l.hidden && l.overflowed);
+    let l = layout_of(&box_layer("one two three four five six seven eight nine ten", 24.0, (0.0, 0.0, 120.0, 40.0)));
+    assert!(l.hidden && l.overflowed);
+    let l = layout_of(&box_layer("Supercalifragilistic", 48.0, (0.0, 0.0, 60.0, 2000.0)));
+    assert!(!l.overflowed && !l.hidden, "a word too wide breaks at the box edge (#6694)");
+    let l = layout_of(&area_ellipse_layer(&"word ".repeat(200), 18.0, 200.0, 120.0));
+    assert!(l.hidden && l.overflowed);
+    let l = layout_of(&box_layer("alpha beta gamma delta\n", 20.0, (0.0, 0.0, 150.0, 40.0)));
+    assert!(!l.hidden && !l.overflowed, "an empty last paragraph is not hidden text");
 }
 
 /// A word wider than its paragraph box wraps at the box edge instead of running past it (#6694);

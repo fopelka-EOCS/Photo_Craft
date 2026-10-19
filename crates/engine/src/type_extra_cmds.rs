@@ -44,7 +44,7 @@ fn has_point_text(s: &Session) -> std::result::Result<(), String> {
     match active_text(s)?.shape {
         TextShape::Point => Ok(()),
         TextShape::Box { .. } => Err("the type layer is already paragraph text".into()),
-        TextShape::Path { .. } => Err("detach the type layer from its path first".into()),
+        TextShape::Path { .. } | TextShape::Area { .. } => Err("release the type layer from its path first".into()),
     }
 }
 
@@ -53,6 +53,7 @@ fn has_box_text(s: &Session) -> std::result::Result<(), String> {
         TextShape::Box { .. } => Ok(()),
         TextShape::Point => Err("the type layer is already point text".into()),
         TextShape::Path { .. } => Err("the type layer is path text".into()),
+        TextShape::Area { .. } => Err("the type layer is area type; release it from its path first".into()),
     }
 }
 
@@ -69,9 +70,10 @@ fn has_defaults(s: &Session) -> std::result::Result<(), String> {
 // ---------- helpers ----------
 
 /// Edits a type layer as one history step and re-renders it.
-fn with_text<R>(s: &mut Session, p: &Value, label: &str, f: impl FnOnce(&mut TextLayer, &Document) -> Result<R>) -> Result<R> {
+pub(crate) fn with_text<R>(s: &mut Session, p: &Value, label: &str, f: impl FnOnce(&mut TextLayer, &Document) -> Result<R>) -> Result<R> {
     let id = layer_param(s, p)?;
     check_text_unlocked(&s.active().ok_or(EngineError::NoDocument)?.doc, id)?;
+    let cmd = crate::type_fit_cmds::guard_cmd(s, label);
     s.edit(label, |doc, _| {
         let snapshot = doc.clone();
         let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
@@ -80,6 +82,7 @@ fn with_text<R>(s: &mut Session, p: &Value, label: &str, f: impl FnOnce(&mut Tex
             return Err(EngineError::Other(format!("layer {} is {} {} layer, not a type layer", id.0, l.content.article(), l.content.kind_name())));
         };
         let r = f(t, &snapshot)?;
+        crate::type_fit_cmds::guard_fit(&snapshot, id, t, cmd)?;
         refresh(&snapshot, t);
         let name = auto_named.then(|| layer_name(&t.text));
         if let Some(n) = name {
@@ -144,47 +147,52 @@ fn set_orientation(s: &mut Session, p: &Value, o: Orientation) -> Result<Value> 
 // ---------- point ⇄ paragraph ----------
 
 fn to_paragraph(s: &mut Session, p: &Value) -> Result<Value> {
-    let r = with_text(s, p, "Convert to Paragraph Text", |t, doc| {
-        let l = layout(doc, t);
-        let size_px = t.char_runs().iter().map(|r| r.style.size_pt).fold(t.size_pt, f32::max) * doc.resolution_dpi / 72.0;
-        let ps = t.paragraph_runs().first().map(|p| p.style.clone()).unwrap_or_default();
-        let indents = (ps.start_indent_pt + ps.end_indent_pt).max(0.0) * doc.resolution_dpi / 72.0;
-        if l.vertical {
-            // Line space: u along the columns, v across them (first column centred on v = 0).
-            let [u0, v0, u1, v1] = l.line_bounds().unwrap_or([0.0, -size_px / 2.0, size_px, size_px / 2.0]);
-            let height = (u1 - u0).max(1.0) + indents + (size_px * 0.5).max(4.0);
-            let width = (v1 - v0).max(1.0) + size_px * 0.5;
-            let y = match ps.align {
-                TextAlign::Center | TextAlign::JustifyCenter => -height / 2.0,
-                TextAlign::Right | TextAlign::JustifyRight => -height,
-                _ => 0.0,
-            };
-            // The box's right edge is the first column's right edge, so the columns stay put.
-            let x = -v0 - width;
-            t.shape = TextShape::Box { x: 0.0, y: 0.0, width, height };
-            t.transform = then_translate(&t.transform, f64::from(x), f64::from(y));
-            return Ok(json!([x, y, width, height]));
-        }
-        let [x0, y0, x1, y1] = l.bounds().unwrap_or([0.0, -t.size_pt, t.size_pt, 0.0]);
-        // A little slack so no line re-wraps; the box keeps the text where it was.
-        let width = (x1 - x0).max(1.0) + indents + (size_px * 0.5).max(4.0);
-        let height = (y1 - y0).max(1.0) + size_px * 0.5;
-        let x = match ps.align {
-            TextAlign::Center | TextAlign::JustifyCenter => -width / 2.0,
-            TextAlign::Right | TextAlign::JustifyRight => -width,
+    let r = with_text(s, p, "Convert to Paragraph Text", |t, doc| Ok(point_to_box(t, doc)))?;
+    Ok(json!({"box": r}))
+}
+
+/// Turns point text into box text sized to its current layout, keeping the text where it was.
+/// Returns `[x, y, width, height]`, the box's place in the old text space.
+/// Shared by Convert to Paragraph Text and Convert to Dynamic Text.
+pub(crate) fn point_to_box(t: &mut TextLayer, doc: &Document) -> Value {
+    let l = layout(doc, t);
+    let size_px = t.char_runs().iter().map(|r| r.style.size_pt).fold(t.size_pt, f32::max) * doc.resolution_dpi / 72.0;
+    let ps = t.paragraph_runs().first().map(|p| p.style.clone()).unwrap_or_default();
+    let indents = (ps.start_indent_pt + ps.end_indent_pt).max(0.0) * doc.resolution_dpi / 72.0;
+    if l.vertical {
+        // Line space: u along the columns, v across them (first column centred on v = 0).
+        let [u0, v0, u1, v1] = l.line_bounds().unwrap_or([0.0, -size_px / 2.0, size_px, size_px / 2.0]);
+        let height = (u1 - u0).max(1.0) + indents + (size_px * 0.5).max(4.0);
+        let width = (v1 - v0).max(1.0) + size_px * 0.5;
+        let y = match ps.align {
+            TextAlign::Center | TextAlign::JustifyCenter => -height / 2.0,
+            TextAlign::Right | TextAlign::JustifyRight => -height,
             _ => 0.0,
         };
-        let mut probe = t.clone();
-        probe.shape = TextShape::Box { x, y: y0, width, height };
-        // Box text puts the first baseline at the box top plus the ascender height: measure it and
-        // shift the box so that baseline stays at the point-text anchor (y = 0).
-        let b0 = layout(doc, &probe).lines.first().map_or(0.0, |ln| ln.baseline);
-        let y = y0 - b0;
+        // The box's right edge is the first column's right edge, so the columns stay put.
+        let x = -v0 - width;
         t.shape = TextShape::Box { x: 0.0, y: 0.0, width, height };
         t.transform = then_translate(&t.transform, f64::from(x), f64::from(y));
-        Ok(json!([x, y, width, height]))
-    })?;
-    Ok(json!({"box": r}))
+        return json!([x, y, width, height]);
+    }
+    let [x0, y0, x1, y1] = l.bounds().unwrap_or([0.0, -t.size_pt, t.size_pt, 0.0]);
+    // A little slack so no line re-wraps; the box keeps the text where it was.
+    let width = (x1 - x0).max(1.0) + indents + (size_px * 0.5).max(4.0);
+    let height = (y1 - y0).max(1.0) + size_px * 0.5;
+    let x = match ps.align {
+        TextAlign::Center | TextAlign::JustifyCenter => -width / 2.0,
+        TextAlign::Right | TextAlign::JustifyRight => -width,
+        _ => 0.0,
+    };
+    let mut probe = t.clone();
+    probe.shape = TextShape::Box { x, y: y0, width, height };
+    // Box text puts the first baseline at the box top plus the ascender height: measure it and
+    // shift the box so that baseline stays at the point-text anchor (y = 0).
+    let b0 = layout(doc, &probe).lines.first().map_or(0.0, |ln| ln.baseline);
+    let y = y0 - b0;
+    t.shape = TextShape::Box { x: 0.0, y: 0.0, width, height };
+    t.transform = then_translate(&t.transform, f64::from(x), f64::from(y));
+    json!([x, y, width, height])
 }
 
 fn to_point(s: &mut Session, p: &Value) -> Result<Value> {
@@ -392,7 +400,7 @@ fn attach_to_path(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn is_path_text(s: &Session) -> std::result::Result<(), String> {
     match active_text(s)?.shape {
-        TextShape::Path { .. } => Ok(()),
+        TextShape::Path { .. } | TextShape::Area { .. } => Ok(()),
         _ => Err("the type layer is not on a path".into()),
     }
 }
@@ -400,13 +408,21 @@ fn is_path_text(s: &Session) -> std::result::Result<(), String> {
 fn detach_from_path(s: &mut Session, p: &Value) -> Result<Value> {
     let id = layer_param(s, p)?;
     with_text(s, p, "Release Type from Path", |t, _| {
-        if !matches!(t.shape, TextShape::Path { .. }) {
-            return Err(EngineError::Other("the type layer is not on a path".into()));
+        match &t.shape {
+            TextShape::Path { .. } => {
+                // Point text starts where the type started on the path.
+                let origin = photocraft_text::warp::Warp::on_path(&t.shape).map_or((0.0, 0.0), |w| w.apply(0.0, 0.0));
+                t.shape = TextShape::Point;
+                t.transform = then_translate(&t.transform, origin.0, origin.1);
+            }
+            // Area type keeps wrapping, in a text box over the path's bounds.
+            TextShape::Area { path } => {
+                let (x0, y0, x1, y1) = photocraft_text::area::path_bounds(path)
+                    .ok_or_else(|| EngineError::Other("the area type's path is empty or has coordinates that aren't finite".into()))?;
+                t.shape = TextShape::Box { x: x0 as f32, y: y0 as f32, width: ((x1 - x0) as f32).max(1.0), height: ((y1 - y0) as f32).max(1.0) };
+            }
+            _ => return Err(EngineError::Other("the type layer is not on a path".into())),
         }
-        // Point text starts where the type started on the path.
-        let origin = photocraft_text::warp::Warp::on_path(&t.shape).map_or((0.0, 0.0), |w| w.apply(0.0, 0.0));
-        t.shape = TextShape::Point;
-        t.transform = then_translate(&t.transform, origin.0, origin.1);
         Ok(())
     })?;
     Ok(json!({"layer": id.0}))

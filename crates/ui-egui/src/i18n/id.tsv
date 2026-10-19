@@ -3198,6 +3198,15 @@ curves	Smooth	Haluskan
 	set name	nama set
 	{set} (modified)	{set} (diubah)
 	Random	Acak
+	Dynamic Text	Teks Dinamis
+	Convert to Dynamic Text	Konversi ke Teks Dinamis
+	Release Dynamic Text	Lepaskan Teks Dinamis
+	Size is set by Dynamic Text	Ukuran ditentukan oleh Teks Dinamis
+	Leading is set by Line Gap	Leading ditentukan oleh Jarak Baris
+	Word Gap	Jarak Kata
+	Line Gap	Jarak Baris
+	Select a type layer	Pilih layer teks
+	Not available for vertical, right-to-left or path text	Tidak tersedia untuk teks vertikal, kanan-ke-kiri, atau teks pada path
 	Accept and Go to Conflict	Terima dan Buka Konflik
 	Changes undone.	Perubahan dibatalkan.
 	Choose a new shortcut for this command, or leave it without one.	Pilih pintasan baru untuk perintah ini, atau biarkan tanpa pintasan.

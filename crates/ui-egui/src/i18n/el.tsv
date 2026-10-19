@@ -3904,6 +3904,15 @@ curves	Smooth	Εξομάλυνση
 	There are too many sets: delete one first.	Υπάρχουν πάρα πολλά σύνολα: διαγράψτε πρώτα ένα.
 	set name	όνομα συνόλου
 	{set} (modified)	{set} (τροποποιημένο)
+	Dynamic Text	Δυναμικό κείμενο
+	Convert to Dynamic Text	Μετατροπή σε δυναμικό κείμενο
+	Release Dynamic Text	Αποδέσμευση δυναμικού κειμένου
+	Size is set by Dynamic Text	Το μέγεθος καθορίζεται από το δυναμικό κείμενο
+	Leading is set by Line Gap	Το διάστιχο καθορίζεται από το κενό γραμμών
+	Word Gap	Κενό λέξεων
+	Line Gap	Κενό γραμμών
+	Select a type layer	Επιλέξτε ένα επίπεδο κειμένου
+	Not available for vertical, right-to-left or path text	Μη διαθέσιμο για κατακόρυφο κείμενο, κείμενο από δεξιά προς τα αριστερά ή κείμενο σε διαδρομή
 	Accept and Go to Conflict	Αποδοχή και μετάβαση στη σύγκρουση
 	Changes undone.	Οι αλλαγές αναιρέθηκαν.
 	Choose a new shortcut for this command, or leave it without one.	Επιλέξτε νέα συντόμευση για αυτήν την εντολή ή αφήστε την χωρίς.

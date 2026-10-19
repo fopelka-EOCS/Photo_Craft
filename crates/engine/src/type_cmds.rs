@@ -568,10 +568,15 @@ pub fn replace_text(t: &mut TextLayer, a: usize, b: usize, new: &str) {
     t.sync_summary();
 }
 
-/// Re-renders the layer's pixels and regenerates its PSD `TySh` data.
+/// Re-renders the layer's pixels and regenerates its PSD `TySh` data. Dynamic Text is refitted
+/// first, so every edit that ends here (typing, styles, box resize, path changes, font swaps)
+/// keeps the text filling its box; a layer without fit returns from the solver at once.
 pub fn refresh(doc: &Document, t: &mut TextLayer) {
     let dpi = doc.resolution_dpi;
     let mut eng = photocraft_text::shared().lock().unwrap_or_else(|e| e.into_inner());
+    if t.fit.is_some() && crate::type_fit_cmds::fit_refusal(t).is_none() {
+        photocraft_text::fit::refit(&mut eng, t, dpi);
+    }
     let (layout, r) = eng.render(t, dpi, doc.pixel_format());
     t.cache = Some(r.surface);
     t.psd_raw = Some(Arc::new(photocraft_text::psd::build_tysh(t, dpi, layout.bounds())));
@@ -592,6 +597,7 @@ pub(crate) fn check_text_unlocked(doc: &Document, id: LayerId) -> Result<()> {
 fn with_text_layer<R>(s: &mut Session, p: &Value, label: &str, f: impl FnOnce(&mut TextLayer, &Document, &mut Option<String>) -> Result<R>) -> Result<R> {
     let id = layer_id(s, p)?;
     check_text_unlocked(&s.active().ok_or(EngineError::NoDocument)?.doc, id)?;
+    let cmd = crate::type_fit_cmds::guard_cmd(s, label);
     let (r, damage) = s.edit(label, |doc, _| {
         let snapshot = doc.clone();
         let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
@@ -602,6 +608,7 @@ fn with_text_layer<R>(s: &mut Session, p: &Value, label: &str, f: impl FnOnce(&m
         let before = t.cache.as_ref().map(|c| c.tile_bounds());
         let mut rename = None;
         let r = f(t, &snapshot, &mut rename)?;
+        crate::type_fit_cmds::guard_fit(&snapshot, id, t, cmd)?;
         refresh(&snapshot, t);
         // Only this layer's pixels changed: the canvas recomposites their old and new area
         // instead of the whole document (#124). Unknown old pixels mean a full refresh.
@@ -664,6 +671,7 @@ pub(crate) fn with_text_targets(
     mut f: impl FnMut(&mut TextLayer, (usize, usize)) -> Result<()>,
 ) -> Result<Vec<LayerId>> {
     let ids = format_targets(s, p)?;
+    let cmd = crate::type_fit_cmds::guard_cmd(s, label);
     let damage = s.edit(label, |doc, _| {
         let snapshot = doc.clone();
         let mut damage = Some(photocraft_geom::Rect::EMPTY);
@@ -672,6 +680,7 @@ pub(crate) fn with_text_targets(
             let before = t.cache.as_ref().map(|c| c.tile_bounds());
             let range = if p.get("layers").is_none() || p.get("layer").is_some() { range_param(&t.text, p) } else { (0, t.text.len()) };
             f(t, range)?;
+            crate::type_fit_cmds::guard_fit(&snapshot, *id, t, cmd)?;
             refresh(&snapshot, t);
             // An unknown old/new cache retains Session.edit's full-refresh fallback.
             damage = damage.zip(before).zip(t.cache.as_ref().map(|c| c.tile_bounds())).map(|((all, a), b)| all.union(&a).union(&b));
