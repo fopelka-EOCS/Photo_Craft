@@ -80,6 +80,7 @@ pub mod discard_ui;
 pub mod disk_change_prompt;
 pub mod distort_ui;
 pub mod doc_props_ui;
+mod doc_window_bar;
 pub mod dock;
 pub mod duplicate_layer_ui;
 pub mod edit_history;
@@ -2046,7 +2047,9 @@ impl eframe::App for PhotocraftApp {
         if chrome && self.ui.panels.status_bar {
             panels::status_bar(self, ui);
         }
-        if chrome && self.ui.panels.toolbar {
+        // Full Screen Mode (F) keeps the Tools panel: the image fills the screen on black, but
+        // the tools stay at hand (Window › Tools still hides it).
+        if self.ui.panels.toolbar {
             panels::toolbar(self, ui);
         }
         if chrome && self.ui.panels.dock {

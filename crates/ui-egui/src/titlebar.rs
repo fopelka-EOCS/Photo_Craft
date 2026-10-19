@@ -257,6 +257,16 @@ fn toggle_maximize(ctx: &egui::Context) {
 /// hits the outermost one. Close runs File › Exit, which asks about unsaved documents first. On
 /// Linux the buttons drag the window too, as GTK's and KDE's do.
 pub fn caption_buttons(app: &mut PhotocraftApp, ui: &mut Ui, bar: Rect) {
+    if caption_row(app, ui, bar) {
+        let ctx = ui.ctx().clone();
+        let _ = crate::menus::invoke(app, &ctx, "file.exit", json!({}));
+    }
+}
+
+/// The caption buttons of `bar` in this viewport ([`caption_buttons`]): Minimize and Maximize act
+/// on the window they're in; returns whether Close was clicked, which the caller decides (the
+/// main window quits, a floating document window closes its documents).
+pub(crate) fn caption_row(app: &PhotocraftApp, ui: &mut Ui, bar: Rect) -> bool {
     let t = Tokens::get(ui.ctx());
     let s = style(app, ui.ctx());
     let max = maximized(ui.ctx());
@@ -298,12 +308,24 @@ pub fn caption_buttons(app: &mut PhotocraftApp, ui: &mut Ui, bar: Rect) {
     match clicked {
         Some(Caption::Minimize) => ui.ctx().send_viewport_cmd(ViewportCommand::Minimized(true)),
         Some(Caption::Maximize) => toggle_maximize(ui.ctx()),
-        Some(Caption::Close) => {
-            let ctx = ui.ctx().clone();
-            let _ = crate::menus::invoke(app, &ctx, "file.exit", json!({}));
-        }
+        Some(Caption::Close) => return true,
         None => {}
     }
+    false
+}
+
+/// Maximize or restore the window `ctx` draws (a double click on a title bar).
+pub(crate) fn toggle_maximized(ctx: &egui::Context) {
+    toggle_maximize(ctx);
+}
+
+/// The widths the caption buttons take at the bar's ends.
+/// Floating document windows always draw their own buttons, whatever the main window uses.
+/// Returns the (left, right) widths, like [`reserved`].
+pub(crate) fn caption_sides(app: &PhotocraftApp, ctx: &egui::Context) -> (f32, f32) {
+    let s = style(app, ctx);
+    let width = |side: &[Caption]| slots(s.family, side, 0.0, true).last().map_or(0.0, |(_, r, _)| r.1);
+    (width(&s.left), width(&s.right))
 }
 
 /// The 10 pt line glyphs of the Windows caption buttons.

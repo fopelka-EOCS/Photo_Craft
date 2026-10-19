@@ -2563,7 +2563,7 @@ fn fit_doc_tabs(app: &PhotocraftApp, natural: &[f32], selected: usize, avail: f3
 
 /// Photoshop's tab title: "name @ 50% (Layer 1, RGB/8)", "(Layer 1, Layer Mask/8)" when the mask
 /// is targeted, "(Quick Mask/8)" in Quick Mask mode; the Background layer's name is omitted.
-fn pro_tab_title(app: &PhotocraftApp, i: usize) -> String {
+pub(crate) fn pro_tab_title(app: &PhotocraftApp, i: usize) -> String {
     use photocraft_engine::channel_cmds::ChannelTarget;
     let Some(st) = app.session.documents().get(i) else { return String::new() };
     let zoom = app.ui.views.get(i).map_or(100.0, |v| v.zoom * 100.0);
@@ -2586,7 +2586,7 @@ fn pro_tab_title(app: &PhotocraftApp, i: usize) -> String {
 }
 
 /// The Studio strip's tab name: "name *" when unsaved, "name * - Saving 45%" while it saves (#3389).
-fn studio_tab_name(app: &PhotocraftApp, st: &photocraft_engine::DocState) -> String {
+pub(crate) fn studio_tab_name(app: &PhotocraftApp, st: &photocraft_engine::DocState) -> String {
     let saving = crate::jobs_ui::save_progress(app, st.doc.id).map(|s| format!(" - {s}")).unwrap_or_default();
     format!("{}{}{saving}", st.doc.name, if st.is_dirty() { " *" } else { "" })
 }
@@ -6001,7 +6001,7 @@ pub(crate) fn prompt_window(app: &PhotocraftApp, ctx: &egui::Context) -> Option<
     }
     let asked = crate::discard_ui::asking_about(app)?;
     let docs = app.session.documents();
-    app.ui.windows.iter().find(|w| w.open && w.floating && docs.get(w.document).is_some_and(|d| d.doc.id == asked)).map(|w| w.id)
+    app.ui.windows.iter().find(|w| w.open && w.floating && docs.get(w.document).is_some_and(|d| d.doc.id == asked)).map(|w| w.key())
 }
 
 /// While a dialog or prompt is up in another OS window, this window takes no clicks, as under a
@@ -6015,12 +6015,28 @@ pub(crate) fn block_main_window(ctx: &egui::Context) {
     });
 }
 
+/// While a menu or other popup of the main window is open beside document windows, the main
+/// window goes on top for as long as it is open (its menus are drawn inside it, so they'd be
+/// under the document windows otherwise), and back to normal when it closes, which puts the
+/// document windows above it again. Call from the main window's pass, once a frame.
+fn raise_main_window_for_menus(ctx: &egui::Context, wins: &[crate::state::DocWindow]) {
+    let open = !ctx.embed_viewports() && wins.iter().any(|w| w.open) && (egui::Popup::is_any_open(ctx) || crate::menu_nav::is_open(ctx));
+    let id = egui::Id::new("docwin-main-raised");
+    let raised = ctx.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
+    if open != raised {
+        let level = if open { egui::WindowLevel::AlwaysOnTop } else { egui::WindowLevel::Normal };
+        ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::WindowLevel(level));
+        ctx.data_mut(|d| d.insert_temp(id, open));
+    }
+}
+
 fn doc_windows_on_top(app: &PhotocraftApp, ctx: &egui::Context, wins: &[crate::state::DocWindow]) -> bool {
     if wins.is_empty() {
         return false;
     }
     let now = ctx.input(|i| i.time);
-    let focused = ctx.input(|i| i.focused) || wins.iter().any(|w| ctx.data(|d| d.get_temp::<bool>(egui::Id::new(("docwin-focused", w.id)))).unwrap_or(false));
+    let focused =
+        ctx.input(|i| i.focused) || wins.iter().any(|w| ctx.data(|d| d.get_temp::<bool>(egui::Id::new(("docwin-focused", w.key())))).unwrap_or(false));
     let seen = egui::Id::new("docwin-app-focused-at");
     if focused {
         ctx.data_mut(|d| d.insert_temp(seen, now));
@@ -6060,56 +6076,77 @@ fn doc_windows_on_top(app: &PhotocraftApp, ctx: &egui::Context, wins: &[crate::s
 /// act on it). Closing it closes the document, with the usual prompt for unsaved changes. A
 /// second view (New Window for …) only shows the document and just closes.
 pub fn extra_windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    use crate::doc_window_bar as bar;
     let wins = app.ui.windows.clone();
+    raise_main_window_for_menus(ctx, &wins);
     let level = if doc_windows_on_top(app, ctx, &wins) { egui::WindowLevel::AlwaysOnTop } else { egui::WindowLevel::Normal };
-    // Closing a floating window closes its document, after the loop: closing shifts the
-    // document indices the remaining windows hold.
+    bar::track(app, ctx);
+    bar::begin_frame(ctx);
+    // Closing a floating window closes its documents, after the loop: closing shifts the
+    // document indices the remaining windows hold. So do the bars' actions.
     let mut close_docs = Vec::new();
+    let mut actions = Vec::new();
     let prompt_in = prompt_window(app, ctx);
+    let asked = crate::discard_ui::asking_about(app).and_then(|id| app.session.documents().iter().position(|d| d.doc.id == id));
     let dialogs_apart = crate::dialog_window::hosts(app, ctx);
-    for w in wins.into_iter().filter(|w| w.open) {
+    // A real OS window has its own focus and keyboard input. Embedded in the main window (the
+    // web build, tests) it shares the main window's, whose shortcuts already ran.
+    let own_window = !ctx.embed_viewports();
+    for (key, idx) in bar::groups(&wins) {
+        let members: Vec<crate::state::DocWindow> = idx.iter().filter_map(|&i| wins.get(i).cloned()).collect();
+        let Some(first) = members.first() else { continue };
+        let floating = first.floating;
+        let front = bar::shown(&members, app.session.active_index(), asked.filter(|_| prompt_in == Some(key)), bar::picked(ctx, key));
+        let Some(w) = members.get(front).cloned() else { continue };
         let Some(st) = app.session.documents().get(w.document) else { continue };
         let doc_id = st.doc.id;
-        let title = if w.floating { pro_tab_title(app, w.document) } else { format!("{} — window {}", st.doc.name, w.id) };
-        let vid = egui::ViewportId::from_hash_of(("docwin", w.id));
-        let mut builder = egui::ViewportBuilder::default().with_title(title).with_inner_size([800.0, 600.0]).with_window_level(level);
-        if let Some([x, y]) = w.position {
+        let title = if floating { pro_tab_title(app, w.document) } else { format!("{} — window {}", st.doc.name, w.id) };
+        // The window opens where its first document's window was.
+        let anchor = members.iter().find(|m| m.id == key).unwrap_or(first);
+        let mut builder = egui::ViewportBuilder::default()
+            .with_title(title)
+            .with_inner_size([800.0, 600.0])
+            .with_window_level(level)
+            .with_decorations(!(floating && own_window));
+        if let Some([x, y]) = anchor.position {
             builder = builder.with_position([x, y]);
         }
-        let mut view = if w.floating { app.ui.views.get(w.document).cloned().unwrap_or_else(|| w.view.clone()) } else { w.view.clone() };
+        let mut view = if floating { app.ui.views.get(w.document).cloned().unwrap_or_else(|| w.view.clone()) } else { w.view.clone() };
         let mut close = false;
-        let focus_id = egui::Id::new(("docwin-focused", w.id));
-        ctx.show_viewport_immediate(vid, builder, |ui, _class| {
+        let focus_id = egui::Id::new(("docwin-focused", key));
+        ctx.show_viewport_immediate(bar::viewport(key), builder, |ui, _class| {
             let wctx = ui.ctx().clone();
             if wctx.input(|i| i.viewport().close_requested()) {
                 close = true;
-                if w.floating {
-                    // The document decides: it closes (and the window with it) unless the
+                if floating {
+                    // The documents decide: they close (and the window with them) unless the
                     // unsaved-changes prompt is cancelled.
                     wctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 }
             }
-            // A real OS window has its own focus and keyboard input. Embedded in the main window
-            // (the web build, tests) it shares the main window's, whose shortcuts already ran.
-            let own_window = !ctx.embed_viewports();
             let focused = own_window && wctx.input(|i| i.focused);
             let was = wctx.data(|d| d.get_temp::<bool>(focus_id)).unwrap_or(false);
             wctx.data_mut(|d| d.insert_temp(focus_id, focused));
-            if w.floating && own_window && focused && !was && app.session.active_index() != Some(w.document) {
+            if floating && own_window && focused && !was && app.session.active_index() != Some(w.document) {
                 app.session.set_active(w.document);
                 ctx.request_repaint();
             }
-            let primary = w.floating && app.session.active_index() == Some(w.document);
+            let primary = floating && app.session.active_index() == Some(w.document);
             // Keys typed into this window go to its own input, not the main window's.
             if primary && own_window && wctx.input(|i| i.focused) {
                 crate::shortcuts::handle(app, &wctx);
+            }
+            if floating {
+                let mut close_all = false;
+                actions.extend(bar::bar(app, ui, key, &members, front, own_window, &mut close_all, &mut close_docs));
+                close |= close_all;
             }
             egui::CentralPanel::default().frame(egui::Frame::NONE.fill(crate::theme::Tokens::get(&wctx).canvas)).show(ui, |ui| {
                 let rect = ui.available_rect_before_wrap();
                 // A click on this window's canvas makes its document active (the tool takes it
                 // from the next press, as a click on another tile does).
                 let press = ui.input(|i| i.pointer.primary_pressed().then(|| i.pointer.interact_pos()).flatten());
-                if w.floating && !primary && press.is_some_and(|p| rect.contains(p) && ui.ctx().layer_id_at(p) == Some(ui.layer_id())) {
+                if floating && !primary && press.is_some_and(|p| rect.contains(p) && ui.ctx().layer_id_at(p) == Some(ui.layer_id())) {
                     app.session.set_active(w.document);
                     ctx.request_repaint();
                 }
@@ -6118,12 +6155,21 @@ pub fn extra_windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     // document's view by this window's canvas.
                     app.last_canvas_rect = rect;
                 }
+                // The document's view as it is now: this window's shortcuts (⌘+ / ⌘−, Fit on
+                // Screen) just ran above and changed it, and the copy taken before would undo them.
+                if floating && let Some(now) = app.ui.views.get(w.document) {
+                    view = now.clone();
+                }
                 view = canvas_view(app, ui, w.document, rect, view.clone(), primary);
             });
+            if floating && own_window {
+                // No system frame: the window's edges resize it.
+                crate::titlebar::resize_zones(ui);
+            }
             if dialogs_apart {
                 block_main_window(&wctx);
             }
-            if prompt_in == Some(w.id) {
+            if prompt_in == Some(key) {
                 // The question needs this window's keys (Y / N / Esc): take the focus from the
                 // main window, never from another application.
                 if own_window && !wctx.input(|i| i.focused) && ctx.input(|i| i.focused) {
@@ -6137,11 +6183,10 @@ pub fn extra_windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
         if app.session.documents().get(w.document).map(|d| d.doc.id) != Some(doc_id) {
             app.ui.windows.retain(|x| x.id != w.id);
             ctx.request_repaint();
+            actions.clear();
             break;
         }
-        if w.floating
-            && let Some(slot) = app.ui.views.get_mut(w.document)
-        {
+        if floating && let Some(slot) = app.ui.views.get_mut(w.document) {
             *slot = view.clone();
         }
         if let Some(win) = app.ui.windows.iter_mut().find(|x| x.id == w.id) {
@@ -6150,11 +6195,16 @@ pub fn extra_windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 win.open = false;
             }
         }
-        if close && w.floating {
-            close_docs.push(doc_id);
+        if close && floating {
+            let docs = app.session.documents();
+            close_docs.extend(members.iter().filter_map(|m| docs.get(m.document).map(|d| d.doc.id)));
         }
     }
+    for a in actions {
+        bar::apply(app, ctx, a);
+    }
     app.ui.windows.retain(|w| w.open);
+    close_docs.dedup();
     for id in close_docs {
         if let Some(doc) = app.session.documents().iter().position(|d| d.doc.id == id) {
             let _ = crate::menus::invoke(app, ctx, "file.close", json!({"document": doc}));
@@ -7378,6 +7428,80 @@ mod tests {
         if app.discard.is_some() {
             assert_eq!(prompt_window(&app, &ctx), None);
         }
+    }
+
+    /// Zoom commands (⌘+ / ⌘−) act on a floating document's window: it draws the document's view
+    /// as the command left it, not the copy taken at the start of the frame.
+    #[test]
+    fn zoom_commands_zoom_a_floating_window() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        for name in ["a", "b"] {
+            app.run("file.new", json!({"width": 300, "height": 200, "name": name})).unwrap();
+        }
+        app.sync_views();
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_ui_state(
+            |ui, app: &mut PhotocraftApp| {
+                let ctx = ui.ctx().clone();
+                if !ctx.fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                    return;
+                }
+                egui::CentralPanel::default().show(ui, |ui| document_area(app, ui));
+                extra_windows(app, &ctx);
+            },
+            app,
+        );
+        PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ALL[0]);
+        h.run_steps(4);
+        let ctx = h.ctx.clone();
+        crate::menus::invoke(h.state_mut(), &ctx, "window.arrange.floatInWindow", json!({"document": 1})).unwrap();
+        h.run_steps(6);
+        let zoom = |app: &PhotocraftApp| (app.ui.views[1].zoom, app.ui.windows[0].view.zoom);
+        let (before, _) = zoom(h.state());
+        for (id, grows) in [("view.zoomIn", true), ("view.zoomOut", false)] {
+            let (was, _) = zoom(h.state());
+            crate::menus::invoke(h.state_mut(), &ctx, id, json!({})).unwrap();
+            h.run_steps(3);
+            let (view, window) = zoom(h.state());
+            assert!(if grows { view > was } else { view < was }, "{id}: {was} -> {view}");
+            assert_eq!(view, window, "{id}: the window shows the zoomed view");
+        }
+        assert!(before > 0.0);
+    }
+
+    /// A menu of the main window opened beside document windows raises the main window for as
+    /// long as it is open (else it would be under them), and only then; never with embedded
+    /// viewports or without document windows.
+    #[test]
+    fn a_main_window_menu_raises_the_main_window_while_open() {
+        let ctx = egui::Context::default();
+        ctx.set_embed_viewports(false);
+        let mut wins = vec![crate::state::DocWindow { id: 1, document: 0, view: Default::default(), open: true, position: None, floating: true, group: None }];
+        let level = |out: &egui::FullOutput| {
+            out.viewport_output.get(&egui::ViewportId::ROOT).and_then(|v| {
+                v.commands.iter().find_map(|c| match c {
+                    egui::ViewportCommand::WindowLevel(l) => Some(*l),
+                    _ => None,
+                })
+            })
+        };
+        let frame = |wins: &[crate::state::DocWindow], menu: bool| {
+            let mut out = ctx.run_ui(Default::default(), |ui| {
+                if menu {
+                    egui::Popup::open_id(ui.ctx(), egui::Id::new("a menu"));
+                } else {
+                    egui::Popup::close_all(ui.ctx());
+                }
+                raise_main_window_for_menus(ui.ctx(), wins);
+            });
+            out.textures_delta.clear();
+            level(&out)
+        };
+        assert_eq!(frame(&wins, false), None, "no menu: nothing changes");
+        assert_eq!(frame(&wins, true), Some(egui::WindowLevel::AlwaysOnTop), "a menu opens: the main window goes on top");
+        assert_eq!(frame(&wins, true), None, "once");
+        assert_eq!(frame(&wins, false), Some(egui::WindowLevel::Normal), "it closes: back to normal");
+        wins.clear();
+        assert_eq!(frame(&wins, true), None, "no document windows: the main window is left alone");
     }
 
     /// A floating document is worked on in its own window, not just shown there: a brush stroke

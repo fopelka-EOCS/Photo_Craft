@@ -811,7 +811,7 @@ fn add_window(app: &mut PhotocraftApp, doc: usize, offset: usize, floating: bool
     let wid = app.ui.alloc_id();
     let mut view = app.ui.views.get(doc).cloned().unwrap_or_default();
     view.fit_pending = offset > 0 || view.fit_pending;
-    app.ui.windows.push(crate::state::DocWindow { id: wid, document: doc, view, open: true, position: None, floating });
+    app.ui.windows.push(crate::state::DocWindow { id: wid, document: doc, view, open: true, position: None, floating, group: None });
     wid
 }
 

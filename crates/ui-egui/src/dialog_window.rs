@@ -24,7 +24,7 @@ fn anchor(app: &PhotocraftApp, ctx: &egui::Context) -> Option<egui::Rect> {
     let active = app.session.active_index();
     let floating = app.ui.windows.iter().find(|w| w.open && w.floating && Some(w.document) == active);
     match floating {
-        Some(w) => ctx.input_for(egui::ViewportId::from_hash_of(("docwin", w.id)), |i| i.viewport().outer_rect),
+        Some(w) => ctx.input_for(crate::doc_window_bar::viewport(w.key()), |i| i.viewport().outer_rect),
         None => None,
     }
     .or_else(|| ctx.input(|i| i.viewport().outer_rect))
@@ -67,8 +67,8 @@ pub(crate) fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         .with_window_level(egui::WindowLevel::AlwaysOnTop);
     // PhotoCraft has the focus in its main window or a document window: the dialog takes it, as
     // a modal dialog does (never from another application).
-    let app_focused =
-        ctx.input(|i| i.focused) || app.ui.windows.iter().any(|w| ctx.data(|d| d.get_temp::<bool>(egui::Id::new(("docwin-focused", w.id)))).unwrap_or(false));
+    let app_focused = ctx.input(|i| i.focused)
+        || app.ui.windows.iter().any(|w| ctx.data(|d| d.get_temp::<bool>(egui::Id::new(("docwin-focused", w.key())))).unwrap_or(false));
     let mut close = false;
     ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("pc-dialog-window"), builder, |ui, _class| {
         let vctx = ui.ctx().clone();

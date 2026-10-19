@@ -507,6 +507,17 @@ pub struct DocWindow {
     /// keeps its tab (Window › Arrange › New Window for …).
     #[serde(default)]
     pub floating: bool,
+    /// The floating window this document is a tab of (another window's id), when documents were
+    /// dragged together into one window; `None`: its own window.
+    #[serde(default)]
+    pub group: Option<u64>,
+}
+
+impl DocWindow {
+    /// The OS window this document shows in: its group's, else its own.
+    pub fn key(&self) -> u64 {
+        self.group.unwrap_or(self.id)
+    }
 }
 
 impl UiState {

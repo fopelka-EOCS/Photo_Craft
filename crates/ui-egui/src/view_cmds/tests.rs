@@ -582,3 +582,27 @@ fn esc_leaves_full_screen_modes_unless_something_else_owns_it() {
     assert_eq!(app.ui.view.screen_mode, "standard");
     assert!(app.session.active().unwrap().doc.selection.is_some());
 }
+
+/// Full Screen Mode (F) shows only the image on black but keeps the Tools panel, so a tool can
+/// still be picked; turning Window › Tools off still hides it.
+#[test]
+fn full_screen_mode_keeps_the_tools_panel() {
+    let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).with_max_steps(64).build_eframe(|cc| {
+        PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 100, "height": 80})).unwrap();
+        app
+    });
+    h.run_steps(6);
+    use egui_kittest::kittest::Queryable;
+    let tool = "Move Tool  (V)";
+    assert!(h.query_by_label(tool).is_some(), "standard screen mode shows the tools");
+    let ctx = h.ctx.clone();
+    menu(h.state_mut(), &ctx, "view.screenMode.fullScreen", json!({})).unwrap();
+    h.run_steps(6);
+    assert!(h.state().ui.view.hides_chrome());
+    assert!(h.query_by_label(tool).is_some(), "full screen mode keeps the tools");
+    h.state_mut().ui.panels.toolbar = false;
+    h.run_steps(6);
+    assert!(h.query_by_label(tool).is_none(), "Window › Tools off hides them");
+}
