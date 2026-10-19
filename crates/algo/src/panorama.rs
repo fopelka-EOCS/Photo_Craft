@@ -1172,8 +1172,15 @@ fn band_row(band: &PyramidBand, l: usize, ch: usize, py: usize) -> Option<(usize
 
 /// Estimated bytes of band construction [`multiband`] keeps in flight at once. Images are built
 /// and accumulated in batches under it, so its peak memory doesn't grow with the image count
-/// (#7758): building every band at once took ~5.3 GB above the inputs for four 24 MP sources.
-const BAND_BUDGET: usize = 2 << 30;
+/// (#7758). Four 24 MP RGB sources (~1.2 GB each) fit in one batch: building bands side by side
+/// uses a many-core machine better than one band's row-parallel work, and one at a time made the
+/// usual 2–4 image Photomerge 12–36% slower on a 32-thread desktop.
+#[cfg(not(target_arch = "wasm32"))]
+const BAND_BUDGET: usize = 5 << 30;
+/// Without threads the bands of a batch are built one after another anyway, so each is added as
+/// soon as it is built (the browser's address space is 4 GB).
+#[cfg(target_arch = "wasm32")]
+const BAND_BUDGET: usize = 0;
 
 /// Multi-band blend of `imgs` into a `w × h` panorama (origin 0,0) with one weight map per image
 /// over the same grid as its ROI (`weights[i]` has `w_i × h_i` entries). Returns the colour
