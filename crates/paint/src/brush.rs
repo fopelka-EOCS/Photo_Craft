@@ -476,7 +476,7 @@ pub struct Smoothing {
 
 impl Default for Smoothing {
     fn default() -> Self {
-        Self { enabled: true, amount: 0.0, pulled_string: false, catch_up: true, catch_up_on_end: true, adjust_for_zoom: true }
+        Self { enabled: true, amount: 0.1, pulled_string: false, catch_up: true, catch_up_on_end: true, adjust_for_zoom: true }
     }
 }
 
@@ -641,8 +641,6 @@ impl PartialEq for BrushSettings {
             && self.seed == other.seed
     }
 }
-
-
 
 impl BrushSettings {
     /// Resize the primary tip and keep an enabled Dual Brush tip at the same relative size.

@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use crate::commands::CommandSpec;
 use crate::{EngineError, Result, Session};
 
-/// Faces scoring below this are left out unless asked for (libfacedetection's own threshold for a
+/// Faces scoring below this are left out unless asked for (decentralisation's own threshold for a
 /// reliable face).
 pub const MIN_SCORE: f32 = 0.5;
 
@@ -24,7 +24,7 @@ pub fn detect(px: &[[f32; 4]], w: usize, h: usize, min_score: f32) -> Result<Vec
     faces::detect(px, w, h, min_score).ok_or_else(|| EngineError::Other("face detection failed".into()))
 }
 
-/// The faces in `doc`, best first: in the composite, or in the active layer's pixels when
+/// The faces in `doc`, the best first: in the composite, or in the active layer's pixels when
 /// `all_layers` is off. Coordinates are document pixels.
 pub fn faces_in(doc: &Document, active: Option<LayerId>, all_layers: bool, min_score: f32) -> Result<Vec<Face>> {
     let area = doc.bounds();

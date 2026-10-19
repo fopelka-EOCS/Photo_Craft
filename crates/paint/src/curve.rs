@@ -37,12 +37,12 @@ impl Default for ResponseCurve {
     }
 }
 
-impl ResponseCurve {    // >>>> Added SMOOTH to match Photoshop's curve 
+impl ResponseCurve {
+    // >>>> Added SMOOTH to match Photoshop's curve
     pub const MAX_POINTS: usize = MAX;
 
     /// The identity: input passes through unchanged.
     pub const LINEAR: Self = Self { n: 2, xs: padded(0.0, 1.0), ys: padded(0.0, 1.0), ms: padded(1.0, 1.0) };
-
 
     /// Photoshop's default pressure response: a smooth S-curve (smoothstep, `3x² − 2x³`).
     /// Matches Photoshop's measured output within a rounding step — 10 % pressure → ~2.8 %

@@ -169,11 +169,7 @@ pub fn tip_shape(radius: f32, hardness: f32) -> (f32, f32) {
     // and a 0.15-radius dab emit ~0.05 instead of 0.07. It's not what's producing
     // the flat ending — but if the fade is still a bit abrupt after the fixes above,
     // this is the remaining contributor
-    let edge = if radius < 0.83 {
-        (0.3 * radius).max(0.02)
-    } else {
-        TIP_EDGE_PX.min(0.3 * radius).max(0.25)
-    };
+    let edge = if radius < 0.83 { (0.3 * radius).max(0.02) } else { TIP_EDGE_PX.min(0.3 * radius).max(0.25) };
     ((r0 * radius).min(radius - edge).max(0.0), (s * radius).max(edge).max(1e-3))
 }
 ///////////////////////////////////////////////////////////////

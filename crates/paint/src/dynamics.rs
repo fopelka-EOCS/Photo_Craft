@@ -27,12 +27,10 @@ const MIN_SPEED_STEP: f64 = 0.5;
 /// Maximum airbrush catch-up dabs for one input segment.
 const MAX_AIRBRUSH_DABS_PER_SEGMENT: usize = 512;
 
-
 // ADDED
 /// Dabs this thin may run freely for THIN_FREE_DABS dabs, then fade to nothing over THIN_FADE_DABS more (no hairs, no hard cut).
 const THIN_FREE_DABS: u32 = 16;
 const THIN_FADE_DABS: u32 = 24;
-
 
 #[inline]
 fn lerp_pt(a: &StrokePoint, b: &StrokePoint, f: f64) -> StrokePoint {
@@ -54,8 +52,7 @@ fn lerp_pt(a: &StrokePoint, b: &StrokePoint, f: f64) -> StrokePoint {
 // ---------------------------------------------------------------------------
 
 /// Incremental stroke smoothing: exponential (with optional time-based catch-up) or pulled string.
-#[derive(Clone)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Smoother {
     cfg: Smoothing,
     zoom: f64,
@@ -63,8 +60,8 @@ pub struct Smoother {
     pos: Option<StrokePoint>,
     prev_pos: Option<StrokePoint>, // ----->>>> ADDED
     last_input: Option<StrokePoint>,
-    prev_pressure: f32,  // ----->>>> ADDED
-    last_dir: (f64, f64), // ----->>>> ADDED
+    prev_pressure: f32,             // ----->>>> ADDED
+    last_dir: (f64, f64),           // ----->>>> ADDED
     start_pos: Option<StrokePoint>, // Added for the startup filter
     started: bool,                  // Added for the startup filter
 }
@@ -88,7 +85,6 @@ impl Smoother {
     fn active(&self) -> bool {
         self.cfg.enabled && self.cfg.amount > 0.0
     }
-
 
     ///////////////////////////////////////////////////////////////////////////////
     // FIX
@@ -332,7 +328,6 @@ impl Smoother {
         None
     }
 
-
     /// End of stroke.
     pub fn finish(&mut self, out: &mut Vec<StrokePoint>) {
         let Some(cur) = self.pos else { return };
@@ -362,7 +357,6 @@ impl Smoother {
         self.pos = Some(target);
     }
 }
-
 
 /// Smooth a whole point list with the brush's smoothing settings.
 // UPDATED as well, naturally
@@ -495,7 +489,6 @@ impl PathWalker {
             self.emit(f, out);
         }
         if len > 1e-9 {
-
             let dt = p.time - a.time;
             match self.speed.filter(|_| dt > 0.0 && dt.is_finite()) {
                 None => {
@@ -513,7 +506,6 @@ impl PathWalker {
                     }
                 }
                 /////////////////////////////////////////////////////////////////////
-
                 Some(iv) => {
                     self.speed_acc += dt;
                     let max_n = (len / MIN_SPEED_STEP).ceil().max(1.0) as usize;
@@ -561,12 +553,7 @@ impl PathWalker {
         // Always force-emit the final point so a residual spacing gap
         // never leaves the tip undrawn (the main source of “stepped” ends).
         if let Some(last) = self.last {
-            let s = StepInput {
-                point: last,
-                direction: self.dir,
-                initial_direction: self.initial_dir.unwrap_or(self.dir),
-                step: self.step,
-            };
+            let s = StepInput { point: last, direction: self.dir, initial_direction: self.initial_dir.unwrap_or(self.dir), step: self.step };
             self.step += 1;
             out(s);
         }
@@ -708,7 +695,7 @@ pub struct DabBuilder {
     /// Per-stroke colour (Color Dynamics with per-tip off), computed at the first step.
     stroke_color: Option<[f32; 4]>,
     next_index: u64,
-    thin_run: u32 // >> ADDED
+    thin_run: u32, // >> ADDED
 }
 
 impl DabBuilder {
@@ -793,7 +780,7 @@ impl DabBuilder {
             } else {
                 let thin_r = (b.size * 0.07).clamp(1.2, 3.0);
                 let fade_start = thin_r * 1.4;
-                let fade_end   = thin_r * 0.2;   // <-- Changed from 0.45 to 0.2
+                let fade_end = thin_r * 0.2; // <-- Changed from 0.45 to 0.2
                 if radius >= fade_start {
                     1.0
                 } else if radius <= fade_end {
@@ -812,10 +799,7 @@ impl DabBuilder {
             if sc.enabled && sc.scatter.jitter > 0.0 {
                 let cv = dynamic_value(&sc.scatter, s);
                 let amt = f64::from(sc.scatter.jitter * cv * radius);
-                let (ox, oy) = (
-                    rand_signed(seed, i, stream::SCATTER_X) as f64 * amt,
-                    rand_signed(seed, i, stream::SCATTER_Y) as f64 * amt,
-                );
+                let (ox, oy) = (rand_signed(seed, i, stream::SCATTER_X) as f64 * amt, rand_signed(seed, i, stream::SCATTER_Y) as f64 * amt);
                 if sc.both_axes {
                     c.x += ox;
                     c.y += oy;
@@ -833,47 +817,27 @@ impl DabBuilder {
                 opacity = scalar(&tr.opacity, s, r(stream::OPACITY));
                 flow *= scalar(&tr.flow, s, r(stream::FLOW));
             }
-            let (wet, mix) = if tr.enabled {
-                (
-                    scalar(&tr.wetness, s, r(stream::WET)),
-                    scalar(&tr.mix, s, r(stream::MIX)),
-                )
-            } else {
-                (1.0, 1.0)
-            };
+            let (wet, mix) = if tr.enabled { (scalar(&tr.wetness, s, r(stream::WET)), scalar(&tr.mix, s, r(stream::MIX))) } else { (1.0, 1.0) };
             if b.pressure_opacity && !(tr.enabled && tr.opacity.control != Control::Off) {
                 opacity *= s.point.pressure.clamp(0.0, 1.0);
             }
             // Colour.
             let color = if b.color_dynamics.enabled {
-                if b.color_dynamics.per_tip {
-                    dynamic_color(b, s, seed, i)
-                } else {
-                    *self.stroke_color
-                        .get_or_insert_with(|| dynamic_color(b, s, seed, 0))
-                }
+                if b.color_dynamics.per_tip { dynamic_color(b, s, seed, i) } else { *self.stroke_color.get_or_insert_with(|| dynamic_color(b, s, seed, 0)) }
             } else {
                 b.color
             };
             // Texture depth (per tip).
             let tx = &b.texture;
-            let depth = if tx.enabled && tx.each_tip {
-                tx.depth.clamp(0.0, 1.0) * scalar(&tx.depth_jitter, s, r(stream::DEPTH))
-            } else {
-                tx.depth.clamp(0.0, 1.0)
-            };
+            let depth =
+                if tx.enabled && tx.each_tip { tx.depth.clamp(0.0, 1.0) * scalar(&tx.depth_jitter, s, r(stream::DEPTH)) } else { tx.depth.clamp(0.0, 1.0) };
 
             // Dabs under ~1.5px wide would be inflated to a 1px line by the rasterizer's
             // 0.5px radius floor: make them vanish instead.
             let fade_hi = (b.size * 0.25).clamp(0.5, 2.0);
             let fade_lo = fade_hi * 0.1; // <-- Changed from 0.25 to 0.1
             let t = ((radius - fade_lo) / (fade_hi - fade_lo)).clamp(0.0, 1.0);
-            let area_scale = if b.aliased {
-                1.0
-            } else {
-                t * t * (3.0 - 2.0 * t) * thin_fade
-            };
-
+            let area_scale = if b.aliased { 1.0 } else { t * t * (3.0 - 2.0 * t) * thin_fade };
 
             out.push(Dab {
                 center: c,
@@ -997,8 +961,7 @@ impl DabGenerator {
         let interval = brush.build_up.then(|| 1000.0 / f64::from(brush.build_up_rate.clamp(0.1, 1000.0)));
         let dual_on = brush.dual_brush.enabled;
 
-        let mut walker = if brush.spacing_enabled { PathWalker::new(interval) }
-        else { PathWalker::new(interval).speed_spacing(SPEED_SPACING_MS) };
+        let mut walker = if brush.spacing_enabled { PathWalker::new(interval) } else { PathWalker::new(interval).speed_spacing(SPEED_SPACING_MS) };
 
         // A small aliased tip whose dabs are at most a pixel apart steps pixel by pixel (#2139).
         if brush.aliased && brush.size * brush.spacing.max(0.01) <= 1.0 {

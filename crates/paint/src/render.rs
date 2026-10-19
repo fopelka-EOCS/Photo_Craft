@@ -822,7 +822,6 @@ impl StrokeRenderer {
 
     /// End of stroke (smoothing catch-up, a lone first point).
     pub fn finish(&mut self) {
-
         self.generator.finish(&mut self.dab_buf, &mut self.dual_buf);
         self.raster_pending();
     }
@@ -961,7 +960,7 @@ impl StrokeRenderer {
             k
 
         /////////////////////////////////////////////////////////////////////
-       // FIX no.1
+        // FIX no.1
         } else {
             // If the brush has a stroke-level mask (Dual Brush or Texture that is not per-tip),
             // we must re-composite the *entire* stroke bounds, not just the dirty tiles.
@@ -983,7 +982,6 @@ impl StrokeRenderer {
             }
         };
         //////////////////////////////////////////////////////////////////////////////////
-
 
         if let Some(d) = self.dual.as_mut() {
             d.dirty.clear();
