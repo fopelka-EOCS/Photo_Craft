@@ -1243,11 +1243,15 @@ pub(crate) fn encode(src: &Image, plan: Plan, opts: &EncodeOptions) -> Result<Ve
     // as BigTIFF.
     let estimate = estimated_size(&img, &tags);
     let write = |big: bool| -> tiff::TiffResult<Vec<u8>> {
-        // Allocated once for the whole file (usually an upper bound; compression can grow
-        // the data, see the BigTIFF retry below). Grown as written, the buffer doubles near
-        // the end, copying the file (#6607).
+        // An uncompressed file is allocated once at its estimated size: grown as written, the
+        // buffer would double near the end and copy the file (#6607). Compressed output is
+        // usually a fraction of the estimate, so it grows as written instead: reserving the
+        // estimate would hold a second full-size buffer while encoding, which wasm32 never
+        // returns and Windows counts as committed memory.
         let mut out = Vec::new();
-        let _ = out.try_reserve(usize::try_from(estimate).unwrap_or(usize::MAX));
+        if matches!(opts.tiff_compression, TiffCompression::None) {
+            let _ = out.try_reserve(usize::try_from(estimate).unwrap_or(usize::MAX));
+        }
         let mut cursor = Cursor::new(out);
         if big {
             let mut enc = TiffEncoder::new_big(&mut cursor)?.with_compression(compression).with_predictor(predictor);
@@ -1256,8 +1260,8 @@ pub(crate) fn encode(src: &Image, plan: Plan, opts: &EncodeOptions) -> Result<Ve
             let mut enc = TiffEncoder::new(&mut cursor)?.with_compression(compression).with_predictor(predictor);
             write_image::<TiffKindStandard>(&mut enc, &img, &tags)?;
         }
-        // LZW or Deflate often writes a third of the estimate: the unused rest is given back
-        // instead of being held while the file is saved.
+        // Growth (or an estimate that was too high) can leave spare capacity: give it back
+        // instead of holding it while the file is saved.
         let mut out = cursor.into_inner();
         if out.capacity() - out.len() > out.len() / 8 {
             out.shrink_to_fit();
