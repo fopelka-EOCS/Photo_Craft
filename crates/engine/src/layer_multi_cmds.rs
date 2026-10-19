@@ -364,11 +364,14 @@ pub fn translate(s: &mut Session, p: &Value) -> Result<Value> {
     if dx == 0 && dy == 0 {
         return Ok(Value::Null);
     }
-    // One colour channel targeted in the Channels panel (#6068): the Move tool moves that channel
-    // of the active layer, not the layer. A `"target"` param (the mask) still wins.
-    if p.get("target").is_none()
-        && let Some(k) = crate::channel_cmds::targeted_color(s)
-    {
+    // An explicit target wins. An explicit layer without one retains whole-layer movement,
+    // matching the other geometric commands; an implicit Move-tool command follows Channels.
+    let color = match crate::channel_transform::color_index(p)? {
+        Some(k) => Some(k),
+        None if p.get("target").is_none() && p.get("layer").is_none_or(Value::is_null) => crate::channel_cmds::targeted_color(s),
+        None => None,
+    };
+    if let Some(k) = color {
         return translate_color_channel(s, p, k, dx, dy);
     }
     let roots = match crate::commands::explicit_layer(s, p)? {

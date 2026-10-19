@@ -825,32 +825,67 @@ pub(crate) fn restrict_color_region(old: &Surface, new: &mut Surface, k: usize, 
 /// value for it, as Clear does with a channel targeted (#2720); values moved past the layer's
 /// pixels are dropped. Only pixel layers have colour channels to move.
 pub fn move_color_channel(doc: &mut Document, id: LayerId, k: usize, dx: i32, dy: i32, background: [f32; 4]) -> Result<()> {
+    let space = photocraft_compose::cmyk_space(doc);
     let surf = crate::commands::paint_surface(doc, id, &Value::Null)?;
     let fmt = surf.format();
-    let n = fmt.channels();
-    let Some(bg) = from_rgba(&fmt, [background[0], background[1], background[2], 1.0]).get(k).copied().filter(|_| k < n) else {
+    if k >= fmt.mode.color_channels() {
         return Err(EngineError::Other(format!("no colour channel {k} in this layer")));
-    };
+    }
     let area = surf.content_bounds();
     if area.is_empty() || (dx == 0 && dy == 0) {
         return Ok(());
     }
-    let old = crate::allocation::read_region(surf, area, "moving a channel")?;
-    let mut px = crate::allocation::filled(old.len(), 0.0f32, "moving a channel")?;
-    px.copy_from_slice(&old);
-    let (w, h) = (i64::from(area.width()), i64::from(area.height()));
-    let (dx, dy) = (i64::from(dx), i64::from(dy));
-    let at = |x: i64, y: i64| usize::try_from(y * w + x).ok().and_then(|i| i.checked_mul(n)).and_then(|i| i.checked_add(k));
-    for y in 0..h {
-        for x in 0..w {
-            let (sx, sy) = (x - dx, y - dy);
-            let v = if (0..w).contains(&sx) && (0..h).contains(&sy) { at(sx, sy).and_then(|i| old.get(i)).copied().unwrap_or(bg) } else { bg };
-            if let Some(c) = at(x, y).and_then(|i| px.get_mut(i)) {
-                *c = v;
+    crate::channel_transform::validate_area(area)?;
+    let native = photocraft_color::convert::with_cmyk_space(space.as_ref(), || from_rgba(&fmt, background));
+    let bpp = fmt.bytes_per_pixel();
+    let bytes = fmt.sample.bytes();
+    let offset = k * bytes;
+    let end = offset + bytes;
+    let mut encoded = [0u8; 20];
+    let pixel = encoded.get_mut(..bpp).ok_or_else(|| bad("layer.translate", "invalid pixel format"))?;
+    photocraft_raster::encode_pixel(&fmt, &native, pixel);
+    let fill = pixel.get(offset..end).ok_or_else(|| bad("layer.translate", "missing background component"))?;
+    // The snapshot keeps source samples intact while changed tiles copy on write. Work a tile at
+    // a time so a large channel move never needs two full-document pixel buffers.
+    let source = surf.clone();
+    for tile in area.tiles() {
+        let tile_rect = tile.rect();
+        let r = tile_rect.intersect(&area);
+        // Widen before subtracting: a hostile command may provide i32::MIN as an offset.
+        let sx0 = (i64::from(r.x0) - i64::from(dx)).max(i64::from(area.x0));
+        let sy0 = (i64::from(r.y0) - i64::from(dy)).max(i64::from(area.y0));
+        let sx1 = (i64::from(r.x1) - i64::from(dx)).min(i64::from(area.x1));
+        let sy1 = (i64::from(r.y1) - i64::from(dy)).min(i64::from(area.y1));
+        let shifted = if sx0 < sx1 && sy0 < sy1 {
+            let src = Rect::new(sx0 as i32, sy0 as i32, sx1 as i32, sy1 as i32);
+            Some((src, source.try_to_interleaved(src)?))
+        } else {
+            None
+        };
+        let data = surf.try_tile_mut(tile)?.bytes_mut();
+        let tile_width = photocraft_geom::TILE_SIZE as usize;
+        let width = r.width() as usize;
+        for y in r.y0..r.y1 {
+            let base = (((y - tile_rect.y0) as usize) * tile_width + (r.x0 - tile_rect.x0) as usize) * bpp;
+            let row = data.get_mut(base..base + width * bpp).ok_or_else(|| bad("layer.translate", "missing destination row"))?;
+            for pixel in row.chunks_exact_mut(bpp) {
+                pixel.get_mut(offset..end).ok_or_else(|| bad("layer.translate", "missing colour component"))?.copy_from_slice(fill);
+            }
+        }
+        if let Some((src, values)) = shifted {
+            let sw = src.width() as usize;
+            let ox = (sx0 + i64::from(dx) - i64::from(tile_rect.x0)) as usize;
+            let oy = (sy0 + i64::from(dy) - i64::from(tile_rect.y0)) as usize;
+            for (y, row) in values.chunks_exact(sw * bpp).enumerate() {
+                let base = ((oy + y) * tile_width + ox) * bpp;
+                let dest = data.get_mut(base..base + sw * bpp).ok_or_else(|| bad("layer.translate", "missing shifted destination row"))?;
+                for (pixel, from) in dest.chunks_exact_mut(bpp).zip(row.chunks_exact(bpp)) {
+                    let sample = from.get(offset..end).ok_or_else(|| bad("layer.translate", "missing source component"))?;
+                    pixel.get_mut(offset..end).ok_or_else(|| bad("layer.translate", "missing destination component"))?.copy_from_slice(sample);
+                }
             }
         }
     }
-    surf.try_write_region(area, &px)?;
     surf.prune();
     Ok(())
 }

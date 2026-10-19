@@ -1018,3 +1018,117 @@ fn move_with_a_colour_channel_targeted_refuses_layers_it_cannot_move() {
     assert!(s.execute("layer.translate", json!({"dx": 3, "dy": 0})).is_err());
     assert_eq!(*s.active().unwrap().doc, *before);
 }
+
+#[test]
+fn move_channel_preserves_native_samples_and_undo_across_modes_and_depths() {
+    use photocraft_color::Color;
+    use photocraft_doc::Size;
+
+    for mode in [ColorMode::Rgb, ColorMode::Cmyk, ColorMode::Lab] {
+        for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
+            let mut s = Session::new();
+            s.add_document(Document::with_background("move", Size::new(8, 4), mode, depth, Color::WHITE), None);
+            s.execute("layer.new.layer", json!({})).unwrap();
+            s.edit("fixture", |doc, active| {
+                let surf = doc.layer_mut(active.unwrap()).unwrap().surface_mut().unwrap();
+                let n = surf.format().channels();
+                for y in 0..4 {
+                    for x in 0..8 {
+                        let mut pixel: Vec<_> = (0..n).map(|c| (x + 1 + y * 8 + c as i32) as f32 / 40.0).collect();
+                        if depth == SampleType::F32 {
+                            pixel[1] = if x % 2 == 0 { -0.25 } else { 1.75 };
+                        }
+                        pixel[n - 1] = 0.75;
+                        surf.write_pixel(x, y, &pixel);
+                    }
+                }
+                Ok(())
+            })
+            .unwrap();
+            let id = s.active().unwrap().active_layer.unwrap();
+            let surface = |s: &Session| s.active().unwrap().doc.layer(id).unwrap().surface().unwrap().clone();
+            let original = surface(&s);
+            let fmt = original.format();
+            let bpp = fmt.bytes_per_pixel();
+            let bytes = depth.bytes();
+            let k = 1;
+            let before = original.try_to_interleaved(Rect::new(0, 0, 8, 4)).unwrap();
+            s.tools.background = [0.2, 0.4, 0.6, 1.0];
+            s.execute("channel.target", json!({"channel":{"color":k}})).unwrap();
+            s.execute("layer.translate", json!({"dx":1,"dy":0})).unwrap();
+            let after = surface(&s).try_to_interleaved(Rect::new(0, 0, 8, 4)).unwrap();
+            for (a, b) in after.chunks_exact(bpp).zip(before.chunks_exact(bpp)) {
+                for c in 0..fmt.channels() {
+                    if c != k {
+                        assert_eq!(&a[c * bytes..(c + 1) * bytes], &b[c * bytes..(c + 1) * bytes], "{mode:?}/{depth:?}/{c}");
+                    }
+                }
+            }
+            for x in 1..8 {
+                let src = ((x - 1) * bpp) + k * bytes;
+                let dst = x * bpp + k * bytes;
+                assert_eq!(&after[dst..dst + bytes], &before[src..src + bytes], "{mode:?}/{depth:?}/x={x}");
+            }
+            s.undo();
+            assert_eq!(surface(&s).try_to_interleaved(Rect::new(0, 0, 8, 4)).unwrap(), before);
+            s.redo();
+            assert_eq!(surface(&s).try_to_interleaved(Rect::new(0, 0, 8, 4)).unwrap(), after);
+        }
+    }
+}
+
+#[test]
+fn move_channel_target_precedence_and_bad_input() {
+    let mut s = session();
+    s.execute("layer.new.layer", json!({})).unwrap();
+    s.execute("edit.fill", json!({"color":"#804020"})).unwrap();
+    let id = s.active().unwrap().active_layer.unwrap();
+    s.execute("channel.target", json!({"channel":"red"})).unwrap();
+    let before = s.active().unwrap().doc.clone();
+    for target in [json!({"color":99}), json!({"color":"red"})] {
+        assert!(s.execute("layer.translate", json!({"dx":1,"target":target})).is_err());
+        assert_eq!(*s.active().unwrap().doc, *before);
+    }
+    // An explicit channel beats the Channels panel; an explicit layer alone moves all pixels.
+    s.execute("layer.translate", json!({"dx":1,"target":{"color":1}})).unwrap();
+    assert_eq!(px(&s, 1, 0)[0], before.layer(id).unwrap().surface().unwrap().sample_channel(1, 0, 0));
+    s.undo();
+    s.execute("layer.translate", json!({"dx":1,"layer":null})).unwrap();
+    assert_eq!(px(&s, 0, 0)[1], before.layer(id).unwrap().surface().unwrap().sample_channel(0, 0, 1));
+    assert_ne!(px(&s, 0, 0)[0], before.layer(id).unwrap().surface().unwrap().sample_channel(0, 0, 0));
+    s.undo();
+    s.execute("layer.translate", json!({"dx":1,"layer":id.0})).unwrap();
+    let after = s.active().unwrap().doc.layer(id).unwrap().surface().unwrap();
+    assert_eq!(after.pixel(1, 0), before.layer(id).unwrap().surface().unwrap().pixel(0, 0));
+}
+
+#[test]
+fn move_channel_crosses_tiles_and_handles_extreme_offsets() {
+    use photocraft_color::Color;
+    use photocraft_doc::Size;
+
+    let mut s = Session::new();
+    s.add_document(Document::with_background("move", Size::new(260, 2), ColorMode::Rgb, SampleType::F32, Color::WHITE), None);
+    s.execute("layer.new.layer", json!({})).unwrap();
+    s.edit("fixture", |doc, active| {
+        let surf = doc.layer_mut(active.unwrap()).unwrap().surface_mut().unwrap();
+        for x in 0..260 {
+            surf.write_pixel(x, 0, &[x as f32 / 100.0 - 0.5, 0.3, 0.7, 1.0]);
+        }
+        Ok(())
+    })
+    .unwrap();
+    let id = s.active().unwrap().active_layer.unwrap();
+    let original = s.active().unwrap().doc.layer(id).unwrap().surface().unwrap().clone();
+    s.execute("channel.target", json!({"channel":"red"})).unwrap();
+    s.execute("layer.translate", json!({"dx":9})).unwrap();
+    let shifted = s.active().unwrap().doc.layer(id).unwrap().surface().unwrap();
+    for x in [127, 128, 129, 255] {
+        assert_eq!(shifted.sample_channel(x, 0, 0).to_bits(), original.sample_channel(x - 9, 0, 0).to_bits());
+        assert_eq!(shifted.sample_channel(x, 0, 1).to_bits(), original.sample_channel(x, 0, 1).to_bits());
+    }
+    s.undo();
+    s.execute("layer.translate", json!({"dx":i32::MIN})).unwrap();
+    let shifted = s.active().unwrap().doc.layer(id).unwrap().surface().unwrap();
+    assert_eq!(shifted.sample_channel(128, 0, 0), 1.0, "no source remains in bounds; white background fills red");
+}
