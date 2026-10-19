@@ -296,9 +296,21 @@ fn has_doc(s: &Session) -> std::result::Result<(), String> {
 /// Image › Adjustments run as a smart filter (`image.adjustments.<kind>` recorded on a smart
 /// object): the adjustment applied to a copy of `surf`. `None` for kinds or params it can't run.
 pub(crate) fn adjust_as_filter(kind: &str, p: &Value, surf: &Surface) -> Option<Surface> {
+    // A Color Lookup filter re-reads its LUT `file`, a path stored in the document: followed only
+    // as `doc_path` allows, else the filter can't run (like a missing file).
+    let resolved;
+    let p = match p.get("file").and_then(Value::as_str).filter(|f| kind == "colorLookup" && !f.is_empty()) {
+        Some(file) => {
+            let mut q = p.clone();
+            q["file"] = json!(crate::doc_path::resolve(file).ok()?.to_str()?);
+            resolved = q;
+            &resolved
+        }
+        None => p,
+    };
     let mut out = surf.clone();
     if kind == "replaceColor" {
-        let (c, fuzz, h, sat, l) = replace_color_params(p, [0.0, 0.0, 0.0, 1.0]);
+        let (c, fuzz, h, sat, l) = replace_color_params("image.adjustments.replaceColor", p, [0.0, 0.0, 0.0, 1.0]).ok()?;
         process_surface(&mut out, None, &mut |px, _| {
             tone::replace_color(px, [c[0], c[1], c[2]], fuzz, h, sat, l);
         });
@@ -346,11 +358,11 @@ fn shadows_highlights_params(p: &Value) -> ShadowsHighlights {
     }
 }
 
-fn replace_color_params(p: &Value, default_color: [f32; 4]) -> ([f32; 4], f32, f32, f32, f32) {
-    let c = crate::commands::color_param(p, "color", default_color);
+fn replace_color_params(cmd: &str, p: &Value, default_color: [f32; 4]) -> Result<([f32; 4], f32, f32, f32, f32)> {
+    let c = crate::commands::color_param(cmd, p, "color", default_color)?;
     let fuzz = num(p, "fuzziness", 40.0).clamp(0.0, 200.0);
     let (h, sat, l) = (num(p, "hue", 0.0).clamp(-180.0, 180.0), num(p, "saturation", 0.0).clamp(-100.0, 100.0), num(p, "lightness", 0.0).clamp(-100.0, 100.0));
-    (c, fuzz, h, sat, l)
+    Ok((c, fuzz, h, sat, l))
 }
 
 fn replace_color(s: &mut Session, p: &Value) -> Result<Value> {
@@ -374,7 +386,7 @@ fn replace_color(s: &mut Session, p: &Value) -> Result<Value> {
             return Ok(Value::Null);
         }
     }
-    let (c, fuzz, h, sat, l) = replace_color_params(p, s.tools.foreground);
+    let (c, fuzz, h, sat, l) = replace_color_params(CMD, p, s.tools.foreground)?;
     // Localized Color Clusters, as in Select › Color Range: the colour only matches within Range
     // (a percentage of the canvas's longer side) of where it was picked.
     let points = sample_points(p).map_err(|m| bad(CMD, m))?;
