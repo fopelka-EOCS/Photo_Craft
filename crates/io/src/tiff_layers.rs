@@ -93,6 +93,7 @@ pub(crate) fn import_layered(name: &str, img: &Image, layers: &[u8]) -> Result<I
         ChannelLayout::Gray | ChannelLayout::GrayA => (PsdMode::Grayscale, 1),
         ChannelLayout::Rgb | ChannelLayout::Rgba => (PsdMode::Rgb, 3),
         ChannelLayout::Cmyk | ChannelLayout::CmykA => (PsdMode::Cmyk, 4),
+        ChannelLayout::Lab | ChannelLayout::LabA => (PsdMode::Lab, 3),
     };
     let depth = match img.sample_type() {
         CSample::U8 => 8,
@@ -208,8 +209,14 @@ pub(crate) fn export_layered(doc: &Document, opts: &ExportOptions, ctl: &photocr
     // while its real layer data is a small fraction of that; it is not used here. PSB-style data
     // is written only past 30000 px, when asked for, or when a length really overflows 32 bits.
     let force_psb = opts.force_psb || big;
-    let psd_opts =
-        PsdExportOptions { force_psb, size_limit_psb: false, merged_matte: false, merged_compression: Compression::Raw, maximize_compatibility: true };
+    let psd_opts = PsdExportOptions {
+        force_psb,
+        size_limit_psb: false,
+        merged_matte: false,
+        merged_compression: Compression::Raw,
+        maximize_compatibility: true,
+        document_path: opts.document_path.clone(),
+    };
     let (mut file, w) = crate::with_span(ctl, 0.0, TIFF_MODEL_DONE, |ctl| crate::psd_export::document_to_psd_interruptible(doc, &psd_opts, ctl));
     // A cancelled conversion stops early with an incomplete model: never encode it.
     ctl.check().map_err(|_| IoError::Cancelled)?;
