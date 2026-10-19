@@ -71,6 +71,11 @@ fn finish(at: vec2<i32>, transformed: vec2<f32>) -> vec4<f32> {
     let c = u32(p.size.z); let weight = textureLoad(selection, at, 0).r;
     let rest = quant(rgba[c] * (1.0-weight) + p.size.w * weight);
     if p.opts.w == 0.0 { rgba[c] = quant(transformed.x + rest * (1.0-transformed.y)); }
+    if p.opts.w == 2.0 && all(vec2<f32>(at) >= p.bounds.xy) && all(vec2<f32>(at) < p.bounds.zw) {
+        // Move changes only the source layer's content rectangle. Its vacated samples take
+        // the background component; samples outside that rectangle remain untouched.
+        rgba[c] = quant(transformed.x + p.size.w * (1.0-transformed.y));
+    }
     rgba.a = clamp(rgba.a * p.view.z, 0.0, 1.0);
     let visible = u32(p.view.x);
     if visible != 7u {
@@ -107,7 +112,7 @@ fn finish(at: vec2<i32>, transformed: vec2<f32>) -> vec4<f32> {
         }
         footprint = vec2(valid_extent(footprint.x), valid_extent(footprint.y));
     }
-    return finish(vec2<i32>(v.position.xy), sample_at(src, footprint, true));
+    return finish(vec2<i32>(v.position.xy), sample_at(src, footprint, p.opts.w != 2.0));
 }
 fn inverse_at(at: vec2<f32>) -> vec2<f32> {
     let dst = vec3(at, 1.0);

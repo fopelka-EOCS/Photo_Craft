@@ -40,20 +40,23 @@ pub(crate) struct Preview {
     lifted: [photocraft_geom::Rect; 3],
     selection: Option<photocraft_geom::Rect>,
     selected: bool,
-    last: Option<(TransformSession, ChannelView, bool, bool)>,
+    last: Option<(TransformSession, ChannelView, bool, bool, Option<photocraft_geom::Rect>)>,
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
 }
 
 /// Deliberately narrow: no flattened RGB shortcut may change a mask, blending or ICC result.
-fn source(doc: &Document, layer: Option<LayerId>) -> Option<&Layer> {
+fn source(doc: &Document, layer: Option<LayerId>) -> Option<(&Layer, bool)> {
     if doc.mode != ColorMode::Rgb {
         return None;
     }
     let mut visible = doc.layers.iter().filter(|l| l.visible);
-    let l = visible.next()?;
-    (visible.next().is_none()
-        && Some(l.id) == layer
+    // Document layers are stored bottom to top. An opaque active layer at the top hides
+    // lower layers and can be displayed by the same single-layer shader.
+    let l = visible.next_back()?;
+    let beneath = visible.next_back().is_some();
+    (Some(l.id) == layer
+        && doc.walk().iter().filter(|(_, _, other)| other.id == l.id).count() == 1
         && matches!(l.content, photocraft_doc::LayerContent::Raster(_))
         && l.surface().is_some_and(|s| s.format().mode == ColorMode::Rgb && s.format().sample == doc.depth)
         && l.blend == BlendMode::Normal
@@ -66,13 +69,14 @@ fn source(doc: &Document, layer: Option<LayerId>) -> Option<&Layer> {
         && l.advanced == Default::default()
         && l.video.is_none()
         && (0.0..=1.0).contains(&l.opacity)
-        && (0.0..=1.0).contains(&l.fill_opacity))
-    .then_some(l)
+        && (0.0..=1.0).contains(&l.fill_opacity)
+        && (!beneath || (l.opacity == 1.0 && l.fill_opacity == 1.0 && l.surface().is_some_and(|s| doc.bounds().contains_rect(&s.content_bounds())))))
+    .then_some((l, beneath))
 }
 
 impl Preview {
     pub(crate) fn new(gpu: &crate::gpu_canvas::GpuCanvas, doc: &Document, layer: Option<LayerId>, fill: [f32; 4]) -> Option<Self> {
-        let l = source(doc, layer)?;
+        let (l, beneath) = source(doc, layer)?;
         let surf = l.surface()?;
         let selection_bounds = doc.selection.as_ref().map(photocraft_raster::Surface::content_bounds);
         if doc.selection.as_ref().is_some_and(|s| s.default_pixel().first().copied().unwrap_or(0.0) != 0.0)
@@ -165,7 +169,9 @@ impl Preview {
                     }
                 }
                 let alpha = p.get(3).copied().unwrap_or(1.0);
-                if !(0.0..=1.0).contains(&alpha) {
+                // A fully opaque top raster hides every layer below it. That common unlocked-
+                // image stack can use the same single-layer shader without compositing a base.
+                if !(0.0..=1.0).contains(&alpha) || (beneath && alpha != 1.0) {
                     return None;
                 }
                 rgba.push(alpha);
@@ -235,11 +241,40 @@ impl Preview {
     }
 
     pub(crate) fn texture(&mut self, t: &TransformSession, view: &ChannelView, in_color: bool, encode: bool, factor: u32) -> Option<egui::TextureId> {
+        self.texture_with_mode(t, view, in_color, encode, factor, None)
+    }
+
+    /// The Move tool uses the same cached source and affine shader, but changes only the
+    /// channel's original content rectangle. Samples outside it retain their source value.
+    pub(crate) fn texture_move(
+        &mut self,
+        t: &TransformSession,
+        view: &ChannelView,
+        in_color: bool,
+        encode: bool,
+        factor: u32,
+        bounds: photocraft_geom::Rect,
+    ) -> Option<egui::TextureId> {
+        if t.warp.is_some() {
+            return None;
+        }
+        self.texture_with_mode(t, view, in_color, encode, factor, Some(bounds))
+    }
+
+    fn texture_with_mode(
+        &mut self,
+        t: &TransformSession,
+        view: &ChannelView,
+        in_color: bool,
+        encode: bool,
+        factor: u32,
+        move_bounds: Option<photocraft_geom::Rect>,
+    ) -> Option<egui::TextureId> {
         let component = t.target.as_ref()?.get("color")?.as_u64()?;
         if component >= 3 {
             return None;
         }
-        if self.last.as_ref().is_some_and(|(old, v, c, e)| old == t && v == view && *c == in_color && *e == encode) {
+        if self.last.as_ref().is_some_and(|(old, v, c, e, bounds)| old == t && v == view && *c == in_color && *e == encode && *bounds == move_bounds) {
             return Some(self.id);
         }
         let k = f64::from(factor);
@@ -252,7 +287,13 @@ impl Preview {
         }
         let inv = h.inverse()?;
         let frame = photocraft_geom::Rect::new(rect[0].floor() as i32, rect[1].floor() as i32, rect[2].ceil() as i32, rect[3].ceil() as i32);
-        let source_bounds = if self.selected {
+        let source_bounds = if let Some(bounds) = move_bounds {
+            let canvas = photocraft_geom::Rect::from_xywh(0, 0, self.size[0], self.size[1]);
+            if self.selected || bounds.is_empty() || !canvas.contains_rect(&bounds) {
+                return None;
+            }
+            bounds
+        } else if self.selected {
             if t.warp.is_some() && !frame.contains_rect(&self.selection?) {
                 return None;
             }
@@ -300,9 +341,11 @@ impl Preview {
         let visible = (0..3).fold(0u32, |v, c| v | (u32::from(view.color_visible(c)) << c));
         data.extend([visible as f32, f32::from(in_color), self.opacity, f32::from(encode)]);
         let identity = t.warp.as_ref().map_or_else(|| h.is_identity(), photocraft_geom::warp::Warp::is_identity);
-        data.extend([interp, f32::from(self.selected), self.steps, f32::from(identity)]);
+        data.extend([interp, f32::from(self.selected), self.steps, if move_bounds.is_some() { 2.0 } else { f32::from(identity) }]);
         // Perspective edge coverage uses the CPU sampler's destination-tile midpoint.
-        let output = if t.warp.is_none() && interp != 0.0 {
+        let output = if let Some(bounds) = move_bounds {
+            bounds
+        } else if t.warp.is_none() && interp != 0.0 {
             photocraft_algo::transform::warp_output_bounds(source_bounds, &h).unwrap_or(photocraft_geom::Rect::EMPTY)
         } else {
             photocraft_geom::Rect::EMPTY
@@ -356,7 +399,7 @@ impl Preview {
             pass.draw(0..3, 0..1);
         }
         self.rs.queue.submit([encoder.finish()]);
-        self.last = Some((t.clone(), view.clone(), in_color, encode));
+        self.last = Some((t.clone(), view.clone(), in_color, encode, move_bounds));
         Some(self.id)
     }
 }
@@ -670,7 +713,7 @@ impl Pipelines {
 mod tests {
     use super::*;
     use photocraft_color::Color;
-    use photocraft_doc::{LayerMask, Size};
+    use photocraft_doc::{Layer, LayerMask, Size};
     use photocraft_geom::warp::{BezierMesh, Warp};
 
     #[test]
@@ -678,6 +721,15 @@ mod tests {
         let doc = Document::with_background("eligibility", Size::new(4, 4), ColorMode::Rgb, SampleType::U8, Color::WHITE);
         let id = doc.layers[0].id;
         assert!(source(&doc, Some(id)).is_some());
+        let mut opaque_stack = doc.clone();
+        let mut top = Layer::raster("opaque top", doc.pixel_format());
+        top.surface_mut().unwrap().fill_rect(doc.bounds(), &[0.2, 0.4, 0.6, 1.0]);
+        let top_id = top.id;
+        opaque_stack.layers.push(top);
+        assert!(source(&opaque_stack, Some(top_id)).is_some(), "an opaque top layer can hide its Background");
+        assert!(source(&opaque_stack, Some(id)).is_none(), "a covered lower layer cannot use the one-layer shader");
+        opaque_stack.layers.last_mut().unwrap().surface_mut().unwrap().fill_rect(photocraft_geom::Rect::new(-1, 0, 0, 1), &[0.1, 0.2, 0.3, 1.0]);
+        assert!(source(&opaque_stack, Some(top_id)).is_none(), "a moved off-canvas source needs the CPU preview");
         for case in 0..10 {
             let mut d = doc.clone();
             match case {

@@ -1327,6 +1327,14 @@ pub fn navigator_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usiz
     // Keyed by the document snapshot, not its revision: selecting a layer changes no pixels.
     let (snapshot, id, revision, last_damage) =
         app.session.documents().get(idx).map(|st| (std::sync::Arc::downgrade(&st.doc), st.doc.id, st.revision, st.last_damage))?;
+    // Keep the last thumbnail during a Move drag. Asking display_doc first would build a
+    // full-resolution CPU Move preview even when the canvas uses the cached GPU source.
+    if app.session.active_index() == Some(idx)
+        && app.drag.as_ref().is_some_and(|d| d.tool == Tool::Move && d.points.len() > 1)
+        && let Some((_, _, _, t)) = app.navigator_textures.get(&id)
+    {
+        return Some(t.id());
+    }
     let (doc, preview_key) = display_doc(app, idx);
     let (display, display_key) = canvas_display(app, &doc, None);
     let preview_key = preview_key ^ display_key;
@@ -3084,7 +3092,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         // Live adjustment previews on big documents use a downsampled proxy (see proxy.rs), unless
         // Preferences › Performance › Low Resolution Previews is off.
         let mut on_gpu = false;
-        let channel_texture = crate::channel_transform_preview::texture(app, &ctx, idx, output);
+        let channel_texture = crate::channel_transform_preview::texture(app, &ctx, idx, output).or_else(|| crate::move_ui::channel_texture(app, idx, output));
         // A flipped or pixel-aspect-corrected view draws through the CPU path (the GPU canvas shader
         // has no mirroring or non-square pixels). Rotation stays on the GPU: it is a view uniform.
         let gpu_ok = crate::gpu_canvas::gpu_view_ok(flip, view.rotation, aspect);
@@ -5638,6 +5646,7 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
             // the release point would otherwise nudge the layer onto a nearby edge.
             if d.tool == Tool::Move && d.points.len() < 2 && matches!(raw, ToolEvent::Up { x, y } if [x, y] == d.start) {
                 app.move_preview = None;
+                app.move_gpu_preview = None;
                 crate::move_mods::finish(app);
                 if d.sel_move.is_some() {
                     finish_selection_drag(app, true, d.start, d.start);

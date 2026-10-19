@@ -169,6 +169,37 @@ fn channel_management_and_view_state() {
 }
 
 #[test]
+fn invalidated_channel_target_restores_a_visible_composite_only_when_needed() {
+    let mut s = session();
+    s.execute("channel.new", json!({"name":"Temporary"})).unwrap();
+    assert_eq!(s.active().unwrap().channel_view.target, ChannelTarget::Alpha(0));
+    assert_eq!(s.active().unwrap().channel_view.visible_colors(3), 0);
+    assert!(s.undo(), "undo removes the targeted alpha channel");
+    let view = &s.active().unwrap().channel_view;
+    assert!(doc(&s).channels.is_empty());
+    assert_eq!(view.target, ChannelTarget::Composite);
+    assert_eq!(view.visible_colors(3), 3, "invalidated solo view must not leave an empty canvas");
+
+    // Deliberately hiding every eye does not silently restore them when the target is valid.
+    let st = s.active_mut().unwrap();
+    for channel in 0..3 {
+        st.channel_view.set_color_visible(channel, false);
+    }
+    fix_view(st);
+    assert_eq!(st.channel_view.visible_colors(3), 0);
+
+    // A different visible channel remains the user's view when a stale target is repaired.
+    s.execute("channel.new", json!({"name":"Keep"})).unwrap();
+    let st = s.active_mut().unwrap();
+    st.channel_view.target = ChannelTarget::Alpha(9);
+    st.channel_view.set_alpha_visible(0, true);
+    fix_view(st);
+    assert_eq!(st.channel_view.target, ChannelTarget::Composite);
+    assert_eq!(st.channel_view.visible_colors(3), 0);
+    assert!(st.channel_view.alpha_shown(0));
+}
+
+#[test]
 fn deleting_an_earlier_channel_keeps_the_last_channel_targeted() {
     for depth in [8, 16, 32] {
         let mut s = session_depth(depth);

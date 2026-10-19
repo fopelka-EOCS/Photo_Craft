@@ -615,6 +615,8 @@ pub struct PhotocraftApp {
     pub(crate) menu_cache: Option<menus::ItemCache>,
     /// Move tool drag shown live (`move_ui`).
     pub(crate) move_preview: Option<move_ui::MovePreview>,
+    /// Cached native samples for an isolated colour-channel Move drag.
+    pub(crate) move_gpu_preview: Option<move_ui::MoveGpuPreview>,
     /// Move tool › Show Highlight on Rollover: the last hover answer (`move_hover`).
     pub(crate) move_hover: Option<move_hover::Hover>,
     /// Object Selection › Object Finder: the hover preview (`object_finder`).
@@ -885,6 +887,7 @@ impl PhotocraftApp {
             remove_trail: None,
             menu_cache: None,
             move_preview: None,
+            move_gpu_preview: None,
             move_hover: None,
             object_finder: None,
             blend_preview: None,
@@ -1030,6 +1033,7 @@ impl PhotocraftApp {
             }
         };
         self.perf.gpu_info.canvas = "gpu".into();
+        self.move_gpu_preview = None;
         self.gpu = Some(gpu);
         self.prefs_rt.gpu_style = None;
     }
@@ -1254,6 +1258,7 @@ impl PhotocraftApp {
     }
 
     pub fn sync_views(&mut self) {
+        move_ui::cancel_stale_gpu(self);
         type_transform::cancel_stale(self);
         crate::cam_transform::cancel_stale(self);
         crate::lasso_ui::cancel_stale(self);

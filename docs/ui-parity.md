@@ -1,6 +1,6 @@
 # UI parity: tools, handles, modifiers and feel
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-19 · **Change:** minor (Move tool now shifts a targeted colour component alone without a selection, #6068; selected-pixel floating remains a separate path; aggregate percentage unchanged) · **Target:** Adobe Photoshop 2026
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-19 · **Change:** minor (targeted RGB Move drags reuse cached GPU samples where supported; native CPU commit and fallback remain; #6068; aggregate percentage unchanged) · **Target:** Adobe Photoshop 2026
 
 How PhotoCraft's direct manipulation compares with Photoshop 2026 (27.11.0): the toolbox, the
 handles and modifier keys of each gesture, nudging, snapping, numeric precision, navigation,
@@ -93,7 +93,7 @@ Triangle and Curvature Pen (minus legacy Rounded Rectangle and Targeted Adjustme
 | Behaviour | Status | Evidence |
 |---|---|---|
 | Arrow 1 px, ⇧-arrow 10 px for layers | done | `move_mods.rs` |
-| Move one targeted colour component without a selection, including the live drag and arrow nudges | done | #6068: `channel_cmds::move_color_channel`, `layer_multi_cmds::translate`, `move_ui::display_doc`; native-depth and preview/commit regressions |
+| Move one targeted colour component without a selection, including the live drag and arrow nudges | done | #6068: `channel_cmds::move_color_channel`, `layer_multi_cmds::translate`, `move_ui::channel_texture` / `display_doc`; cached RGB GPU drag where supported, native CPU fallback/commit, native-depth preview/commit regressions |
 | Move selected pixels of one targeted colour component with the Move tool | missing | `select.float` still floats all colour components; Free Transform handles an isolated selected component |
 | Arrow nudge of a selection outline (selection tools) | done | #1502 |
 | Arrow nudge of the crop box, X swaps orientation | done | TOOL-214-19 |
@@ -268,3 +268,4 @@ Paragraph; the rest open as in-app floating windows.
 | 2026-10-13 | minor | Free Transform with a selection: the box is the selection's rectangle, and the marching ants follow it while it is transformed (#5297) |
 | 2026-10-14 | minor | Move › Show Transform Controls frames every selected layer and outlines the selected shapes |
 | 2026-10-19 | minor | #6068: Move tool drags and nudges shift only the targeted colour component without a selection; RGB/CMYK/Lab native samples, undo and preview tested. Selected-pixel floating remains open; aggregate percentage unchanged. |
+| 2026-10-19 | minor | #6068: RGB targeted Move drag previews reuse the transform GPU's native-component source and only update offset uniforms; unsupported stacks and other modes retain CPU preview. Native commit and selected-pixel floating are unchanged; aggregate percentage unchanged. |
