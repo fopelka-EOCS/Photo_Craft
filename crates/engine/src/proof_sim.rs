@@ -92,9 +92,11 @@ impl Default for HdrPreview {
 }
 
 impl HdrPreview {
+    /// Whether the preview passes values through unchanged.
     pub fn is_identity(&self) -> bool {
         self.highlight_compression || (self.exposure == 0.0 && self.gamma == 1.0)
     }
+    /// One encoded channel value through the 32-bit preview's exposure and gamma.
     fn apply(&self, v: f32) -> f32 {
         if self.is_identity() {
             return v;
@@ -116,6 +118,7 @@ pub fn signature(c: &ColorState, doc: &Document) -> String {
     format!("{:?} {:?}", pv.setup.kind, h)
 }
 
+/// sRGB-encodes linear light after clamping it to 0..=1.
 fn srgb_encode(v: f32) -> f32 {
     linear_to_srgb(v.clamp(0.0, 1.0))
 }
@@ -258,6 +261,7 @@ fn run_kind(s: &mut Session, id: &str) -> Result<Value> {
     set_kind(s, kind)
 }
 
+/// View › 32-bit Preview Options for the active document.
 fn preview_32(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "view.thirtyTwoBitPreviewOptions";
     let id = s.active().ok_or(EngineError::NoDocument)?.doc.id;
@@ -294,6 +298,7 @@ macro_rules! kind_spec {
     };
 }
 
+/// The View › Proof Setup commands.
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         kind_spec!("view.proofSetup.workingCyanPlate", "Working Cyan Plate"),
@@ -321,6 +326,7 @@ pub fn specs() -> Vec<CommandSpec> {
 mod tests {
     use super::*;
 
+    /// The shared sRGB functions match the removed copies bit for bit.
     #[test]
     fn srgb_transfer_output_is_unchanged() {
         let decode = |v: f32| if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) };

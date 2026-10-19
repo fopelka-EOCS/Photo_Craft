@@ -209,6 +209,7 @@ pub(crate) fn catmull_rom(t: f32) -> [f32; 4] {
 mod tests {
     use super::*;
 
+    /// The shared sRGB functions match the removed copies bit for bit.
     #[test]
     fn srgb_transfer_output_is_unchanged() {
         let decode = |v: f32| if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) };
