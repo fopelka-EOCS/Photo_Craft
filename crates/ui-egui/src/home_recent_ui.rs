@@ -5,8 +5,6 @@
 //! Grid/List view switching matching Photoshop 2026 Home screen.
 
 use std::collections::HashMap;
-#[cfg(not(target_arch = "wasm32"))]
-use std::collections::HashSet;
 use std::path::Path;
 
 use egui::{Color32, ColorImage, Rect, Response, Sense, Stroke, TextureHandle, TextureOptions, Ui, Vec2, pos2, vec2};
@@ -42,9 +40,11 @@ pub(crate) struct ThumbnailCache {
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) was_focused: bool,
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) in_flight: HashSet<String>,
+    pub(crate) in_flight: HashMap<String, u64>,
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) pending: Vec<(String, CacheKey, Option<ColorImage>)>,
+    pub(crate) next_req_id: u64,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) pending: Vec<(String, u64, CacheKey, Option<ColorImage>)>,
 }
 
 impl ThumbnailCache {
@@ -305,7 +305,7 @@ fn load_thumbnail_image_bounded(path: &str, file_len: u64) -> Option<ColorImage>
 /// Drain completed asynchronous thumbnail results and update the texture cache on the UI thread.
 #[cfg(not(target_arch = "wasm32"))]
 fn drain_pending_thumbnails(app: &PhotocraftApp, ctx: &egui::Context, opts: TextureOptions) {
-    let pending: Vec<(String, CacheKey, Option<ColorImage>)> = {
+    let pending: Vec<(String, u64, CacheKey, Option<ColorImage>)> = {
         let mut cache = app.thumbnail_cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if cache.pending.is_empty() {
             return;
@@ -314,8 +314,12 @@ fn drain_pending_thumbnails(app: &PhotocraftApp, ctx: &egui::Context, opts: Text
     };
 
     let mut cache = app.thumbnail_cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    for (path, key, opt_img) in pending {
-        cache.in_flight.remove(&path);
+    for (path, req_id, key, opt_img) in pending {
+        if cache.in_flight.get(&path).copied() == Some(req_id) {
+            cache.in_flight.remove(&path);
+        } else {
+            continue;
+        }
         // If the document is currently open in the session, do not overwrite its live in-memory thumbnail
         if app.session.documents().iter().any(|d| d.path.as_deref().is_some_and(|p| paths_match(p, &path))) {
             continue;
@@ -404,7 +408,7 @@ pub(crate) fn get_or_load_thumbnail(app: &PhotocraftApp, ctx: &egui::Context, pa
             }
 
             let entry = cache.entries.get(path).cloned();
-            let in_flight = cache.in_flight.contains(path);
+            let in_flight = cache.in_flight.contains_key(path);
             (focus_gained, entry, in_flight)
         };
 
@@ -445,10 +449,13 @@ pub(crate) fn get_or_load_thumbnail(app: &PhotocraftApp, ctx: &egui::Context, pa
         }
 
         if app.background_jobs {
-            {
+            let req_id = {
                 let mut cache = app.thumbnail_cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                cache.in_flight.insert(path.to_string());
-            }
+                let id = cache.next_req_id;
+                cache.next_req_id = cache.next_req_id.wrapping_add(1);
+                cache.in_flight.insert(path.to_string(), id);
+                id
+            };
             let cache_arc = std::sync::Arc::clone(&app.thumbnail_cache);
             let ctx_clone = ctx.clone();
             let path_str = path.to_string();
@@ -457,9 +464,9 @@ pub(crate) fn get_or_load_thumbnail(app: &PhotocraftApp, ctx: &egui::Context, pa
             std::thread::spawn(move || {
                 let opt_img = load_thumbnail_image_bounded(&path_str, file_len);
                 let mut cache = cache_arc.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                // Only enqueue if the path was not invalidated or removed while loading
-                if cache.in_flight.remove(&path_str) {
-                    cache.pending.push((path_str, key_clone, opt_img));
+                // Only enqueue if this request generation is still the active one
+                if cache.in_flight.get(&path_str).copied() == Some(req_id) {
+                    cache.pending.push((path_str, req_id, key_clone, opt_img));
                     ctx_clone.request_repaint();
                 }
             });
@@ -1358,7 +1365,7 @@ mod tests {
 
         // The background thread should have detected it was removed from in_flight and discarded its result
         let cache = app.thumbnail_cache.lock().unwrap();
-        assert!(!cache.in_flight.contains(&path_str));
+        assert!(!cache.in_flight.contains_key(&path_str));
         assert!(cache.pending.iter().all(|(p, ..)| p != &path_str));
         assert!(!cache.entries.contains_key(&path_str));
 
@@ -1386,11 +1393,12 @@ mod tests {
         let open_tex = get_or_load_thumbnail(&app, &ctx, &doc_path);
         assert!(open_tex.is_some());
 
-        // Simulate an obsolete disk result queued in pending
+        // Simulate an obsolete disk result queued in pending with active in_flight matching generation 1
         {
             let mut cache = app.thumbnail_cache.lock().unwrap();
             let disk_key = CacheKey::DiskFile { modified: None, len: 1000 };
-            cache.pending.push((doc_path.clone(), disk_key, None));
+            cache.in_flight.insert(doc_path.clone(), 1);
+            cache.pending.push((doc_path.clone(), 1, disk_key, None));
         }
 
         // Drain pending thumbnails
@@ -1404,6 +1412,32 @@ mod tests {
 
         let _ = app.session.close(0);
         let _ = doc_id;
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn recent_thumbnail_superseded_generation_is_discarded() {
+        let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let test_path = "C:/fake/path/image.png".to_string();
+        let ctx = egui::Context::default();
+        let opts = egui::TextureOptions::default();
+
+        // Simulate request generation 1 was superseded by generation 2
+        {
+            let mut cache = app.thumbnail_cache.lock().unwrap();
+            cache.in_flight.insert(test_path.clone(), 2);
+            // Stale worker 1 pushes with req_id 1
+            let disk_key = CacheKey::DiskFile { modified: None, len: 500 };
+            cache.pending.push((test_path.clone(), 1, disk_key, None));
+        }
+
+        // Drain pending: request 1 should be discarded because generation 2 is active
+        drain_pending_thumbnails(&app, &ctx, opts);
+
+        let cache = app.thumbnail_cache.lock().unwrap();
+        // Generation 2 must remain in flight and not be removed or overwritten by generation 1
+        assert_eq!(cache.in_flight.get(&test_path).copied(), Some(2));
+        assert!(!cache.entries.contains_key(&test_path));
     }
 
     #[cfg(not(target_arch = "wasm32"))]

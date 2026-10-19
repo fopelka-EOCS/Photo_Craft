@@ -2823,8 +2823,8 @@ fn start_screen(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let rail_w = 170.0;
 
     if is_narrow {
-        let card_w = (area.width() - 32.0).clamp(320.0, 520.0);
-        let card = Rect::from_center_size(area.center(), egui::vec2(card_w, (area.height() - 40.0).max(300.0)));
+        let card_w = (area.width() - 32.0).clamp(0.0, 520.0);
+        let card = Rect::from_center_size(area.center(), egui::vec2(card_w, (area.height() - 40.0).max(0.0)));
         ui.scope_builder(egui::UiBuilder::new().max_rect(card), |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 render_start_actions_row(app, ui, card.width());
@@ -2861,7 +2861,7 @@ fn start_screen(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 
 fn render_start_actions_row(app: &mut PhotocraftApp, ui: &mut egui::Ui, avail_w: f32) {
     let t = crate::theme::Tokens::get(ui.ctx());
-    let btn_w = ((avail_w - 12.0) / 2.0).clamp(100.0, 150.0);
+    let btn_w = ((avail_w - 12.0) / 2.0).clamp(0.0, 150.0);
 
     ui.horizontal(|ui| {
         // [ New file ]
