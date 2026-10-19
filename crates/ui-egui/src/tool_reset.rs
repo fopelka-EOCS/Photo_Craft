@@ -311,6 +311,6 @@ mod tests {
         assert_eq!(sample_all_key(Tool::Brush), None);
         let keys: Vec<String> = Tool::ALL.iter().filter_map(|t| sample_all_key(*t)).collect();
         let distinct: std::collections::BTreeSet<&String> = keys.iter().collect();
-        assert_eq!((keys.len(), distinct.len()), (12, 12), "one key per tool with the option");
+        assert_eq!((keys.len(), distinct.len()), (18, 18), "one key per tool with the option");
     }
 }
