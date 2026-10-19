@@ -144,7 +144,7 @@ For a slightly tighter camera JPEG, fitting can align the reference proxy using 
 retains the held-out colour gates; the developed crop and camera calibration are unchanged.
 
 Without a usable fit (no preview, an unrelated or differently shaped one, or a fit that does not
-clearly help), a camera with measured spectral matrices (see below) develops through them, with no
+clearly help), a camera with measured spectral matrices (see above) develops through them, with no
 tone curve; with a black-and-white preview it keeps them and fits only the tone curve. Only when
 there is no usable look, no calibration in the file and no spectral matrix does the documented
 neutral fallback apply: the white-balanced camera channels are treated as linear sRGB primaries,
