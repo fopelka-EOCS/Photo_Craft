@@ -49,6 +49,12 @@ fn cr2_opens() {
 /// A NEF-like file with Nikon's (undocumented) compression and a full-size
 /// baseline JPEG preview in IFD0.
 fn nef_with_preview() -> Vec<u8> {
+    nef_with_preview_exif(false)
+}
+
+/// The same; `adobe_rgb`: the EXIF says the camera was set to Adobe RGB (ColorSpace
+/// Uncalibrated, InteropIndex "R03"), as on a Sony body, and the JPEG carries no profile.
+fn nef_with_preview_exif(adobe_rgb: bool) -> Vec<u8> {
     let img = Image::from_u8(32, 20, ChannelLayout::Rgb, vec![180; 32 * 20 * 3]).unwrap();
     let jpeg = photocraft_codecs::encode(&img, Format::Jpeg, &EncodeOptions::default()).unwrap();
     let mut t = TiffBuilder::default();
@@ -65,14 +71,30 @@ fn nef_with_preview() -> Vec<u8> {
         (33421, Val::Short(vec![2, 2])),
         (33422, Val::Byte(vec![0, 1, 1, 2])),
     ]);
-    let ifd0 = t.ifd(vec![
+    let mut tags = vec![
         (271, Val::Ascii("NIKON CORPORATION".into())),
         (330, Val::Ifds(vec![raw])),
         (513, Val::Blobs(vec![preview])),
         (514, Val::Long(vec![jpeg.len() as u32])),
-    ]);
+    ];
+    if adobe_rgb {
+        let interop = t.ifd(vec![(0x0001, Val::Ascii("R03".into()))]);
+        let exif = t.ifd(vec![(0xA001, Val::Short(vec![0xFFFF])), (0xA005, Val::Ifds(vec![interop]))]);
+        tags.push((34665, Val::Ifds(vec![exif])));
+    }
+    let ifd0 = t.ifd(tags);
     t.chain = vec![ifd0];
     t.build()
+}
+
+#[test]
+fn a_preview_fallback_keeps_the_colour_space_the_raw_states() {
+    let tagged = import("DSC_0001.NEF", &nef_with_preview_exif(true)).unwrap();
+    let icc = tagged.document.icc_profile.as_deref().expect("an Adobe RGB preview opens tagged");
+    let profile = photocraft_cms::Profile::parse(icc).unwrap();
+    assert!(profile.same_colors(photocraft_cms::Builtin::AdobeRgbCompat.profile()));
+    // Unstated: untagged sRGB, as before.
+    assert!(import("DSC_0001.NEF", &nef_with_preview()).unwrap().document.icc_profile.is_none());
 }
 
 #[test]
