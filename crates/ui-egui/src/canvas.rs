@@ -4420,6 +4420,34 @@ mod transform_outline_clip_tests {
         }
         assert!(clip_line(r, pos2(-1e9, -100.0), pos2(1e9, -100.0)).is_none());
     }
+
+    #[test]
+    fn marching_ants_draw_visible_lines_and_skip_nonfinite_or_offscreen_lines() {
+        let clip = Rect::from_min_max(pos2(0.0, 0.0), pos2(100.0, 100.0));
+        let draw = |lines: &[(Pos2, Pos2)]| {
+            let ctx = egui::Context::default();
+            let mut output = ctx.run_ui(Default::default(), |ui| {
+                let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("ants-culling-test"))).with_clip_rect(clip);
+                marching_ants_lines(&painter, lines.iter().copied(), 0.0);
+            });
+            output.textures_delta.clear();
+            output.shapes.into_iter().filter(|s| matches!(s.shape, egui::Shape::Mesh(_) | egui::Shape::LineSegment { .. })).map(|s| s.shape).collect::<Vec<_>>()
+        };
+        // Exercise both the mesh of horizontal dashes and the antialiased slanted path.
+        let visible = [(pos2(20.0, 20.0), pos2(60.0, 20.0)), (pos2(20.0, 40.0), pos2(60.0, 60.0))];
+        let expected = draw(&visible);
+        assert!(expected.iter().any(|s| matches!(s, egui::Shape::Mesh(_))), "visible straight ants must draw");
+        assert!(expected.iter().any(|s| matches!(s, egui::Shape::LineSegment { .. })), "visible slanted ants must draw");
+        let mut with_invalid = visible.to_vec();
+        with_invalid.extend([
+            (pos2(f32::NAN, 30.0), pos2(50.0, 30.0)),
+            (pos2(30.0, 30.0), pos2(f32::NAN, 30.0)),
+            (pos2(f32::INFINITY, 30.0), pos2(50.0, 30.0)),
+            (pos2(30.0, 30.0), pos2(f32::NEG_INFINITY, 30.0)),
+            (pos2(500.0, 500.0), pos2(520.0, 500.0)),
+        ]);
+        assert_eq!(draw(&with_invalid), expected, "invalid or invisible outlines must add no painter geometry");
+    }
 }
 
 /// Marching ants along lines already placed on screen (a warped outline is a run of short ones).
@@ -6220,6 +6248,23 @@ mod tests {
         let d = color.canvas_display(&doc).unwrap();
         assert!(!d.is_identity());
         assert_eq!(super::display_image(Some(&d), &buf).pixels, reference(d.to_rgba8(&buf)).pixels);
+    }
+
+    #[test]
+    fn lint_cleanup_gradient_release_commits_only_at_the_minimum_drag_distance() {
+        for (end, committed) in [([11.5, 10.0], false), ([12.0, 10.0], true), ([11.0, 11.0], true), ([30.0, 10.0], true)] {
+            let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+            app.run("file.new", json!({"width": 40, "height": 24})).unwrap();
+            app.ui.tool = Tool::Gradient;
+            app.ui.tool_options.gradient_classic = true;
+            let history = app.session.active().unwrap().history.past_len();
+            let revision = app.session.active().unwrap().revision;
+            finish_gesture(&mut app, Drag::new(Tool::Gradient, [10.0, 10.0], vec![[10.0, 10.0, 1.0], [end[0], end[1], 1.0]], egui::Modifiers::NONE, false));
+            let active = app.session.active().unwrap();
+            assert_eq!(active.history.past_len() - history, usize::from(committed), "gradient release at {end:?}");
+            assert_eq!(active.revision > revision, committed, "a short drag must not change the document");
+            assert!(!app.ui.status_error, "gradient command failed: {}", app.ui.status);
+        }
     }
 
     /// #7490: the inline (web) preview path composites and uploads each changed preview once, as

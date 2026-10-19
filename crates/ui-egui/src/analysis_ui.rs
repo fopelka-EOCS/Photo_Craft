@@ -1073,6 +1073,22 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn lint_cleanup_ruler_release_consumes_input_and_clears_only_short_new_lines() {
+        for (drag, length, cleared) in
+            [(Some(Drag::RulerNew), 0.25, true), (Some(Drag::RulerNew), 0.5, false), (Some(Drag::RulerHandle(1)), 0.25, false), (None, 0.25, false)]
+        {
+            let (mut app, _) = app();
+            app.run("image.analysis.rulerTool", json!({"start": [10.0, 10.0], "end": [10.0 + length, 10.0]})).unwrap();
+            app.ui.tool = Tool::Ruler;
+            app.ui.analysis.drag = drag;
+            assert!(pointer(&mut app, ToolEvent::Up { x: 10.0 + length, y: 10.0 }, egui::Modifiers::NONE), "every ruler release is consumed");
+            assert!(app.ui.analysis.drag.is_none(), "release must consume the drag even when it keeps the ruler");
+            assert_eq!(ruler(&app).is_none(), cleared, "drag {drag:?}, length {length}");
+            assert_eq!(app.session.active().unwrap().history.past_len(), 0, "ruler release adds no history");
+        }
+    }
+
+    #[test]
     fn count_tool_add_move_remove() {
         let (mut app, _) = app();
         app.ui.tool = Tool::Count;
