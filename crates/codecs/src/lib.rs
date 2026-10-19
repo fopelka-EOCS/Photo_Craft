@@ -20,6 +20,8 @@ mod fidelity;
 mod format;
 mod image;
 mod lab;
+#[cfg(feature = "native-zstd")]
+mod native_zstd;
 mod options;
 pub mod orientation;
 pub mod resolution;
@@ -45,6 +47,8 @@ pub use crate::orientation::{exif_orientation, upright_exif, upright_xmp};
 pub use crate::resolution::{exif_resolution, export_exif, export_xmp, photoshop_resolution, xmp_resolution};
 pub use crate::source_settings::{WebpEncoding, jpeg_quality, webp_encoding};
 pub use half::f16;
+#[cfg(feature = "native-zstd")]
+pub use native_zstd::{ZstdEncoder, decode_zstd};
 
 use crate::codecs::{dds, dpx, exr, fits, heif, jpeg, pcx, png, pnm, tiff, via_image, webp, xpm};
 

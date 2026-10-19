@@ -26,8 +26,16 @@ fn blob_path(h: &str) -> String {
     format!("blobs/{h}.zst")
 }
 
-fn compress(data: &[u8]) -> Vec<u8> {
-    ruzstd::encoding::compress_to_vec(data, ruzstd::encoding::CompressionLevel::Fastest)
+#[cfg(not(feature = "native-zstd"))]
+type Compressor<'a> = std::marker::PhantomData<&'a ()>;
+#[cfg(feature = "native-zstd")]
+type Compressor<'a> = photocraft_codecs::ZstdEncoder<'a>;
+
+fn new_compressor<'a>() -> Result<Compressor<'a>> {
+    #[cfg(feature = "native-zstd")]
+    return Ok(Compressor::new()?);
+    #[cfg(not(feature = "native-zstd"))]
+    Ok(Default::default())
 }
 
 /// Decodes a zstd frame of at most `max` bytes (`LimitExceeded` beyond). With `exact`, the
@@ -47,6 +55,15 @@ fn decompress_bounded(data: &[u8], max: usize, exact: Option<usize>, what: &str)
 }
 
 fn decompress(data: &[u8], expected: usize, what: &str) -> Result<Vec<u8>> {
+    #[cfg(feature = "native-zstd")]
+    {
+        let out = photocraft_codecs::decode_zstd(data, expected).map_err(|e| FormatError::corrupt(format!("{what}: zstd: {e}")))?;
+        if out.len() != expected {
+            return Err(FormatError::corrupt(format!("{what}: expected {expected} bytes, got {}", out.len())));
+        }
+        Ok(out)
+    }
+    #[cfg(not(feature = "native-zstd"))]
     decompress_bounded(data, expected, Some(expected), what)
 }
 
@@ -416,8 +433,12 @@ enum Object {
 }
 
 impl Object {
-    fn compressed(&self) -> Vec<u8> {
-        compress(&self.content())
+    fn compressed<'a>(&'a self, _compressor: &mut Compressor<'a>) -> Result<Vec<u8>> {
+        let bytes = self.content();
+        #[cfg(feature = "native-zstd")]
+        return Ok(_compressor.compress(&bytes)?);
+        #[cfg(not(feature = "native-zstd"))]
+        Ok(ruzstd::encoding::compress_to_vec(bytes.as_ref(), ruzstd::encoding::CompressionLevel::Fastest))
     }
 
     /// The bytes this object stores (tiles little-endian).
@@ -689,20 +710,22 @@ type Compressed<'a> = (&'a String, Arc<Vec<u8>>);
 fn par_compress<'a>(objects: &[(&'a String, &'a Object)]) -> Result<Vec<Compressed<'a>>> {
     let threads = if cfg!(target_arch = "wasm32") { 1 } else { std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 32) };
     if threads < 2 || objects.len() < 2 {
-        return Ok(objects.iter().map(|(p, o)| (*p, Arc::new(o.compressed()))).collect());
+        let mut compressor = new_compressor()?;
+        return objects.iter().map(|(p, o)| Ok((*p, Arc::new(o.compressed(&mut compressor)?)))).collect();
     }
     let next = std::sync::atomic::AtomicUsize::new(0);
     std::thread::scope(|sc| {
         let hs: Vec<_> = (0..threads.min(objects.len()))
             .map(|_| {
-                sc.spawn(|| {
+                sc.spawn(|| -> Result<_> {
+                    let mut compressor = new_compressor()?;
                     let mut out = Vec::new();
                     loop {
                         let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         let Some((p, o)) = objects.get(i) else { break };
-                        out.push((*p, Arc::new(o.compressed())));
+                        out.push((*p, Arc::new(o.compressed(&mut compressor)?)));
                     }
-                    out
+                    Ok(out)
                 })
             })
             .collect();
@@ -711,7 +734,7 @@ fn par_compress<'a>(objects: &[(&'a String, &'a Object)]) -> Result<Vec<Compress
         let joined: Vec<_> = hs.into_iter().map(|h| h.join()).collect();
         let mut out = Vec::with_capacity(objects.len());
         for r in joined {
-            out.extend(r.map_err(|_| FormatError::Io(std::io::Error::other("compression worker panicked")))?);
+            out.extend(r.map_err(|_| FormatError::Io(std::io::Error::other("compression worker panicked")))??);
         }
         Ok(out)
     })
@@ -793,7 +816,10 @@ impl PcraftWriter {
                         Object::Tile(..) => stats.tiles_written += 1,
                         Object::Blob(_) => stats.blobs_written += 1,
                     }
-                    fresh.remove(path).unwrap_or_else(|| Arc::new(obj.compressed()))
+                    match fresh.remove(path) {
+                        Some(data) => data,
+                        None => Arc::new(obj.compressed(&mut new_compressor()?)?),
+                    }
                 }
             };
             z.add(path, &data)?;
@@ -828,6 +854,7 @@ impl PcraftWriter {
             None => 0,
         };
         let recheck = self.rolling_recheck(&p.objects);
+        let mut compressor = new_compressor()?;
         for (path, obj) in &p.objects {
             let object_path = dir.join(path);
             // bundle_root and list_objects validated the fixed parent directories once. Check
@@ -862,7 +889,7 @@ impl PcraftWriter {
                 Object::Tile(..) => stats.tiles_written += 1,
                 Object::Blob(_) => stats.blobs_written += 1,
             }
-            write_bundle_file(dir, &object_path, &obj.compressed())?;
+            write_bundle_file(dir, &object_path, &obj.compressed(&mut compressor)?)?;
             let written = path_signature(&object_path)?;
             if let Some(cache) = &mut self.verified_directory {
                 match written {
@@ -1010,4 +1037,26 @@ fn list_objects(dir: &Path) -> Result<HashSet<String>> {
 pub(crate) fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
     crate::atomic::atomic_write(path, data)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reused_compressor_produces_independent_frames() {
+        let data: Vec<Arc<Vec<u8>>> =
+            [0, 1, 8, 131_072, 262_144, 262_147, 131_072, 1].into_iter().map(|n| Arc::new((0..n).map(|i| ((i * 37 + i / 97) % 251) as u8).collect())).collect();
+        let objects: Vec<_> = data.iter().cloned().map(Object::Blob).collect();
+        let mut compressor = new_compressor().unwrap();
+        for (object, bytes) in objects.iter().zip(&data) {
+            let encoded = object.compressed(&mut compressor).unwrap();
+            #[cfg(not(feature = "native-zstd"))]
+            assert_eq!(encoded, ruzstd::encoding::compress_to_vec(bytes.as_slice(), ruzstd::encoding::CompressionLevel::Fastest));
+            assert_eq!(decompress(&encoded, bytes.len(), "test").unwrap(), **bytes);
+            assert_eq!(decompress_bounded(&encoded, bytes.len(), Some(bytes.len()), "Rust decoder").unwrap(), **bytes);
+            let rust = ruzstd::encoding::compress_to_vec(bytes.as_slice(), ruzstd::encoding::CompressionLevel::Fastest);
+            assert_eq!(decompress(&rust, bytes.len(), "Rust encoder").unwrap(), **bytes);
+        }
+    }
 }

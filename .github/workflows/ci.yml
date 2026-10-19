@@ -207,6 +207,13 @@ jobs:
         if: matrix.part == 'all' || matrix.part == 'unit'
         run: cargo test --workspace --locked --features heif --doc
 
+      - name: Test reference Zstandard
+        if: matrix.part == 'all' || matrix.part == 'unit'
+        run: |
+          cargo test -p photocraft-codecs --lib --locked --features native-zstd native_zstd
+          cargo test -p photocraft-format --locked --features native-zstd
+          cargo clippy -p photocraft-format -p photocraft-codecs --all-targets --locked --features photocraft-format/native-zstd -- -D warnings
+
   # The Windows tests used to be one job named `test (windows-latest)`; they're now legs named
   # `test (windows-latest, unit)` and `test (windows-latest, integration)`. This job keeps the old
   # name reporting, so a required status check on it (none today) would keep working. It fails
@@ -337,7 +344,9 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
       - name: Check wasm-safe crates
-        run: cargo xtask wasm
+        run: |
+          cargo xtask wasm
+          cargo check -p photocraft-format --target wasm32-unknown-unknown --locked --features native-zstd
 
   web:
     timeout-minutes: 60
