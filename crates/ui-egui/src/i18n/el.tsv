@@ -3930,3 +3930,48 @@ curves	Smooth	Εξομάλυνση
 	Increase Brush Size	Αύξηση μεγέθους πινέλου
 	Decrease Brush Hardness	Μείωση σκληρότητας πινέλου
 	Increase Brush Hardness	Αύξηση σκληρότητας πινέλου
+
+# Edit › Preferences › AI: local AI models
+	AI	ΤΝ
+	AI Models…	Μοντέλα ΤΝ…
+	AI models run in the desktop app. Download PhotoCraft for your computer to use them.	Τα μοντέλα ΤΝ λειτουργούν στην εφαρμογή υπολογιστή. Κατεβάστε το PhotoCraft για τον υπολογιστή σας για να τα χρησιμοποιήσετε.
+	AI…	ΤΝ…
+	Add a model from a file or a link	Προσθήκη μοντέλου από αρχείο ή σύνδεσμο
+	Cancelled	Ακυρώθηκε
+	Choose Files…	Επιλογή αρχείων…
+	Delete this model	Διαγραφή αυτού του μοντέλου
+	Disabled: no tool offers this model	Ανενεργό: κανένα εργαλείο δεν προσφέρει αυτό το μοντέλο
+	Download	Λήψη
+	Enabled: tools can use this model	Ενεργό: τα εργαλεία μπορούν να χρησιμοποιούν αυτό το μοντέλο
+	Finished in {time}	Ολοκληρώθηκε σε {time}
+	From a File	Από αρχείο
+	From a Link	Από σύνδεσμο
+	Generative Fill & Infill	Παραγωγική γέμιση και συμπλήρωση
+	Generative Removal	Παραγωγική αφαίρεση
+	Hugging Face, Civitai or download link	Σύνδεσμος Hugging Face, Civitai ή λήψης
+	Imported models PhotoCraft's tools don't use yet.	Εισηγμένα μοντέλα που τα εργαλεία του PhotoCraft δεν χρησιμοποιούν ακόμη.
+	Importing {name}	Εισαγωγή {name}
+	Keep	Διατήρηση
+	Looking up the model…	Αναζήτηση του μοντέλου…
+	Models are stored in {path}	Τα μοντέλα αποθηκεύονται στο {path}
+	No models match your search.	Κανένα μοντέλο δεν ταιριάζει με την αναζήτηση.
+	No models yet. Use Import… to add one.	Δεν υπάρχουν ακόμη μοντέλα. Με την Εισαγωγή… προσθέστε ένα.
+	ONNX, safetensors, checkpoint or GGUF. Pick an ONNX model and its .data file together.	ONNX, safetensors, checkpoint ή GGUF. Επιλέξτε ένα μοντέλο ONNX μαζί με το αρχείο .data του.
+	Object Selection	Επιλογή αντικειμένου
+	Optional	Προαιρετικό
+	Other Models	Άλλα μοντέλα
+	Paste a Hugging Face file or repository (org/name), a Civitai model page, or a direct link to a model file.	Επικολλήστε ένα αρχείο ή αποθετήριο Hugging Face (org/name), μια σελίδα μοντέλου του Civitai ή έναν άμεσο σύνδεσμο σε αρχείο μοντέλου.
+	Recommended	Προτεινόμενο
+	Reflection Removal	Αφαίρεση αντανακλάσεων
+	Search models by name…	Αναζήτηση μοντέλων κατά όνομα…
+	Subject & Background	Θέμα και φόντο
+	Use as	Χρήση ως
+	Used by the AI Object Selection tool.	Χρησιμοποιείται από το εργαλείο Επιλογή αντικειμένου ΤΝ.
+	Used by the Generative Removal brush.	Χρησιμοποιείται από το πινέλο Παραγωγική αφαίρεση.
+	Used by the Infill brush and Generative Fill (prompts).	Χρησιμοποιείται από το πινέλο Συμπλήρωση και την Παραγωγική γέμιση (εντολές).
+	Used by the Reflection Removal brush.	Χρησιμοποιείται από το πινέλο Αφαίρεση αντανακλάσεων.
+	Used to select people, animals and products in one click.	Χρησιμοποιείται για την επιλογή ανθρώπων, ζώων και προϊόντων με ένα κλικ.
+	about {time} left	απομένουν περίπου {time}
+	{done} of {total}	{done} από {total}
+	{n} installed	Εγκατεστημένα: {n}
+	{n} to download	Για λήψη: {n}

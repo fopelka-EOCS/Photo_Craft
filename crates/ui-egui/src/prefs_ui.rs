@@ -1059,13 +1059,38 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
             info.extend(gpu_memory_lines(app));
             f.insert("__gpuInfo".into(), json!(info));
             let system = system_theme(app, ui.ctx());
-            prefs_body(ui, f, system);
+            let models = app.services.models.clone();
+            prefs_body(ui, f, system, models.as_ref());
+            if let Some(pick) = f.remove(crate::ai_prefs_ui::PICK_FILES) {
+                pick_model_files(app, &pick);
+            }
         }
         "shortcuts" => shortcuts_body(app, ui, f),
         "presets" => presets_body(app, ui, f),
         "presetsIO" => presets_io_body(ui, f),
         "mismatch" => mismatch_body(ui, f),
         _ => {}
+    }
+}
+
+/// AI › Import › Choose Files…: asks for model files, then imports them in the background.
+fn pick_model_files(app: &mut PhotocraftApp, pick: &Value) {
+    let Some(manager) = app.services.models.clone() else { return };
+    let kind = pick.get("kind").and_then(Value::as_str).and_then(photocraft_ml::ModelKind::from_id).unwrap_or(photocraft_ml::ModelKind::Other);
+    let name = pick.get("name").and_then(Value::as_str).map(str::to_string);
+    let initial_dir = crate::file_dialog::last_used_dir(&app.ui.recent_files);
+    let extensions = Some(crate::ai_prefs_ui::MODEL_EXTENSIONS.iter().map(|e| (*e).to_string()).collect());
+    let asked = app.ask_file(crate::FileDialogRequest::Open { multiple: true, initial_dir, extensions }, move |_app, answer| match answer {
+        crate::FileDialogAnswer::Paths(paths) => {
+            let paths: Vec<std::path::PathBuf> = paths.into_iter().map(std::path::PathBuf::from).collect();
+            manager.import_files(&paths, kind, name).map(|job| json!({"importJob": job})).map_err(|e| e.to_string())
+        }
+        _ => Err("Model files can only be imported in the desktop app.".into()),
+    });
+    if let Err(e) = asked
+        && e != crate::file_dialog::CANCELLED
+    {
+        log::warn!("model import dialog: {e}");
     }
 }
 
@@ -1207,7 +1232,7 @@ fn preference_sections(values: &Value, search: &str) -> Vec<(&'static str, &'sta
 }
 
 /// Preferences: section list on the left, the section's settings on the right.
-fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui::Theme>) {
+fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui::Theme>, models: Option<&photocraft_ml::Manager>) {
     let t = Tokens::get(ui.ctx());
     let mut section = f.get("section").and_then(Value::as_str).unwrap_or("general").to_string();
     let mut values = f.get("values").cloned().unwrap_or(Value::Null);
@@ -1223,45 +1248,47 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui
     }
     ui.add_space(6.0);
     ui.horizontal_top(|ui| {
-        // Section list.
-        ui.vertical(|ui| {
-            ui.set_width(170.0);
-            if found.is_empty() {
-                ui.label(RichText::new(tl!("No matching settings")).color(t.text_dim));
-            }
-            for &(id, title) in &found {
-                let sel = section == id;
-                let empty = !has_visible_fields(&values, id);
-                let (rect, resp) = ui.allocate_exact_size(vec2(170.0, 22.0), Sense::click());
-                if sel {
-                    ui.painter().rect_filled(rect, t.radius_sm, t.row_selected);
-                } else if resp.hovered() {
-                    ui.painter().rect_filled(rect, t.radius_sm, t.hover);
-                }
-                let color = if sel {
-                    t.text
-                } else if empty {
-                    t.text_faint
-                } else {
-                    t.text_dim
-                };
-                // Translated section names can be longer than the column: elide them (the full
-                // name is the tooltip) instead of drawing over the settings.
-                let mut job = egui::text::LayoutJob::simple_singleline(tl!(title).to_string(), crate::theme::medium(12.5), color);
-                job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width() - 12.0);
-                let galley = ui.painter().layout_job(job);
-                let elided = galley.elided;
-                ui.painter().galley(rect.left_center() + vec2(8.0, -galley.size().y / 2.0), galley, color);
-                let resp = if elided { resp.on_hover_text(tl!(title)) } else { resp };
-                if resp.clicked() {
-                    section = id.to_string();
-                }
-            }
-        });
         // The settings fill the dialog's resizable area down to the button row (#7420). Sizing them
         // from the window instead left a resized dialog with empty space and the buttons mid-way.
         // The area grows to fit its content, so this must never ask for more than it was given.
         let content_height = settings_height(ui.available_height(), ui.spacing().item_spacing.y, crate::widgets::button_height(ui.ctx()));
+        // Section list: scrolls in a dialog made shorter than the list.
+        ui.vertical(|ui| {
+            ui.set_width(170.0);
+            egui::ScrollArea::vertical().max_height(content_height).id_salt("prefs-sections").show(ui, |ui| {
+                if found.is_empty() {
+                    ui.label(RichText::new(tl!("No matching settings")).color(t.text_dim));
+                }
+                for &(id, title) in &found {
+                    let sel = section == id;
+                    let empty = !has_visible_fields(&values, id) && id != "ai";
+                    let (rect, resp) = ui.allocate_exact_size(vec2(170.0, 22.0), Sense::click());
+                    if sel {
+                        ui.painter().rect_filled(rect, t.radius_sm, t.row_selected);
+                    } else if resp.hovered() {
+                        ui.painter().rect_filled(rect, t.radius_sm, t.hover);
+                    }
+                    let color = if sel {
+                        t.text
+                    } else if empty {
+                        t.text_faint
+                    } else {
+                        t.text_dim
+                    };
+                    // Translated section names can be longer than the column: elide them (the full
+                    // name is the tooltip) instead of drawing over the settings.
+                    let mut job = egui::text::LayoutJob::simple_singleline(tl!(title).to_string(), crate::theme::medium(12.5), color);
+                    job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width() - 12.0);
+                    let galley = ui.painter().layout_job(job);
+                    let elided = galley.elided;
+                    ui.painter().galley(rect.left_center() + vec2(8.0, -galley.size().y / 2.0), galley, color);
+                    let resp = if elided { resp.on_hover_text(tl!(title)) } else { resp };
+                    if resp.clicked() {
+                        section = id.to_string();
+                    }
+                }
+            });
+        });
         crate::widgets::vline(ui, content_height);
         ui.vertical(|ui| {
             ui.set_width((ui.available_width() - 12.0).max(340.0));
@@ -1275,7 +1302,9 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui
             egui::ScrollArea::vertical().max_height(content_height - 30.0).id_salt("prefs-scroll").show(ui, |ui| {
                 let order: Vec<String> =
                     f.get("__order").and_then(|o| o.get(&section)).and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
-                if !has_visible_fields(&values, &section) {
+                if section == "ai" {
+                    crate::ai_prefs_ui::body(ui, f, models);
+                } else if !has_visible_fields(&values, &section) {
                     ui.add_space(4.0);
                     ui.label(RichText::new(tl!("These settings aren't available in PhotoCraft yet.")).color(t.text_faint));
                 } else if let Some(obj) = values.get_mut(&section).and_then(Value::as_object_mut) {

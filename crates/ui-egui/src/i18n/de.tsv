@@ -3230,3 +3230,49 @@ curves	Smooth	Glätten
 	GPU Memory (MB, 0 = Automatic)	GPU-Speicher (MB, 0 = Automatisch)
 	{name} was changed by another app after it was opened or saved here.	{name} wurde von einer anderen App geändert, nachdem es hier geöffnet oder gespeichert wurde.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Ersetze die Datei durch dieses Dokument oder brich ab und nutze Datei › Speichern unter, um beide zu behalten.
+
+# Edit › Preferences › AI: local AI models
+	AI	KI
+	AI Models…	KI-Modelle…
+	AI models run in the desktop app. Download PhotoCraft for your computer to use them.	KI-Modelle laufen in der Desktop-App. Laden Sie PhotoCraft für Ihren Computer herunter, um sie zu nutzen.
+	AI…	KI…
+	Add a model from a file or a link	Modell aus einer Datei oder über einen Link hinzufügen
+	Cancelled	Abgebrochen
+	Choose Files…	Dateien wählen…
+	Delete this model	Dieses Modell löschen
+	Disabled: no tool offers this model	Deaktiviert: kein Werkzeug bietet dieses Modell an
+	Download	Herunterladen
+	Enabled: tools can use this model	Aktiviert: Werkzeuge können dieses Modell verwenden
+	Finished in {time}	Fertig nach {time}
+	From a File	Aus einer Datei
+	From a Link	Über einen Link
+	Generative Fill & Infill	Generatives Füllen & Infill
+	Generative Removal	Generatives Entfernen
+	Hugging Face, Civitai or download link	Hugging Face, Civitai oder Download-Link
+	Imported models PhotoCraft's tools don't use yet.	Importierte Modelle, die PhotoCraft-Werkzeuge noch nicht verwenden.
+	Importing {name}	{name} wird importiert
+	Import…	Importieren…
+	Keep	Behalten
+	Looking up the model…	Modell wird gesucht…
+	Models are stored in {path}	Modelle werden gespeichert in {path}
+	No models match your search.	Keine Modelle entsprechen Ihrer Suche.
+	No models yet. Use Import… to add one.	Noch keine Modelle. Fügen Sie mit „Importieren…“ eines hinzu.
+	ONNX, safetensors, checkpoint or GGUF. Pick an ONNX model and its .data file together.	ONNX, safetensors, Checkpoint oder GGUF. Wählen Sie ein ONNX-Modell zusammen mit seiner .data-Datei.
+	Object Selection	Objektauswahl
+	Optional	Optional
+	Other Models	Weitere Modelle
+	Paste a Hugging Face file or repository (org/name), a Civitai model page, or a direct link to a model file.	Fügen Sie eine Hugging-Face-Datei oder ein Repository (org/name), eine Civitai-Modellseite oder einen direkten Link zu einer Modelldatei ein.
+	Recommended	Empfohlen
+	Reflection Removal	Spiegelungen entfernen
+	Search models by name…	Modelle nach Namen suchen…
+	Subject & Background	Motiv & Hintergrund
+	Use as	Verwenden als
+	Used by the AI Object Selection tool.	Verwendet vom KI-Objektauswahl-Werkzeug.
+	Used by the Generative Removal brush.	Verwendet vom Pinsel „Generatives Entfernen“.
+	Used by the Infill brush and Generative Fill (prompts).	Verwendet vom Infill-Pinsel und von „Generatives Füllen“ (Prompts).
+	Used by the Reflection Removal brush.	Verwendet vom Pinsel „Spiegelungen entfernen“.
+	Used to select people, animals and products in one click.	Verwendet, um Personen, Tiere und Produkte mit einem Klick auszuwählen.
+	about {time} left	noch etwa {time}
+	{done} of {total}	{done} von {total}
+	{n} installed	{n} installiert
+	{n} to download	{n} zum Herunterladen

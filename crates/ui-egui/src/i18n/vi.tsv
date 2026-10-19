@@ -3717,3 +3717,49 @@ curves	Smooth	Làm mượt
 	Increase Brush Size	Tăng kích thước cọ
 	Decrease Brush Hardness	Giảm độ cứng của cọ
 	Increase Brush Hardness	Tăng độ cứng của cọ
+
+# Edit › Preferences › AI: local AI models
+	AI	AI
+	AI Models…	Mô hình AI…
+	AI models run in the desktop app. Download PhotoCraft for your computer to use them.	Mô hình AI chạy trong ứng dụng máy tính. Hãy tải PhotoCraft cho máy tính của bạn để dùng chúng.
+	AI…	AI…
+	Add a model from a file or a link	Thêm mô hình từ tệp hoặc liên kết
+	Cancelled	Đã hủy
+	Choose Files…	Chọn tệp…
+	Delete this model	Xóa mô hình này
+	Disabled: no tool offers this model	Đã tắt: không công cụ nào dùng mô hình này
+	Download	Tải xuống
+	Enabled: tools can use this model	Đã bật: các công cụ có thể dùng mô hình này
+	Finished in {time}	Hoàn tất sau {time}
+	From a File	Từ tệp
+	From a Link	Từ liên kết
+	Generative Fill & Infill	Tô tạo sinh và lấp đầy
+	Generative Removal	Xóa tạo sinh
+	Hugging Face, Civitai or download link	Liên kết Hugging Face, Civitai hoặc liên kết tải xuống
+	Imported models PhotoCraft's tools don't use yet.	Các mô hình đã nhập mà công cụ của PhotoCraft chưa dùng.
+	Importing {name}	Đang nhập {name}
+	Import…	Nhập…
+	Keep	Giữ lại
+	Looking up the model…	Đang tra cứu mô hình…
+	Models are stored in {path}	Mô hình được lưu tại {path}
+	No models match your search.	Không có mô hình nào khớp với tìm kiếm.
+	No models yet. Use Import… to add one.	Chưa có mô hình. Dùng Nhập… để thêm.
+	ONNX, safetensors, checkpoint or GGUF. Pick an ONNX model and its .data file together.	ONNX, safetensors, checkpoint hoặc GGUF. Chọn mô hình ONNX cùng với tệp .data của nó.
+	Object Selection	Chọn đối tượng
+	Optional	Tùy chọn
+	Other Models	Mô hình khác
+	Paste a Hugging Face file or repository (org/name), a Civitai model page, or a direct link to a model file.	Dán tệp hoặc kho Hugging Face (org/name), trang mô hình Civitai, hoặc liên kết trực tiếp đến tệp mô hình.
+	Recommended	Đề xuất
+	Reflection Removal	Xóa phản chiếu
+	Search models by name…	Tìm mô hình theo tên…
+	Subject & Background	Chủ thể và nền
+	Use as	Dùng cho
+	Used by the AI Object Selection tool.	Dùng bởi công cụ Chọn đối tượng AI.
+	Used by the Generative Removal brush.	Dùng bởi cọ Xóa tạo sinh.
+	Used by the Infill brush and Generative Fill (prompts).	Dùng bởi cọ Lấp đầy và Tô tạo sinh (câu lệnh).
+	Used by the Reflection Removal brush.	Dùng bởi cọ Xóa phản chiếu.
+	Used to select people, animals and products in one click.	Dùng để chọn người, động vật và sản phẩm chỉ bằng một cú nhấp.
+	about {time} left	còn khoảng {time}
+	{done} of {total}	{done} / {total}
+	{n} installed	Đã cài {n}
+	{n} to download	{n} có thể tải

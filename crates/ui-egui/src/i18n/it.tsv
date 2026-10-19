@@ -4347,3 +4347,48 @@ shape	Appearance	Aspetto
 	GPU Memory (MB, 0 = Automatic)	Memoria GPU (MB, 0 = Automatico)
 	{name} was changed by another app after it was opened or saved here.	{name} è stato modificato da un'altra app dopo essere stato aperto o salvato qui.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Sostituiscilo con questo documento, oppure annulla e usa File › Salva con nome per tenerli entrambi.
+
+# Edit › Preferences › AI: local AI models
+	AI	IA
+	AI Models…	Modelli IA…
+	AI models run in the desktop app. Download PhotoCraft for your computer to use them.	I modelli IA funzionano nell'app desktop. Scarica PhotoCraft per il tuo computer per usarli.
+	AI…	IA…
+	Add a model from a file or a link	Aggiungi un modello da un file o da un link
+	Cancelled	Annullato
+	Choose Files…	Scegli file…
+	Delete this model	Elimina questo modello
+	Disabled: no tool offers this model	Disattivato: nessuno strumento offre questo modello
+	Download	Scarica
+	Enabled: tools can use this model	Attivato: gli strumenti possono usare questo modello
+	Finished in {time}	Completato in {time}
+	From a File	Da un file
+	From a Link	Da un link
+	Generative Fill & Infill	Riempimento generativo e infill
+	Generative Removal	Rimozione generativa
+	Hugging Face, Civitai or download link	Link Hugging Face, Civitai o di download
+	Imported models PhotoCraft's tools don't use yet.	Modelli importati che gli strumenti di PhotoCraft non usano ancora.
+	Importing {name}	Importazione di {name}
+	Keep	Mantieni
+	Looking up the model…	Ricerca del modello…
+	Models are stored in {path}	I modelli sono salvati in {path}
+	No models match your search.	Nessun modello corrisponde alla ricerca.
+	No models yet. Use Import… to add one.	Nessun modello per ora. Usa Importa… per aggiungerne uno.
+	ONNX, safetensors, checkpoint or GGUF. Pick an ONNX model and its .data file together.	ONNX, safetensors, checkpoint o GGUF. Scegli un modello ONNX insieme al suo file .data.
+	Object Selection	Selezione oggetto
+	Optional	Facoltativo
+	Other Models	Altri modelli
+	Paste a Hugging Face file or repository (org/name), a Civitai model page, or a direct link to a model file.	Incolla un file o un repository Hugging Face (org/name), una pagina di modello Civitai o un link diretto a un file di modello.
+	Recommended	Consigliato
+	Reflection Removal	Rimozione riflessi
+	Search models by name…	Cerca modelli per nome…
+	Subject & Background	Soggetto e sfondo
+	Use as	Usa come
+	Used by the AI Object Selection tool.	Usato dallo strumento Selezione oggetto IA.
+	Used by the Generative Removal brush.	Usato dal pennello Rimozione generativa.
+	Used by the Infill brush and Generative Fill (prompts).	Usato dal pennello Infill e dal Riempimento generativo (prompt).
+	Used by the Reflection Removal brush.	Usato dal pennello Rimozione riflessi.
+	Used to select people, animals and products in one click.	Usato per selezionare persone, animali e prodotti con un clic.
+	about {time} left	circa {time} rimanenti
+	{done} of {total}	{done} di {total}
+	{n} installed	{n} installati
+	{n} to download	{n} da scaricare

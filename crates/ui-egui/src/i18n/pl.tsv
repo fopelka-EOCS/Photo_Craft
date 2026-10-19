@@ -3829,3 +3829,48 @@ curves	Smooth	Wygładź
 	Increase Brush Size	Zwiększ rozmiar pędzla
 	Decrease Brush Hardness	Zmniejsz twardość pędzla
 	Increase Brush Hardness	Zwiększ twardość pędzla
+
+# Edit › Preferences › AI: local AI models
+	AI	AI
+	AI Models…	Modele AI…
+	AI models run in the desktop app. Download PhotoCraft for your computer to use them.	Modele AI działają w aplikacji na komputer. Pobierz PhotoCraft na swój komputer, aby z nich korzystać.
+	AI…	AI…
+	Add a model from a file or a link	Dodaj model z pliku lub linku
+	Cancelled	Anulowano
+	Choose Files…	Wybierz pliki…
+	Delete this model	Usuń ten model
+	Disabled: no tool offers this model	Wyłączony: żadne narzędzie nie oferuje tego modelu
+	Download	Pobierz
+	Enabled: tools can use this model	Włączony: narzędzia mogą używać tego modelu
+	Finished in {time}	Ukończono w {time}
+	From a File	Z pliku
+	From a Link	Z linku
+	Generative Fill & Infill	Wypełnienie generatywne i infill
+	Generative Removal	Usuwanie generatywne
+	Hugging Face, Civitai or download link	Link Hugging Face, Civitai lub do pobrania
+	Imported models PhotoCraft's tools don't use yet.	Zaimportowane modele, których narzędzia PhotoCraft jeszcze nie używają.
+	Importing {name}	Importowanie: {name}
+	Keep	Zachowaj
+	Looking up the model…	Wyszukiwanie modelu…
+	Models are stored in {path}	Modele są przechowywane w {path}
+	No models match your search.	Żaden model nie pasuje do wyszukiwania.
+	No models yet. Use Import… to add one.	Nie ma jeszcze modeli. Użyj opcji Importuj…, aby dodać model.
+	ONNX, safetensors, checkpoint or GGUF. Pick an ONNX model and its .data file together.	ONNX, safetensors, checkpoint lub GGUF. Wybierz model ONNX razem z jego plikiem .data.
+	Object Selection	Zaznaczanie obiektu
+	Optional	Opcjonalnie
+	Other Models	Inne modele
+	Paste a Hugging Face file or repository (org/name), a Civitai model page, or a direct link to a model file.	Wklej plik lub repozytorium Hugging Face (org/name), stronę modelu Civitai albo bezpośredni link do pliku modelu.
+	Recommended	Polecane
+	Reflection Removal	Usuwanie odbić
+	Search models by name…	Szukaj modeli po nazwie…
+	Subject & Background	Obiekt i tło
+	Use as	Użyj jako
+	Used by the AI Object Selection tool.	Używany przez narzędzie Zaznaczanie obiektu AI.
+	Used by the Generative Removal brush.	Używany przez pędzel Usuwanie generatywne.
+	Used by the Infill brush and Generative Fill (prompts).	Używany przez pędzel Infill i Wypełnienie generatywne (prompty).
+	Used by the Reflection Removal brush.	Używany przez pędzel Usuwanie odbić.
+	Used to select people, animals and products in one click.	Służy do zaznaczania ludzi, zwierząt i produktów jednym kliknięciem.
+	about {time} left	zostało około {time}
+	{done} of {total}	{done} z {total}
+	{n} installed	Zainstalowane: {n}
+	{n} to download	Do pobrania: {n}

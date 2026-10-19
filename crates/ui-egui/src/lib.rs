@@ -19,6 +19,7 @@ pub mod adjust_dialog;
 pub mod adjust_editors;
 pub mod adjust_preview;
 pub mod adjust_ui;
+pub mod ai_prefs_ui;
 mod alt_grab;
 pub mod analysis_ui;
 pub mod anchor_tools;
@@ -559,6 +560,9 @@ pub struct Services {
     /// while AppKit's run loop is still going crashes or hangs Touch Bar Macs (#1575, #1458).
     /// Without one, eframe closes the window and the app ends with it.
     pub quit: Option<QuitFn>,
+    /// Edit › Preferences › AI: the local model manager (desktop; `None` on the web, where the
+    /// tab says models need the desktop app).
+    pub models: Option<photocraft_ml::Manager>,
 }
 
 /// A document histogram being computed off the UI thread: (document, revision, receiver of

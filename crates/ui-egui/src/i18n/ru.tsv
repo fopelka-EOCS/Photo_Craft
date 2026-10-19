@@ -3203,3 +3203,48 @@ curves	Smooth	Сгладить
 	Increase Brush Size	Увеличить размер кисти
 	Decrease Brush Hardness	Уменьшить жёсткость кисти
 	Increase Brush Hardness	Увеличить жёсткость кисти
+
+# Edit › Preferences › AI: local AI models
+	AI	ИИ
+	AI Models…	Модели ИИ…
+	AI models run in the desktop app. Download PhotoCraft for your computer to use them.	Модели ИИ работают в настольном приложении. Скачайте PhotoCraft для своего компьютера, чтобы ими пользоваться.
+	AI…	ИИ…
+	Add a model from a file or a link	Добавить модель из файла или по ссылке
+	Cancelled	Отменено
+	Choose Files…	Выбрать файлы…
+	Delete this model	Удалить эту модель
+	Disabled: no tool offers this model	Отключена: ни один инструмент не предлагает эту модель
+	Download	Скачать
+	Enabled: tools can use this model	Включена: инструменты могут использовать эту модель
+	Finished in {time}	Готово за {time}
+	From a File	Из файла
+	From a Link	По ссылке
+	Generative Fill & Infill	Генеративная заливка и дорисовка
+	Generative Removal	Генеративное удаление
+	Hugging Face, Civitai or download link	Ссылка Hugging Face, Civitai или ссылка на загрузку
+	Imported models PhotoCraft's tools don't use yet.	Импортированные модели, которые инструменты PhotoCraft пока не используют.
+	Importing {name}	Импорт: {name}
+	Keep	Оставить
+	Looking up the model…	Поиск модели…
+	Models are stored in {path}	Модели хранятся в {path}
+	No models match your search.	Нет моделей, соответствующих запросу.
+	No models yet. Use Import… to add one.	Моделей пока нет. Добавьте модель с помощью «Импорт…».
+	ONNX, safetensors, checkpoint or GGUF. Pick an ONNX model and its .data file together.	ONNX, safetensors, checkpoint или GGUF. Выберите модель ONNX вместе с её файлом .data.
+	Object Selection	Выделение объектов
+	Optional	Необязательно
+	Other Models	Другие модели
+	Paste a Hugging Face file or repository (org/name), a Civitai model page, or a direct link to a model file.	Вставьте файл или репозиторий Hugging Face (org/name), страницу модели Civitai или прямую ссылку на файл модели.
+	Recommended	Рекомендуется
+	Reflection Removal	Удаление отражений
+	Search models by name…	Искать модели по названию…
+	Subject & Background	Объект и фон
+	Use as	Использовать как
+	Used by the AI Object Selection tool.	Используется инструментом «Выделение объектов ИИ».
+	Used by the Generative Removal brush.	Используется кистью «Генеративное удаление».
+	Used by the Infill brush and Generative Fill (prompts).	Используется кистью «Дорисовка» и генеративной заливкой (запросы).
+	Used by the Reflection Removal brush.	Используется кистью «Удаление отражений».
+	Used to select people, animals and products in one click.	Используется, чтобы выделять людей, животных и товары одним щелчком.
+	about {time} left	осталось около {time}
+	{done} of {total}	{done} из {total}
+	{n} installed	Установлено: {n}
+	{n} to download	Можно скачать: {n}

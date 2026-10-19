@@ -3411,3 +3411,49 @@ curves	Smooth	매끄럽게
 	Increase Brush Size	브러시 크기 늘리기
 	Decrease Brush Hardness	브러시 경도 줄이기
 	Increase Brush Hardness	브러시 경도 늘리기
+
+# Edit › Preferences › AI: local AI models
+	AI	AI
+	AI Models…	AI 모델…
+	AI models run in the desktop app. Download PhotoCraft for your computer to use them.	AI 모델은 데스크톱 앱에서 실행됩니다. 사용하려면 컴퓨터용 PhotoCraft를 다운로드하세요.
+	AI…	AI…
+	Add a model from a file or a link	파일 또는 링크에서 모델 추가
+	Cancelled	취소됨
+	Choose Files…	파일 선택…
+	Delete this model	이 모델 삭제
+	Disabled: no tool offers this model	사용 안 함: 이 모델을 쓰는 도구가 없습니다
+	Download	다운로드
+	Enabled: tools can use this model	사용: 도구에서 이 모델을 쓸 수 있습니다
+	Finished in {time}	{time} 만에 완료
+	From a File	파일에서
+	From a Link	링크에서
+	Generative Fill & Infill	생성형 채우기 및 인필
+	Generative Removal	생성형 제거
+	Hugging Face, Civitai or download link	Hugging Face, Civitai 또는 다운로드 링크
+	Imported models PhotoCraft's tools don't use yet.	PhotoCraft 도구에서 아직 사용하지 않는 가져온 모델입니다.
+	Importing {name}	{name} 가져오는 중
+	Import…	가져오기…
+	Keep	유지
+	Looking up the model…	모델을 찾는 중…
+	Models are stored in {path}	모델 저장 위치: {path}
+	No models match your search.	검색과 일치하는 모델이 없습니다.
+	No models yet. Use Import… to add one.	아직 모델이 없습니다. 가져오기…로 추가하세요.
+	ONNX, safetensors, checkpoint or GGUF. Pick an ONNX model and its .data file together.	ONNX, safetensors, 체크포인트 또는 GGUF. ONNX 모델은 .data 파일과 함께 선택하세요.
+	Object Selection	개체 선택
+	Optional	선택 사항
+	Other Models	기타 모델
+	Paste a Hugging Face file or repository (org/name), a Civitai model page, or a direct link to a model file.	Hugging Face 파일이나 저장소(org/name), Civitai 모델 페이지 또는 모델 파일의 직접 링크를 붙여 넣으세요.
+	Recommended	추천
+	Reflection Removal	반사 제거
+	Search models by name…	이름으로 모델 검색…
+	Subject & Background	피사체 및 배경
+	Use as	용도
+	Used by the AI Object Selection tool.	AI 개체 선택 도구에서 사용합니다.
+	Used by the Generative Removal brush.	생성형 제거 브러시에서 사용합니다.
+	Used by the Infill brush and Generative Fill (prompts).	인필 브러시와 생성형 채우기(프롬프트)에서 사용합니다.
+	Used by the Reflection Removal brush.	반사 제거 브러시에서 사용합니다.
+	Used to select people, animals and products in one click.	사람, 동물, 제품을 한 번의 클릭으로 선택하는 데 사용합니다.
+	about {time} left	약 {time} 남음
+	{done} of {total}	{done} / {total}
+	{n} installed	{n}개 설치됨
+	{n} to download	{n}개 다운로드 가능

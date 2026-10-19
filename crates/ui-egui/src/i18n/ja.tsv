@@ -3907,3 +3907,48 @@ curves	Smooth	スムーズ
 	Increase Brush Size	ブラシサイズを大きく
 	Decrease Brush Hardness	ブラシの硬さを下げる
 	Increase Brush Hardness	ブラシの硬さを上げる
+
+# Edit › Preferences › AI: local AI models
+	AI	AI
+	AI Models…	AI モデル…
+	AI models run in the desktop app. Download PhotoCraft for your computer to use them.	AI モデルはデスクトップアプリで動作します。使用するには、お使いのコンピューター用の PhotoCraft をダウンロードしてください。
+	AI…	AI…
+	Add a model from a file or a link	ファイルまたはリンクからモデルを追加
+	Cancelled	キャンセルしました
+	Choose Files…	ファイルを選択…
+	Delete this model	このモデルを削除
+	Disabled: no tool offers this model	無効: このモデルを使うツールはありません
+	Download	ダウンロード
+	Enabled: tools can use this model	有効: ツールでこのモデルを使用できます
+	Finished in {time}	{time} で完了
+	From a File	ファイルから
+	From a Link	リンクから
+	Generative Fill & Infill	生成塗りつぶしとインフィル
+	Generative Removal	生成削除
+	Hugging Face, Civitai or download link	Hugging Face、Civitai またはダウンロードリンク
+	Imported models PhotoCraft's tools don't use yet.	PhotoCraft のツールでまだ使われていない読み込み済みモデルです。
+	Importing {name}	{name} を読み込み中
+	Keep	残す
+	Looking up the model…	モデルを確認しています…
+	Models are stored in {path}	モデルの保存場所: {path}
+	No models match your search.	検索に一致するモデルはありません。
+	No models yet. Use Import… to add one.	モデルはまだありません。「読み込み…」で追加してください。
+	ONNX, safetensors, checkpoint or GGUF. Pick an ONNX model and its .data file together.	ONNX、safetensors、チェックポイント、GGUF に対応。ONNX モデルは .data ファイルと一緒に選択してください。
+	Object Selection	オブジェクト選択
+	Optional	任意
+	Other Models	その他のモデル
+	Paste a Hugging Face file or repository (org/name), a Civitai model page, or a direct link to a model file.	Hugging Face のファイルやリポジトリ (org/name)、Civitai のモデルページ、またはモデルファイルへの直接リンクを貼り付けてください。
+	Recommended	おすすめ
+	Reflection Removal	映り込み除去
+	Search models by name…	モデル名で検索…
+	Subject & Background	被写体と背景
+	Use as	用途
+	Used by the AI Object Selection tool.	AI オブジェクト選択ツールで使用します。
+	Used by the Generative Removal brush.	生成削除ブラシで使用します。
+	Used by the Infill brush and Generative Fill (prompts).	インフィルブラシと生成塗りつぶし (プロンプト) で使用します。
+	Used by the Reflection Removal brush.	映り込み除去ブラシで使用します。
+	Used to select people, animals and products in one click.	人物、動物、製品をワンクリックで選択するのに使用します。
+	about {time} left	残り約 {time}
+	{done} of {total}	{done} / {total}
+	{n} installed	{n} 個インストール済み
+	{n} to download	{n} 個ダウンロード可能

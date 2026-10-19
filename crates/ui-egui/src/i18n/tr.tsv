@@ -3960,3 +3960,48 @@ cameraData	Lens	Lens
 	Increase Brush Size	Fırça boyutunu büyüt
 	Decrease Brush Hardness	Fırça sertliğini azalt
 	Increase Brush Hardness	Fırça sertliğini artır
+
+# Edit › Preferences › AI: local AI models
+	AI	Yapay Zeka
+	AI Models…	Yapay Zeka Modelleri…
+	AI models run in the desktop app. Download PhotoCraft for your computer to use them.	Yapay zeka modelleri masaüstü uygulamasında çalışır. Kullanmak için bilgisayarınıza PhotoCraft'ı indirin.
+	AI…	Yapay Zeka…
+	Add a model from a file or a link	Dosyadan veya bağlantıdan model ekle
+	Cancelled	İptal edildi
+	Choose Files…	Dosya Seç…
+	Delete this model	Bu modeli sil
+	Disabled: no tool offers this model	Devre dışı: bu modeli kullanan araç yok
+	Download	İndir
+	Enabled: tools can use this model	Etkin: araçlar bu modeli kullanabilir
+	Finished in {time}	{time} içinde bitti
+	From a File	Dosyadan
+	From a Link	Bağlantıdan
+	Generative Fill & Infill	Üretken Dolgu ve Doldurma
+	Generative Removal	Üretken Kaldırma
+	Hugging Face, Civitai or download link	Hugging Face, Civitai veya indirme bağlantısı
+	Imported models PhotoCraft's tools don't use yet.	PhotoCraft araçlarının henüz kullanmadığı içe aktarılmış modeller.
+	Importing {name}	{name} içe aktarılıyor
+	Keep	Tut
+	Looking up the model…	Model aranıyor…
+	Models are stored in {path}	Modeller {path} konumunda saklanır
+	No models match your search.	Aramanızla eşleşen model yok.
+	No models yet. Use Import… to add one.	Henüz model yok. Eklemek için İçe Aktar…'ı kullanın.
+	ONNX, safetensors, checkpoint or GGUF. Pick an ONNX model and its .data file together.	ONNX, safetensors, checkpoint veya GGUF. ONNX modelini .data dosyasıyla birlikte seçin.
+	Object Selection	Nesne Seçimi
+	Optional	İsteğe bağlı
+	Other Models	Diğer Modeller
+	Paste a Hugging Face file or repository (org/name), a Civitai model page, or a direct link to a model file.	Bir Hugging Face dosyası veya deposu (org/name), bir Civitai model sayfası ya da model dosyasına doğrudan bağlantı yapıştırın.
+	Recommended	Önerilen
+	Reflection Removal	Yansıma Kaldırma
+	Search models by name…	Modelleri ada göre ara…
+	Subject & Background	Konu ve Arka Plan
+	Use as	Kullanım
+	Used by the AI Object Selection tool.	Yapay Zeka Nesne Seçimi aracı tarafından kullanılır.
+	Used by the Generative Removal brush.	Üretken Kaldırma fırçası tarafından kullanılır.
+	Used by the Infill brush and Generative Fill (prompts).	Doldurma fırçası ve Üretken Dolgu (komutlar) tarafından kullanılır.
+	Used by the Reflection Removal brush.	Yansıma Kaldırma fırçası tarafından kullanılır.
+	Used to select people, animals and products in one click.	İnsanları, hayvanları ve ürünleri tek tıklamayla seçmek için kullanılır.
+	about {time} left	yaklaşık {time} kaldı
+	{done} of {total}	{done} / {total}
+	{n} installed	{n} yüklü
+	{n} to download	{n} indirilebilir

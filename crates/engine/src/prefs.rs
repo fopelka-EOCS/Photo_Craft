@@ -889,6 +889,13 @@ impl Default for Integrations {
     }
 }
 
+/// Edit › Preferences › AI. The shell draws this section from the local model manager
+/// (`photocraft-ml`), whose model list lives in the models folder's `models.json`, so it stores
+/// nothing here yet. It exists so the section has its place in the preferences JSON.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Ai {}
+
 /// Edit › Menus: hidden items and item colours, by command id.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -943,6 +950,7 @@ pub struct Preferences {
     pub enhanced_controls: EnhancedControls,
     pub raw_defaults: RawDefaults,
     pub integrations: Integrations,
+    pub ai: Ai,
     /// Edit › Keyboard Shortcuts: command id → shortcut (`Cmd+Shift+N` notation); an empty
     /// string removes the default shortcut.
     pub shortcuts: BTreeMap<String, String>,
@@ -994,7 +1002,7 @@ pub struct Preferences {
 }
 
 /// Preferences dialog sections in Photoshop's order: (id, title).
-pub const SECTIONS: [(&str, &str); 18] = [
+pub const SECTIONS: [(&str, &str); 19] = [
     ("general", "General"),
     ("interface", "Interface"),
     ("workspace", "Workspace"),
@@ -1013,6 +1021,8 @@ pub const SECTIONS: [(&str, &str); 18] = [
     ("enhancedControls", "Enhanced Controls"),
     ("rawDefaults", "Camera Raw Defaults"),
     ("integrations", "Integrations"),
+    // Local AI models (Edit › Preferences › AI), drawn by the shell: no stored preferences.
+    ("ai", "AI"),
 ];
 
 /// Preferences that nothing reads yet, so Edit › Preferences doesn't show them: a control that
@@ -2481,6 +2491,7 @@ pub fn specs() -> Vec<CommandSpec> {
         section!("edit.preferences.enhancedControls", "Enhanced Controls…"),
         section!("edit.preferences.rawDefaults", "Camera Raw…"),
         section!("edit.preferences.integrations", "Integrations…"),
+        section!("edit.preferences.ai", "AI…"),
         spec!(
             "edit.keyboardShortcuts",
             "Keyboard Shortcuts…",

@@ -599,8 +599,16 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) ->
         // Set by main, which starts loading the store before the window opens.
         preset_store: None,
         is_wayland: false,
+        models: models_manager(),
         ..recovery_services(recovery_dir())
     }
+}
+
+/// Edit › Preferences › AI: models live in `Models` inside the PhotoCraft data folder, next to
+/// the preferences and presets (and inside `PhotoCraftData` for a portable copy).
+fn models_manager() -> Option<photocraft_ml::Manager> {
+    let dir = config_dir()?.join("Models");
+    photocraft_ml::Manager::open(&dir).map_err(|e| log::warn!("AI models unavailable: {e}")).ok()
 }
 
 /// Preferences ▸ General ▸ Beep When Done: the platform's default information beep.

@@ -3990,3 +3990,48 @@ curves	Smooth	Vloeiend maken
 	Increase Brush Size	Penseelgrootte vergroten
 	Decrease Brush Hardness	Penseelhardheid verlagen
 	Increase Brush Hardness	Penseelhardheid verhogen
+
+# Edit › Preferences › AI: local AI models
+	AI	AI
+	AI Models…	AI-modellen…
+	AI models run in the desktop app. Download PhotoCraft for your computer to use them.	AI-modellen werken in de desktop-app. Download PhotoCraft voor je computer om ze te gebruiken.
+	AI…	AI…
+	Add a model from a file or a link	Een model toevoegen uit een bestand of via een link
+	Cancelled	Geannuleerd
+	Choose Files…	Bestanden kiezen…
+	Delete this model	Dit model verwijderen
+	Disabled: no tool offers this model	Uitgeschakeld: geen enkele tool biedt dit model aan
+	Download	Downloaden
+	Enabled: tools can use this model	Ingeschakeld: tools kunnen dit model gebruiken
+	Finished in {time}	Klaar na {time}
+	From a File	Uit een bestand
+	From a Link	Via een link
+	Generative Fill & Infill	Generatief vullen en infill
+	Generative Removal	Generatief verwijderen
+	Hugging Face, Civitai or download link	Hugging Face-, Civitai- of downloadlink
+	Imported models PhotoCraft's tools don't use yet.	Geïmporteerde modellen die de tools van PhotoCraft nog niet gebruiken.
+	Importing {name}	{name} importeren
+	Keep	Behouden
+	Looking up the model…	Model opzoeken…
+	Models are stored in {path}	Modellen worden opgeslagen in {path}
+	No models match your search.	Geen modellen gevonden voor je zoekopdracht.
+	No models yet. Use Import… to add one.	Nog geen modellen. Gebruik Importeren… om er een toe te voegen.
+	ONNX, safetensors, checkpoint or GGUF. Pick an ONNX model and its .data file together.	ONNX, safetensors, checkpoint of GGUF. Kies een ONNX-model samen met het bijbehorende .data-bestand.
+	Object Selection	Objectselectie
+	Optional	Optioneel
+	Other Models	Andere modellen
+	Paste a Hugging Face file or repository (org/name), a Civitai model page, or a direct link to a model file.	Plak een Hugging Face-bestand of -repository (org/name), een Civitai-modelpagina of een directe link naar een modelbestand.
+	Recommended	Aanbevolen
+	Reflection Removal	Reflecties verwijderen
+	Search models by name…	Modellen zoeken op naam…
+	Subject & Background	Onderwerp en achtergrond
+	Use as	Gebruiken als
+	Used by the AI Object Selection tool.	Gebruikt door de tool AI-objectselectie.
+	Used by the Generative Removal brush.	Gebruikt door het penseel Generatief verwijderen.
+	Used by the Infill brush and Generative Fill (prompts).	Gebruikt door het Infill-penseel en Generatief vullen (prompts).
+	Used by the Reflection Removal brush.	Gebruikt door het penseel Reflecties verwijderen.
+	Used to select people, animals and products in one click.	Gebruikt om mensen, dieren en producten met één klik te selecteren.
+	about {time} left	nog ongeveer {time}
+	{done} of {total}	{done} van {total}
+	{n} installed	{n} geïnstalleerd
+	{n} to download	{n} te downloaden

@@ -8,6 +8,7 @@
 //!
 //! `--system-theme light|dark|none` supplies a deterministic OS appearance for theme captures.
 //!
+//! `--models-dir DIR` gives Edit › Preferences › AI a models folder to list.
 //! `--safe-gpu` draws the canvas on the CPU path, like the app's `--safe-gpu` launch.
 //! `--wayland-notice` previews the native file drag-and-drop guidance shown in Wayland sessions.
 //! `--custom-titlebar` draws the Windows/Linux title bar (caption buttons in the top bar).
@@ -57,6 +58,8 @@ fn main() {
             photocraft_io::export(doc, path, &opts).map(|r| (r.bytes, r.warnings)).map_err(|e| e.to_string())
         })),
         write: Some(Box::new(|path: &str, bytes: &[u8]| photocraft_format::atomic_write(std::path::Path::new(path), bytes).map_err(|e| e.to_string()))),
+        // `--models-dir DIR`: Edit › Preferences › AI lists the models in DIR.
+        models: arg(&args, "--models-dir").and_then(|d| photocraft_ml::Manager::open(std::path::Path::new(&d)).ok()),
         ..Default::default()
     };
     let open = arg(&args, "--open");

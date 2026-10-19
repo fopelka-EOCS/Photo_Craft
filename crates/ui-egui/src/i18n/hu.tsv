@@ -4149,3 +4149,48 @@ cameraRaw	Yellow	Sárga
 	Increase Brush Size	Ecsetméret növelése
 	Decrease Brush Hardness	Ecsetkeménység csökkentése
 	Increase Brush Hardness	Ecsetkeménység növelése
+
+# Edit › Preferences › AI: local AI models
+	AI	MI
+	AI Models…	MI-modellek…
+	AI models run in the desktop app. Download PhotoCraft for your computer to use them.	Az MI-modellek az asztali alkalmazásban futnak. Használatukhoz töltse le a PhotoCraftot a számítógépére.
+	AI…	MI…
+	Add a model from a file or a link	Modell hozzáadása fájlból vagy hivatkozásból
+	Cancelled	Megszakítva
+	Choose Files…	Fájlok kiválasztása…
+	Delete this model	A modell törlése
+	Disabled: no tool offers this model	Kikapcsolva: egyik eszköz sem kínálja ezt a modellt
+	Download	Letöltés
+	Enabled: tools can use this model	Bekapcsolva: az eszközök használhatják ezt a modellt
+	Finished in {time}	Elkészült {time} alatt
+	From a File	Fájlból
+	From a Link	Hivatkozásból
+	Generative Fill & Infill	Generatív kitöltés és infill
+	Generative Removal	Generatív eltávolítás
+	Hugging Face, Civitai or download link	Hugging Face-, Civitai- vagy letöltési hivatkozás
+	Imported models PhotoCraft's tools don't use yet.	Importált modellek, amelyeket a PhotoCraft eszközei még nem használnak.
+	Importing {name}	{name} importálása
+	Keep	Megtartás
+	Looking up the model…	A modell keresése…
+	Models are stored in {path}	A modellek helye: {path}
+	No models match your search.	Egy modell sem felel meg a keresésnek.
+	No models yet. Use Import… to add one.	Még nincs modell. Adjon hozzá egyet az Importálás… gombbal.
+	ONNX, safetensors, checkpoint or GGUF. Pick an ONNX model and its .data file together.	ONNX, safetensors, checkpoint vagy GGUF. Az ONNX-modellt a hozzá tartozó .data fájllal együtt válassza ki.
+	Object Selection	Objektumkijelölés
+	Optional	Nem kötelező
+	Other Models	Egyéb modellek
+	Paste a Hugging Face file or repository (org/name), a Civitai model page, or a direct link to a model file.	Illesszen be egy Hugging Face-fájlt vagy -tárolót (org/name), egy Civitai-modelloldalt vagy egy modellfájlra mutató közvetlen hivatkozást.
+	Recommended	Ajánlott
+	Reflection Removal	Tükröződés eltávolítása
+	Search models by name…	Modellek keresése név szerint…
+	Subject & Background	Alany és háttér
+	Use as	Felhasználás
+	Used by the AI Object Selection tool.	Az MI-objektumkijelölő eszköz használja.
+	Used by the Generative Removal brush.	A Generatív eltávolítás ecset használja.
+	Used by the Infill brush and Generative Fill (prompts).	Az Infill ecset és a Generatív kitöltés (promptok) használja.
+	Used by the Reflection Removal brush.	A Tükröződés eltávolítása ecset használja.
+	Used to select people, animals and products in one click.	Emberek, állatok és termékek egy kattintással való kijelöléséhez.
+	about {time} left	kb. {time} van hátra
+	{done} of {total}	{done} / {total}
+	{n} installed	{n} telepítve
+	{n} to download	{n} letölthető

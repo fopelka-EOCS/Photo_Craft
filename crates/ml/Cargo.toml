@@ -1,0 +1,20 @@
+[package]
+name = "photocraft-ml"
+description = "Local AI model manager: the recommended-model catalog, installed models on disk, downloads and imports (Hugging Face, Civitai, URLs, files)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
+sha2 = "0.10"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ureq = { version = "3", default-features = false, features = ["rustls", "gzip"] }

@@ -3938,3 +3938,48 @@ curves	Smooth	Згладити
 	This shape layer must be rasterized before proceeding. It will no longer be editable as a shape. Rasterize the shape?	Щоб продовжити, потрібно растеризувати цей шар фігури. Після цього його більше не можна буде редагувати як фігуру. Растеризувати фігуру?
 	This Smart Object must be rasterized before proceeding. Its contents will no longer be editable. Rasterize the Smart Object?	Щоб продовжити, потрібно растеризувати цей смартоб’єкт. Після цього його вміст більше не можна буде редагувати. Растеризувати смартоб’єкт?
 	This fill layer must be rasterized before proceeding. Its fill content will no longer be editable. Rasterize the layer?	Щоб продовжити, потрібно растеризувати цей шар заливки. Після цього його заливку більше не можна буде редагувати. Растеризувати шар?
+
+# Edit › Preferences › AI: local AI models
+	AI	ШІ
+	AI Models…	Моделі ШІ…
+	AI models run in the desktop app. Download PhotoCraft for your computer to use them.	Моделі ШІ працюють у застосунку для комп'ютера. Завантажте PhotoCraft для свого комп'ютера, щоб ними користуватися.
+	AI…	ШІ…
+	Add a model from a file or a link	Додати модель із файлу або за посиланням
+	Cancelled	Скасовано
+	Choose Files…	Вибрати файли…
+	Delete this model	Видалити цю модель
+	Disabled: no tool offers this model	Вимкнено: жоден інструмент не пропонує цю модель
+	Download	Завантажити
+	Enabled: tools can use this model	Увімкнено: інструменти можуть використовувати цю модель
+	Finished in {time}	Готово за {time}
+	From a File	З файлу
+	From a Link	За посиланням
+	Generative Fill & Infill	Генеративна заливка й домальовування
+	Generative Removal	Генеративне видалення
+	Hugging Face, Civitai or download link	Посилання Hugging Face, Civitai або на завантаження
+	Imported models PhotoCraft's tools don't use yet.	Імпортовані моделі, які інструменти PhotoCraft ще не використовують.
+	Importing {name}	Імпорт: {name}
+	Keep	Залишити
+	Looking up the model…	Пошук моделі…
+	Models are stored in {path}	Моделі зберігаються в {path}
+	No models match your search.	Немає моделей, що відповідають пошуку.
+	No models yet. Use Import… to add one.	Моделей ще немає. Додайте модель за допомогою «Імпорт…».
+	ONNX, safetensors, checkpoint or GGUF. Pick an ONNX model and its .data file together.	ONNX, safetensors, checkpoint або GGUF. Виберіть модель ONNX разом із її файлом .data.
+	Object Selection	Виділення об'єктів
+	Optional	Необов'язково
+	Other Models	Інші моделі
+	Paste a Hugging Face file or repository (org/name), a Civitai model page, or a direct link to a model file.	Вставте файл або репозиторій Hugging Face (org/name), сторінку моделі Civitai або пряме посилання на файл моделі.
+	Recommended	Рекомендовано
+	Reflection Removal	Видалення відблисків
+	Search models by name…	Шукати моделі за назвою…
+	Subject & Background	Об'єкт і тло
+	Use as	Використовувати як
+	Used by the AI Object Selection tool.	Використовується інструментом «Виділення об'єктів ШІ».
+	Used by the Generative Removal brush.	Використовується пензлем «Генеративне видалення».
+	Used by the Infill brush and Generative Fill (prompts).	Використовується пензлем «Домальовування» та генеративною заливкою (запити).
+	Used by the Reflection Removal brush.	Використовується пензлем «Видалення відблисків».
+	Used to select people, animals and products in one click.	Використовується, щоб виділяти людей, тварин і товари одним клацанням.
+	about {time} left	залишилося близько {time}
+	{done} of {total}	{done} з {total}
+	{n} installed	Встановлено: {n}
+	{n} to download	Можна завантажити: {n}

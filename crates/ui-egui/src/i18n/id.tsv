@@ -3225,3 +3225,48 @@ curves	Smooth	Haluskan
 	Increase Brush Size	Perbesar ukuran kuas
 	Decrease Brush Hardness	Kurangi kekerasan kuas
 	Increase Brush Hardness	Tambah kekerasan kuas
+
+# Edit › Preferences › AI: local AI models
+	AI	AI
+	AI Models…	Model AI…
+	AI models run in the desktop app. Download PhotoCraft for your computer to use them.	Model AI berjalan di aplikasi desktop. Unduh PhotoCraft untuk komputer Anda untuk menggunakannya.
+	AI…	AI…
+	Add a model from a file or a link	Tambahkan model dari file atau tautan
+	Cancelled	Dibatalkan
+	Choose Files…	Pilih File…
+	Delete this model	Hapus model ini
+	Disabled: no tool offers this model	Nonaktif: tidak ada alat yang memakai model ini
+	Download	Unduh
+	Enabled: tools can use this model	Aktif: alat dapat memakai model ini
+	Finished in {time}	Selesai dalam {time}
+	From a File	Dari File
+	From a Link	Dari Tautan
+	Generative Fill & Infill	Isi Generatif & Infill
+	Generative Removal	Penghapusan Generatif
+	Hugging Face, Civitai or download link	Tautan Hugging Face, Civitai, atau unduhan
+	Imported models PhotoCraft's tools don't use yet.	Model impor yang belum dipakai alat PhotoCraft.
+	Importing {name}	Mengimpor {name}
+	Keep	Simpan
+	Looking up the model…	Mencari model…
+	Models are stored in {path}	Model disimpan di {path}
+	No models match your search.	Tidak ada model yang cocok dengan pencarian.
+	No models yet. Use Import… to add one.	Belum ada model. Gunakan Impor… untuk menambahkannya.
+	ONNX, safetensors, checkpoint or GGUF. Pick an ONNX model and its .data file together.	ONNX, safetensors, checkpoint, atau GGUF. Pilih model ONNX bersama file .data-nya.
+	Object Selection	Pemilihan Objek
+	Optional	Opsional
+	Other Models	Model Lain
+	Paste a Hugging Face file or repository (org/name), a Civitai model page, or a direct link to a model file.	Tempel file atau repositori Hugging Face (org/name), halaman model Civitai, atau tautan langsung ke file model.
+	Recommended	Disarankan
+	Reflection Removal	Penghapusan Pantulan
+	Search models by name…	Cari model berdasarkan nama…
+	Subject & Background	Subjek & Latar
+	Use as	Gunakan sebagai
+	Used by the AI Object Selection tool.	Dipakai oleh alat Pemilihan Objek AI.
+	Used by the Generative Removal brush.	Dipakai oleh kuas Penghapusan Generatif.
+	Used by the Infill brush and Generative Fill (prompts).	Dipakai oleh kuas Infill dan Isi Generatif (prompt).
+	Used by the Reflection Removal brush.	Dipakai oleh kuas Penghapusan Pantulan.
+	Used to select people, animals and products in one click.	Dipakai untuk memilih orang, hewan, dan produk dalam satu klik.
+	about {time} left	sekitar {time} lagi
+	{done} of {total}	{done} dari {total}
+	{n} installed	{n} terpasang
+	{n} to download	{n} dapat diunduh

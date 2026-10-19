@@ -4192,3 +4192,48 @@ navigator	Zoom	Zoom
 	Increase Brush Size	Aumentar tamaño del pincel
 	Decrease Brush Hardness	Reducir dureza del pincel
 	Increase Brush Hardness	Aumentar dureza del pincel
+
+# Edit › Preferences › AI: local AI models
+	AI	IA
+	AI Models…	Modelos de IA…
+	AI models run in the desktop app. Download PhotoCraft for your computer to use them.	Los modelos de IA funcionan en la aplicación de escritorio. Descarga PhotoCraft para tu ordenador para usarlos.
+	AI…	IA…
+	Add a model from a file or a link	Añadir un modelo desde un archivo o un enlace
+	Cancelled	Cancelado
+	Choose Files…	Elegir archivos…
+	Delete this model	Eliminar este modelo
+	Disabled: no tool offers this model	Desactivado: ninguna herramienta ofrece este modelo
+	Download	Descargar
+	Enabled: tools can use this model	Activado: las herramientas pueden usar este modelo
+	Finished in {time}	Terminado en {time}
+	From a File	Desde un archivo
+	From a Link	Desde un enlace
+	Generative Fill & Infill	Relleno generativo e infill
+	Generative Removal	Eliminación generativa
+	Hugging Face, Civitai or download link	Enlace de Hugging Face, Civitai o de descarga
+	Imported models PhotoCraft's tools don't use yet.	Modelos importados que las herramientas de PhotoCraft aún no usan.
+	Importing {name}	Importando {name}
+	Keep	Conservar
+	Looking up the model…	Buscando el modelo…
+	Models are stored in {path}	Los modelos se guardan en {path}
+	No models match your search.	Ningún modelo coincide con tu búsqueda.
+	No models yet. Use Import… to add one.	Aún no hay modelos. Usa Importar… para añadir uno.
+	ONNX, safetensors, checkpoint or GGUF. Pick an ONNX model and its .data file together.	ONNX, safetensors, checkpoint o GGUF. Elige un modelo ONNX junto con su archivo .data.
+	Object Selection	Selección de objetos
+	Optional	Opcional
+	Other Models	Otros modelos
+	Paste a Hugging Face file or repository (org/name), a Civitai model page, or a direct link to a model file.	Pega un archivo o repositorio de Hugging Face (org/name), una página de modelo de Civitai o un enlace directo a un archivo de modelo.
+	Recommended	Recomendado
+	Reflection Removal	Eliminación de reflejos
+	Search models by name…	Buscar modelos por nombre…
+	Subject & Background	Sujeto y fondo
+	Use as	Usar como
+	Used by the AI Object Selection tool.	Lo usa la herramienta Selección de objetos con IA.
+	Used by the Generative Removal brush.	Lo usa el pincel Eliminación generativa.
+	Used by the Infill brush and Generative Fill (prompts).	Lo usan el pincel Infill y el Relleno generativo (indicaciones).
+	Used by the Reflection Removal brush.	Lo usa el pincel Eliminación de reflejos.
+	Used to select people, animals and products in one click.	Se usa para seleccionar personas, animales y productos con un clic.
+	about {time} left	quedan unos {time}
+	{done} of {total}	{done} de {total}
+	{n} installed	{n} instalados
+	{n} to download	{n} para descargar

@@ -2838,3 +2838,49 @@ curves	Smooth	平滑
 	Increase Brush Size	放大筆刷大小
 	Decrease Brush Hardness	降低筆刷硬度
 	Increase Brush Hardness	提高筆刷硬度
+
+# Edit › Preferences › AI: local AI models
+	AI	AI
+	AI Models…	AI 模型…
+	AI models run in the desktop app. Download PhotoCraft for your computer to use them.	AI 模型在桌面應用程式中執行。請下載適用於你電腦的 PhotoCraft 來使用它們。
+	AI…	AI…
+	Add a model from a file or a link	從檔案或連結加入模型
+	Cancelled	已取消
+	Choose Files…	選擇檔案…
+	Delete this model	刪除此模型
+	Disabled: no tool offers this model	已停用：沒有工具會使用此模型
+	Download	下載
+	Enabled: tools can use this model	已啟用：工具可以使用此模型
+	Finished in {time}	耗時 {time} 完成
+	From a File	從檔案
+	From a Link	從連結
+	Generative Fill & Infill	生成式填色與補全
+	Generative Removal	生成式移除
+	Hugging Face, Civitai or download link	Hugging Face、Civitai 或下載連結
+	Imported models PhotoCraft's tools don't use yet.	PhotoCraft 的工具尚未使用的匯入模型。
+	Importing {name}	正在匯入 {name}
+	Import…	匯入…
+	Keep	保留
+	Looking up the model…	正在查詢模型…
+	Models are stored in {path}	模型儲存在 {path}
+	No models match your search.	沒有符合搜尋的模型。
+	No models yet. Use Import… to add one.	還沒有模型。使用「匯入…」加入一個。
+	ONNX, safetensors, checkpoint or GGUF. Pick an ONNX model and its .data file together.	支援 ONNX、safetensors、checkpoint 或 GGUF。請將 ONNX 模型與其 .data 檔案一起選取。
+	Object Selection	物件選取
+	Optional	選填
+	Other Models	其他模型
+	Paste a Hugging Face file or repository (org/name), a Civitai model page, or a direct link to a model file.	貼上 Hugging Face 檔案或儲存庫 (org/name)、Civitai 模型頁面，或模型檔案的直接連結。
+	Recommended	推薦
+	Reflection Removal	反光移除
+	Search models by name…	依名稱搜尋模型…
+	Subject & Background	主體與背景
+	Use as	用途
+	Used by the AI Object Selection tool.	由 AI 物件選取工具使用。
+	Used by the Generative Removal brush.	由生成式移除筆刷使用。
+	Used by the Infill brush and Generative Fill (prompts).	由補全筆刷與生成式填色（提示詞）使用。
+	Used by the Reflection Removal brush.	由反光移除筆刷使用。
+	Used to select people, animals and products in one click.	用於一鍵選取人物、動物和產品。
+	about {time} left	約剩 {time}
+	{done} of {total}	{done} / {total}
+	{n} installed	已安裝 {n} 個
+	{n} to download	{n} 個可下載

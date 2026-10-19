@@ -4303,3 +4303,48 @@ shape	Appearance	Izgled
 	Increase Brush Size	Povećaj veličinu četkice
 	Decrease Brush Hardness	Smanji tvrdoću četkice
 	Increase Brush Hardness	Povećaj tvrdoću četkice
+
+# Edit › Preferences › AI: local AI models
+	AI	AI
+	AI Models…	AI modeli…
+	AI models run in the desktop app. Download PhotoCraft for your computer to use them.	AI modeli rade u aplikaciji za računar. Preuzmite PhotoCraft za svoj računar da biste ih koristili.
+	AI…	AI…
+	Add a model from a file or a link	Dodaj model iz datoteke ili sa linka
+	Cancelled	Otkazano
+	Choose Files…	Izaberi datoteke…
+	Delete this model	Obriši ovaj model
+	Disabled: no tool offers this model	Isključen: nijedan alat ne nudi ovaj model
+	Download	Preuzmi
+	Enabled: tools can use this model	Uključen: alati mogu da koriste ovaj model
+	Finished in {time}	Završeno za {time}
+	From a File	Iz datoteke
+	From a Link	Sa linka
+	Generative Fill & Infill	Generativno popunjavanje i dopunjavanje
+	Generative Removal	Generativno uklanjanje
+	Hugging Face, Civitai or download link	Hugging Face, Civitai ili link za preuzimanje
+	Imported models PhotoCraft's tools don't use yet.	Uvezeni modeli koje alati programa PhotoCraft još ne koriste.
+	Importing {name}	Uvoz: {name}
+	Keep	Zadrži
+	Looking up the model…	Traženje modela…
+	Models are stored in {path}	Modeli se čuvaju u {path}
+	No models match your search.	Nijedan model ne odgovara pretrazi.
+	No models yet. Use Import… to add one.	Još nema modela. Pomoću opcije Uvezi… dodajte model.
+	ONNX, safetensors, checkpoint or GGUF. Pick an ONNX model and its .data file together.	ONNX, safetensors, checkpoint ili GGUF. Izaberite ONNX model zajedno sa njegovom .data datotekom.
+	Object Selection	Izbor objekta
+	Optional	Opciono
+	Other Models	Ostali modeli
+	Paste a Hugging Face file or repository (org/name), a Civitai model page, or a direct link to a model file.	Nalepite Hugging Face datoteku ili repozitorijum (org/name), stranicu modela na Civitai-ju ili direktan link do datoteke modela.
+	Recommended	Preporučeno
+	Reflection Removal	Uklanjanje odsjaja
+	Search models by name…	Pretraži modele po imenu…
+	Subject & Background	Subjekat i pozadina
+	Use as	Koristi kao
+	Used by the AI Object Selection tool.	Koristi ga alat AI izbor objekta.
+	Used by the Generative Removal brush.	Koristi ga četkica Generativno uklanjanje.
+	Used by the Infill brush and Generative Fill (prompts).	Koriste ga četkica Dopunjavanje i Generativno popunjavanje (upiti).
+	Used by the Reflection Removal brush.	Koristi ga četkica Uklanjanje odsjaja.
+	Used to select people, animals and products in one click.	Služi za izbor ljudi, životinja i proizvoda jednim klikom.
+	about {time} left	još oko {time}
+	{done} of {total}	{done} od {total}
+	{n} installed	Instalirano: {n}
+	{n} to download	Za preuzimanje: {n}

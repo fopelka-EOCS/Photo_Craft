@@ -3838,3 +3838,49 @@ navigator	Zoom	Zvětšení
 	Increase Brush Size	Zvětšit velikost štětce
 	Decrease Brush Hardness	Snížit tvrdost štětce
 	Increase Brush Hardness	Zvýšit tvrdost štětce
+
+# Edit › Preferences › AI: local AI models
+	AI	AI
+	AI Models…	Modely AI…
+	AI models run in the desktop app. Download PhotoCraft for your computer to use them.	Modely AI běží v desktopové aplikaci. Chcete-li je používat, stáhněte si PhotoCraft pro svůj počítač.
+	AI…	AI…
+	Add a model from a file or a link	Přidat model ze souboru nebo odkazu
+	Cancelled	Zrušeno
+	Choose Files…	Vybrat soubory…
+	Delete this model	Odstranit tento model
+	Disabled: no tool offers this model	Vypnuto: tento model nenabízí žádný nástroj
+	Download	Stáhnout
+	Enabled: tools can use this model	Zapnuto: nástroje mohou tento model používat
+	Finished in {time}	Dokončeno za {time}
+	From a File	Ze souboru
+	From a Link	Z odkazu
+	Generative Fill & Infill	Generativní výplň a infill
+	Generative Removal	Generativní odstranění
+	Hugging Face, Civitai or download link	Odkaz Hugging Face, Civitai nebo ke stažení
+	Imported models PhotoCraft's tools don't use yet.	Importované modely, které nástroje PhotoCraftu zatím nepoužívají.
+	Importing {name}	Importuje se {name}
+	Import…	Importovat…
+	Keep	Ponechat
+	Looking up the model…	Vyhledává se model…
+	Models are stored in {path}	Modely jsou uloženy v {path}
+	No models match your search.	Hledání neodpovídá žádný model.
+	No models yet. Use Import… to add one.	Zatím žádné modely. Příkazem Importovat… přidáte model.
+	ONNX, safetensors, checkpoint or GGUF. Pick an ONNX model and its .data file together.	ONNX, safetensors, checkpoint nebo GGUF. Vyberte model ONNX spolu s jeho souborem .data.
+	Object Selection	Výběr objektu
+	Optional	Volitelné
+	Other Models	Další modely
+	Paste a Hugging Face file or repository (org/name), a Civitai model page, or a direct link to a model file.	Vložte soubor nebo repozitář Hugging Face (org/name), stránku modelu na Civitai nebo přímý odkaz na soubor modelu.
+	Recommended	Doporučené
+	Reflection Removal	Odstranění odlesků
+	Search models by name…	Hledat modely podle názvu…
+	Subject & Background	Objekt a pozadí
+	Use as	Použít jako
+	Used by the AI Object Selection tool.	Používá nástroj Výběr objektu AI.
+	Used by the Generative Removal brush.	Používá štětec Generativní odstranění.
+	Used by the Infill brush and Generative Fill (prompts).	Používá štětec Infill a Generativní výplň (prompty).
+	Used by the Reflection Removal brush.	Používá štětec Odstranění odlesků.
+	Used to select people, animals and products in one click.	Slouží k výběru lidí, zvířat a produktů jedním kliknutím.
+	about {time} left	zbývá asi {time}
+	{done} of {total}	{done} z {total}
+	{n} installed	Nainstalováno: {n}
+	{n} to download	Ke stažení: {n}
