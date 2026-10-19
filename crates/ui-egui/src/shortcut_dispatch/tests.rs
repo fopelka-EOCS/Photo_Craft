@@ -327,6 +327,42 @@ fn content_aware_scale_explains_background_and_runs_after_conversion() {
 }
 
 #[test]
+fn content_aware_scale_explains_background_and_pending_crop_in_order() {
+    let mut session = photocraft_engine::Session::new();
+    session.execute("file.new", json!({"width": 32, "height": 24})).unwrap();
+    let mut app = PhotocraftApp::new(session, Default::default());
+    let ctx = egui::Context::default();
+    let id = "edit.contentAwareScale";
+    let conversion = "layer.new.layerFromBackground";
+    app.sync_views();
+    app.ui.tool = Tool::Crop;
+    app.ui.crop_rect = Some([2.0, 2.0, 20.0, 16.0]);
+    app.crop.default_frame = false;
+    assert!(!crate::menus::is_enabled(&app, id));
+    assert!(!crate::menus::is_enabled(&app, conversion), "the pending crop blocks Background conversion too");
+
+    super::dispatch(&mut app, &ctx, id);
+    let crop_step = app.ui.status.find("commit or cancel the current crop").expect("explain the pending crop first");
+    let background_step = app.ui.status.find("Layer > New > Layer from Background").expect("explain Background conversion too");
+    assert!(crop_step < background_step, "{}", app.ui.status);
+    assert!(app.ui.status_error);
+    assert_eq!(app.ui.crop_rect, Some([2.0, 2.0, 20.0, 16.0]));
+    assert!(app.ui.transform.is_none());
+
+    crate::crop_ui::cancel(&mut app);
+    assert!(crate::menus::is_enabled(&app, conversion));
+    assert!(!crate::menus::is_enabled(&app, id), "the Background still needs conversion");
+    super::dispatch(&mut app, &ctx, id);
+    assert!(app.ui.status.contains("Layer from Background"), "{}", app.ui.status);
+    assert!(!app.ui.status.contains("current crop"), "{}", app.ui.status);
+
+    app.run(conversion, json!({})).unwrap();
+    assert!(crate::menus::is_enabled(&app, id));
+    super::dispatch(&mut app, &ctx, id);
+    assert!(app.ui.transform.as_ref().is_some_and(|t| t.content_aware.is_some()));
+}
+
+#[test]
 fn content_aware_scale_explains_pending_transform_and_crop() {
     let mut session = photocraft_engine::Session::new();
     session.execute("file.new", json!({"width": 32, "height": 24})).unwrap();

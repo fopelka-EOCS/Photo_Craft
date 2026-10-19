@@ -22,11 +22,17 @@ pub const COMMAND: &str = "edit.contentAwareScale";
 
 /// UI-only restrictions aren't visible to the engine's disabled-reason lookup (#7107).
 pub(crate) fn disabled_reason(app: &PhotocraftApp) -> Option<&'static str> {
-    if app.session.active().is_some_and(|st| st.active_layer.is_some_and(|id| st.doc.is_background(id))) {
-        return Some("convert the Background using Layer > New > Layer from Background");
-    }
+    let is_background = app.session.active().is_some_and(|st| st.active_layer.is_some_and(|id| st.doc.is_background(id)));
     if crate::crop_ui::blocks(app, COMMAND) {
-        return Some("commit or cancel the current crop first");
+        // A pending crop also blocks Background conversion, so give the steps in usable order.
+        return Some(if is_background {
+            "commit or cancel the current crop, then convert the Background using Layer > New > Layer from Background"
+        } else {
+            "commit or cancel the current crop first"
+        });
+    }
+    if is_background {
+        return Some("convert the Background using Layer > New > Layer from Background");
     }
     if crate::transform_tool::is_enabled(app, COMMAND) == Some(false) {
         return Some(if crate::transform_tool::committing(app).is_some() {
