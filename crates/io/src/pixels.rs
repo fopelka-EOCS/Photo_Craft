@@ -2,6 +2,9 @@
 //! native-endian surface bytes.
 
 use photocraft_color::SampleType;
+use photocraft_geom::{Rect, TILE_SIZE};
+use photocraft_raster::Surface;
+use std::sync::Arc;
 
 /// PSD depth (bits) for a sample type.
 pub fn psd_depth(s: SampleType) -> u16 {
@@ -49,24 +52,136 @@ pub fn interleave(planes: &[Option<&[u8]>], fill: &[Vec<u8>], n: usize, s: Sampl
     let bs = bands(n);
     let step = bs.first().map_or(n, |b| b.len()) * row;
     par_map(bs.into_iter().zip(out.chunks_mut(step)).collect(), |(band, part)| {
-        for (c, plane) in planes.iter().enumerate() {
-            let src = plane.and_then(|p| p.get(band.start * bps..)).unwrap_or_default();
-            let inv = src.len() >= bps && invert[c];
-            let fill = fill.get(c).map(Vec::as_slice).unwrap_or_default();
-            match s {
-                SampleType::U8 => write_channel(part, ch, c, src, fill, |[v]| [if inv { 255 - v } else { v }]),
-                SampleType::U16 => write_channel(part, ch, c, src, fill, |v| {
-                    let v = u16::from_be_bytes(v);
-                    (if inv { 65535 - v } else { v }).to_ne_bytes()
-                }),
-                SampleType::F32 => write_channel(part, ch, c, src, fill, |v| {
-                    // Preserve float bits when no inversion is requested.
-                    if inv { (1.0 - f32::from_be_bytes(v)).to_ne_bytes() } else { u32::from_be_bytes(v).to_ne_bytes() }
-                }),
+        interleave_into(part, planes, fill, band.start, s, invert);
+    });
+    out
+}
+
+/// Convert a contiguous part of the planes directly into existing native-endian storage.
+fn interleave_into(out: &mut [u8], planes: &[Option<&[u8]>], fill: &[Vec<u8>], start: usize, s: SampleType, invert: &[bool]) {
+    let ch = planes.len();
+    for (c, plane) in planes.iter().enumerate() {
+        let src = plane.and_then(|p| p.get(start * s.bytes()..)).unwrap_or_default();
+        let inv = invert.get(c).copied().unwrap_or(false);
+        let fill = fill.get(c).map(Vec::as_slice).unwrap_or_default();
+        match s {
+            SampleType::U8 => write_channel(out, ch, c, src, fill, |[v]| [if inv { 255 - v } else { v }]),
+            SampleType::U16 => write_channel(out, ch, c, src, fill, |v| {
+                let v = u16::from_be_bytes(v);
+                (if inv { 65535 - v } else { v }).to_ne_bytes()
+            }),
+            SampleType::F32 => write_channel(out, ch, c, src, fill, |v| {
+                // Preserve float bits when no inversion is requested.
+                if inv { (1.0 - f32::from_be_bytes(v)).to_ne_bytes() } else { u32::from_be_bytes(v).to_ne_bytes() }
+            }),
+        }
+    }
+}
+
+/// Write decoded PSD planes straight into tiles, preserving the surface's default outside `r`.
+pub(crate) fn write_planes(surface: &mut Surface, r: Rect, planes: &[Option<&[u8]>], fill: &[Vec<u8>], invert: &[bool], lab16: bool) {
+    if r.is_empty() {
+        return;
+    }
+    let fmt = surface.format();
+    let bpp = fmt.bytes_per_pixel();
+    let mut tiles = surface.take_tiles(r);
+    let bs = bands(tiles.len());
+    let step = bs.first().map_or(1, |b| b.len());
+    par_map(tiles.chunks_mut(step).collect(), |part| {
+        for (tc, tile) in part {
+            let tr = tc.rect().intersect(&r);
+            let dst = Arc::make_mut(tile).bytes_mut();
+            for y in tr.y0..tr.y1 {
+                let src = y.abs_diff(r.y0) as usize * r.width() as usize + tr.x0.abs_diff(r.x0) as usize;
+                let at = ((y - tc.rect().y0) as usize * TILE_SIZE as usize + (tr.x0 - tc.rect().x0) as usize) * bpp;
+                let row = &mut dst[at..at + tr.width() as usize * bpp];
+                interleave_into(row, planes, fill, src, fmt.sample, invert);
+                if lab16 {
+                    lab16_chroma(row, fmt.channels(), true);
+                }
             }
         }
     });
-    out
+    surface.put_tiles(tiles);
+}
+
+/// Gather big-endian PSD planes directly from tiles into their final allocations.
+pub(crate) fn surface_planes(surface: &Surface, r: Rect, invert: &[bool], lab16: bool) -> Vec<Vec<u8>> {
+    let fmt = surface.format();
+    let mut planes = vec![vec![0u8; r.width() as usize * r.height() as usize * fmt.sample.bytes()]; fmt.channels()];
+    surface_planes_into(surface, r, invert, lab16, &mut planes.iter_mut().map(Vec::as_mut_slice).collect::<Vec<_>>());
+    planes
+}
+
+/// Gather into final plane slices, each covering `r`; also used for appended merged channels.
+pub(crate) fn surface_planes_into(surface: &Surface, r: Rect, invert: &[bool], lab16: bool, planes: &mut [&mut [u8]]) {
+    if r.is_empty() {
+        return;
+    }
+    let fmt = surface.format();
+    let (ch, bps, w) = (fmt.channels(), fmt.sample.bytes(), r.width() as usize);
+    let bs = bands(r.height() as usize);
+    let step = bs.first().map_or(1, |b| b.len()) * w * bps;
+    let mut parts: Vec<Vec<&mut [u8]>> = (0..bs.len()).map(|_| Vec::with_capacity(ch)).collect();
+    for plane in planes {
+        for (part, slice) in parts.iter_mut().zip(plane.chunks_mut(step)) {
+            part.push(slice);
+        }
+    }
+    let default_row = surface.default_bytes().repeat(TILE_SIZE as usize);
+    par_map(bs.into_iter().zip(parts).collect(), |(rows, mut parts)| {
+        let band = Rect::new(r.x0, r.y0.saturating_add_unsigned(rows.start as u32), r.x1, r.y0.saturating_add_unsigned(rows.end as u32));
+        for tc in band.tiles() {
+            let tr = tc.rect().intersect(&band);
+            let tile = surface.tile(tc);
+            for y in tr.y0..tr.y1 {
+                let dst = (y.abs_diff(band.y0) as usize * w + tr.x0.abs_diff(r.x0) as usize) * bps;
+                let len = tr.width() as usize;
+                let src = match tile {
+                    Some(t) => {
+                        let at = ((y - tc.rect().y0) as usize * TILE_SIZE as usize + (tr.x0 - tc.rect().x0) as usize) * ch * bps;
+                        &t.bytes()[at..at + len * ch * bps]
+                    }
+                    None => &default_row[..len * ch * bps],
+                };
+                for (c, plane) in parts.iter_mut().enumerate() {
+                    let out = &mut plane[dst..dst + len * bps];
+                    let inv = invert.get(c).copied().unwrap_or(false);
+                    match fmt.sample {
+                        SampleType::U8 => gather_channel(out, src, ch, c, |[v]| [if inv { 255 - v } else { v }]),
+                        SampleType::U16 => gather_channel(out, src, ch, c, |v| {
+                            let v = u16::from_ne_bytes(v);
+                            let v = if lab16 && (c == 1 || c == 2) {
+                                (f64::from(v) * (f64::from(LAB16_CHROMA_MAX) / 65535.0)).round().min(65535.0) as u16
+                            } else {
+                                v
+                            };
+                            (if inv { 65535 - v } else { v }).to_be_bytes()
+                        }),
+                        SampleType::F32 => {
+                            gather_channel(
+                                out,
+                                src,
+                                ch,
+                                c,
+                                |v| {
+                                    if inv { (1.0 - f32::from_ne_bytes(v)).to_be_bytes() } else { u32::from_ne_bytes(v).to_be_bytes() }
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+/// Copy one encoded channel from a tile row into a contiguous output plane.
+fn gather_channel<const N: usize>(out: &mut [u8], src: &[u8], ch: usize, c: usize, encode: impl Fn([u8; N]) -> [u8; N]) {
+    for (dst, src) in out.as_chunks_mut::<N>().0.iter_mut().zip(src.as_chunks::<N>().0.iter().skip(c).step_by(ch)) {
+        *dst = encode(*src);
+    }
 }
 
 fn write_channel<const N: usize>(out: &mut [u8], ch: usize, c: usize, src: &[u8], fill: &[u8], decode: impl Fn([u8; N]) -> [u8; N]) {
@@ -219,6 +334,58 @@ pub fn bands(n: usize) -> Vec<std::ops::Range<usize>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Direct tile conversion must match the old whole-image staging paths, including padding.
+    #[test]
+    fn tiled_planes_match_previous_staging_paths() {
+        use photocraft_color::{ColorMode, PixelFormat};
+        for mode in [ColorMode::Rgb, ColorMode::Grayscale, ColorMode::Cmyk, ColorMode::Lab] {
+            for sample in SampleType::ALL {
+                let fmt = PixelFormat::new(mode, sample, true);
+                let r = Rect::new(-3, -2, 258, 3);
+                let n = r.width() as usize * r.height() as usize;
+                let ch = fmt.channels();
+                let planes: Vec<Vec<u8>> = (0..ch).map(|c| (0..n * sample.bytes()).map(|i| (i * 13 + c * 5) as u8).collect()).collect();
+                let mut refs: Vec<Option<&[u8]>> = planes.iter().map(|p| Some(p.as_slice())).collect();
+                refs[0] = None;
+                refs[ch - 1] = Some(&planes[ch - 1][..n * sample.bytes() - 1]);
+                let mut fill = vec![zero_sample(sample); ch];
+                fill[ch - 1] = max_sample(sample);
+                let invert: Vec<bool> = (0..ch).map(|c| mode == ColorMode::Cmyk && c + 1 < ch).collect();
+                let lab16 = mode == ColorMode::Lab && sample == SampleType::U16;
+                let mut previous = previous_interleave(&refs, &fill, n, sample, &invert);
+                if lab16 {
+                    lab16_chroma(&mut previous, ch, true);
+                }
+                let expected = Surface::from_interleaved(fmt, r, &previous);
+                let mut actual = Surface::new(fmt);
+                write_planes(&mut actual, r, &refs, &fill, &invert, lab16);
+                assert_eq!(actual, expected, "{mode:?} {sample:?} import");
+                let bounds = Rect::new(-5, -3, 260, 4);
+                let mut previous = expected.to_interleaved(bounds);
+                if lab16 {
+                    lab16_chroma(&mut previous, ch, false);
+                }
+                assert_eq!(surface_planes(&actual, bounds, &invert, lab16), deinterleave(&previous, ch, sample, &invert), "{mode:?} {sample:?} export");
+            }
+        }
+        let fmt = PixelFormat::new(ColorMode::Grayscale, SampleType::U16, false);
+        for origin in [-1, i32::MIN + 256, i32::MAX - 512] {
+            let mut mask = Surface::with_default(fmt, &[1.0]);
+            let r = Rect::new(origin, origin, origin + 3, origin + 1);
+            write_planes(&mut mask, r, &[Some(&[0, 0, 0x12, 0x34])], &[zero_sample(SampleType::U16)], &[false], false);
+            let mut expected = Surface::with_default(fmt, &[1.0]);
+            expected.write_interleaved(r, &interleave(&[Some(&[0, 0, 0x12, 0x34])], &[zero_sample(SampleType::U16)], 3, SampleType::U16, &[false]));
+            assert_eq!(mask, expected);
+            let mut merged = [42u8; 1 + 3 * 2];
+            surface_planes_into(&mask, r, &[false], false, &mut [&mut merged[1..]]);
+            assert_eq!(merged[0], 42);
+            assert_eq!(&merged[1..], surface_planes(&mask, r, &[false], false)[0]);
+            assert_eq!(surface_planes(&mask, Rect::EMPTY, &[false], false), vec![Vec::<u8>::new()]);
+            write_planes(&mut mask, Rect::EMPTY, &[], &[], &[], false);
+            assert_eq!(mask, expected);
+        }
+    }
 
     pub(super) fn previous_interleave(planes: &[Option<&[u8]>], fill: &[Vec<u8>], n: usize, s: SampleType, invert: &[bool]) -> Vec<u8> {
         let bps = s.bytes();

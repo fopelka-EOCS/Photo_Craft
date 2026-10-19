@@ -15,7 +15,7 @@ use photocraft_raster::Surface;
 
 use crate::adjust_map::{self, ADJUSTMENT_KEYS};
 use crate::blocks;
-use crate::pixels::{interleave, max_sample, sample_for_depth, zero_sample};
+use crate::pixels::{max_sample, sample_for_depth, write_planes, zero_sample};
 
 /// Resources that are mapped to document fields or regenerated on export.
 pub(crate) const MAPPED_RESOURCES: [u16; 19] = [
@@ -184,8 +184,6 @@ impl Ctx<'_> {
             // The channels decode independently; their RLE rows are the bulk of the open
             // time for full-canvas layers, so they run side by side and the warnings land
             // in the same order afterwards.
-            // par_map reuses the crate's worker pool (one OS thread per channel per layer
-            // would spawn thousands on a file with many layers).
             let decoded: Vec<Option<Vec<u8>>> = crate::pixels::par_map(ids.to_vec(), |id| self.channel_plane_decoded(rec, id));
             let mut planes: Vec<Option<Vec<u8>>> = Vec::with_capacity(decoded.len());
             for (&id, p) in ids.iter().zip(decoded) {
@@ -212,11 +210,8 @@ impl Ctx<'_> {
         fill.push(max_sample(s));
         let mut invert = vec![self.cmyk; self.cc];
         invert.push(false);
-        let mut bytes = interleave(&refs, &fill, w * h, s, &invert);
-        if self.fmt.mode == ColorMode::Lab && s == SampleType::U16 {
-            crate::pixels::lab16_chroma(&mut bytes, self.cc + 1, true);
-        }
-        let mut surf = Surface::from_interleaved(self.fmt, Rect::new(r.left, r.top, r.right, r.bottom), &bytes);
+        let mut surf = Surface::new(self.fmt);
+        write_planes(&mut surf, Rect::new(r.left, r.top, r.right, r.bottom), &refs, &fill, &invert, self.fmt.mode == ColorMode::Lab && s == SampleType::U16);
         surf.prune();
         surf
     }
@@ -232,12 +227,11 @@ impl Ctx<'_> {
         };
         let mut surface = Surface::with_default(self.mask_fmt, &[f32::from(default) / 255.0]);
         if !rect.is_empty()
-            && let Ok((w, h)) = rect.size()
+            && rect.size().is_ok()
             && let Some(plane) = self.channel_plane(rec, id, name)
         {
             let s = self.mask_fmt.sample;
-            let bytes = interleave(&[Some(&plane)], &[zero_sample(s)], w * h, s, &[false]);
-            surface.write_interleaved(Rect::new(rect.left, rect.top, rect.right, rect.bottom), &bytes);
+            write_planes(&mut surface, Rect::new(rect.left, rect.top, rect.right, rect.bottom), &[Some(&plane)], &[zero_sample(s)], &[false], false);
             surface.prune();
         }
         let params = m.parameters;
@@ -599,10 +593,6 @@ fn preserved_blocks(rec: &LayerRecord) -> Vec<([u8; 4], Arc<Vec<u8>>)> {
     rec.blocks.iter().filter(|b| !REGENERATED.contains(&&b.key)).map(|b| (b.key, Arc::new(b.data.clone()))).collect()
 }
 
-fn be_to_ne_plane(plane: &[u8], s: SampleType, n: usize) -> Vec<u8> {
-    interleave(&[Some(plane)], &[zero_sample(s)], n, s, &[false])
-}
-
 fn unicode_names(data: &[u8]) -> Vec<String> {
     let mut out = Vec::new();
     let mut at = 0;
@@ -949,7 +939,7 @@ pub(crate) fn psd_to_document_decoded(
         if doc.layers.is_empty()
             && let Some(Ok(all)) = &merged
             // Always `Some` here: a decoded 8/16/32-bit plane holds at least `w * hh` bytes.
-            && let Some((n, plane)) = sizes
+            && let Some((_, plane)) = sizes
         {
             // Flattened file: the merged image becomes the background layer.
             let alpha_idx = if file.merged_has_alpha() { Some(cc) } else { None };
@@ -959,11 +949,8 @@ pub(crate) fn psd_to_document_decoded(
             fill.push(max_sample(depth));
             let mut inv = vec![cx.cmyk; cc];
             inv.push(false);
-            let mut bytes = interleave(&planes, &fill, n, depth, &inv);
-            if fmt.mode == ColorMode::Lab && depth == SampleType::U16 {
-                crate::pixels::lab16_chroma(&mut bytes, cc + 1, true);
-            }
-            let mut s = Surface::from_interleaved(fmt, canvas, &bytes);
+            let mut s = Surface::new(fmt);
+            write_planes(&mut s, canvas, &planes, &fill, &inv, fmt.mode == ColorMode::Lab && depth == SampleType::U16);
             if alpha_idx.is_some() {
                 // Undo Photoshop's white matting of the merged image.
                 // A band of tile rows at a time (no full-size float copy of the image).
@@ -1027,7 +1014,7 @@ pub(crate) fn psd_to_document_decoded(
     // Extra (alpha / spot) channels of the merged image.
     if layered
         && let Some(Ok(all)) = &merged
-        && let Some((n, plane)) = sizes
+        && let Some((_, plane)) = sizes
     {
         let first = cc + usize::from(file.merged_has_alpha());
         let names = file.resource(1045).map(|r| unicode_names(&r.data)).unwrap_or_default();
@@ -1037,7 +1024,7 @@ pub(crate) fn psd_to_document_decoded(
         for (k, idx) in (first..usize::from(h.channels)).enumerate() {
             let Some(p) = merged_plane(all, idx, plane) else { break };
             let mut s = Surface::new(cx.mask_fmt);
-            s.write_interleaved(canvas, &be_to_ne_plane(p, depth, n));
+            write_planes(&mut s, canvas, &[Some(p)], &[zero_sample(depth)], &[false], false);
             s.prune();
             let name = names.get(k).cloned().unwrap_or_else(|| format!("Alpha {}", k + 1));
             doc.channels.push(AlphaChannel::new(name, s));

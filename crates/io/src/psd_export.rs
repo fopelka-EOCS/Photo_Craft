@@ -12,7 +12,7 @@ use photocraft_raster::{Interrupt, Surface};
 
 use crate::adjust_map;
 use crate::blocks;
-use crate::pixels::{deinterleave, encode_be, psd_depth};
+use crate::pixels::{encode_be, psd_depth, surface_planes, surface_planes_into};
 use crate::psd_import::REGENERATED;
 
 /// Blocks that define a layer's content as something other than pixels: fill (`SoCo`, `GdFl`,
@@ -311,10 +311,6 @@ fn upsert(raw: &mut Vec<([u8; 4], Vec<u8>)>, key: &[u8; 4], data: Vec<u8>, befor
     }
 }
 
-fn h_of(r: photocraft_geom::Rect) -> usize {
-    r.height() as usize
-}
-
 fn psd_mode(m: ColorMode) -> PsdMode {
     match m {
         ColorMode::Grayscale => PsdMode::Grayscale,
@@ -364,23 +360,9 @@ impl Ex {
         if r.is_empty() {
             return (PsdRect::default(), self.empty_channels(), warnings);
         }
-        // The interleaved gather is the sequential pass for full-canvas layers, so it runs
-        // in row bands on all cores and the band results concatenate in order.
-        let row_len = r.width() as usize;
-        let bands = crate::pixels::bands(h_of(r));
-        let parts =
-            crate::pixels::par_map(bands, |rows| s.to_interleaved(photocraft_geom::Rect::new(r.x0, r.y0 + rows.start as i32, r.x1, r.y0 + rows.end as i32)));
-        let mut bytes = Vec::with_capacity(row_len * h_of(r) * s.format().bytes_per_pixel());
-        for part in parts {
-            bytes.extend_from_slice(&part);
-        }
-        if self.fmt.mode == ColorMode::Lab && self.fmt.sample == SampleType::U16 {
-            crate::pixels::lab16_chroma(&mut bytes, self.cc + 1, false);
-        }
         let mut invert = vec![self.cmyk; self.cc];
         invert.push(false);
-        let planes = deinterleave(&bytes, self.cc + 1, self.fmt.sample, &invert);
-        drop(bytes);
+        let planes = surface_planes(&s, r, &invert, self.fmt.mode == ColorMode::Lab && self.fmt.sample == SampleType::U16);
         let (w, h) = (r.width() as usize, r.height() as usize);
         // Alpha (-1) first, then the colour channels; each compressed on its own thread.
         let order: Vec<(i16, &Vec<u8>)> =
@@ -394,7 +376,7 @@ impl Ex {
         let default = s.default_pixel().first().copied().unwrap_or(0.0);
         let r = s.content_bounds();
         let (w, h) = (r.width() as usize, r.height() as usize);
-        let plane = if r.is_empty() { Vec::new() } else { deinterleave(&s.to_interleaved(r), 1, self.mask_fmt.sample, &[false]).remove(0) };
+        let plane = if r.is_empty() { Vec::new() } else { surface_planes(&s, r, &[false], false).remove(0) };
         let mut flags = 0u8;
         if !m.linked {
             flags |= PsdMask::FLAG_RELATIVE;
@@ -1660,8 +1642,9 @@ fn document_to_psd_nested(doc: &Document, opts: &PsdExportOptions, depth: u32, c
     };
     for a in &extra {
         let s = if a.surface.format() != ex.mask_fmt { a.surface.convert(ex.mask_fmt) } else { a.surface.clone() };
-        let bytes = s.to_interleaved(canvas);
-        planes.extend(deinterleave(&bytes, 1, sample, &[false]).remove(0));
+        let start = planes.len();
+        planes.resize(start + n * sample.bytes(), 0);
+        surface_planes_into(&s, canvas, &[false], false, &mut [&mut planes[start..]]);
     }
     let channels = (cc + usize::from(has_alpha) + extra.len()) as u16;
     let header = Header::new(version, doc.size.width, doc.size.height, channels, psd_depth(sample), psd_mode(fmt.mode));
