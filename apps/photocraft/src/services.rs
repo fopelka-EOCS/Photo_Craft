@@ -701,6 +701,16 @@ mod tests {
     use photocraft_ui_egui::{PhotocraftApp, prefs_ui};
     use serde_json::{Value, json};
 
+    /// A cloud file list offers a file only when File › Open would turn it into a document, so the
+    /// cloud table is held to a subset of this one. A format added to one and forgotten in the
+    /// other would offer a file the app then cannot open, or hide one it can.
+    #[test]
+    fn cloud_open_extensions_are_a_subset_of_file_open() {
+        for extension in photocraft_ui_egui::cloud::DOCUMENT.extensions {
+            assert!(OPEN_EXTS.contains(extension) || SVG_EXTS.contains(extension), ".{extension} is offered from the cloud but File › Open does not open it");
+        }
+    }
+
     /// #6121: the file type picked in the save dialog gives the name its extension where the
     /// dialog left the one it opened with, and only there.
     #[test]

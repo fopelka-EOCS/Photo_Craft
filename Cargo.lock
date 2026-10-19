@@ -1094,7 +1094,7 @@ dependencies = [
 [[package]]
 name = "collabcraft-share"
 version = "0.1.0"
-source = "git+https://github.com/wdunn001/collab-craft?rev=80bfaec#80bfaec3e581213bb5bcfedc42079525aec5a1af"
+source = "git+https://github.com/wdunn001/collab-craft?rev=80bfaec3e581213bb5bcfedc42079525aec5a1af#80bfaec3e581213bb5bcfedc42079525aec5a1af"
 dependencies = [
  "craft-cloud",
  "craft-cloud-client",
@@ -1272,7 +1272,7 @@ dependencies = [
 [[package]]
 name = "craft-cloud-client"
 version = "0.1.0"
-source = "git+https://github.com/wdunn001/collab-craft?rev=80bfaec#80bfaec3e581213bb5bcfedc42079525aec5a1af"
+source = "git+https://github.com/wdunn001/collab-craft?rev=80bfaec3e581213bb5bcfedc42079525aec5a1af#80bfaec3e581213bb5bcfedc42079525aec5a1af"
 dependencies = [
  "craft-cloud",
  "craft-collab",
@@ -1290,7 +1290,7 @@ dependencies = [
 [[package]]
 name = "craft-collab"
 version = "0.1.0"
-source = "git+https://github.com/wdunn001/collab-craft?rev=80bfaec#80bfaec3e581213bb5bcfedc42079525aec5a1af"
+source = "git+https://github.com/wdunn001/collab-craft?rev=80bfaec3e581213bb5bcfedc42079525aec5a1af#80bfaec3e581213bb5bcfedc42079525aec5a1af"
 dependencies = [
  "js-sys",
  "log",
@@ -5164,6 +5164,7 @@ name = "photocraft-web"
 version = "0.11.1"
 dependencies = [
  "collabcraft-share",
+ "craft-cloud",
  "craft-cloud-client",
  "eframe",
  "egui",

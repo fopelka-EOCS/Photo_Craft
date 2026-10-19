@@ -389,8 +389,8 @@ pub fn handles(id: &str) -> bool {
 pub fn is_enabled(app: &PhotocraftApp, id: &str) -> Option<bool> {
     let open = app.session.active().is_some() && app.services.export.is_some();
     Some(match id {
-        "cloud.open" | "cloud.browse" | "cloud.shared" | "cloud.link" | "cloud.status" => available(app),
-        "cloud.saveAs" | "cloud.save" | "cloud.reload" | "cloud.openFile" => available(app) && open,
+        "cloud.open" | "cloud.openFile" | "cloud.browse" | "cloud.shared" | "cloud.link" | "cloud.status" => available(app),
+        "cloud.saveAs" | "cloud.save" | "cloud.reload" => available(app) && open,
         _ => return None,
     })
 }
@@ -507,15 +507,26 @@ pub(crate) fn share_save(app: &mut PhotocraftApp) {
         // One destination today. `request.destination` names which, and is carried through so a
         // second provider needs no change here.
         let _ = request.destination;
+        let Some(uid) = app.active() else {
+            app.share.save_failed("no document open".to_owned());
+            return;
+        };
         match save_as(app, "/", &request.name) {
-            Ok(_) => app.cloud.sharing_save = true,
+            Ok(_) => {
+                app.cloud.sharing_save = true;
+                app.sharing_save_uid = Some(uid);
+            }
             Err(reason) => app.share.save_failed(reason),
         }
     }
-    // The worker reports by clearing `busy`. A new origin means it landed.
+    // The worker reports by clearing `busy`. A new origin on the document that started the save
+    // means it landed.
     if app.cloud.sharing_save && app.cloud.busy.is_none() {
         app.cloud.sharing_save = false;
-        match origin(app) {
+        let Some(uid) = app.sharing_save_uid.take() else {
+            return;
+        };
+        match app.cloud.origins.get(&uid) {
             Some(origin) => {
                 let (id, name) = (origin.entry.id.clone(), origin.entry.name.clone());
                 app.share.saved(id, name);

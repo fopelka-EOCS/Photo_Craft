@@ -887,6 +887,9 @@ pub struct PhotocraftApp {
     /// The revision of each document a cloud save in flight encoded, so a save that lands marks
     /// exactly that revision saved and an edit made meanwhile stays unsaved.
     pub(crate) cloud_sent: cloud::Sent,
+    /// Document uid a share-dialog save was started for, so completion is not tied to whichever
+    /// document is active when the worker answers.
+    pub(crate) sharing_save_uid: Option<u64>,
     /// URLs the cloud controls asked for while the frame was being drawn. Those calls hold a
     /// shared borrow of the window and opening one wants a mutable one, so they wait here until
     /// [`Self::open_queued_urls`] runs.
@@ -1048,6 +1051,7 @@ impl PhotocraftApp {
             dds_options: None,
             cloud: cloud::CloudFiles::new(),
             cloud_sent: cloud::Sent::new(),
+            sharing_save_uid: None,
             cloud_urls: std::cell::RefCell::new(Vec::new()),
             share: craft_ui::share::ShareDialog::new(),
             // Initials alone: the title bar has room for a row of them beside the account, and a
