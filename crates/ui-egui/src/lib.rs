@@ -890,6 +890,14 @@ pub struct PhotocraftApp {
     /// Document uid a share-dialog save was started for, so completion is not tied to whichever
     /// document is active when the worker answers.
     pub(crate) sharing_save_uid: Option<u64>,
+    /// Share dialog generation when a share save started, so a result is not applied after close.
+    pub(crate) sharing_save_epoch: Option<u64>,
+    /// Document that was active when Share opened, for saves while another tab is selected.
+    pub(crate) sharing_doc_uid: Option<u64>,
+    /// Bumps each time Share opens; pairs with [`Self::sharing_save_epoch`].
+    pub(crate) share_open_epoch: u64,
+    /// Previous frame's [`craft_ui::share::ShareDialog::is_open`], for open/close edges.
+    pub(crate) share_was_open: bool,
     /// URLs the cloud controls asked for while the frame was being drawn. Those calls hold a
     /// shared borrow of the window and opening one wants a mutable one, so they wait here until
     /// [`Self::open_queued_urls`] runs.
@@ -1052,6 +1060,10 @@ impl PhotocraftApp {
             cloud: cloud::CloudFiles::new(),
             cloud_sent: cloud::Sent::new(),
             sharing_save_uid: None,
+            sharing_save_epoch: None,
+            sharing_doc_uid: None,
+            share_open_epoch: 0,
+            share_was_open: false,
             cloud_urls: std::cell::RefCell::new(Vec::new()),
             share: craft_ui::share::ShareDialog::new(),
             // Initials alone: the title bar has room for a row of them beside the account, and a

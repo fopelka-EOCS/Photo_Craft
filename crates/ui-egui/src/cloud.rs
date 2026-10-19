@@ -26,7 +26,7 @@ pub use craft_cloud::{Capability, Entry, EntryKind};
 pub use craft_ui::cloud::{
     Account, Busy, CloudApp, CloudBackend, CloudFiles, Conflict, CopyFormat, Destination, DocumentKind, Event, Fault, Folder, Job, Link, Origin, Post, Source,
     UNAVAILABLE, available, browse, can_converse, conflict_modal, destination_name, has_target, link, load_shared, open_entry, open_page, origin, parent_of,
-    prefers_cloud, progress, pump, reload_active, save, save_as, save_page, share_button, shares, sign_in, sign_out, start, who, work_together,
+    prefers_cloud, progress, pump, reload_active, save, save_as, save_page, share_button, shares, sign_in, sign_out, start, submit, who, work_together,
 };
 use egui::{Color32, FontFamily, Painter, Rect, Ui};
 use serde_json::{Value as Json, json};
@@ -497,24 +497,57 @@ pub fn title_controls(app: &mut PhotocraftApp, ui: &mut Ui) {
     }
 }
 
+/// Save As for the document Share opened on, not whichever tab is active when the request lands.
+fn share_save_as(app: &mut PhotocraftApp, uid: u64, folder: &str, name: &str) -> Result<Json, String> {
+    let name = document_name(name);
+    if name.is_empty() {
+        return Err("type a file name".to_owned());
+    }
+    if !app.session.documents().iter().any(|d| d.doc.id.0 == uid) {
+        return Err("no document open".to_owned());
+    }
+    if app.cloud().busy.is_some() {
+        return Err("a cloud transfer is already running".to_owned());
+    }
+    let bytes = app.encode(uid, Destination::new(&name))?;
+    let size = bytes.len();
+    let answer = json!({"saving": name.clone(), "folder": folder, "bytes": size});
+    let cloud = app.cloud_mut();
+    cloud.status = None;
+    cloud.busy = Some(Busy::Saving { name: name.clone(), bytes: size });
+    submit(app, Job::Create { uid, folder: folder.to_owned(), name, bytes });
+    Ok(answer)
+}
+
 /// Carry out a save the share dialog asked for, and report the outcome back.
 ///
 /// Split into asking and answering because a cloud save is asynchronous. The dialog waits, showing
 /// its own progress, until one of these arrives. A document that has never been in the cloud has no
 /// handle to share, which is the one case this exists for.
 pub(crate) fn share_save(app: &mut PhotocraftApp) {
+    let open = app.share.is_open();
+    if open && !app.share_was_open {
+        app.share_open_epoch = app.share_open_epoch.wrapping_add(1);
+        app.sharing_doc_uid = app.active();
+    }
+    if !open && app.share_was_open {
+        app.sharing_doc_uid = None;
+    }
+    app.share_was_open = open;
+
     if let Some(request) = app.share.take_save_request() {
         // One destination today. `request.destination` names which, and is carried through so a
         // second provider needs no change here.
         let _ = request.destination;
-        let Some(uid) = app.active() else {
+        let Some(uid) = app.sharing_doc_uid else {
             app.share.save_failed("no document open".to_owned());
             return;
         };
-        match save_as(app, "/", &request.name) {
+        match share_save_as(app, uid, "/", &request.name) {
             Ok(_) => {
                 app.cloud.sharing_save = true;
                 app.sharing_save_uid = Some(uid);
+                app.sharing_save_epoch = Some(app.share_open_epoch);
             }
             Err(reason) => app.share.save_failed(reason),
         }
@@ -526,6 +559,11 @@ pub(crate) fn share_save(app: &mut PhotocraftApp) {
         let Some(uid) = app.sharing_save_uid.take() else {
             return;
         };
+        let epoch = app.sharing_save_epoch.take();
+        let deliver = epoch.is_some_and(|epoch| app.share.is_open() && epoch == app.share_open_epoch);
+        if !deliver {
+            return;
+        }
         match app.cloud.origins.get(&uid) {
             Some(origin) => {
                 let (id, name) = (origin.entry.id.clone(), origin.entry.name.clone());
