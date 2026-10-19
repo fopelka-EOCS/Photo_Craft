@@ -6,7 +6,6 @@ use crate::PhotocraftApp;
 use crate::auto_show_peek;
 use crate::dock_strip_id;
 use crate::record_panel_strip;
-use crate::toolbar_strip_id;
 
 fn app() -> PhotocraftApp {
     let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
