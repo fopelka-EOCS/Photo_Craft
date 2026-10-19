@@ -200,7 +200,8 @@ fn header_model(bytes: &[u8]) -> Option<String> {
 
 /// A strip shorter than the samples it holds: Fujifilm's striped compression (`rafc`).
 fn decode_compressed(bytes: &[u8], src: &[u8], width: usize, height: usize, bits: u32, cfa: &Cfa) -> Result<Vec<u16>> {
-    let flag = rafc::stream_flag(src).ok_or_else(|| RawError::unsupported("Fujifilm RAF with an unknown sample storage (short strip without the IS signature)"))?;
+    let flag =
+        rafc::stream_flag(src).ok_or_else(|| RawError::unsupported("Fujifilm RAF with an unknown sample storage (short strip without the IS signature)"))?;
     // The header's compression mode (0 uncompressed, 2 lossless, 3 lossy) must agree with the stream.
     match be32(bytes, COMPRESSION) {
         Some(2) if flag == 1 => {}

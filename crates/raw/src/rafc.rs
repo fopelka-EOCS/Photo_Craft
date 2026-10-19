@@ -405,8 +405,7 @@ pub(crate) fn zero_stream(bits: u32, xtrans: bool, groups: usize, quantizers: Op
             }
         }
     }
-    let stream: Vec<u8> =
-        bitstream.chunks(8).map(|chunk| chunk.iter().enumerate().fold(0, |b, (i, bit)| b | (u8::from(*bit) << (7 - i)))).collect();
+    let stream: Vec<u8> = bitstream.chunks(8).map(|chunk| chunk.iter().enumerate().fold(0, |b, (i, bit)| b | (u8::from(*bit) << (7 - i)))).collect();
     // Two stripes; the second is mostly padding, which must never enter the output.
     let mut out = b"IS".to_vec();
     out.extend_from_slice(&[u8::from(quantizers.is_none()), if xtrans { 16 } else { 0 }, bits as u8]);
