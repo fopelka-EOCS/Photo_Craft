@@ -474,6 +474,44 @@ fn content_aware_scale_explains_pending_transform_and_crop() {
 }
 
 #[test]
+fn content_aware_scale_keeps_locked_background_reason() {
+    for (pixels, all) in [(true, false), (false, true)] {
+        let mut session = photocraft_engine::Session::new();
+        session.execute("file.new", json!({"width": 32, "height": 24})).unwrap();
+        session
+            .edit("Lock Background", |doc, active| {
+                // Retain the transparency/position locks that identify a Background.
+                let layer = doc.layer_mut(active.unwrap()).unwrap();
+                layer.locks.pixels = pixels;
+                layer.locks.all = all;
+                Ok(())
+            })
+            .unwrap();
+        let id = "edit.contentAwareScale";
+        let expected = session.disabled_reason(id).expect("the engine refuses a locked Background");
+        assert!(expected.contains("locked"), "{expected}");
+        let mut app = PhotocraftApp::new(session, Default::default());
+        let ctx = egui::Context::default();
+        let revision = app.session.active().unwrap().revision;
+
+        super::dispatch(&mut app, &ctx, id);
+        assert!(app.ui.status.ends_with(&expected), "{}", app.ui.status);
+        assert!(!app.ui.status.contains("Select > All") && !app.ui.status.contains("Layer from Background"), "{}", app.ui.status);
+        assert!(app.ui.status_error);
+        assert!(app.ui.transform.is_none());
+        let st = app.session.active().unwrap();
+        assert!(st.doc.is_background(st.active_layer.unwrap()));
+        assert!(st.doc.selection.is_none());
+        assert_eq!(st.revision, revision, "the shortcut must not change the locked document");
+
+        app.session.execute("layer.lockLayers", json!({"pixels": false, "all": false})).unwrap();
+        assert!(app.session.is_enabled(id));
+        super::dispatch(&mut app, &ctx, id);
+        assert!(app.ui.status.contains("Select > All") && app.ui.status.contains("Layer from Background"), "{}", app.ui.status);
+    }
+}
+
+#[test]
 fn content_aware_scale_keeps_engine_disabled_reasons() {
     let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
     let ctx = egui::Context::default();

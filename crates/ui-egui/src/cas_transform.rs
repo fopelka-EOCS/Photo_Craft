@@ -41,7 +41,7 @@ pub(crate) fn disabled_reason(app: &PhotocraftApp) -> Option<&'static str> {
             "commit or cancel the current transform first"
         });
     }
-    if background_needs_selection {
+    if background_needs_selection && app.session.is_enabled(COMMAND) {
         return Some("make a selection (Select > All), or use Layer > New > Layer from Background");
     }
     None
