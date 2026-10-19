@@ -118,12 +118,8 @@ fn every_preference_is_read_or_hidden() {
     let mut files = Vec::new();
     rust_sources(&root.join("crates"), &mut files);
     rust_sources(&root.join("apps"), &mut files);
-    let sources: Vec<String> = files
-        .iter()
-        .filter(|p| !p.ends_with("engine/src/prefs.rs"))
-        .filter_map(|p| std::fs::read_to_string(p).ok())
-        .map(|t| production(&t))
-        .collect();
+    let sources: Vec<String> =
+        files.iter().filter(|p| !p.ends_with("engine/src/prefs.rs")).filter_map(|p| std::fs::read_to_string(p).ok()).map(|t| production(&t)).collect();
     assert!(sources.len() > 100, "found only {} source files under {}", sources.len(), root.display());
 
     // Section key → struct name, from `pub <field>: <Type>,` in `struct Preferences`.
