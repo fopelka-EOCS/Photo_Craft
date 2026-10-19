@@ -58,6 +58,38 @@ fn fade_with_blend_mode_and_invalidation() {
 }
 
 #[test]
+fn fade_uniform_layer_mask_invert_at_all_depths() {
+    for depth in [8, 16, 32] {
+        for (opacity, expected) in [(0, 1.0), (50, 0.5), (100, 0.0)] {
+            let mut s = session(depth);
+            s.execute("layer.layerMask.revealAll", json!({})).unwrap();
+            s.execute("channel.target", json!({"channel": "mask"})).unwrap();
+            let mask_pixel = |s: &Session| {
+                let layer = active(s);
+                let mask = &layer.mask.as_ref().unwrap().surface;
+                mask.pixel(5, 5)[0]
+            };
+            assert!((mask_pixel(&s) - 1.0).abs() < 0.01);
+            s.execute("image.adjustments.invert", json!({})).unwrap();
+            assert!(mask_pixel(&s) < 0.01, "depth {depth}: invert changed the mask");
+            assert!(s.edit_state.fade.as_ref().is_some_and(|f| f.mask), "depth {depth}: Fade must target the mask");
+            let history_before_fade = s.active().unwrap().history.past_len();
+
+            s.execute("edit.fade", json!({"opacity": opacity})).unwrap();
+            for (x, y) in [(0, 0), (5, 5), (63, 47)] {
+                let pixel = active(&s).mask.as_ref().unwrap().surface.pixel(x, y)[0];
+                assert!((pixel - expected).abs() < 0.02, "depth {depth}, opacity {opacity}, ({x}, {y}): {pixel}");
+            }
+            assert_eq!(s.active().unwrap().history.past_len(), history_before_fade + 1);
+            assert!(s.undo());
+            assert!(mask_pixel(&s) < 0.01, "undo restores inverted mask");
+            assert!(s.redo());
+            assert!((mask_pixel(&s) - expected).abs() < 0.02, "redo restores faded mask");
+        }
+    }
+}
+
+#[test]
 fn purge_commands() {
     let mut s = session(8);
     assert!(!s.is_enabled("edit.purge.undo"));
@@ -471,6 +503,35 @@ fn define_custom_shape_and_preset_manager() {
     assert!(t.tools.presets.iter().any(|b| b.name == "Mine"));
     assert_eq!(custom_shapes(&t)[0].path, custom_shapes(&s)[0].path);
     assert!(t.execute("edit.presets.exportImportPresets", json!({"action": "import", "data": {"format": "other"}})).is_err());
+}
+
+#[test]
+fn preset_manager_brush_rename_follows_current_preset() {
+    let mut s = Session::new();
+    s.execute("brush.presets.setCurrent", json!({"name": "Chalk"})).unwrap();
+    s.execute("edit.presets.presetManager", json!({"action": "rename", "kind": "brushes", "name": "Chalk", "newName": "Chalky"})).unwrap();
+    assert_eq!(s.tools.current_preset.as_deref(), Some("Chalky"));
+    s.execute("brush.presets.update", json!({})).unwrap();
+}
+
+#[test]
+fn preset_manager_brush_rename_refuses_duplicate_name() {
+    let mut s = Session::new();
+    let before: Vec<String> = s.tools.presets.iter().map(|b| b.name.clone()).collect();
+    let r = s.execute("edit.presets.presetManager", json!({"action": "rename", "kind": "brushes", "name": "Soft Round", "newName": "hard round"}));
+    assert!(r.is_err(), "a case-insensitive duplicate name must be refused");
+    assert_eq!(s.tools.presets.iter().map(|b| b.name.clone()).collect::<Vec<_>>(), before);
+    // Renaming to a different case of its own name is fine.
+    s.execute("edit.presets.presetManager", json!({"action": "rename", "kind": "brushes", "name": "Soft Round", "newName": "soft round"})).unwrap();
+}
+
+#[test]
+fn preset_manager_brush_delete_clears_current_preset() {
+    let mut s = Session::new();
+    s.execute("brush.presets.setCurrent", json!({"name": "Chalk"})).unwrap();
+    s.execute("edit.presets.presetManager", json!({"action": "delete", "kind": "brushes", "name": "Chalk"})).unwrap();
+    assert!(!s.tools.presets.iter().any(|b| b.name == "Chalk"));
+    assert_eq!(s.tools.current_preset, None);
 }
 
 #[test]
