@@ -1321,10 +1321,19 @@ impl PhotocraftApp {
         let mut r = self.session.prefs().file_handling.recent_files.clone();
         r.retain(|p| p != path);
         r.insert(0, path.to_string());
+        let evicted: Vec<String> = if r.len() > cap {
+            r[cap..].to_vec()
+        } else {
+            Vec::new()
+        };
         r.truncate(cap);
         self.ui.recent_files = r.clone();
         self.session.prefs.edit(|p| p.file_handling.recent_files = r);
-        self.thumbnail_cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner).invalidate(path);
+        let mut cache = self.thumbnail_cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        cache.invalidate(path);
+        for evicted_path in evicted {
+            cache.invalidate(&evicted_path);
+        }
     }
 
     /// File › Open Recent › Clear Recent File List.
