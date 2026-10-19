@@ -572,8 +572,14 @@ pub fn control(app: &mut PhotocraftApp, ui: &Value) -> Result<Value, String> {
         cancel(app);
         return Ok(json!({"cancelled": true}));
     }
+    // A `backdropUse` that names no layer of the document is All Layers, as the Use list shows it.
+    let missing = |id: u64| app.session.active().is_none_or(|st| st.doc.layer(LayerId(id)).is_none());
+    let unknown_use = ui.get("backdropUse").and_then(Value::as_u64).is_some_and(missing);
     let d = app.distort.liquify.as_mut().ok_or(tl!("Liquify is not open"))?;
     d.opts.apply(ui)?;
+    if unknown_use {
+        d.opts.backdrop_layer = None;
+    }
     let num = |k: &str| ui.get(k).and_then(Value::as_f64).map(|v| v as f32);
     let flag = |k: &str| ui.get(k).and_then(Value::as_bool);
     if flag("undo") == Some(true) {
@@ -1257,6 +1263,12 @@ mod tests {
         open(&mut app, &ctx).unwrap();
         let o = &app.distort.liquify.as_ref().unwrap().opts;
         assert_eq!((o.backdrop_layer, o.backdrop_mode), (None, BackdropMode::Blend), "the mode is kept, the layer is not");
+        // Over the control channel, a layer of the document is kept and one that isn't is All Layers.
+        let layer = app.session.active().unwrap().active_layer.unwrap().0;
+        control(&mut app, &json!({"backdropUse": layer})).unwrap();
+        assert_eq!(app.distort.liquify.as_ref().unwrap().opts.backdrop_layer, Some(layer));
+        control(&mut app, &json!({"backdropUse": 4242})).unwrap();
+        assert_eq!(app.distort.liquify.as_ref().unwrap().opts.backdrop_layer, None, "no such layer: All Layers");
     }
 
     /// #418: the brush settings survive Cancel, OK and Esc, and come back the next time Liquify
