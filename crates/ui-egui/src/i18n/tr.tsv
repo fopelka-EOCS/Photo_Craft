@@ -3647,6 +3647,7 @@ cameraRaw	Whites	Beyazlar
 	Auto Hide Notifications	Bildirimleri Otomatik Gizle
 	Notification Duration (seconds)	Bildirim Süresi (saniye)
 	Bundle Arrow-Key Nudges	Ok tuşlarıyla kaydırmaları birleştir
+	Disable touch drawing	Dokunmatik çizimi devre dışı bırak
 	Nudge Bundle Pause (ms)	Kaydırma birleştirme duraklaması (ms)
 	Appearance Mode	Görünüm Modu
 	Presentation	Sunum

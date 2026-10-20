@@ -3523,6 +3523,7 @@ cameraRaw	Roughness	Chropowatość
 	Auto Hide Notifications	Automatycznie ukrywaj powiadomienia
 	Notification Duration (seconds)	Czas trwania powiadomienia (sekundy)
 	Bundle Arrow-Key Nudges	Grupuj przesunięcia strzałkami
+	Disable touch drawing	Wyłącz rysowanie dotykiem
 	Nudge Bundle Pause (ms)	Przerwa grupowania przesunięć (ms)
 	Appearance Mode	Tryb wyglądu
 	Dark Theme	Ciemny motyw

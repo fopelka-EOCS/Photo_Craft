@@ -2806,6 +2806,7 @@ fontWeight	Italic	Nghiêng
 	Auto Hide Notifications	Tự động ẩn thông báo
 	Notification Duration (seconds)	Thời lượng thông báo (giây)
 	Bundle Arrow-Key Nudges	Gộp dịch chuyển bằng phím mũi tên
+	Disable touch drawing	Tắt vẽ bằng cảm ứng
 	Nudge Bundle Pause (ms)	Thời gian chờ gộp dịch chuyển (ms)
 	Dark Theme	Giao diện tối
 	Light Theme	Giao diện sáng

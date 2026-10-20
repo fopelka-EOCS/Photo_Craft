@@ -2508,6 +2508,7 @@ fontWeight	Italic	Kurzíva
 	Auto Hide Notifications	Automaticky skrývat oznámení
 	Notification Duration (seconds)	Trvání oznámení (sekundy)
 	Bundle Arrow-Key Nudges	Slučovat posuny šipkami
+	Disable touch drawing	Zakázat kreslení dotykem
 	Nudge Bundle Pause (ms)	Pauza slučování posunů (ms)
 	Appearance Mode	Režim vzhledu
 	Dark Theme	Tmavý motiv

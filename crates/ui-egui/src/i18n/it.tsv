@@ -2578,6 +2578,7 @@ fontWeight	Italic	Corsivo
 	Auto Hide Notifications	Nascondi automaticamente le notifiche
 	Notification Duration (seconds)	Durata della notifica (secondi)
 	Bundle Arrow-Key Nudges	Raggruppa gli spostamenti con le frecce
+	Disable touch drawing	Disabilita il disegno con il tocco
 	Nudge Bundle Pause (ms)	Pausa per raggruppare gli spostamenti (ms)
 	Appearance Mode	Modalità aspetto
 	Dark Theme	Tema scuro
