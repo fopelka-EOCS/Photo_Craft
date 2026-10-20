@@ -423,6 +423,87 @@ fn web_warnings(st: &WebSettings, exif: Option<&[u8]>, dpi: f32) -> Vec<String> 
         .collect()
 }
 
+/// A GIF or PNG-8 image: palette indices, the palette they index (colour edits applied, the
+/// transparent slot last), the opaque colour table before edits, and the transparent index.
+struct Indexed {
+    indices: Vec<u8>,
+    palette: Vec<[u8; 3]>,
+    color_table: Vec<[u8; 3]>,
+    transparent: Option<usize>,
+}
+
+/// Quantizes `rect` of `px` (straight RGBA, `bw` wide) for GIF or PNG-8 with `st`: pixels over the
+/// matte, see-through ones given the transparent index when transparency is on.
+fn indexed_pixels(px: &[[f32; 4]], bw: usize, rect: Rect, st: &WebSettings) -> Result<Indexed> {
+    if bw == 0 || rect.x0 < 0 || rect.y0 < 0 || rect.is_empty() || rect.x1 as usize > bw || (rect.y1 as usize).checked_mul(bw).is_none_or(|end| end > px.len())
+    {
+        return Err(other("slice is outside the pixel buffer"));
+    }
+    let w = rect.width() as usize;
+    let row = |y: i32| {
+        let o = y as usize * bw;
+        px.get(o + rect.x0 as usize..o + rect.x1 as usize).unwrap_or(&[])
+    };
+    let region = || (rect.y0..rect.y1).flat_map(row);
+    let matte = st.matte.unwrap_or([1.0, 1.0, 1.0]);
+    let over = |p: &[f32; 4]| -> [f32; 4] {
+        [p[0] * p[3] + matte[0] * (1.0 - p[3]), p[1] * p[3] + matte[1] * (1.0 - p[3]), p[2] * p[3] + matte[2] * (1.0 - p[3]), 1.0]
+    };
+    let transparent = st.transparency && region().any(|p| p[3] < 0.5);
+    // Partially transparent edges blend with the matte; with transparency off everything does.
+    let mut work: Vec<[f32; 4]> = region()
+        .map(|p| {
+            if st.transparency && p[3] < 0.5 {
+                [0.0, 0.0, 0.0, 0.0]
+            } else if st.transparency && st.matte.is_none() {
+                [p[0], p[1], p[2], 1.0]
+            } else {
+                over(p)
+            }
+        })
+        .collect();
+    let room = if transparent { st.colors.saturating_sub(1).max(2) } else { st.colors };
+    let mut pal = if let Some(table) = &st.color_table {
+        if table.is_empty() || table.len() > if transparent { 255 } else { 256 } {
+            return Err(other("colorTable has too many entries for this image's transparency"));
+        }
+        table.clone()
+    } else {
+        // Large images: build adaptive palettes from an even ~1 MP sample (Exact needs all).
+        let n_opaque = work.iter().filter(|p| p[3] >= 0.5).count();
+        let step = if n_opaque > 1 << 20 && st.palette != PaletteKind::Exact { n_opaque / (1 << 20) + 1 } else { 1 };
+        let mut src: Vec<[f32; 4]> = work.iter().filter(|p| p[3] >= 0.5).step_by(step).copied().collect();
+        if src.is_empty() {
+            src = work.clone();
+        }
+        quantize::build_palette(&src, st.palette, room, Forced::None).map_err(other)?
+    };
+    if st.web_snap > 0.0 && st.color_table.is_none() {
+        let tol = (st.web_snap * 255.0) as u8;
+        for c in &mut pal {
+            let snap = c.map(|x| ((f32::from(x) / 51.0).round() * 51.0) as u8);
+            if c.iter().zip(snap).all(|(a, b)| a.abs_diff(b) <= tol) {
+                *c = snap;
+            }
+        }
+    }
+    if transparent {
+        pal.truncate(255);
+    }
+    let first = pal.first().copied().ok_or_else(|| other("empty colour table"))?;
+    let color_table = pal.clone();
+    let t = transparent.then(|| {
+        pal.push(first);
+        pal.len() - 1
+    });
+    let idx = quantize_rows(&mut work, w, &pal, st.dither, st.dither_amount, t);
+    for (index, color) in &st.color_table_edits {
+        let slot = pal.get_mut(*index).filter(|_| Some(*index) != t).ok_or_else(|| other("colour edit is outside the opaque palette"))?;
+        *slot = *color;
+    }
+    Ok(Indexed { indices: idx, palette: pal, color_table, transparent: t })
+}
+
 /// Optimises `rect` of `px` (straight RGBA, `bw` wide) with `st`. `preview` also returns what
 /// the file looks like (the dialog's panes); exports skip it.
 #[allow(clippy::too_many_arguments)]
@@ -520,59 +601,10 @@ pub fn optimize(
             (photocraft_codecs::web::encode_wbmp(ww, hh, &white).map_err(e)?, Some(2))
         }
         WebFormat::Gif | WebFormat::Png8 => {
-            let transparent = st.transparency && region().any(|p| p[3] < 0.5);
-            // Partially transparent edges blend with the matte; with transparency off everything does.
-            let mut work: Vec<[f32; 4]> = region()
-                .map(|p| {
-                    if st.transparency && p[3] < 0.5 {
-                        [0.0, 0.0, 0.0, 0.0]
-                    } else if st.transparency && st.matte.is_none() {
-                        [p[0], p[1], p[2], 1.0]
-                    } else {
-                        over(p)
-                    }
-                })
-                .collect();
-            let room = if transparent { st.colors.saturating_sub(1).max(2) } else { st.colors };
-            let mut pal = if let Some(table) = &st.color_table {
-                if table.is_empty() || table.len() > if transparent { 255 } else { 256 } {
-                    return Err(other("colorTable has too many entries for this image's transparency"));
-                }
-                table.clone()
-            } else {
-                // Large images: build adaptive palettes from an even ~1 MP sample (Exact needs all).
-                let n_opaque = work.iter().filter(|p| p[3] >= 0.5).count();
-                let step = if n_opaque > 1 << 20 && st.palette != PaletteKind::Exact { n_opaque / (1 << 20) + 1 } else { 1 };
-                let mut src: Vec<[f32; 4]> = work.iter().filter(|p| p[3] >= 0.5).step_by(step).copied().collect();
-                if src.is_empty() {
-                    src = work.clone();
-                }
-                quantize::build_palette(&src, st.palette, room, Forced::None).map_err(other)?
-            };
-            if st.web_snap > 0.0 && st.color_table.is_none() {
-                let tol = (st.web_snap * 255.0) as u8;
-                for c in &mut pal {
-                    let snap = c.map(|x| ((f32::from(x) / 51.0).round() * 51.0) as u8);
-                    if c.iter().zip(snap).all(|(a, b)| a.abs_diff(b) <= tol) {
-                        *c = snap;
-                    }
-                }
-            }
-            if transparent {
-                pal.truncate(255);
-            }
+            let Indexed { indices: idx, palette: pal, color_table: table, transparent: t } = indexed_pixels(px, bw, rect, st)?;
             let first = pal.first().copied().ok_or_else(|| other("empty colour table"))?;
-            color_table = pal.clone();
-            let t = transparent.then(|| {
-                pal.push(first);
-                pal.len() - 1
-            });
+            color_table = table;
             transparent_index = t;
-            let idx = quantize_rows(&mut work, w, &pal, st.dither, st.dither_amount, t);
-            for (index, color) in &st.color_table_edits {
-                let slot = pal.get_mut(*index).filter(|_| Some(*index) != t).ok_or_else(|| other("colour edit is outside the opaque palette"))?;
-                *slot = *color;
-            }
             if preview {
                 look = idx
                     .iter()
@@ -863,6 +895,46 @@ fn save_for_web(s: &mut Session, p: &Value) -> Result<Value> {
     save_for_web_impl(s, p, &mut write_file, true)
 }
 
+/// Most palette indices an animated GIF export holds at once (every frame's, before encoding):
+/// the timeline's length times the image's size is input, so it is capped before allocating.
+const MAX_ANIMATED_GIF_PIXELS: u64 = 1 << 30;
+
+/// Every frame of the timeline as one animated GIF. Each frame is laid out and quantized like the
+/// still image, to its own palette, and shows for its own frame delay. Edits on the frame at the
+/// playhead are kept, as in Render Video.
+fn animated_gif(doc: &Document, p: &Value, st: &WebSettings, frames: usize) -> Result<(Vec<u8>, u32, u32)> {
+    let mut doc = doc.clone();
+    crate::video_cmds::store(&mut doc);
+    let mut gframes = Vec::with_capacity(frames.min(1024));
+    let mut size = None;
+    for f in 0..frames {
+        let mut at = doc.clone();
+        if let Some(t) = &mut at.timeline {
+            t.current = f;
+        }
+        crate::video_cmds::sync(&mut at);
+        let (wdoc, _, _) = web_document(&at, p, st)?;
+        let rect = wdoc.bounds();
+        let (w, h) = (rect.width(), rect.height());
+        if size.is_none() && (frames as u64).saturating_mul(u64::from(w) * u64::from(h)) > MAX_ANIMATED_GIF_PIXELS {
+            return Err(other(format!("{frames} frames of {w} × {h} are too many to save as an animated GIF (limit {MAX_ANIMATED_GIF_PIXELS} pixels in all)")));
+        }
+        size.get_or_insert((w, h));
+        let buf = photocraft_compose::flatten(&wdoc);
+        let ix = indexed_pixels(&buf.px, wdoc.size.width as usize, rect, st)?;
+        let delay_ms = doc.timeline.as_ref().map_or(100, |t| t.frame_ms(f));
+        gframes.push(photocraft_codecs::web::GifFrame {
+            indices: ix.indices,
+            palette: ix.palette,
+            transparent: ix.transparent.map(|i| i as u8),
+            delay_cs: crate::video_cmds::delay_cs(delay_ms),
+        });
+    }
+    let (w, h) = size.ok_or_else(|| other("the timeline has no frames"))?;
+    let bytes = photocraft_codecs::web::encode_gif_animated(w, h, &gframes, true).map_err(other)?;
+    Ok((bytes, w, h))
+}
+
 /// Save for Web through a platform writer (native files or browser downloads).
 /// The writer receives every image, spacer and HTML file. A write error stops the export;
 /// only a complete export remembers its settings and fires the export event. A custom writer
@@ -930,6 +1002,19 @@ fn save_for_web_impl(s: &mut Session, p: &Value, write: &mut dyn FnMut(&str, &[u
         return Ok(
             json!({"format": o.ext, "bytes": o.bytes.len(), "width": o.width, "height": o.height, "colors": o.colors, "colorTable": o.color_table.iter().map(|c| rgb_hex(*c)).collect::<Vec<_>>(), "transparentIndex": o.transparent_index}),
         );
+    }
+    // A GIF of a timeline is animated: every frame, each shown for its own delay.
+    let frames = doc.timeline.as_ref().map_or(1, |t| t.duration);
+    if let Some(path) = single.filter(|_| dir.is_none() && st.format == WebFormat::Gif && frames > 1 && (all.len() == 1 || p.get("slices").is_none())) {
+        if frames > crate::timeline_cmds::MAX_DURATION {
+            return Err(other(format!("the timeline is {frames} frames; an animated GIF is limited to {}", crate::timeline_cmds::MAX_DURATION)));
+        }
+        let (bytes, w, h) = animated_gif(&doc, p, &st, frames)?;
+        write(path, &bytes)?;
+        remember_web_settings(s, cmd, &last_web);
+        s.file_menu.last_web = Some(last_web);
+        crate::automate_cmds::fire_event(s, "export");
+        return Ok(json!({"files": [path], "bytes": bytes.len(), "width": w, "height": h, "frames": frames, "warnings": warnings}));
     }
     if let Some(path) = single.filter(|_| dir.is_none() && (all.len() == 1 || p.get("slices").is_none())) {
         let o = optimize(&buf.px, bw, wdoc.bounds(), &st, icc, exif, xmp.as_deref(), dpi, false)?;

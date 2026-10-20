@@ -70,12 +70,16 @@ pub struct Timeline {
     pub work_start: usize,
     /// Work-area end frame (exclusive).
     pub work_end: usize,
+    /// How long each frame shows, in milliseconds (a GIF stores one per frame). Empty, or short of
+    /// `duration`, means the frames past it run at `fps`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub delays_ms: Vec<u32>,
 }
 
 impl Timeline {
     pub fn new(duration: usize, fps: f32) -> Self {
         let d = duration.max(1);
-        Timeline { fps: valid_fps(fps), duration: d, current: 0, work_start: 0, work_end: d }
+        Timeline { fps: valid_fps(fps), duration: d, current: 0, work_start: 0, work_end: d, delays_ms: Vec::new() }
     }
 
     /// Keep every index inside `0..duration` and the work area non-empty.
@@ -85,6 +89,7 @@ impl Timeline {
         self.current = self.current.min(self.duration - 1);
         self.work_start = self.work_start.min(self.duration - 1);
         self.work_end = self.work_end.clamp(self.work_start + 1, self.duration);
+        self.delays_ms.truncate(self.duration);
     }
 
     /// Move the playhead `delta` frames, stopping at the first and last frame. Saturating, so it's
@@ -93,6 +98,11 @@ impl Timeline {
         let n = usize::try_from(delta.unsigned_abs()).unwrap_or(usize::MAX);
         let moved = if delta < 0 { self.current.saturating_sub(n) } else { self.current.saturating_add(n) };
         self.current = moved.min(self.duration.saturating_sub(1));
+    }
+
+    /// How long frame `f` shows, in milliseconds: its own delay when it has one, else `1000 / fps`.
+    pub fn frame_ms(&self, f: usize) -> u32 {
+        self.delays_ms.get(f).copied().unwrap_or_else(|| (1000.0 / valid_fps(self.fps)).round().clamp(1.0, u32::MAX as f32) as u32)
     }
 
     /// Playhead time in seconds.
@@ -124,6 +134,21 @@ mod tests {
         assert!((t.time() - 23.0 / 24.0).abs() < 1e-6);
     }
 
+    /// A frame shows for its own delay; frames without one, and any loaded rate, fall back to `fps`.
+    #[test]
+    fn frame_delays_fall_back_to_the_rate() {
+        let mut t = Timeline::new(3, 10.0);
+        t.delays_ms = vec![50, 500];
+        assert_eq!([t.frame_ms(0), t.frame_ms(1), t.frame_ms(2), t.frame_ms(usize::MAX)], [50, 500, 100, 100]);
+        t.fps = f32::NAN;
+        assert_eq!(t.frame_ms(2), 33);
+        t.fps = 0.001;
+        assert_eq!(t.frame_ms(2), 1_000_000);
+        t.duration = 1;
+        t.clamp();
+        assert_eq!(t.delays_ms, [50]);
+    }
+
     /// #1009: stepping never panics or leaves the timeline, whatever was stored.
     #[test]
     fn step_saturates_at_both_ends() {
@@ -136,7 +161,7 @@ mod tests {
         t.step(i64::MIN);
         assert_eq!(t.current, 0);
         for duration in [0, usize::MAX] {
-            let mut t = Timeline { fps: f32::INFINITY, duration, current: usize::MAX, work_start: 0, work_end: 0 };
+            let mut t = Timeline { fps: f32::INFINITY, duration, current: usize::MAX, work_start: 0, work_end: 0, delays_ms: Vec::new() };
             t.step(1);
             assert_eq!(t.current, duration.saturating_sub(1));
             t.clamp();
