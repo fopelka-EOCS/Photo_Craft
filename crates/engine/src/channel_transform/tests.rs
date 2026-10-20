@@ -216,6 +216,9 @@ fn interactive_guard_blocks_retargeting_but_all_eyes_remain_available() {
     s.execute("channel.target", json!({"channel":"red"})).unwrap();
     let st = s.active_mut().unwrap();
     st.channel_transform = Some(Guard { layer: st.active_layer, target: json!({"color":0}) });
+    let before = st.doc.clone();
+    let history = st.history.past_len();
+    let view = st.channel_view.clone();
     for (cmd, p) in [
         ("channel.target", json!({"channel":"blue"})),
         ("channel.target.slot4", json!({})),
@@ -225,6 +228,10 @@ fn interactive_guard_blocks_retargeting_but_all_eyes_remain_available() {
         ("timeline.setFrame", json!({"frame":1})),
     ] {
         assert!(s.execute(cmd, p).unwrap_err().to_string().contains(LOCKED));
+        let st = s.active().unwrap();
+        assert!(Arc::ptr_eq(&before, &st.doc), "{cmd}");
+        assert_eq!(st.history.past_len(), history, "{cmd}");
+        assert_eq!(st.channel_view, view, "{cmd}");
     }
     assert!(s.edit::<()>("direct edit", |_, _| panic!("locked edit closure must never run")).unwrap_err().to_string().contains(LOCKED));
     s.execute("channel.setVisible", json!({"channel":"composite","visible":false})).unwrap();
