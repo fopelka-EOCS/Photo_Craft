@@ -1094,6 +1094,7 @@ fn color_value(cmd: &str, p: &Value, key: &str) -> Result<Option<Color>> {
     Ok(Some(Color::rgb(c[0], c[1], c[2])))
 }
 
+/// Creates and targets an alpha channel using a constant, selection, or inverse-selection fill.
 fn new_channel(s: &mut Session, p: &Value) -> Result<Value> {
     let fill = p.get("fill").and_then(Value::as_str).unwrap_or("black").to_string();
     let name = p.get("name").and_then(Value::as_str).map(str::to_string);
@@ -1105,7 +1106,13 @@ fn new_channel(s: &mut Session, p: &Value) -> Result<Value> {
         let fmt = channel_format(doc);
         let surface = match fill.as_str() {
             "white" => plane_surface(&vec![1.0; area.width() as usize * area.height() as usize], area, fmt),
-            "selection" => plane_surface(&sel::mask_from_surface(doc.selection.as_ref(), area), area, fmt),
+            "selection" | "inverseSelection" => {
+                let mut mask = sel::mask_from_surface(doc.selection.as_ref(), area);
+                if fill == "inverseSelection" {
+                    mask.iter_mut().for_each(|v| *v = 1.0 - *v);
+                }
+                plane_surface(&mask, area, fmt)
+            }
             _ => Surface::new(fmt),
         };
         let mut ch = AlphaChannel::new(name.clone().unwrap_or_else(|| next_alpha_name(doc, "Alpha")), surface);
@@ -1126,6 +1133,7 @@ fn new_channel(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "channel": i }))
 }
 
+/// Creates and targets spot ink from the selection, keeping unselected pixels ink-free.
 fn new_spot(s: &mut Session, p: &Value) -> Result<Value> {
     let color = color_value("channel.newSpot", p, "color")?.unwrap_or(Color::rgb(1.0, 0.0, 0.0));
     let solidity = p.get("solidity").and_then(Value::as_f64).unwrap_or(0.0).clamp(0.0, 100.0) as f32 / 100.0;
@@ -1143,10 +1151,7 @@ fn new_spot(s: &mut Session, p: &Value) -> Result<Value> {
         doc.channels.push(AlphaChannel { spot: Some((color, solidity)), ..AlphaChannel::new(name, surface) });
         Ok(doc.channels.len() - 1)
     })?;
-    if let Some(st) = s.active_mut() {
-        st.channel_view.set_alpha_visible(i, true);
-        touch(st);
-    }
+    target(s, ChannelTarget::Alpha(i));
     Ok(json!({ "channel": i }))
 }
 
@@ -1331,7 +1336,9 @@ fn target(s: &mut Session, t: ChannelTarget) {
                 v.alpha_visible.clear();
             }
             ChannelTarget::Alpha(i) => {
-                v.color_hidden = vec![true; colors];
+                // Spot ink is edited over the image and its transparency; alpha masks are
+                // inspected on their own in grayscale.
+                v.color_hidden = if st.doc.channels.get(i).is_some_and(|ch| ch.spot.is_some()) { Vec::new() } else { vec![true; colors] };
                 v.alpha_visible = (0..n).map(|c| c == i).collect();
             }
         }
@@ -1418,6 +1425,7 @@ fn set_visible(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(list(s))
 }
 
+/// Updates channel display options and preserves coverage when converting alpha masks to spot ink.
 fn options(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "channel.options";
     let doc = &s.active().ok_or(EngineError::NoDocument)?.doc;
@@ -1427,18 +1435,36 @@ fn options(s: &mut Session, p: &Value) -> Result<Value> {
     let opacity = p.get("opacity").and_then(Value::as_f64).map(|v| (v as f32 / 100.0).clamp(0.0, 1.0));
     let solidity = p.get("solidity").and_then(Value::as_f64).map(|v| (v as f32 / 100.0).clamp(0.0, 1.0));
     let kind = p.get("indicates").and_then(Value::as_str).map(str::to_string);
+    let area = doc.bounds();
+    if matches!(r, ChanRef::QuickMask) && kind.as_deref() == Some("spot") {
+        return Err(bad(cmd, "Quick Mask can't be a spot channel"));
+    }
+    let converted_spot = match r {
+        ChanRef::Alpha(i) if kind.as_deref() == Some("spot") && doc.channels.get(i).is_some_and(|ch| ch.spot.is_none()) => Some(i),
+        _ => None,
+    };
     let apply = move |ch: &mut AlphaChannel| -> Result<()> {
         if let Some(n) = &name {
             ch.name = n.clone();
         }
         match kind.as_deref() {
             Some("spot") => {
+                // Alpha masks mark ink with black; spot surfaces store ink density (1 = ink).
+                // Preserve the footprint instead of printing the white, unselected background.
+                if ch.spot.is_none() && ch.indicates == ColorIndicates::MaskedAreas {
+                    let values: Vec<_> = read_plane(&ch.surface, area).into_iter().map(|v| 1.0 - v).collect();
+                    ch.surface = plane_surface(&values, area, ch.surface.format());
+                }
                 let (c, sol) = ch.spot.unwrap_or((ch.color, 0.0));
                 ch.spot = Some((color.unwrap_or(c), solidity.unwrap_or(sol)));
                 return Ok(());
             }
             Some(k) => {
                 ch.indicates = indicates_param(Some(&json!(k))).ok_or_else(|| bad(cmd, format!("unknown `indicates` {k}")))?;
+                if ch.spot.is_some() && ch.indicates == ColorIndicates::MaskedAreas {
+                    let values: Vec<_> = read_plane(&ch.surface, area).into_iter().map(|v| 1.0 - v).collect();
+                    ch.surface = plane_surface(&values, area, ch.surface.format());
+                }
                 ch.spot = None;
             }
             None => {}
@@ -1496,6 +1522,14 @@ fn options(s: &mut Session, p: &Value) -> Result<Value> {
             }
         }
         _ => return Err(bad(cmd, "`channel` must be an alpha/spot channel or \"quickMask\"")),
+    }
+    if let Some(i) = converted_spot
+        && let Some(st) = s.active_mut()
+    {
+        // Preview the new ink over the image's real transparency, rather than an opaque mask.
+        st.channel_view.color_hidden.clear();
+        st.channel_view.set_alpha_visible(i, true);
+        touch(st);
     }
     Ok(list(s))
 }
@@ -1800,6 +1834,7 @@ macro_rules! spec {
     };
 }
 
+/// Registers channel commands with their parameter contracts, availability, and handlers.
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         spec!(
@@ -1844,7 +1879,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "New Channel…",
             [],
             None,
-            r##"{"name":str?,"fill":"black|white|selection"="black","color":"#rrggbb"="#ff0000","opacity":0..100=50,"indicates":"masked|selected"="masked"}"##,
+            r##"{"name":str?,"fill":"black|white|selection|inverseSelection"="black","color":"#rrggbb"="#ff0000","opacity":0..100=50,"indicates":"masked|selected"="masked"}"##,
             has_doc,
             new_channel
         ),

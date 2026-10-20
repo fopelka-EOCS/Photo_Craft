@@ -39,7 +39,18 @@ pub fn fields(app: &PhotocraftApp, channel: &Value) -> Option<Map<String, Value>
     let mut f = Map::new();
     f.insert(MARK.into(), json!(true));
     f.insert("__command".into(), json!(COMMAND));
-    f.insert("__label".into(), json!(if name.is_some() { "Channel Options…" } else { "Quick Mask Options…" }));
+    let spot_only = indicates == "spot";
+    f.insert("__spotOptions".into(), json!(spot_only));
+    f.insert(
+        "__label".into(),
+        json!(if spot_only {
+            "Spot Channel Options…"
+        } else if name.is_some() {
+            "Channel Options…"
+        } else {
+            "Quick Mask Options…"
+        }),
+    );
     f.insert("channel".into(), channel.clone());
     if let Some(n) = name {
         f.insert("name".into(), json!(n));
@@ -82,6 +93,7 @@ fn label(ui: &mut egui::Ui, text: &str) {
     ui.painter().text(pos2(r.right() - 6.0, r.center().y), Align2::RIGHT_CENTER, text, egui::FontId::proportional(12.0), t.text_dim);
 }
 
+/// Edits alpha, Quick Mask, or spot-specific display options in the pending dialog fields.
 pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     ui.spacing_mut().item_spacing.y = 6.0;
     let quick = f.get("channel").and_then(Value::as_str) == Some("quickMask");
@@ -93,24 +105,27 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
             }
         });
     }
-    crate::widgets::section_label(ui, tl!("Color Indicates:"));
-    crate::widgets::hairline(ui);
+    let spot_only = f.get("__spotOptions").and_then(Value::as_bool).unwrap_or(false);
     let mut indicates = f.get("indicates").and_then(Value::as_str).unwrap_or("masked").to_string();
     let before = indicates.clone();
-    ui.indent("channel-options-indicates", |ui| {
-        ui.radio_value(&mut indicates, "masked".to_string(), tl!("Masked Areas"));
-        ui.radio_value(&mut indicates, "selected".to_string(), tl!("Selected Areas"));
-        // Quick Mask can't be a spot channel.
-        if !quick {
-            ui.radio_value(&mut indicates, "spot".to_string(), tl!("Spot Color"));
-        }
-    });
+    if !spot_only {
+        crate::widgets::section_label(ui, tl!("Color Indicates:"));
+        crate::widgets::hairline(ui);
+        ui.indent("channel-options-indicates", |ui| {
+            ui.radio_value(&mut indicates, "masked".to_string(), tl!("Masked Areas"));
+            ui.radio_value(&mut indicates, "selected".to_string(), tl!("Selected Areas"));
+            // Quick Mask can't be a spot channel.
+            if !quick {
+                ui.radio_value(&mut indicates, "spot".to_string(), tl!("Spot Color"));
+            }
+        });
+    }
     if indicates != before {
         f.insert("indicates".into(), json!(indicates));
     }
     let spot = indicates == "spot";
     ui.add_space(4.0);
-    crate::widgets::section_label(ui, tl!("Color"));
+    crate::widgets::section_label(ui, if spot_only { tl!("Ink Characteristics") } else { tl!("Color") });
     crate::widgets::hairline(ui);
     ui.horizontal(|ui| {
         label(ui, "");

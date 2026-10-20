@@ -32,11 +32,44 @@ fn rect(s: &mut Session, x: i32, y: i32, w: u32, h: u32, mode: &str) {
     s.execute("select.rect", json!({"x": x, "y": y, "width": w, "height": h, "mode": mode})).unwrap();
 }
 
+/// Checks that every channel command has a documented, registered parameter contract.
 #[test]
 fn specs_are_documented_and_registered() {
     for sp in specs() {
         assert!(crate::commands::find(sp.id).is_some(), "{} not registered", sp.id);
         assert!(sp.params.starts_with('{'), "{}", sp.id);
+    }
+}
+
+/// Checks inverse selection coverage, selection preservation, and undo/redo at every bit depth.
+#[test]
+fn new_channel_inverse_selection_preserves_coverage_and_history() {
+    for depth in [8, 16, 32] {
+        let mut s = session_depth(depth);
+        rect(&mut s, 8, 4, 16, 12, "replace");
+        s.execute("select.modify.feather", json!({"radius": 1})).unwrap();
+        let selection = doc(&s).selection.clone().unwrap();
+        assert!(selection.sample_channel(8, 10, 0) > 0.0 && selection.sample_channel(8, 10, 0) < 1.0);
+        let steps = s.active().unwrap().history.past_len();
+        s.execute("channel.new", json!({"fill": "inverseSelection"})).unwrap();
+        assert_eq!(s.active().unwrap().history.past_len(), steps + 1);
+        assert!(chan(&s, 0, 16, 10) < 0.01, "selected area is black");
+        assert_eq!(chan(&s, 0, 38, 18), 1.0, "unselected area is white");
+        for y in 0..20 {
+            for x in 0..40 {
+                let expected = selection.sample_channel(x, y, 0);
+                assert!((chan(&s, 0, x, y) - (1.0 - expected)).abs() < 0.005);
+                assert_eq!(sel_at(&s, x, y), expected, "selection remains unchanged");
+            }
+        }
+        assert!(s.undo());
+        assert!(doc(&s).channels.is_empty());
+        assert!(s.redo());
+        assert_eq!(chan(&s, 0, 38, 18), 1.0);
+        // Saving an alpha selection keeps its existing white-is-selected convention.
+        s.execute("channel.new", json!({"fill": "selection"})).unwrap();
+        assert!(chan(&s, 1, 16, 10) > 0.99);
+        assert_eq!(chan(&s, 1, 38, 18), 0.0);
     }
 }
 
