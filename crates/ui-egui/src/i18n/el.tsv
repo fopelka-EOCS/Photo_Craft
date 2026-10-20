@@ -3944,3 +3944,6 @@ curves	Smooth	Εξομάλυνση
 	Use	Χρήση
 	In Front	Μπροστά
 	Behind	Πίσω
+# Opening an image from a link (?open=)
+	The server may not allow other sites to read it (CORS).	Ο διακομιστής ίσως δεν επιτρέπει σε άλλους ιστότοπους να διαβάσουν το αρχείο (CORS).
+	Only http and https links can be opened.	Μπορούν να ανοιχτούν μόνο σύνδεσμοι http και https.

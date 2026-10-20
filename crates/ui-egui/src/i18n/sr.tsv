@@ -4317,3 +4317,6 @@ shape	Appearance	Izgled
 	Use	Koristi
 	In Front	Ispred
 	Behind	Iza
+# Opening an image from a link (?open=)
+	The server may not allow other sites to read it (CORS).	Server možda ne dozvoljava drugim sajtovima da čitaju fajl (CORS).
+	Only http and https links can be opened.	Mogu da se otvore samo http i https linkovi.

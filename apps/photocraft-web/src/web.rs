@@ -54,11 +54,11 @@ pub fn start() {
             log::error!("missing <canvas id=\"{CANVAS_ID}\">");
             return;
         };
-        let q = query();
-        let force_cpu = q.contains("cpu");
+        let query = crate::open_link::parse_query(&query());
+        let force_cpu = crate::open_link::has_flag(&query, "cpu");
         let mut options = eframe::WebOptions::default();
         photocraft_ui_egui::gpu_canvas::use_adapter_limits(&mut options.wgpu_options.wgpu_setup);
-        if q.contains("webgl")
+        if crate::open_link::has_flag(&query, "webgl")
             && let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup
         {
             create.instance_descriptor.backends = eframe::wgpu::Backends::GL;
@@ -101,7 +101,11 @@ pub fn start() {
                     }
                     let unsaved = Arc::new(AtomicBool::new(false));
                     guard_unload(unsaved.clone());
-                    Ok(Box::new(WebShell { app, inbox, place_inbox, unsaved, served, database, presets }))
+                    let link_errors = LinkErrors::default();
+                    if let Some(target) = crate::open_link::open_target(&query) {
+                        open_from_link(target, inbox.clone(), link_errors.clone(), cc.egui_ctx.clone());
+                    }
+                    Ok(Box::new(WebShell { app, inbox, place_inbox, unsaved, served, database, presets, link_errors }))
                 }),
             )
             .await;
@@ -198,6 +202,32 @@ fn query() -> String {
     web_sys::window().and_then(|w| w.location().search().ok()).unwrap_or_default()
 }
 
+/// Failures of `?open=` waiting for the next frame to report them: (name, error).
+type LinkErrors = Arc<Mutex<Vec<(String, String)>>>;
+
+/// Fetches the image `?open=` names and queues it to open as a dropped file does. A failure is
+/// reported as a failed open is ([`WebShell`] passes it on), so a broken link doesn't go unexplained.
+fn open_from_link(target: Result<String, String>, inbox: Inbox, errors: LinkErrors, ctx: egui::Context) {
+    wasm_bindgen_futures::spawn_local(async move {
+        let fetched = match target {
+            Ok(url) => fetch_bytes(&url, None).await.map(|bytes| (url.clone(), bytes)).map_err(|e| {
+                // A refused CORS request and a network error look the same to the page.
+                let error = if e.starts_with("HTTP ") { e } else { format!("{e}. {}", i18n::t("The server may not allow other sites to read it (CORS).")) };
+                (crate::open_link::file_name(&url, None), error)
+            }),
+            Err(value) => Err((value, i18n::t("Only http and https links can be opened.").to_string())),
+        };
+        match fetched {
+            Ok((url, bytes)) => {
+                let name = crate::open_link::file_name(&url, photocraft_codecs::detect(&bytes).map(|f| f.extensions()));
+                inbox.lock().unwrap_or_else(|e| e.into_inner()).push((name, bytes));
+            }
+            Err(failure) => errors.lock().unwrap_or_else(|e| e.into_inner()).push(failure),
+        }
+        ctx.request_repaint();
+    });
+}
+
 /// Reads the served font manifest, if the host has one, and lists its families in the font menus.
 fn load_font_manifest(served: Served, ctx: egui::Context) {
     wasm_bindgen_futures::spawn_local(async move {
@@ -236,7 +266,8 @@ fn browser_languages() -> Vec<String> {
 /// Integrity value), the browser rejects a body whose hash differs.
 async fn fetch_bytes(url: &str, integrity: Option<&str>) -> Result<Vec<u8>, String> {
     use wasm_bindgen_futures::JsFuture;
-    let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
+    // A JavaScript error's message ("Failed to fetch"), not its stack.
+    let js = |e: wasm_bindgen::JsValue| e.dyn_ref::<js_sys::Error>().map_or_else(|| format!("{e:?}"), |e| String::from(e.message()));
     let window = web_sys::window().ok_or("no window")?;
     let request = match integrity {
         Some(sri) => {
@@ -267,6 +298,7 @@ struct WebShell {
     served: Served,
     database: Option<web_sys::IdbDatabase>,
     presets: crate::preset_bridge::Bridge,
+    link_errors: LinkErrors,
 }
 
 impl WebShell {
@@ -346,6 +378,10 @@ impl eframe::App for WebShell {
                     }
                 }
             });
+        }
+        let link_errors = std::mem::take(&mut *self.link_errors.lock().unwrap_or_else(|e| e.into_inner()));
+        for (name, error) in link_errors {
+            self.app.open_failed(&name, &error);
         }
         self.serve_fonts(ctx);
         self.app.logic(ctx, frame);

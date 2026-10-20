@@ -3252,3 +3252,6 @@ curves	Smooth	Lisser
 	Use	Utiliser
 	In Front	Devant
 	Behind	Derrière
+# Opening an image from a link (?open=)
+	The server may not allow other sites to read it (CORS).	Le serveur n'autorise peut-être pas d'autres sites à lire le fichier (CORS).
+	Only http and https links can be opened.	Seuls les liens http et https peuvent être ouverts.

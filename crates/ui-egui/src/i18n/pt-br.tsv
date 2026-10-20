@@ -4034,3 +4034,6 @@ layerLabel	No Color	Sem cor
 	Use	Usar
 	In Front	Na frente
 	Behind	Atrás
+# Opening an image from a link (?open=)
+	The server may not allow other sites to read it (CORS).	O servidor pode não permitir que outros sites leiam o arquivo (CORS).
+	Only http and https links can be opened.	Só é possível abrir links http e https.

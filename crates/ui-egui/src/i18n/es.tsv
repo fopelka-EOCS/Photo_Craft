@@ -4206,3 +4206,6 @@ navigator	Zoom	Zoom
 	Use	Usar
 	In Front	Delante
 	Behind	Detrás
+# Opening an image from a link (?open=)
+	The server may not allow other sites to read it (CORS).	Es posible que el servidor no permita que otros sitios lean el archivo (CORS).
+	Only http and https links can be opened.	Solo se pueden abrir enlaces http y https.

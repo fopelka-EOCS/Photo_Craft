@@ -3974,3 +3974,6 @@ cameraData	Lens	Lens
 	Use	Kullan
 	In Front	Önde
 	Behind	Arkada
+# Opening an image from a link (?open=)
+	The server may not allow other sites to read it (CORS).	Sunucu, diğer sitelerin dosyayı okumasına izin vermiyor olabilir (CORS).
+	Only http and https links can be opened.	Yalnızca http ve https bağlantıları açılabilir.

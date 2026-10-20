@@ -4361,3 +4361,6 @@ shape	Appearance	Aspetto
 	Use	Usa
 	In Front	Davanti
 	Behind	Dietro
+# Opening an image from a link (?open=)
+	The server may not allow other sites to read it (CORS).	Il server potrebbe non consentire ad altri siti di leggere il file (CORS).
+	Only http and https links can be opened.	Si possono aprire solo link http e https.

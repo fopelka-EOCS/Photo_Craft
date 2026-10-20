@@ -3218,3 +3218,6 @@ curves	Smooth	Сгладить
 	Use	Использовать
 	In Front	Спереди
 	Behind	Сзади
+# Opening an image from a link (?open=)
+	The server may not allow other sites to read it (CORS).	Возможно, сервер не разрешает другим сайтам читать файл (CORS).
+	Only http and https links can be opened.	Открывать можно только ссылки http и https.

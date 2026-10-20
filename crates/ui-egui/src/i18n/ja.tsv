@@ -3921,3 +3921,6 @@ curves	Smooth	スムーズ
 	Use	使用
 	In Front	前面
 	Behind	背面
+# Opening an image from a link (?open=)
+	The server may not allow other sites to read it (CORS).	サーバーが他のサイトからのファイルの読み取りを許可していない可能性があります（CORS）。
+	Only http and https links can be opened.	開けるのは http と https のリンクだけです。

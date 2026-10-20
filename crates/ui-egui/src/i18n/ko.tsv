@@ -3426,3 +3426,6 @@ curves	Smooth	매끄럽게
 	In Front	앞
 	Behind	뒤
 	Blend	혼합
+# Opening an image from a link (?open=)
+	The server may not allow other sites to read it (CORS).	서버가 다른 사이트의 파일 읽기를 허용하지 않을 수 있습니다(CORS).
+	Only http and https links can be opened.	http 및 https 링크만 열 수 있습니다.

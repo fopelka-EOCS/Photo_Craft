@@ -3852,3 +3852,6 @@ navigator	Zoom	Zvětšení
 	Use	Použít
 	In Front	Vpředu
 	Behind	Vzadu
+# Opening an image from a link (?open=)
+	The server may not allow other sites to read it (CORS).	Server možná nepovoluje jiným webům soubor číst (CORS).
+	Only http and https links can be opened.	Otevřít lze jen odkazy http a https.

@@ -221,3 +221,24 @@ PhotoCraft renders with wgpu. It uses **WebGPU** when the browser has it and fal
 For example: `<iframe src="https://example.com/photocraft/?webgl" ...>`.
 
 A browser with neither WebGPU nor WebGL2 gets a message in place of the app.
+
+## Opening an image from a link
+
+`?open=<url>` opens the image at that URL when the page loads, as if it had been dropped on the
+window, so another site can link straight into the editor (an "Edit" button next to an image):
+
+```html
+<a href="https://example.com/photocraft/?open=https%3A%2F%2Fimages.example.org%2Fwave.jpg">Edit</a>
+```
+
+- **Percent-encode the URL** (`encodeURIComponent` in JavaScript). Unencoded, an `&` in its own
+  query ends it.
+- **The browser fetches it**, so a server on another origin has to allow that with CORS
+  (`Access-Control-Allow-Origin` naming the PhotoCraft site, or `*`). Many image hosts don't;
+  serve such images through a proxy of your own that adds the header.
+- Only `http:` and `https:` URLs open. The document is named after the URL's last path segment,
+  with the extension of the format detected in the file when that segment has none (an image
+  proxy's `/img?id=7` opens as `img.png`).
+- A failure (a refused CORS request, an HTTP error, a file PhotoCraft can't read) shows in the
+  status bar and as a notice, as a file that can't be opened does.
+- It combines with the flags above: `?webgl&open=…`.

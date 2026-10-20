@@ -3239,3 +3239,6 @@ curves	Smooth	Haluskan
 	Use	Gunakan
 	In Front	Di Depan
 	Behind	Di Belakang
+# Opening an image from a link (?open=)
+	The server may not allow other sites to read it (CORS).	Server mungkin tidak mengizinkan situs lain membaca file ini (CORS).
+	Only http and https links can be opened.	Hanya tautan http dan https yang dapat dibuka.

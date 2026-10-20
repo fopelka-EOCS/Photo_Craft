@@ -4004,3 +4004,6 @@ curves	Smooth	Vloeiend maken
 	Use	Gebruiken
 	In Front	Voor
 	Behind	Achter
+# Opening an image from a link (?open=)
+	The server may not allow other sites to read it (CORS).	De server staat andere sites mogelijk niet toe het bestand te lezen (CORS).
+	Only http and https links can be opened.	Alleen http- en https-links kunnen worden geopend.

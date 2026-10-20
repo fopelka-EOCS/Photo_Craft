@@ -3731,3 +3731,6 @@ curves	Smooth	Làm mượt
 	Use	Dùng
 	In Front	Phía trước
 	Behind	Phía sau
+# Opening an image from a link (?open=)
+	The server may not allow other sites to read it (CORS).	Máy chủ có thể không cho phép các trang khác đọc tệp này (CORS).
+	Only http and https links can be opened.	Chỉ có thể mở liên kết http và https.
