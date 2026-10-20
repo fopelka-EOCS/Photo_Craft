@@ -4038,3 +4038,8 @@ curves	Smooth	スムーズ
 	As above	上と同じ
 	Object Selection Brush Tool	オブジェクト選択ブラシツール
 	Generative Enhance Brush Tool	生成強化ブラシツール
+
+# DDS Options (#1327)
+	DDS Options	DDS オプション
+	Compression	圧縮
+	Generate Mipmaps	ミップマップを生成

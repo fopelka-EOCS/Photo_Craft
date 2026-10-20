@@ -4091,3 +4091,7 @@ cameraData	Lens	Lens
 	As above	Yukarıdakiyle aynı
 	Object Selection Brush Tool	Nesne Seçme Fırçası Aracı
 	Generative Enhance Brush Tool	Üretken İyileştirme Fırçası Aracı
+
+# DDS Options (#1327)
+	DDS Options	DDS Seçenekleri
+	Generate Mipmaps	Mipmap oluştur

@@ -4323,3 +4323,7 @@ navigator	Zoom	Zoom
 	As above	Igual que arriba
 	Object Selection Brush Tool	Herramienta Pincel de selección de objetos
 	Generative Enhance Brush Tool	Herramienta Pincel de mejora generativa
+
+# DDS Options (#1327)
+	DDS Options	Opciones de DDS
+	Generate Mipmaps	Generar mipmaps

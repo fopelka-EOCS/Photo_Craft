@@ -4434,3 +4434,7 @@ shape	Appearance	Izgled
 	As above	Kao gore
 	Object Selection Brush Tool	Alatka četkica za izbor objekta
 	Generative Enhance Brush Tool	Alatka četkica za generativno poboljšanje
+
+# DDS Options (#1327)
+	DDS Options	DDS opcije
+	Generate Mipmaps	Generiši mipmape

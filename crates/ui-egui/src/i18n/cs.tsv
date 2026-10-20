@@ -3970,3 +3970,7 @@ navigator	Zoom	Zvětšení
 	As above	Stejně jako výše
 	Object Selection Brush Tool	Nástroj štětec výběru objektu
 	Generative Enhance Brush Tool	Nástroj štětec generativního vylepšení
+
+# DDS Options (#1327)
+	DDS Options	Možnosti DDS
+	Generate Mipmaps	Generovat mipmapy

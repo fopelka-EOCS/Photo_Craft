@@ -3849,3 +3849,8 @@ curves	Smooth	Làm mượt
 	As above	Như trên
 	Object Selection Brush Tool	Công cụ Cọ Chọn đối tượng
 	Generative Enhance Brush Tool	Công cụ Cọ Cải thiện tạo sinh
+
+# DDS Options (#1327)
+	DDS Options	Tùy chọn DDS
+	Compression	Nén
+	Generate Mipmaps	Tạo mipmap

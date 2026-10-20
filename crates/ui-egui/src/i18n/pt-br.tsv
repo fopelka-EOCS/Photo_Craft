@@ -4151,3 +4151,7 @@ layerLabel	No Color	Sem cor
 	As above	Igual ao acima
 	Object Selection Brush Tool	Ferramenta Pincel de seleção de objeto
 	Generative Enhance Brush Tool	Ferramenta Pincel de aprimoramento generativo
+
+# DDS Options (#1327)
+	DDS Options	Opções de DDS
+	Generate Mipmaps	Gerar mipmaps

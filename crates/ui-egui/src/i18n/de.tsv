@@ -3364,3 +3364,8 @@ curves	Smooth	Glätten
 	As above	Wie oben
 	Object Selection Brush Tool	Objektauswahl-Pinsel-Werkzeug
 	Generative Enhance Brush Tool	Pinsel „Generatives Verbessern“
+
+# DDS Options (#1327)
+	DDS Options	DDS-Optionen
+	Compression	Komprimierung
+	Generate Mipmaps	Mipmaps erzeugen

@@ -4061,3 +4061,7 @@ curves	Smooth	Εξομάλυνση
 	As above	Όπως παραπάνω
 	Object Selection Brush Tool	Πινέλο επιλογής αντικειμένου (Object Selection Brush Tool)
 	Generative Enhance Brush Tool	Πινέλο παραγωγικής βελτίωσης (Generative Enhance Brush Tool)
+
+# DDS Options (#1327)
+	DDS Options	Επιλογές DDS
+	Generate Mipmaps	Δημιουργία mipmap

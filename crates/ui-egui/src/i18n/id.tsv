@@ -3357,3 +3357,8 @@ curves	Smooth	Haluskan
 	As above	Sama seperti di atas
 	Object Selection Brush Tool	Alat Kuas Pemilihan Objek
 	Generative Enhance Brush Tool	Alat Kuas Peningkatan Generatif
+
+# DDS Options (#1327)
+	DDS Options	Opsi DDS
+	Compression	Kompresi
+	Generate Mipmaps	Buat mipmap

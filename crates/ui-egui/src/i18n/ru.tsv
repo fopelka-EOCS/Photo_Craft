@@ -3336,3 +3336,8 @@ curves	Smooth	Сгладить
 	As above	Как выше
 	Object Selection Brush Tool	Кисть выделения объектов
 	Generative Enhance Brush Tool	Кисть генеративного улучшения
+
+# DDS Options (#1327)
+	DDS Options	Параметры DDS
+	Compression	Сжатие
+	Generate Mipmaps	Создать MIP-карты

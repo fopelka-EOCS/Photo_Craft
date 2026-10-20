@@ -4069,3 +4069,8 @@ curves	Smooth	Згладити
 	As above	Як вище
 	Object Selection Brush Tool	Інструмент «Пензель виділення об'єктів»
 	Generative Enhance Brush Tool	Інструмент «Пензель генеративного покращення»
+
+# DDS Options (#1327)
+	DDS Options	Параметри DDS
+	Compression	Стиснення
+	Generate Mipmaps	Створити MIP-карти

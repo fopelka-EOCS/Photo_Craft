@@ -4280,3 +4280,7 @@ cameraRaw	Yellow	Sárga
 	As above	Mint fent
 	Object Selection Brush Tool	Objektumkijelölő ecset
 	Generative Enhance Brush Tool	Generatív javítás ecset
+
+# DDS Options (#1327)
+	DDS Options	DDS-beállítások
+	Generate Mipmaps	Mipmapek létrehozása

@@ -3960,3 +3960,8 @@ curves	Smooth	Wygładź
 	As above	Jak wyżej
 	Object Selection Brush Tool	Narzędzie Pędzel zaznaczania obiektów
 	Generative Enhance Brush Tool	Narzędzie Pędzel ulepszania generatywnego
+
+# DDS Options (#1327)
+	DDS Options	Opcje DDS
+	Compression	Kompresja
+	Generate Mipmaps	Generuj mipmapy
