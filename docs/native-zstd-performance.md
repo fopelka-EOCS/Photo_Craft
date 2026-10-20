@@ -2,8 +2,11 @@
 
 Opt in to the reference Zstandard C implementation at default level 3 for native-format compression and bounded tile decoding. Blobs retain the bounded Rust streaming reader. Default builds retain the Rust backend. Enabling the feature adds zstd/zstd-sys and requires a C compiler, including a WASM-capable compiler for WASM.
 
-The feature also enables Zstandard TIFF decoding through the existing TIFF dependency. TIFF export keeps its existing compression options. The measurements below cover only native-format operations.
-The Rust wrapper is aligned with TIFF's dependency; the reference C library remains Zstandard 1.5.7. This build change and the Affinity reader reductions were not benchmarked.
+The feature also enables Zstandard TIFF decoding through the existing TIFF dependency. TIFF export keeps its existing compression options.
+Affinity's `native-zstd` feature selects the reference decoder for its archive entries, with one context reused across concatenated frames and the same window, size and CRC checks.
+Enable `photocraft-io/native-zstd` to select all three. Default Affinity builds retain `ruzstd`.
+The Rust wrapper is aligned with TIFF's dependency; the reference C library remains Zstandard 1.5.7.
+The measurements below cover only native-format operations. TIFF support, native Affinity decoding and the Affinity allocation reductions were not benchmarked.
 
 The measured backend improves real-photo save/load time and file size. Own-output loading of the 22-layer layout takes 4.9% longer, under 1 ms.
 Acceptance of that tradeoff and the native dependency remains a maintainer decision.
@@ -65,7 +68,7 @@ PHOTOCRAFT_BACKEND_READ_OTHER=1 cargo test -p photocraft-format --locked --featu
 PHOTOCRAFT_BACKEND_READ_OTHER=1 cargo test -p photocraft-format --locked --test roundtrip cross_backend_documents -- --ignored --exact
 ```
 
-The native checks run in CI when sources, tests or manifests change in codecs, format or their workspace dependencies.
+The native checks run in CI when sources, tests or manifests change in affinity, codecs, format, io or the listed format dependencies.
 Changes to the lockfile, toolchain, Cargo configuration or CI workflow also trigger them. Manual runs and `full-ci` force them.
-The checks include the native unit tests, format suite, fixture exchange, strict Clippy and a WASM check with Clang.
+The checks include native decoder unit tests, one Affinity import test, the format suite, fixture exchange, strict Clippy and WASM checks with Clang.
 Default builds keep their existing tests. The optional backend tests add no routine execution to unrelated changes.

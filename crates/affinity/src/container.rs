@@ -319,12 +319,25 @@ fn inflate(data: &[u8], size: usize) -> Result<Vec<u8>, Error> {
 fn unzstd(data: &[u8], size: usize) -> Result<Vec<u8>, Error> {
     let mut src = data;
     let mut out = Vec::new();
+    #[cfg(not(feature = "native-zstd"))]
     let mut frame = ruzstd::decoding::FrameDecoder::new();
+    #[cfg(not(feature = "native-zstd"))]
     frame.set_max_window_size(MAX_ZSTD_WINDOW);
+    #[cfg(feature = "native-zstd")]
+    let mut frame = {
+        let mut frame = zstd::zstd_safe::DCtx::try_create().ok_or(Error::Limit("not enough memory for Zstandard decoder"))?;
+        frame
+            .set_parameter(zstd::zstd_safe::DParameter::WindowLogMax(MAX_ZSTD_WINDOW.ilog2()))
+            .map_err(|_| Error::Malformed("cannot set Zstandard window limit"))?;
+        frame
+    };
     // Entries may hold several concatenated frames.
     while !src.is_empty() {
         let left = size.checked_sub(out.len()).ok_or(Error::Malformed("archive entry size mismatch"))?;
+        #[cfg(not(feature = "native-zstd"))]
         let decoder = ruzstd::decoding::StreamingDecoder::new_with_decoder(&mut src, &mut frame).map_err(|_| Error::Malformed("corrupt compressed entry"))?;
+        #[cfg(feature = "native-zstd")]
+        let decoder = zstd::stream::read::Decoder::with_context(&mut src, &mut frame).single_frame();
         if out.is_empty() {
             out.try_reserve(size.min(64 << 20)).map_err(|_| Error::Limit("not enough memory for archive entry"))?;
         }
@@ -402,6 +415,7 @@ mod tests {
         }
     }
 
+    /// Concatenated Rust frames preserve output, window and complete-frame checks.
     #[test]
     fn zstd_frames_match_separate_decoders_and_keep_bounds() {
         let frames = [b"first".to_vec(), vec![19; 131_073], b"last".to_vec()];
@@ -416,9 +430,54 @@ mod tests {
         assert_eq!(unzstd(&packed, expected.len()).unwrap(), expected);
         assert!(unzstd(&packed, expected.len() - 1).is_err());
         assert!(unzstd(&packed[..packed.len() - 1], expected.len()).is_err());
+        // Valid one-byte frames above 64 MiB must fail, including after a reused context.
+        for window in [0x81, 0x88] {
+            let wide = [b"\x28\xb5\x2f\xfd\x00".as_slice(), &[window], b"\x09\x00\x00x"].concat();
+            assert!(unzstd(&wide, 1).is_err());
+            let mut joined = packed.clone();
+            joined.extend(wide);
+            assert!(unzstd(&joined, expected.len() + 1).is_err());
+        }
         packed.extend(ruzstd::encoding::compress_to_vec(&b""[..], ruzstd::encoding::CompressionLevel::Fastest));
         assert!(unzstd(&packed, expected.len()).is_err());
-        // A non-single-segment frame advertising a 128 MiB window is rejected before allocation.
-        assert!(unzstd(b"\x28\xb5\x2f\xfd\x00\x88\x01\x00\x00", 1).is_err());
+    }
+
+    /// Native checksummed frames, with and without a content size, match the Rust reader.
+    #[cfg(feature = "native-zstd")]
+    #[test]
+    fn native_zstd_frames_match_rust_and_keep_checksums() {
+        let content: Vec<u8> = (0..4097).map(|i| ((i * 37 + i / 97) % 251) as u8).collect();
+        let mut encoder = zstd::bulk::Compressor::new(0).unwrap();
+        encoder.include_checksum(true).unwrap();
+        let mut packed = Vec::new();
+        for sized in [false, true] {
+            encoder.include_contentsize(sized).unwrap();
+            let mut bytes = encoder.compress(&content).unwrap();
+            let reference = ruzstd::decoding::StreamingDecoder::new_with_max_window_size(bytes.as_slice(), MAX_ZSTD_WINDOW).unwrap();
+            assert_eq!(read_bounded(reference, content.len()).unwrap(), content);
+            assert_eq!(unzstd(&bytes, content.len()).unwrap(), content);
+            for cut in 1..bytes.len() {
+                assert!(unzstd(&bytes[..cut], content.len()).is_err(), "cut at {cut}");
+            }
+            packed.extend(&bytes);
+            *bytes.last_mut().unwrap() ^= 1;
+            assert!(unzstd(&bytes, content.len()).is_err());
+        }
+        assert_eq!(unzstd(&packed, 2 * content.len()).unwrap(), content.repeat(2));
+    }
+
+    /// A failed CRC check does not spend the archive's extraction budget.
+    #[test]
+    fn zstd_archive_keeps_crc_and_budget_checks() {
+        let content = b"Affinity archive payload";
+        let bytes = crate::synth::container(&[("doc.dat", content, crate::synth::Method::Zstd)], None);
+        let mut archive = Archive::open(&bytes, Limits { max_total: content.len(), ..Limits::default() }).unwrap();
+        archive.entries.get_mut("doc.dat").unwrap().crc ^= 1;
+        assert_eq!(archive.read("doc.dat").unwrap_err(), Error::Malformed("archive entry checksum mismatch"));
+        assert_eq!(archive.extracted(), 0);
+        archive.entries.get_mut("doc.dat").unwrap().crc ^= 1;
+        assert_eq!(archive.read("doc.dat").unwrap(), content);
+        assert_eq!(archive.read("doc.dat").unwrap_err(), Error::Limit("document too large"));
+        assert_eq!(archive.extracted(), content.len());
     }
 }

@@ -72,7 +72,7 @@ jobs:
           if [ "$EVENT" = push ]; then native_base="$BEFORE"; fi
           if [ "$EVENT" = workflow_dispatch ] || [ "$FULL" = true ] || ! git cat-file -e "$native_base^{commit}" 2>/dev/null; then
             echo "native-zstd=true" >> "$GITHUB_OUTPUT"
-          elif git diff --name-only "$native_base" HEAD | grep -E '^(crates/(codecs|format|cms|color|doc|geom|raster)/(src/|tests/|benches/|examples/|Cargo\.toml$|build\.rs$)|Cargo\.(toml|lock)$|rust-toolchain(\.toml)?$|\.cargo/|\.github/workflows/ci\.yml$)' > /dev/null; then
+          elif git diff --name-only "$native_base" HEAD | grep -E '^(crates/(affinity|codecs|format|io|cms|color|doc|geom|raster)/(src/|tests/|benches/|examples/|Cargo\.toml$|build\.rs$)|Cargo\.(toml|lock)$|rust-toolchain(\.toml)?$|\.cargo/|\.github/workflows/ci\.yml$)' > /dev/null; then
             echo "native-zstd=true" >> "$GITHUB_OUTPUT"
           else
             echo "native-zstd=false" >> "$GITHUB_OUTPUT"
@@ -227,11 +227,13 @@ jobs:
         run: |
           cargo test -p photocraft-codecs --lib --locked --features native-zstd native_zstd
           cargo test -p photocraft-codecs --test tiff_pages --locked --features native-zstd zstd
+          cargo test -p photocraft-affinity --lib --locked --features native-zstd zstd
+          cargo test -p photocraft-io --test affinity --locked --features native-zstd native::artboards_shapes_and_paints_import_as_editable_layers -- --exact
           cargo test -p photocraft-format --locked --test roundtrip cross_backend_documents -- --ignored --exact
           cargo test -p photocraft-format --locked --features native-zstd
           PHOTOCRAFT_BACKEND_READ_OTHER=1 cargo test -p photocraft-format --locked --features native-zstd --test roundtrip cross_backend_documents -- --ignored --exact
           PHOTOCRAFT_BACKEND_READ_OTHER=1 cargo test -p photocraft-format --locked --test roundtrip cross_backend_documents -- --ignored --exact
-          cargo clippy -p photocraft-format -p photocraft-codecs --all-targets --locked --features photocraft-format/native-zstd -- -D warnings
+          cargo clippy -p photocraft-format -p photocraft-codecs -p photocraft-affinity --all-targets --locked --features photocraft-format/native-zstd,photocraft-affinity/native-zstd -- -D warnings
 
   # The Windows tests used to be one job named `test (windows-latest)`; they're now legs named
   # `test (windows-latest, unit)` and `test (windows-latest, integration)`. This job keeps the old
@@ -369,7 +371,7 @@ jobs:
         if: needs.platforms.outputs.native-zstd == 'true'
         env:
           CC_wasm32_unknown_unknown: clang
-        run: cargo check -p photocraft-format --target wasm32-unknown-unknown --locked --features native-zstd
+        run: cargo check -p photocraft-format -p photocraft-affinity --target wasm32-unknown-unknown --locked --features native-zstd
 
   web:
     timeout-minutes: 60
