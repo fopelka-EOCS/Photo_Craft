@@ -3171,6 +3171,23 @@ curves	Smooth	Glätten
 	Sent to {printer}	An {printer} gesendet
 	set in Print Settings…	in den Druckeinstellungen festlegen…
 	ICO is limited to 256 × 256 pixels	ICO ist auf 256 × 256 Pixel begrenzt
+
+# Color panel modes (#2569)
+	Grayscale Slider	Graustufen-Regler
+	RGB Sliders	RGB-Regler
+	HSB Sliders	HSB-Regler
+	CMYK Sliders	CMYK-Regler
+	Lab Sliders	Lab-Regler
+	Web Color Sliders	Webfarben-Regler
+	Copy Color's Hex Code	Hexadezimalcode der Farbe kopieren
+	Copy Color as HTML	Farbe als HTML kopieren
+	Hue Cube	Farbtonwürfel
+	Brightness Cube	Helligkeitswürfel
+	Color Wheel	Farbrad
+	RGB Spectrum	RGB-Spektrum
+	CMYK Spectrum	CMYK-Spektrum
+	Grayscale Ramp	Graustufenverlauf
+	Current Colors	Aktuelle Farben
 # Embedded Profile Mismatch: profile names beside the choices, Remember this choice
 	Use the embedded profile ({profile})	Eingebettetes Profil verwenden ({profile})
 	Convert to the working space ({profile})	In den Arbeitsfarbraum konvertieren ({profile})

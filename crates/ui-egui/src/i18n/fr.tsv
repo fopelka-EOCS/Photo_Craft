@@ -3176,6 +3176,22 @@ curves	Smooth	Lisser
 	Sent to {printer}	Envoyé à {printer}
 	set in Print Settings…	défini dans les paramètres d’impression…
 	ICO is limited to 256 × 256 pixels	Le format ICO est limité à 256 × 256 pixels
+
+# Color panel modes (#2569)
+	RGB Sliders	Curseurs RVB
+	HSB Sliders	Curseurs TSL
+	CMYK Sliders	Curseurs CMJN
+	Lab Sliders	Curseurs Lab
+	Web Color Sliders	Curseurs de couleurs Web
+	Copy Color's Hex Code	Copier le code hexadécimal de la couleur
+	Copy Color as HTML	Copier la couleur au format HTML
+	Hue Cube	Cube de teinte
+	Brightness Cube	Cube de luminosité
+	Color Wheel	Roue chromatique
+	RGB Spectrum	Spectre RVB
+	CMYK Spectrum	Spectre CMJN
+	Grayscale Ramp	Rampe de niveaux de gris
+	Current Colors	Couleurs actuelles
 # Embedded Profile Mismatch: profile names beside the choices, Remember this choice
 	Use the embedded profile ({profile})	Utiliser le profil incorporé ({profile})
 	Convert to the working space ({profile})	Convertir vers l'espace de travail ({profile})

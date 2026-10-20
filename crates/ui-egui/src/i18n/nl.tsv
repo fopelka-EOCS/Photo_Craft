@@ -3930,6 +3930,22 @@ curves	Smooth	Vloeiend maken
 	Sent to {printer}	Verzonden naar {printer}
 	set in Print Settings…	instellen in de afdrukinstellingen…
 	ICO is limited to 256 × 256 pixels	ICO is beperkt tot 256 × 256 pixels
+
+# Color panel modes (#2569)
+	RGB Sliders	RGB-schuifregelaars
+	HSB Sliders	HSB-schuifregelaars
+	CMYK Sliders	CMYK-schuifregelaars
+	Lab Sliders	Lab-schuifregelaars
+	Web Color Sliders	Webkleurschuifregelaars
+	Copy Color's Hex Code	Hexadecimale code van kleur kopiëren
+	Copy Color as HTML	Kleur kopiëren als HTML
+	Hue Cube	Kleurtoonkubus
+	Brightness Cube	Helderheidskubus
+	Color Wheel	Kleurenwiel
+	RGB Spectrum	RGB-spectrum
+	CMYK Spectrum	CMYK-spectrum
+	Grayscale Ramp	Grijswaardenverloop
+	Current Colors	Huidige kleuren
 # Embedded Profile Mismatch: profile names beside the choices, Remember this choice
 	Use the embedded profile ({profile})	Het ingesloten profiel gebruiken ({profile})
 	Convert to the working space ({profile})	Omzetten naar de werkruimte ({profile})

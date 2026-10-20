@@ -3163,6 +3163,22 @@ curves	Smooth	Haluskan
 	Sent to {printer}	Dikirim ke {printer}
 	set in Print Settings…	diatur di Pengaturan Cetak…
 	ICO is limited to 256 × 256 pixels	ICO dibatasi hingga 256 × 256 piksel
+
+# Color panel modes (#2569)
+	RGB Sliders	Penggeser RGB
+	HSB Sliders	Penggeser HSB
+	CMYK Sliders	Penggeser CMYK
+	Lab Sliders	Penggeser Lab
+	Web Color Sliders	Penggeser warna web
+	Copy Color's Hex Code	Salin kode heksadesimal warna
+	Copy Color as HTML	Salin warna sebagai HTML
+	Hue Cube	Kubus corak
+	Brightness Cube	Kubus kecerahan
+	Color Wheel	Roda warna
+	RGB Spectrum	Spektrum RGB
+	CMYK Spectrum	Spektrum CMYK
+	Grayscale Ramp	Gradasi skala abu-abu
+	Current Colors	Warna saat ini
 # Embedded Profile Mismatch: profile names beside the choices, Remember this choice
 	Use the embedded profile ({profile})	Pakai profil tertanam ({profile})
 	Convert to the working space ({profile})	Konversi ke working space ({profile})

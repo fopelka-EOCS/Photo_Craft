@@ -3778,6 +3778,23 @@ navigator	Zoom	Zvětšení
 	Sent to {printer}	Odesláno do {printer}
 	set in Print Settings…	nastavuje se v nastavení tisku…
 	ICO is limited to 256 × 256 pixels	ICO je omezen na 256 × 256 pixelů
+
+# Color panel modes (#2569)
+	Grayscale Slider	Posuvník stupňů šedi
+	RGB Sliders	Posuvníky RGB
+	HSB Sliders	Posuvníky HSB
+	CMYK Sliders	Posuvníky CMYK
+	Lab Sliders	Posuvníky Lab
+	Web Color Sliders	Posuvníky webových barev
+	Copy Color's Hex Code	Kopírovat hexadecimální kód barvy
+	Copy Color as HTML	Kopírovat barvu jako HTML
+	Hue Cube	Krychle odstínu
+	Brightness Cube	Krychle jasu
+	Color Wheel	Barevné kolo
+	RGB Spectrum	Spektrum RGB
+	CMYK Spectrum	Spektrum CMYK
+	Grayscale Ramp	Přechod stupňů šedi
+	Current Colors	Aktuální barvy
 # Embedded Profile Mismatch: profile names beside the choices, Remember this choice
 	Use the embedded profile ({profile})	Použít vložený profil ({profile})
 	Convert to the working space ({profile})	Převést do pracovního prostoru barev ({profile})

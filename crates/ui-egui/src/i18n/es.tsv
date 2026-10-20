@@ -4131,6 +4131,22 @@ navigator	Zoom	Zoom
 	Sent to {printer}	Enviado a {printer}
 	set in Print Settings…	se establece en Ajustes de impresión…
 	ICO is limited to 256 × 256 pixels	ICO está limitado a 256 × 256 píxeles
+
+# Color panel modes (#2569)
+	RGB Sliders	Reguladores RGB
+	HSB Sliders	Reguladores HSB
+	CMYK Sliders	Reguladores CMYK
+	Lab Sliders	Reguladores Lab
+	Web Color Sliders	Reguladores de colores web
+	Copy Color's Hex Code	Copiar código hexadecimal del color
+	Copy Color as HTML	Copiar color como HTML
+	Hue Cube	Cubo de tono
+	Brightness Cube	Cubo de brillo
+	Color Wheel	Rueda de color
+	RGB Spectrum	Espectro RGB
+	CMYK Spectrum	Espectro CMYK
+	Grayscale Ramp	Rampa de escala de grises
+	Current Colors	Colores actuales
 # Embedded Profile Mismatch: profile names beside the choices, Remember this choice
 	Use the embedded profile ({profile})	Usar el perfil incrustado ({profile})
 	Convert to the working space ({profile})	Convertir al espacio de trabajo ({profile})
