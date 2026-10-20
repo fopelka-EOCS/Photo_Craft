@@ -279,7 +279,9 @@ fn load_thumbnail_image_bounded(path: &str, file_len: u64) -> Option<ColorImage>
     if ext.eq_ignore_ascii_case("pcraft") {
         if std_path.is_dir() {
             let thumb_path = std_path.join("thumb.png");
-            if let Ok(bytes) = std::fs::read(thumb_path)
+            if let Ok(thumb_meta) = std::fs::metadata(&thumb_path)
+                && thumb_meta.len() <= MAX_THUMBNAIL_FILE_SIZE
+                && let Ok(bytes) = std::fs::read(&thumb_path)
                 && let Ok(img) = photocraft_codecs::decode_with(&bytes, &decode_opts)
             {
                 let rgba = img.convert(photocraft_codecs::ChannelLayout::Rgba, photocraft_codecs::SampleType::U8);
@@ -1519,6 +1521,27 @@ mod tests {
 
         let thumb = load_thumbnail_image_bounded(&path_str, png.len() as u64);
         assert!(thumb.is_none(), "flat images exceeding 4096 on longest side must be skipped");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn recent_thumbnail_skips_oversized_thumb_in_pcraft_dir() {
+        let temp_dir = std::env::temp_dir().join(format!("photocraft_oversized_pcraft_test_{}.pcraft", std::process::id()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let thumb_path = temp_dir.join("thumb.png");
+        let path_str = temp_dir.to_string_lossy().into_owned();
+
+        // Create a 65 MiB thumb.png (exceeds 64 MiB input budget) using set_len (instant sparse file)
+        let f = std::fs::File::create(&thumb_path).unwrap();
+        f.set_len(65 * 1024 * 1024).unwrap();
+        drop(f);
+
+        // Directory metadata len is small (typically 0 or 4096), but the inner thumb.png exceeds budget
+        let dir_len = std::fs::metadata(&temp_dir).map(|m| m.len()).unwrap_or(0);
+        let thumb = load_thumbnail_image_bounded(&path_str, dir_len);
+        assert!(thumb.is_none(), "oversized thumb.png in .pcraft directory must be rejected before reading");
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
