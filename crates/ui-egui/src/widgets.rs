@@ -2533,11 +2533,7 @@ pub(crate) fn color_swatch(ui: &mut Ui, color: Color32) -> Response {
 /// `is_pointer_button_down_on` is true for any button, so a right or middle press is ignored.
 pub fn pick_pos(resp: &Response) -> Option<Pos2> {
     let held = resp.is_pointer_button_down_on()
-        && resp.ctx.input(|i| {
-            i.pointer.primary_down()
-                && !i.pointer.button_down(egui::PointerButton::Secondary)
-                && !i.pointer.middle_down()
-        });
+        && resp.ctx.input(|i| i.pointer.primary_down() && !i.pointer.button_down(egui::PointerButton::Secondary) && !i.pointer.middle_down());
     if held || resp.clicked() { resp.interact_pointer_pos() } else { None }
 }
 /// A colour swatch that only reports clicks (no popup): for colours edited in PhotoCraft's own
