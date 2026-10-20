@@ -295,6 +295,7 @@ impl PhotocraftApp {
             self.ui.status = e;
             self.ui.status_error = true;
         }
+        ctx.request_repaint();
     }
 }
 

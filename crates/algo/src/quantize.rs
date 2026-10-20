@@ -157,6 +157,61 @@ pub fn uniform_palette(n: usize) -> Vec<Rgb8> {
     v
 }
 
+/// An Adobe Color Table (`.act`): 256 RGB triplets, no header — the format Photoshop's
+/// Indexed Color and Color Table dialogs load and save. Optionally followed by a 4-byte
+/// trailer: u16 BE entry count + u16 BE transparent index (file length 772).
+pub const ACT_BYTES: usize = 768;
+
+/// The length of an `.act` file with its transparency trailer (768 + 4).
+pub const ACT_BYTES_TRAILER: usize = ACT_BYTES + 4;
+
+/// Reads a `.act` file's bytes into its entries and, when the optional 4-byte trailer is
+/// present (file length 772), its transparent index. Any other length is an error: a
+/// truncated or padded table would silently shift every colour. With a trailer, only the first
+/// `count` entries are read (as in Photoshop); an invalid count or a transparent index past the
+/// table is treated as absent, not an error.
+pub fn act_read(bytes: &[u8]) -> Result<(Vec<Rgb8>, Option<u8>), String> {
+    let (rgb, trailer) = match bytes.len() {
+        ACT_BYTES => (&bytes[..ACT_BYTES], None),
+        ACT_BYTES_TRAILER => (&bytes[..ACT_BYTES], Some(&bytes[ACT_BYTES..])),
+        n => return Err(format!("an .act file holds {} or {} bytes of RGB ({} found)", ACT_BYTES, ACT_BYTES_TRAILER, n)),
+    };
+    let chunks = rgb.as_chunks::<3>().0;
+    // Trailer: u16 BE entry count (Photoshop reads only the first `count` entries) +
+    // u16 BE transparent index; an invalid count or an out-of-range index is treated as
+    // absent, not an error.
+    let (n, transparent) = match trailer {
+        Some(t) => {
+            let count = u16::from_be_bytes([t[0], t[1]]);
+            let n = if (1..=256).contains(&count) { count as usize } else { 256 };
+            let transparent = u8::try_from(u16::from_be_bytes([t[2], t[3]])).ok().filter(|&i| usize::from(i) < n);
+            (n, transparent)
+        }
+        None => (256, None),
+    };
+    Ok((chunks[..n].to_vec(), transparent))
+}
+
+/// Writes entries as a `.act` file's bytes: black past the end, 256 entries at most. With
+/// `transparent` set, appends the 4-byte trailer (u16 BE entry count + u16 BE transparent
+/// index).
+pub fn act_write_full(colors: &[Rgb8], transparent: Option<u8>) -> Vec<u8> {
+    let mut v = vec![0u8; ACT_BYTES];
+    for (i, c) in colors.iter().take(256).enumerate() {
+        v[i * 3..i * 3 + 3].copy_from_slice(c);
+    }
+    if let Some(t) = transparent {
+        v.extend_from_slice(&(colors.len().min(256) as u16).to_be_bytes());
+        v.extend_from_slice(&(u16::from(t)).to_be_bytes());
+    }
+    v
+}
+
+/// Writes entries as a `.act` file's bytes, without the transparency trailer.
+pub fn act_write(colors: &[Rgb8]) -> Vec<u8> {
+    act_write_full(colors, None)
+}
+
 fn forced_colors(f: Forced) -> Vec<Rgb8> {
     match f {
         Forced::None => Vec::new(),
@@ -347,12 +402,42 @@ fn hash01(x: usize, y: usize, seed: u32) -> f32 {
     (h & 0xffff) as f32 / 65535.0
 }
 
-/// Maps every opaque pixel to its palette entry (in place) with the chosen dither; returns the
-/// index per pixel. Pixels with alpha < ½ become index `transparent` (and alpha 0) when given;
-/// otherwise alpha is kept. `amount` (0..=1) scales diffusion / pattern / noise strength.
-pub fn quantize(px: &mut [[f32; 4]], w: usize, pal: &[Rgb8], dither: Dither, amount: f32, transparent: Option<usize>) -> Vec<u8> {
+/// Maps every pixel to its palette entry (in place) with the chosen dither; returns the index
+/// per pixel. With `transparent`, pixels of alpha < ½ become that entry (stored with its colour
+/// and alpha 0), and an opaque pixel whose nearest entry is it becomes transparent too. Without
+/// one, `opaque_clear` flattens clear pixels to opaque (an explicit "no transparency" request);
+/// otherwise fully transparent pixels are left alone and the rest keep their alpha. `amount`
+/// (0..=1) scales diffusion / pattern / noise strength.
+pub fn quantize(px: &mut [[f32; 4]], w: usize, pal: &[Rgb8], dither: Dither, amount: f32, transparent: Option<usize>, opaque_clear: bool) -> Vec<u8> {
     let lookup = Nearest::new(pal.iter().map(|c| c.map(f32::from)));
-    quantize_with(px, w, pal, dither, amount, transparent, |c| lookup.find(c.map(|v| v * 255.0)))
+    let mode = match transparent {
+        Some(t) => AlphaMode::Transparent(t),
+        None if opaque_clear => AlphaMode::Opaque,
+        None => AlphaMode::Keep,
+    };
+    quantize_with(px, w, pal, dither, amount, mode, |c| lookup.find(c.map(|v| v * 255.0)))
+}
+
+/// The alpha handling of a quantized pixel (see [`quantize`]).
+#[derive(Clone, Copy, Debug)]
+enum AlphaMode {
+    /// Pixels of alpha < ½ take entry `t` (stored with its colour, alpha 0); an opaque pixel
+    /// whose nearest entry is `t` becomes transparent too.
+    Transparent(usize),
+    /// Every pixel comes out opaque (an explicit "no transparency" request).
+    Opaque,
+    /// Legacy: fully transparent pixels are left alone, the rest keep their alpha.
+    Keep,
+}
+
+/// The output alpha of a quantized pixel: transparent at the transparent entry, opaque when an
+/// entry exists (or [`AlphaMode::Opaque`] flattens clear pixels), else the source alpha.
+fn out_alpha(mode: AlphaMode, k: usize, src: f32) -> f32 {
+    match mode {
+        AlphaMode::Transparent(t) if t == k => 0.0,
+        AlphaMode::Transparent(_) | AlphaMode::Opaque => 1.0,
+        AlphaMode::Keep => src,
+    }
 }
 
 fn quantize_with(
@@ -361,7 +446,7 @@ fn quantize_with(
     pal: &[Rgb8],
     dither: Dither,
     amount: f32,
-    transparent: Option<usize>,
+    mode: AlphaMode,
     nearest: impl Fn([f32; 3]) -> usize + Sync,
 ) -> Vec<u8> {
     let h = px.len().checked_div(w).unwrap_or(0);
@@ -375,13 +460,13 @@ fn quantize_with(
             for (x, (ip, p)) in idxrow.iter_mut().zip(pxrow.iter_mut()).enumerate() {
                 let pv = *p;
                 if pv[3] < 0.5 {
-                    if let Some(t) = transparent {
+                    if let AlphaMode::Transparent(t) = mode {
                         *ip = t as u8;
-                        *p = [0.0, 0.0, 0.0, 0.0];
+                        let e = pal.get(t).copied().unwrap_or([0, 0, 0]).map(|v| f32::from(v) / 255.0);
+                        *p = [e[0], e[1], e[2], 0.0];
                         continue;
-                    }
-                    if pv[3] <= 0.0 {
-                        continue;
+                    } else if matches!(mode, AlphaMode::Keep) && pv[3] <= 0.0 {
+                        continue; // No entry to carry the transparency: leave it alone.
                     }
                 }
                 let mut c = [pv[0], pv[1], pv[2]];
@@ -394,7 +479,7 @@ fn quantize_with(
                 let k = nearest(c);
                 *ip = k as u8;
                 let e = pal[k].map(|v| f32::from(v) / 255.0);
-                *p = [e[0], e[1], e[2], if transparent.is_some() { 1.0 } else { pv[3] }];
+                *p = [e[0], e[1], e[2], out_alpha(mode, k, pv[3])];
             }
         });
         return idx;
@@ -411,13 +496,13 @@ fn quantize_with(
             let i = y * w + x;
             let p = px[i];
             if p[3] < 0.5 {
-                if let Some(t) = transparent {
+                if let AlphaMode::Transparent(t) = mode {
                     idx[i] = t as u8;
-                    px[i] = [0.0, 0.0, 0.0, 0.0];
+                    let e = pal.get(t).copied().unwrap_or([0, 0, 0]).map(|v| f32::from(v) / 255.0);
+                    px[i] = [e[0], e[1], e[2], 0.0];
                     continue;
-                }
-                if p[3] <= 0.0 {
-                    continue;
+                } else if matches!(mode, AlphaMode::Keep) && p[3] <= 0.0 {
+                    continue; // No entry to carry the transparency: leave it alone.
                 }
             }
             let mut c = [p[0], p[1], p[2]];
@@ -452,7 +537,7 @@ fn quantize_with(
                     next[x + 2][q] += d[q] / 16.0;
                 }
             }
-            px[i] = [e[0], e[1], e[2], if transparent.is_some() { 1.0 } else { p[3] }];
+            px[i] = [e[0], e[1], e[2], out_alpha(mode, k, p[3])];
         }
     }
     idx
@@ -583,6 +668,157 @@ mod tests {
     }
 
     #[test]
+    fn act_roundtrip() {
+        let colors: Vec<Rgb8> = (0..256).map(|i| [i as u8, 255 - i as u8, ((i * 7) % 256) as u8]).collect();
+        let bytes = act_write(&colors);
+        assert_eq!(bytes.len(), ACT_BYTES);
+        let (read, transparent) = act_read(&bytes).unwrap();
+        assert_eq!(read, colors);
+        assert_eq!(transparent, None, "no trailer means no transparency");
+    }
+
+    #[test]
+    fn act_write_pads_short_tables_with_black() {
+        let bytes = act_write(&[[255, 0, 0], [0, 255, 0]]);
+        let (colors, transparent) = act_read(&bytes).unwrap();
+        assert_eq!(transparent, None);
+        assert_eq!(colors[0], [255, 0, 0]);
+        assert_eq!(colors[1], [0, 255, 0]);
+        assert_eq!(colors[2], [0, 0, 0]);
+        assert_eq!(*colors.last().unwrap(), [0, 0, 0]);
+    }
+
+    #[test]
+    fn act_read_rejects_wrong_lengths() {
+        assert!(act_read(&[]).is_err());
+        assert!(act_read(&[0u8; 767]).is_err());
+        for n in [769usize, 770, 771, 773] {
+            assert!(act_read(&vec![0u8; n]).is_err(), "{} bytes is neither 768 nor 772", n);
+        }
+    }
+
+    #[test]
+    fn act_trailer_roundtrip() {
+        let colors: Vec<Rgb8> = (0..256).map(|i| [i as u8, 0, 255]).collect();
+        let bytes = act_write_full(&colors, Some(7));
+        assert_eq!(bytes.len(), ACT_BYTES + 4);
+        let (read, transparent) = act_read(&bytes).unwrap();
+        assert_eq!(read, colors);
+        assert_eq!(transparent, Some(7));
+    }
+
+    #[test]
+    fn act_trailer_reference_vector() {
+        // Photoshop export (saber_with_transparent.ACT): trailer 01 00 00 00 → count=256, tindex=0.
+        let mut bytes = vec![0u8; ACT_BYTES];
+        bytes.extend_from_slice(&[1, 0, 0, 0]);
+        let (colors, transparent) = act_read(&bytes).unwrap();
+        assert_eq!(colors.len(), 256);
+        assert_eq!(transparent, Some(0));
+    }
+
+    #[test]
+    fn act_write_full_trailer_bytes() {
+        let short = act_write_full(&[[1, 2, 3]], Some(0));
+        assert_eq!(&short[ACT_BYTES..], &[0, 1, 0, 0], "count=1 (the table length), tindex=0");
+        let full = act_write_full(&vec![[0, 0, 0]; 256], Some(255));
+        assert_eq!(&full[ACT_BYTES..], &[1, 0, 0, 255], "count=256, tindex=255 (both u16 BE)");
+    }
+
+    #[test]
+    fn act_trailer_out_of_range_index_is_absent() {
+        let mut bytes = vec![0u8; ACT_BYTES];
+        bytes.extend_from_slice(&[1, 0, 1, 0]); // count=256, tindex=256 → out of range
+        let (_, transparent) = act_read(&bytes).unwrap();
+        assert_eq!(transparent, None);
+    }
+
+    #[test]
+    fn act_read_respects_the_trailer_count() {
+        // A 16-colour .act (count 16) loads its 16 entries: Photoshop reads only the first
+        // `count`, not a padded 256.
+        let mut bytes = vec![0u8; ACT_BYTES];
+        for i in 0..16 {
+            bytes[i * 3] = (i + 1) as u8;
+        }
+        bytes.extend_from_slice(&[0, 16, 0, 3]); // count=16, tindex=3
+        let (colors, transparent) = act_read(&bytes).unwrap();
+        assert_eq!(colors.len(), 16);
+        assert_eq!((colors[0], colors[15]), ([1, 0, 0], [16, 0, 0]));
+        assert_eq!(transparent, Some(3));
+    }
+
+    #[test]
+    fn act_read_invalid_count_or_index_falls_back() {
+        // count 0 and count 300 are invalid: the full table is read, a valid tindex kept.
+        for count in [0u16, 300] {
+            let mut bytes = vec![0u8; ACT_BYTES];
+            bytes.extend_from_slice(&count.to_be_bytes());
+            bytes.extend_from_slice(&[0, 5]); // tindex=5
+            let (colors, transparent) = act_read(&bytes).unwrap();
+            assert_eq!(colors.len(), 256, "count {count}");
+            assert_eq!(transparent, Some(5), "count {count}");
+        }
+        // A tindex past the counted table is absent, not an error.
+        let mut bytes = vec![0u8; ACT_BYTES];
+        bytes.extend_from_slice(&[0, 16, 0, 20]); // count=16, tindex=20
+        let (colors, transparent) = act_read(&bytes).unwrap();
+        assert_eq!(colors.len(), 16);
+        assert_eq!(transparent, None);
+    }
+
+    #[test]
+    fn quantize_without_transparent_entry_keeps_clear_pixels() {
+        // The legacy behaviour of the existing palettes (no entry appended): fully transparent
+        // pixels are left alone and semi-transparent ones keep their alpha.
+        let pal = vec![[0, 0, 0], [255, 255, 255]];
+        let mut px = vec![
+            [0.4, 0.4, 0.4, 1.0],  // opaque → quantized, stays opaque
+            [0.2, 0.2, 0.2, 0.0],  // fully transparent → left alone
+            [0.3, 0.3, 0.3, 0.25], // semi-transparent → quantized, alpha kept
+        ];
+        let idx = quantize(&mut px, 3, &pal, Dither::None, 1.0, None, false);
+        assert_eq!(idx, [0, 0, 0]);
+        assert_eq!(px[0], [0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(px[1], [0.2, 0.2, 0.2, 0.0]);
+        assert_eq!(px[2], [0.0, 0.0, 0.0, 0.25]);
+    }
+
+    #[test]
+    fn quantize_with_transparent_entry_makes_matching_pixels_transparent() {
+        // With an entry: clear pixels take it (stored with its colour, alpha 0), and an opaque
+        // pixel whose nearest entry is it becomes transparent too (indexed mode shows that
+        // index clear).
+        let pal = vec![[0, 0, 0], [255, 255, 255]];
+        let mut px = vec![
+            [0.4, 0.4, 0.4, 1.0], // opaque → the black entry, stays opaque
+            [0.2, 0.2, 0.2, 0.0], // clear → the entry
+            [1.0, 1.0, 1.0, 1.0], // opaque white → the entry (index 1) → transparent
+        ];
+        let idx = quantize(&mut px, 3, &pal, Dither::None, 1.0, Some(1), false);
+        assert_eq!(idx, [0, 1, 1]);
+        assert_eq!(px[0], [0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(px[1], [1.0, 1.0, 1.0, 0.0]);
+        assert_eq!(px[2], [1.0, 1.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn quantize_opaque_clear_flattens_clear_pixels() {
+        // An explicit "no transparency" (transparent: null) flattens clear pixels to opaque.
+        let pal = vec![[0, 0, 0], [255, 255, 255]];
+        let mut px = vec![
+            [0.4, 0.4, 0.4, 1.0],
+            [0.2, 0.2, 0.2, 0.0],  // clear → quantized opaque
+            [0.3, 0.3, 0.3, 0.25], // semi-transparent → quantized opaque
+        ];
+        let idx = quantize(&mut px, 3, &pal, Dither::None, 1.0, None, true);
+        assert_eq!(idx, [0, 0, 0]);
+        assert_eq!(px[0], [0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(px[1], [0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(px[2], [0.0, 0.0, 0.0, 1.0]);
+    }
+
+    #[test]
     fn exact_palette_and_failure() {
         let px = vec![[1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0], [1.0, 0.0, 0.0, 1.0]];
         assert_eq!(build_palette(&px, PaletteKind::Exact, 256, Forced::None).unwrap().len(), 2);
@@ -627,10 +863,10 @@ mod tests {
             for old in if run % 2 == 0 { [true, false] } else { [false, true] } {
                 let start = std::time::Instant::now();
                 if old {
-                    let indices = quantize_with(&mut linear, 6000, &pal, Dither::Diffusion, 0.75, None, |c| linear_rgb_nearest(&pal, c));
+                    let indices = quantize_with(&mut linear, 6000, &pal, Dither::Diffusion, 0.75, AlphaMode::Keep, |c| linear_rgb_nearest(&pal, c));
                     before = Some((start.elapsed().as_secs_f64() * 1000.0, indices));
                 } else {
-                    let indices = quantize(&mut accelerated, 6000, &pal, Dither::Diffusion, 0.75, None);
+                    let indices = quantize(&mut accelerated, 6000, &pal, Dither::Diffusion, 0.75, None, false);
                     after = Some((start.elapsed().as_secs_f64() * 1000.0, indices));
                 }
             }
@@ -669,8 +905,12 @@ mod tests {
                 for transparent in [None, Some(1)] {
                     let mut actual = source.clone();
                     let mut expected = source.clone();
-                    let indices = quantize(&mut actual, 93, &pal, dither, 0.75, transparent);
-                    let old_indices = quantize_with(&mut expected, 93, &pal, dither, 0.75, transparent, |c| linear_rgb_nearest(&pal, c));
+                    let indices = quantize(&mut actual, 93, &pal, dither, 0.75, transparent, false);
+                    let mode = match transparent {
+                        None => AlphaMode::Keep,
+                        Some(t) => AlphaMode::Transparent(t),
+                    };
+                    let old_indices = quantize_with(&mut expected, 93, &pal, dither, 0.75, mode, |c| linear_rgb_nearest(&pal, c));
                     assert_eq!(indices, old_indices, "{count} {dither:?} {transparent:?}");
                     assert_eq!(actual, expected, "{count} {dither:?} {transparent:?}");
                 }
@@ -689,7 +929,7 @@ mod tests {
                     p
                 })
                 .collect();
-            let idx = quantize(&mut px, 8, &pal, d, 1.0, None);
+            let idx = quantize(&mut px, 8, &pal, d, 1.0, None, false);
             assert!(px.iter().all(|p| p[0] == 0.0 || p[0] == 1.0), "{d:?}");
             assert_eq!(idx.len(), 64);
             // Mean brightness is preserved by dithering (not by plain thresholding).
@@ -699,7 +939,7 @@ mod tests {
             }
         }
         let mut px = vec![[1.0, 1.0, 1.0, 0.2]];
-        let idx = quantize(&mut px, 1, &pal, Dither::None, 1.0, Some(1));
+        let idx = quantize(&mut px, 1, &pal, Dither::None, 1.0, Some(1), false);
         assert_eq!((idx[0], px[0][3]), (1, 0.0));
     }
 

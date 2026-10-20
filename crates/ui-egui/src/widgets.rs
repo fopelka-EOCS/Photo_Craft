@@ -1227,6 +1227,35 @@ pub fn secondary_button(ui: &mut Ui, label: &str, min_width: f32) -> Response {
     button_impl(ui, label, min_width, t.field, t.text, false)
 }
 
+/// A [`secondary_button`] that shows an armed/pressed state (`t.accent_soft` fill,
+/// `t.accent_border` stroke, `t.accent_text` label), matching [`crate::icons::button_chrome`].
+pub fn toggle_button(ui: &mut Ui, label: &str, min_width: f32, selected: bool) -> Response {
+    if !selected {
+        return secondary_button(ui, label, min_width);
+    }
+    let t = Tokens::get(ui.ctx());
+    let (galley, size) = button_layout(ui, label, min_width, None, t.accent_text);
+    let h = size.y;
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
+    if resp.has_focus() {
+        let r = if t.pro { h / 2.0 } else { t.radius_sm } + 2.0;
+        ui.painter().rect_stroke(rect.expand(2.0), r, Stroke::new(2.0, t.accent), StrokeKind::Outside);
+    }
+    if t.pro {
+        let r = h / 2.0;
+        ui.painter().rect_filled(rect, r, t.accent_soft);
+        ui.painter().rect_stroke(rect, r, Stroke::new(1.5, t.accent_border), StrokeKind::Inside);
+    } else {
+        surface(ui, rect, t.accent_soft, false);
+        if !t.bevel {
+            ui.painter().rect_stroke(rect, t.radius_sm, Stroke::new(1.0, t.accent_border), StrokeKind::Inside);
+        }
+    }
+    ui.painter().galley(rect.center() - galley.size() / 2.0, galley, t.accent_text);
+    resp
+}
+
 /// A [`secondary_button`] `height` points tall, for slim bars such as the status bar (#2823).
 pub fn compact_button(ui: &mut Ui, label: &str, height: f32) -> Response {
     let t = Tokens::get(ui.ctx());

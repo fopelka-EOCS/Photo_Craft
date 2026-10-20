@@ -515,6 +515,12 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         if outcome.is_none() {
             crate::color_picker_ui::open_requested(app, d.id);
         }
+        // A palette Load…/Save… asked by the dialog body (Indexed Color Custom…, Color Table).
+        if outcome.is_none()
+            && let Err(error) = crate::palette_file_ui::take_request(app, d.id)
+        {
+            app.ui.status = error;
+        }
         if apply_requested && outcome.is_none() {
             let _ = crate::prefs_ui::apply(app, d.id);
         }
