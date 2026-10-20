@@ -1245,20 +1245,28 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                             58.0,
                         );
                         if tolerance.drag_stopped()
-                            && let Some((doc_id, [x, y], mode, applied_tolerance)) = app.last_magic_wand.clone()
-                            && app.session.active().is_some_and(|doc| doc.doc.id == doc_id)
-                            && app.ui.tool_options.tolerance != applied_tolerance
+                            && let Some(last) = app.last_magic_wand.clone()
+                            && app.session.active().is_some_and(|doc| {
+                                doc.doc.id == last.doc_id
+                                    && doc.revision == last.revision
+                                    && doc.view_revision == last.view_revision
+                                    && doc.active_layer == last.active_layer
+                            })
+                            && app.ui.tool_options.tolerance != last.tolerance
                         {
                             let options = app.ui.tool_options.clone();
-                            if app
-                                .run(
-                                    "select.magicWand",
-                                    json!({"x": x, "y": y, "tolerance": options.tolerance, "contiguous": options.contiguous, "antiAlias": options.anti_alias, "sampleAllLayers": options.sample_all.magic_wand, "mode": mode}),
-                                )
+                            if app.run_magic_wand_with_baseline(
+                                json!({"x": last.point[0], "y": last.point[1], "tolerance": options.tolerance, "contiguous": options.contiguous, "antiAlias": options.anti_alias, "sampleAllLayers": options.sample_all.magic_wand, "mode": last.mode}),
+                                last.selection_baseline,
+                            )
                                 .is_ok()
-                                && let Some(last) = app.last_magic_wand.as_mut()
+                                && let Some(current) = app.last_magic_wand.as_mut()
+                                && let Some(doc) = app.session.active()
                             {
-                                last.3 = options.tolerance;
+                                current.tolerance = options.tolerance;
+                                current.revision = doc.revision;
+                                current.view_revision = doc.view_revision;
+                                current.active_layer = doc.active_layer;
                             }
                         }
                         widgets::checkbox(ui, &mut app.ui.tool_options.anti_alias, tl!("Anti-alias"));
