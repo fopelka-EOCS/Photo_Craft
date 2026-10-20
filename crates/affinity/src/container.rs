@@ -269,7 +269,7 @@ impl<'a> Archive<'a> {
 
     /// Extract an entry by name: decompress, undo the byte predictor and verify the CRC.
     pub fn read(&mut self, name: &str) -> Result<Vec<u8>, Error> {
-        let e = self.entries.get(name).ok_or(Error::Malformed("missing archive entry"))?.clone();
+        let e = self.entries.get(name).ok_or(Error::Malformed("missing archive entry"))?;
         let size = usize::try_from(e.size).map_err(|_| Error::Limit("archive entry too large"))?;
         if size > self.limits.max_entry {
             return Err(Error::Limit("archive entry too large"));
@@ -315,19 +315,24 @@ fn inflate(data: &[u8], size: usize) -> Result<Vec<u8>, Error> {
     read_bounded(flate2::read::ZlibDecoder::new(data), size)
 }
 
+/// Appends concatenated frames under one entry budget, reusing the frame workspace.
 fn unzstd(data: &[u8], size: usize) -> Result<Vec<u8>, Error> {
     let mut src = data;
     let mut out = Vec::new();
+    let mut frame = ruzstd::decoding::FrameDecoder::new();
+    frame.set_max_window_size(MAX_ZSTD_WINDOW);
     // Entries may hold several concatenated frames.
     while !src.is_empty() {
         let left = size.checked_sub(out.len()).ok_or(Error::Malformed("archive entry size mismatch"))?;
-        let decoder = ruzstd::decoding::StreamingDecoder::new_with_max_window_size(&mut src, MAX_ZSTD_WINDOW)
-            .map_err(|_| Error::Malformed("corrupt compressed entry"))?;
-        let frame = read_bounded(decoder, left)?;
-        if frame.is_empty() {
+        let decoder = ruzstd::decoding::StreamingDecoder::new_with_decoder(&mut src, &mut frame).map_err(|_| Error::Malformed("corrupt compressed entry"))?;
+        if out.is_empty() {
+            out.try_reserve(size.min(64 << 20)).map_err(|_| Error::Limit("not enough memory for archive entry"))?;
+        }
+        let cap = u64::try_from(left).unwrap_or(u64::MAX).saturating_add(1);
+        let written = decoder.take(cap).read_to_end(&mut out).map_err(|_| Error::Malformed("corrupt compressed entry"))?;
+        if written == 0 {
             return Err(Error::Malformed("corrupt compressed entry"));
         }
-        out.extend_from_slice(&frame);
         if out.len() > size {
             return Err(Error::Malformed("archive entry size mismatch"));
         }
@@ -352,13 +357,12 @@ fn unpredict(b: &mut [u8], compression: u8) -> Result<(), Error> {
             byte_delta(b);
             // A 64 KiB tile of 16-bit samples is stored as all high bytes, then all low bytes.
             if b.len() == 0x10000 {
-                let planes = b.to_vec();
-                let (hi, lo) = planes.split_at(0x8000);
-                for (i, out) in b.as_chunks_mut::<4>().0.iter_mut().enumerate() {
-                    let (Some(h), Some(l)) = (hi.get(2 * i..2 * i + 2), lo.get(2 * i..2 * i + 2)) else {
-                        return Err(Error::Malformed("tile size"));
-                    };
-                    *out = [l[0], h[0], l[1], h[1]];
+                let hi = b.get(..0x8000).ok_or(Error::Malformed("tile size"))?.to_vec();
+                for (i, h) in hi.as_chunks::<2>().0.iter().enumerate() {
+                    // Forward output only overwrites low bytes already read.
+                    let l = b.get(0x8000 + 2 * i..0x8000 + 2 * i + 2).ok_or(Error::Malformed("tile size"))?;
+                    let out = [l[0], h[0], l[1], h[1]];
+                    b.get_mut(4 * i..4 * i + 4).ok_or(Error::Malformed("tile size"))?.copy_from_slice(&out);
                 }
             }
         }
@@ -372,5 +376,49 @@ fn byte_delta(b: &mut [u8]) {
     for v in b {
         *v = v.wrapping_add(prev);
         prev = *v;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Half-tile scratch matches the former full-copy predictor, including partial tiles.
+    #[test]
+    fn split_byte_predictor_matches_full_copy() {
+        for len in [0, 3, 65535, 65536, 65537] {
+            let mut actual: Vec<u8> = (0..len).map(|i| (i * 37 + i / 97) as u8).collect();
+            let mut expected = actual.clone();
+            byte_delta(&mut expected);
+            if len == 65536 {
+                let planes = expected.clone();
+                let (hi, lo) = planes.split_at(32768);
+                for (out, (&hi, &lo)) in expected.as_chunks_mut::<2>().0.iter_mut().zip(hi.iter().zip(lo)) {
+                    *out = [lo, hi];
+                }
+            }
+            unpredict(&mut actual, 0xA2).unwrap();
+            assert_eq!(actual, expected, "{len}");
+        }
+    }
+
+    #[test]
+    fn zstd_frames_match_separate_decoders_and_keep_bounds() {
+        let frames = [b"first".to_vec(), vec![19; 131_073], b"last".to_vec()];
+        let mut packed = Vec::new();
+        let mut expected = Vec::new();
+        for frame in frames {
+            let bytes = ruzstd::encoding::compress_to_vec(frame.as_slice(), ruzstd::encoding::CompressionLevel::Fastest);
+            let decoder = ruzstd::decoding::StreamingDecoder::new_with_max_window_size(bytes.as_slice(), MAX_ZSTD_WINDOW).unwrap();
+            expected.extend(read_bounded(decoder, frame.len()).unwrap());
+            packed.extend(bytes);
+        }
+        assert_eq!(unzstd(&packed, expected.len()).unwrap(), expected);
+        assert!(unzstd(&packed, expected.len() - 1).is_err());
+        assert!(unzstd(&packed[..packed.len() - 1], expected.len()).is_err());
+        packed.extend(ruzstd::encoding::compress_to_vec(&b""[..], ruzstd::encoding::CompressionLevel::Fastest));
+        assert!(unzstd(&packed, expected.len()).is_err());
+        // A non-single-segment frame advertising a 128 MiB window is rejected before allocation.
+        assert!(unzstd(b"\x28\xb5\x2f\xfd\x00\x88\x01\x00\x00", 1).is_err());
     }
 }
