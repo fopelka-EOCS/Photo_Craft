@@ -890,8 +890,12 @@ mod tests {
 
     /// Press at `at` and hold, with no release and no time passing, then run one frame.
     fn press<S>(h: &mut Harness<'static, S>, at: egui::Pos2) {
+        press_button(h, at, egui::PointerButton::Primary, true);
+    }
+
+    fn press_button<S>(h: &mut Harness<'static, S>, at: egui::Pos2, button: egui::PointerButton, pressed: bool) {
         h.event(egui::Event::PointerMoved(at));
-        h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+        h.event(egui::Event::PointerButton { pos: at, button, pressed, modifiers: egui::Modifiers::NONE });
         h.run_steps(1);
     }
 
@@ -939,6 +943,38 @@ mod tests {
         assert_ne!(color(&h), before, "the slider picks on press");
         let hue = rgb_to_hsv(parse_hex(&color(&h)).unwrap())[0];
         assert!(hue < 30.0 || hue > 330.0, "hue {hue}");
+    }
+
+    /// Only the primary button picks: a right or middle press (and its release) on the field or
+    /// the slider leaves the colour alone.
+    #[test]
+    fn field_and_slider_ignore_secondary_and_middle_presses() {
+        let mut f = Map::new();
+        f.insert("color".into(), json!("#336699"));
+        let mut h = Harness::builder().with_size(vec2(400.0, 300.0)).build_ui_state(
+            |ui, f: &mut Map<String, Value>| {
+                ui.horizontal(|ui| {
+                    let o = ui.cursor().min;
+                    let gap = ui.spacing().item_spacing.x;
+                    ui.data_mut(|d| d.insert_temp(egui::Id::new("test-origin"), (o, gap)));
+                    color_field(ui, f);
+                });
+            },
+            f,
+        );
+        h.run_steps(2);
+        let (o, gap) = h.ctx.data(|d| d.get_temp::<(egui::Pos2, f32)>(egui::Id::new("test-origin"))).unwrap();
+        for at in [o + vec2(FIELD * 0.5, FIELD * 0.5), o + vec2(FIELD + gap + 9.0, FIELD * 0.95)] {
+            for button in [egui::PointerButton::Secondary, egui::PointerButton::Middle] {
+                press_button(&mut h, at, button, true);
+                assert_eq!(color(&h), "#336699", "{button:?} press at {at:?}");
+                h.event(egui::Event::PointerMoved(at + vec2(3.0, 0.0)));
+                h.run_steps(1);
+                press_button(&mut h, at + vec2(3.0, 0.0), button, false);
+                h.run_steps(1);
+                assert_eq!(color(&h), "#336699", "{button:?} drag and release at {at:?}");
+            }
+        }
     }
 
     #[test]

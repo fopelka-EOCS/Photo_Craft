@@ -2529,9 +2529,11 @@ pub(crate) fn color_swatch(ui: &mut Ui, color: Color32) -> Response {
 /// Where a press or drag on a picking surface (a colour field, a hue strip) points, from the
 /// frame the button goes down and on every move after it. `dragged()` waits for egui's click
 /// threshold (a few points of travel, or a long hold), so a press picked nothing until the
-/// pointer had moved away and fine adjustments jumped (#7793).
+/// pointer had moved away and fine adjustments jumped (#7793). Only the primary button picks:
+/// `is_pointer_button_down_on` is true for any button, so a right or middle press is ignored.
 pub fn pick_pos(resp: &Response) -> Option<Pos2> {
-    if resp.is_pointer_button_down_on() || resp.clicked() { resp.interact_pointer_pos() } else { None }
+    let held = resp.is_pointer_button_down_on() && resp.ctx.input(|i| i.pointer.primary_down());
+    if held || resp.clicked() { resp.interact_pointer_pos() } else { None }
 }
 /// A colour swatch that only reports clicks (no popup): for colours edited in PhotoCraft's own
 /// Color Picker dialog. `label` names it for hover text and accessibility.

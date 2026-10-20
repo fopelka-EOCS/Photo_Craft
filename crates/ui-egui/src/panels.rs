@@ -4555,6 +4555,38 @@ mod color_tests {
         assert!((srgb_hsva(now).h * 360.0 - 240.0).abs() < 8.0, "{:?}", srgb_hsva(now));
     }
 
+    /// Only the primary button picks: a right or middle press (and its release) on the field or
+    /// the hue strip leaves the foreground colour alone.
+    #[test]
+    fn color_panel_ignores_secondary_and_middle_presses() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.session.tools.foreground = [0.2, 0.4, 0.6, 1.0];
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(300.0, 300.0)).build_ui_state(
+            |ui, app: &mut PhotocraftApp| {
+                let at = (ui.cursor().min, ui.available_width());
+                ui.data_mut(|d| d.insert_temp(egui::Id::new("test-origin"), at));
+                color_field(app, ui);
+            },
+            app,
+        );
+        PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::Studio);
+        h.run_steps(2);
+        let (o, w) = h.ctx.data(|d| d.get_temp::<(Pos2, f32)>(egui::Id::new("test-origin"))).unwrap();
+        let field_w = w - 38.0 - 14.0 - 16.0;
+        let field = o + vec2(38.0 + 8.0 + field_w * 0.5, 60.0);
+        let strip = o + vec2(38.0 + 8.0 + field_w + 8.0 + 7.0, 40.0);
+        for at in [field, strip] {
+            for button in [egui::PointerButton::Secondary, egui::PointerButton::Middle] {
+                for pressed in [true, false] {
+                    h.event(egui::Event::PointerMoved(at));
+                    h.event(egui::Event::PointerButton { pos: at, button, pressed, modifiers: egui::Modifiers::NONE });
+                    h.run_steps(1);
+                    assert_eq!(h.state().session.tools.foreground, [0.2, 0.4, 0.6, 1.0], "{button:?} pressed={pressed} at {at:?}");
+                }
+            }
+        }
+    }
+
     /// Click the hex field, select its text and type `text` one key per frame.
     fn type_hex(h: &mut egui_kittest::Harness<'static, PhotocraftApp>, text: &str) {
         use egui_kittest::kittest::Queryable;
