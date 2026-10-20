@@ -1,13 +1,33 @@
-//! Download PDFium with a bounded timeout and copy it beside build outputs.
+//! Download PDFium with a bounded timeout, verify its SHA-256, and copy it beside build outputs.
 
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::io::copy;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+
+use sha2::{Digest, Sha256};
 
 const PDFIUM_VERSION: &str = "8100";
 const DOWNLOAD_TIMEOUT_SECONDS: &str = "30";
 const MAX_ARCHIVE_BYTES: &str = "100000000";
+
+// SHA-256 of each PDFium archive, verified after download.
+// Fill these in after a first trusted download, e.g.:
+//   curl -Lf --max-time 30 "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F8100/<asset>" -o /tmp/file.tgz
+//   sha256sum /tmp/file.tgz
+// Leave the digest empty to skip verification while these are being provisioned.
+// Never change a digest without re-downloading and re-hashing the archive from the same URL.
+const PDFIUM_SHA256: &[(&str, &str, &str)] = &[
+    ("windows", "x86_64", "51621bcc1d9be9ea448f4b84b0516862b928e3968d3fca899af1a6d6e2848d6d"),
+    ("windows", "x86", "bdab604368d0116adf84eaab452521a5f200dfa3f97001193d63edb35e75378e"),
+    ("windows", "aarch64", "cca9b28d406ae2a902b0b710a92ab699c4c2931564ab6efe44630014d492a9ca"),
+    ("linux", "x86_64", "1c1894a12d4d96ee01400c3874444126254180c5c7d2ab628576b67f8120320a"),
+    ("linux", "x86", "261c494a1afdda695e0adbbd51074b867ac2c5ef0be2ace15b44f2f6626ca4a2"),
+    ("linux", "aarch64", "58c87a95a40a24c914a9c755fae798843f46f06adf9e5e9f2c893302d4bdb040"),
+    ("macos", "x86_64", "d513a0530a0f0c1ca9929ded06660e27edb9a108a7d18d9df55a5fb060b091c8"),
+    ("macos", "aarch64", "7ea647c7a7a9c1169be3f947000bc071ece2fade2cd6bd7e401e3675c6560cce"),
+];
 
 fn main() {
     println!("cargo:rerun-if-env-changed=PDFIUM_DYNAMIC_LIB_PATH");
@@ -21,7 +41,7 @@ fn main() {
 
     let binary_name = match (target_os.as_str(), target_arch.as_str()) {
         ("windows", "x86_64" | "x86" | "aarch64") => "pdfium.dll",
-        ("linux", "x86_64" | "aarch64") => "libpdfium.so",
+        ("linux", "x86_64" | "x86" | "aarch64") => "libpdfium.so",
         ("macos", "x86_64" | "aarch64") => "libpdfium.dylib",
         _ => {
             info(format!("unsupported platform {}-{}, skipping", target_os, target_arch));
@@ -44,6 +64,7 @@ fn main() {
                 ("windows", "x86") => "pdfium-win-x86.tgz",
                 ("windows", "aarch64") => "pdfium-win-arm64.tgz",
                 ("linux", "x86_64") => "pdfium-linux-x64.tgz",
+                ("linux", "x86") => "pdfium-linux-x86.tgz",
                 ("linux", "aarch64") => "pdfium-linux-arm64.tgz",
                 ("macos", "x86_64") => "pdfium-mac-x64.tgz",
                 ("macos", "aarch64") => "pdfium-mac-arm64.tgz",
@@ -53,7 +74,10 @@ fn main() {
             let archive_path = out_dir.join(asset_name);
 
             info(format!("downloading {} (maximum {} seconds)", asset_name, DOWNLOAD_TIMEOUT_SECONDS));
-            match download_file(&url, &archive_path).and_then(|()| extract_pdfium(&archive_path, &library_path, binary_name)) {
+            match download_file(&url, &archive_path)
+                .and_then(|()| verify_pdfium_archive(&archive_path, &target_os, &target_arch))
+                .and_then(|()| extract_pdfium(&archive_path, &library_path, binary_name))
+            {
                 Ok(()) => info(format!("downloaded {}", binary_name)),
                 Err(error) => {
                     let _ = fs::remove_file(&library_path);
@@ -88,6 +112,44 @@ fn main() {
     };
 
     copy_to_profile(&source, &profile_dir, binary_name);
+}
+
+/// Expected SHA-256 digest for the PDFium archive of `target_os`/`target_arch`, or `None` when
+/// verification has not been provisioned yet.
+fn expected_pdfium_sha256(target_os: &str, target_arch: &str) -> Option<&'static str> {
+    PDFIUM_SHA256.iter().find(|(os, arch, _)| *os == target_os && *arch == target_arch).map(|(_, _, digest)| *digest)
+}
+
+/// Verify `archive_path`'s SHA-256 against the pinned digest for the target. A missing (empty)
+/// pinned digest skips verification with a warning; a mismatch fails so a corrupt or tampered
+/// archive is never extracted.
+fn verify_pdfium_archive(archive_path: &Path, target_os: &str, target_arch: &str) -> Result<(), String> {
+    let Some(expected) = expected_pdfium_sha256(target_os, target_arch) else {
+        info(format!("no pinned SHA-256 for {target_os}-{target_arch}; downloading PDFium unverified"));
+        return Ok(());
+    };
+    if expected.is_empty() {
+        info(format!("SHA-256 for {target_os}-{target_arch} is not provisioned; downloading PDFium unverified"));
+        return Ok(());
+    }
+    let actual = sha256_file(archive_path)?;
+    if actual != expected {
+        let _ = fs::remove_file(archive_path);
+        return Err(format!(
+            "PDFium archive SHA-256 mismatch for {target_os}-{target_arch}: \
+             expected {expected}, got {actual}"
+        ));
+    }
+    Ok(())
+}
+
+/// Hex SHA-256 of the file at `path`.
+fn sha256_file(path: &Path) -> Result<String, String> {
+    let mut file = fs::File::open(path).map_err(|error| error.to_string())?;
+    let mut hasher = Sha256::new();
+    copy(&mut file, &mut hasher).map_err(|error| error.to_string())?;
+    let digest = hasher.finalize();
+    Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
 fn profile_dir() -> Option<PathBuf> {
