@@ -181,18 +181,25 @@ fn principal_endpoints(colours: &[[f32; 3]]) -> ([f32; 3], [f32; 3]) {
             }
         }
     }
-    // Start from the channel that varies most, so a grey ramp or a one-channel ramp converges at once.
-    let start = (0..3).max_by(|&a, &b| cov[a][a].total_cmp(&cov[b][b])).unwrap_or(0);
-    let mut axis = [0f32; 3];
-    axis[start] = 1.0;
-    for _ in 0..8 {
-        let next = [0, 1, 2].map(|i| cov[i][0] * axis[0] + cov[i][1] * axis[1] + cov[i][2] * axis[2]);
-        let len = next.iter().map(|v| v * v).sum::<f32>().sqrt();
-        if !len.is_normal() {
-            break;
+    let times = |a: [f32; 3]| [0, 1, 2].map(|i| cov[i][0] * a[0] + cov[i][1] * a[1] + cov[i][2] * a[2]);
+    let iterate = |start: usize| {
+        let mut axis = [0f32; 3];
+        axis[start] = 1.0;
+        for _ in 0..8 {
+            let next = times(axis);
+            let len = next.iter().map(|v| v * v).sum::<f32>().sqrt();
+            if !len.is_normal() {
+                break;
+            }
+            axis = next.map(|v| v / len);
         }
-        axis = next.map(|v| v / len);
-    }
+        axis
+    };
+    // From each channel's axis, keeping the one the colours spread along most: a channel that
+    // varies on its own is already an eigenvector, so a single start there would never leave it
+    // even when the others vary more together.
+    let spread = |a: [f32; 3]| times(a).iter().zip(a).map(|(x, y)| x * y).sum::<f32>();
+    let axis = [0, 1, 2].map(iterate).into_iter().max_by(|&a, &b| spread(a).total_cmp(&spread(b))).unwrap_or([1.0, 0.0, 0.0]);
     let along = |c: &[f32; 3]| (c[0] - mean[0]) * axis[0] + (c[1] - mean[1]) * axis[1] + (c[2] - mean[2]) * axis[2];
     let (lo, hi) = colours.iter().map(along).fold((f32::MAX, f32::MIN), |(lo, hi), t| (lo.min(t), hi.max(t)));
     let at = |t: f32| [0, 1, 2].map(|i| (mean[i] + t * axis[i]).clamp(0.0, 255.0));
@@ -333,6 +340,21 @@ mod tests {
             let got = palette[(bits >> (3 * t)) as usize & 7];
             assert!(got.abs_diff(texel[3]) <= 2, "texel {t}: {got} for {}", texel[3]);
         }
+    }
+
+    #[test]
+    fn the_principal_axis_is_found_when_one_channel_varies_on_its_own() {
+        // Red alternates on its own (variance 64); green and blue alternate together (variance 49
+        // each, 98 along their shared axis), uncorrelated with red. Starting on red alone would
+        // keep red's axis and flatten green and blue; the block must do better than its bounding box.
+        let block: Block = std::array::from_fn(|t| {
+            let gb = if (t / 2) % 2 == 0 { 121 } else { 135 };
+            [if t % 2 == 0 { 120 } else { 136 }, gb, gb, 255]
+        });
+        let error = |bytes: &[u8; 8]| decode_colour(bytes, false).iter().zip(&block).map(|(a, b)| distance(a, b)).sum::<u32>();
+        let (_, bounding_box) = fit(&block, u16::MAX, 0, to565([120.0, 121.0, 121.0]), to565([136.0, 135.0, 135.0]), true);
+        let ours = error(&colour_block(&block, u16::MAX, 0, false));
+        assert!(ours < bounding_box, "{ours} vs the bounding box's {bounding_box}");
     }
 
     #[test]

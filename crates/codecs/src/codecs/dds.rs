@@ -376,8 +376,8 @@ pub(crate) fn encode(image: &Image, plan: Plan, opts: &EncodeOptions) -> Result<
         size = half(size);
     }
     let total = sizes.iter().try_fold(HEADER, |total, &s| total.checked_add(s)).ok_or_else(|| encode_err("texture size overflow"))?;
-    let mut out = crate::options::alloc_zeroed::<u8>(total)?;
     let header = header(width, height, store, levels, sizes.first().copied().unwrap_or(0))?;
+    let mut out = crate::options::alloc_zeroed::<u8>(total)?;
     out.get_mut(..HEADER).ok_or_else(|| encode_err("output buffer too small"))?.copy_from_slice(&header);
 
     let channels = img.layout().channels();
