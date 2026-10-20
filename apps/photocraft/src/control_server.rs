@@ -3,13 +3,14 @@
 
 use std::io::{BufReader, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel, sync_channel};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use photocraft_automation::budgets::write_reply;
 use photocraft_automation::security::{
-    ConnectionLimiter, LineRead, MAX_CONNECTIONS, MAX_REQUEST_BYTES, authentication_reply, configure_stream, read_bounded_line, repeat_auth_reply,
+    AUTH_DEADLINE, AuthDeadlineStream, ConnectionLimiter, LineRead, MAX_CONNECTIONS, MAX_REQUEST_BYTES, authentication_reply, configure_stream,
+    read_bounded_line, repeat_auth_reply,
 };
 use photocraft_ui_egui::ControlRequest;
 use photocraft_ui_egui::control::REPLY_DEADLINE;
@@ -70,38 +71,88 @@ fn ask(
     Some(rrx.recv_timeout(deadline.saturating_duration_since(Instant::now())).unwrap_or_else(|_| json!({"ok": false, "error": dispatch.give_up()})))
 }
 
-/// Write every pushed event line waiting for a subscribed connection. False once writing fails.
-fn push_pending(out: &mut TcpStream, push: &Receiver<String>) -> bool {
-    while let Ok(line) = push.try_recv() {
-        if writeln!(out, "{line}").is_err() || out.flush().is_err() {
-            return false;
+/// One writer drains a subscriber queue while the reader waits for complete request lines.
+/// All outbound lines share the same lock so a push cannot split a control reply.
+struct PushWriter {
+    stop: Sender<()>,
+    ready: Sender<()>,
+    handle: std::thread::JoinHandle<()>,
+}
+
+impl PushWriter {
+    fn start(out: Arc<Mutex<TcpStream>>, push: Receiver<String>) -> std::io::Result<Self> {
+        let (stop_tx, stop_rx) = channel();
+        let (ready_tx, ready_rx) = channel();
+        let handle = std::thread::Builder::new().name("photocraft-event-writer".into()).spawn(move || {
+            // The subscribe reply must be the first line before any pushed event.
+            if ready_rx.recv().is_err() {
+                return;
+            }
+            loop {
+                if stop_rx.try_recv().is_ok() {
+                    break;
+                }
+                match push.recv_timeout(PUSH_STEP) {
+                    Ok(line) => {
+                        if stop_rx.try_recv().is_ok() {
+                            break;
+                        }
+                        let mut stream = out.lock().unwrap_or_else(PoisonError::into_inner);
+                        if writeln!(stream, "{line}").is_err() || stream.flush().is_err() {
+                            break;
+                        }
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                }
+            }
+        })?;
+        Ok(Self { stop: stop_tx, ready: ready_tx, handle })
+    }
+
+    fn begin(&self) {
+        let _ = self.ready.send(());
+    }
+
+    fn stop(self) {
+        let _ = self.stop.send(());
+        // Also release a writer that has not yet sent its subscribe reply.
+        let _ = self.ready.send(());
+        if self.handle.join().is_err() {
+            eprintln!("photocraft: event writer stopped unexpectedly");
         }
     }
-    true
+}
+
+fn stop_push_writer(push: &mut Option<PushWriter>) {
+    if let Some(writer) = push.take() {
+        writer.stop();
+    }
+}
+
+fn send_reply(out: &Mutex<TcpStream>, reply: &Value) -> bool {
+    let mut stream = out.lock().unwrap_or_else(PoisonError::into_inner);
+    write_reply(&mut *stream, reply).is_ok() && stream.flush().is_ok()
 }
 
 fn serve(stream: TcpStream, token: &str, tx: Sender<ControlRequest>, ctx: egui::Context) {
+    serve_with_auth_deadline(stream, token, tx, ctx, AUTH_DEADLINE);
+}
+
+/// [`serve`] for a connection that must complete `auth` within `auth_deadline` of connecting,
+/// however much it sends meanwhile (#4965); after that only the idle timeout applies.
+fn serve_with_auth_deadline(stream: TcpStream, token: &str, tx: Sender<ControlRequest>, ctx: egui::Context, auth_deadline: Duration) {
     if configure_stream(&stream).is_err() {
         return;
     }
     let Ok(read) = stream.try_clone() else { return };
-    let mut reader = BufReader::new(read);
-    let mut out = stream;
+    let mut reader = BufReader::new(AuthDeadlineStream::new(read, auth_deadline));
+    let out = Arc::new(Mutex::new(stream));
     let mut line = String::new();
     let mut authenticated = false;
-    // Pushed events for this connection once it subscribed (#4939). A subscriber reads with a
-    // short timeout so the pushes go out between requests, and an idle one stays connected.
-    let mut push: Option<Receiver<String>> = None;
+    let mut push: Option<PushWriter> = None;
     'conn: loop {
         match read_bounded_line(&mut reader, &mut line) {
-            Err(e) if push.is_some() && matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
-                if let Some(rx) = &push
-                    && !push_pending(&mut out, rx)
-                {
-                    break;
-                }
-                continue;
-            }
             Ok(LineRead::Eof) | Err(_) => break,
             Ok(LineRead::TooLong) => {
                 let reply = json!({
@@ -109,8 +160,7 @@ fn serve(stream: TcpStream, token: &str, tx: Sender<ControlRequest>, ctx: egui::
                     "ok": false,
                     "error": format!("request exceeds {MAX_REQUEST_BYTES} bytes"),
                 });
-                let _ = write_reply(&mut out, &reply);
-                let _ = out.flush();
+                let _ = send_reply(&out, &reply);
                 break;
             }
             Ok(LineRead::Line) if line.trim().is_empty() => continue,
@@ -119,17 +169,21 @@ fn serve(stream: TcpStream, token: &str, tx: Sender<ControlRequest>, ctx: egui::
         if !authenticated {
             let (reply, ok) = authentication_reply(&line, token);
             authenticated = ok;
-            if write_reply(&mut out, &reply).is_err() || out.flush().is_err() || !authenticated {
+            if ok && reader.get_mut().authenticated().is_err() {
+                break;
+            }
+            if !send_reply(&out, &reply) || !authenticated {
                 break;
             }
             continue;
         }
         if let Some(reply) = repeat_auth_reply(&line) {
-            if write_reply(&mut out, &reply).is_err() || out.flush().is_err() {
+            if !send_reply(&out, &reply) {
                 break;
             }
             continue;
         }
+        let mut pending_push: Option<PushWriter> = None;
         let reply = match serde_json::from_str::<Value>(&line) {
             Ok(msg) => {
                 let id = msg.get("id").cloned().unwrap_or(Value::Null);
@@ -138,21 +192,23 @@ fn serve(stream: TcpStream, token: &str, tx: Sender<ControlRequest>, ctx: egui::
                 let deadline = Instant::now() + REPLY_DEADLINE;
                 let mut r = match method.as_str() {
                     "events.subscribe" => {
-                        // The app pushes into this queue; this thread writes it out.
                         let (ptx, prx) = sync_channel::<String>(photocraft_ui_egui::control::PUSH_QUEUE);
                         let (mut req, rrx) = ControlRequest::new(method, params);
                         req.push = Some(ptx);
-                        let Some(r) = ask(&tx, &ctx, req, rrx, deadline) else { break };
+                        let Some(mut r) = ask(&tx, &ctx, req, rrx, deadline) else { break };
                         if r.get("ok").and_then(Value::as_bool) == Some(true) {
-                            push = Some(prx);
-                            let _ = out.set_read_timeout(Some(PUSH_STEP));
+                            stop_push_writer(&mut push);
+                            match PushWriter::start(Arc::clone(&out), prx) {
+                                Ok(writer) => pending_push = Some(writer),
+                                Err(e) => r = json!({"ok": false, "error": format!("could not start event writer: {e}")}),
+                            }
                         }
                         r
                     }
                     "events.unsubscribe" => {
-                        // Dropping the queue ends the subscription in the app.
-                        push = None;
-                        let _ = configure_stream(&out);
+                        // Dropping the receiver ends the app's subscription. The reader has
+                        // retained its normal timeout, so there is no socket reset to undo.
+                        stop_push_writer(&mut push);
                         let (req, rrx) = ControlRequest::new(method, params);
                         let Some(r) = ask(&tx, &ctx, req, rrx, deadline) else { break };
                         r
@@ -189,25 +245,52 @@ fn serve(stream: TcpStream, token: &str, tx: Sender<ControlRequest>, ctx: egui::
             }
             Err(e) => json!({"id": null, "ok": false, "error": format!("bad JSON: {e}")}),
         };
-        if write_reply(&mut out, &reply).is_err() {
+        if !send_reply(&out, &reply) {
+            if let Some(writer) = pending_push {
+                writer.stop();
+            }
             break;
         }
-        if out.flush().is_err() {
-            break;
-        }
-        if let Some(rx) = &push
-            && !push_pending(&mut out, rx)
-        {
-            break;
+        if let Some(writer) = pending_push {
+            writer.begin();
+            push = Some(writer);
         }
     }
+    stop_push_writer(&mut push);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::BufRead;
-    use std::time::Duration;
+
+    /// #4965: a connection that keeps sending without authenticating is closed at the deadline
+    /// (releasing its connection permit), and nothing it sent is dispatched.
+    #[test]
+    fn an_unauthenticated_connection_is_closed_at_the_deadline_whatever_it_sends() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = channel::<ControlRequest>();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let started = Instant::now();
+            serve_with_auth_deadline(stream, "unused", tx, egui::Context::default(), Duration::from_millis(300));
+            started.elapsed()
+        });
+        // Blank lines and partial frames, one byte every 20 ms: each read succeeds long before
+        // the idle timeout.
+        let mut stream = TcpStream::connect(addr).unwrap();
+        for i in 0..150 {
+            let byte: &[u8] = if i % 5 == 0 { b"\n" } else { b" " };
+            if stream.write_all(byte).is_err() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let served = server.join().unwrap();
+        assert!(served < Duration::from_secs(3), "the trickle did not extend the deadline: {served:?}");
+        assert!(rx.try_recv().is_err(), "nothing was dispatched");
+    }
 
     const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
@@ -288,6 +371,56 @@ mod tests {
         drop(reader);
         server.join().unwrap();
         assert_eq!(handler.join().unwrap(), 3, "two empty polls, then the one with an event");
+    }
+
+    /// #5154: pushes continue while a subscribed client sends one request in pieces.
+    #[test]
+    fn subscribed_slow_request_keeps_its_prefix_across_push_tick() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = channel::<ControlRequest>();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            serve(stream, TOKEN, tx, egui::Context::default());
+        });
+        let handler = std::thread::spawn(move || {
+            let sub = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert_eq!(sub.method, "events.subscribe");
+            let push = sub.push.as_ref().unwrap().clone();
+            sub.reply.send(json!({"ok": true, "result": {"subscribed": true}})).unwrap();
+            std::thread::sleep(PUSH_STEP * 2);
+            push.try_send(json!({"seq": 1, "event": "document.changed"}).to_string()).unwrap();
+            let req = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert_eq!(req.method, "test.split");
+            req.reply.send(json!({"ok": true, "result": "whole request"})).unwrap();
+        });
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut line = String::new();
+        writeln!(stream, "{}", json!({"id": 1, "method": "auth", "params": {"token": TOKEN}})).unwrap();
+        reader.read_line(&mut line).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&line).unwrap()["ok"], true);
+        writeln!(stream, "{}", json!({"id": 2, "method": "events.subscribe", "params": {}})).unwrap();
+        line.clear();
+        reader.read_line(&mut line).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&line).unwrap()["id"], 2);
+        stream.write_all(b"{\"id\":3,\"method\":\"test.").unwrap();
+        // The push must arrive while the request is incomplete and after the old read tick.
+        line.clear();
+        reader.read_line(&mut line).unwrap();
+        let pushed: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(pushed["seq"], 1, "{pushed}");
+        stream.write_all(b"split\"}\n").unwrap();
+        line.clear();
+        reader.read_line(&mut line).unwrap();
+        let reply: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(reply["id"], 3, "{reply}");
+        assert_eq!(reply["result"], "whole request");
+        drop(stream);
+        drop(reader);
+        server.join().unwrap();
+        handler.join().unwrap();
     }
 
     #[test]
