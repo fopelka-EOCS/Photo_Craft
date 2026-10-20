@@ -865,14 +865,22 @@ pub enum Fit {
     Contain,
 }
 
-fn fit_param(p: &Value) -> Result<Fit> {
-    match p.get("fit") {
-        None | Some(Value::Null) => Ok(Fit::Keep),
-        Some(Value::String(f)) if f == "keep" => Ok(Fit::Keep),
-        Some(Value::String(f)) if f == "stretch" => Ok(Fit::Stretch),
-        Some(Value::String(f)) if f == "contain" => Ok(Fit::Contain),
-        Some(o) => Err(other(format!("`fit` must be \"keep\", \"stretch\" or \"contain\", not {o}"))),
+impl Fit {
+    /// A request's `fit` option: absent or null is [`Fit::Keep`]; `None` for anything but
+    /// `"keep"`, `"stretch"` or `"contain"`.
+    pub fn from_param(v: Option<&Value>) -> Option<Fit> {
+        match v {
+            None | Some(Value::Null) => Some(Fit::Keep),
+            Some(Value::String(f)) if f == "keep" => Some(Fit::Keep),
+            Some(Value::String(f)) if f == "stretch" => Some(Fit::Stretch),
+            Some(Value::String(f)) if f == "contain" => Some(Fit::Contain),
+            Some(_) => None,
+        }
     }
+}
+
+fn fit_param(p: &Value) -> Result<Fit> {
+    Fit::from_param(p.get("fit")).ok_or_else(|| other(format!("`fit` must be \"keep\", \"stretch\" or \"contain\", not {}", p["fit"])))
 }
 
 /// Replace Contents from a file's name and bytes: what the desktop and web file pickers hand over.
@@ -886,7 +894,7 @@ pub fn replace_contents_fit(s: &mut Session, id: LayerId, file_name: &str, bytes
     let fmt = doc.pixel_format();
     // The old boxes first: without a stored size they decode the old contents.
     let from = match fit {
-        Fit::Stretch | Fit::Contain => Some(authored_boxes(doc, id)?),
+        Fit::Stretch | Fit::Contain => Some(authored_boxes(s, doc, id)?),
         Fit::Keep => None,
     };
     // Decode now, failing before touching the document; the re-render finds the image in the
@@ -898,8 +906,9 @@ pub fn replace_contents_fit(s: &mut Session, id: LayerId, file_name: &str, bytes
 
 /// The box (source pixels) each instance of `id`'s contents was authored for: its `soLD` stored
 /// size when the layer came from a PSD (cheap), else the box of the decoded contents, which the
-/// instances share (decoded once).
-fn authored_boxes(doc: &Document, id: LayerId) -> Result<Vec<(LayerId, [f64; 4])>> {
+/// instances share (decoded once). A linked file's path comes from the document, so the
+/// session's gate sees it before it is read, as for Replace Contents' own path.
+fn authored_boxes(s: &Session, doc: &Document, id: LayerId) -> Result<Vec<(LayerId, [f64; 4])>> {
     let mut decoded = None;
     instances(doc, smart(doc, id)?.contents_id)
         .into_iter()
@@ -909,7 +918,10 @@ fn authored_boxes(doc: &Document, id: LayerId) -> Result<Vec<(LayerId, [f64; 4])
                 sm.psd_raw.as_deref().and_then(|d| photocraft_io::smart_map::parse_sold(d)).and_then(|p| photocraft_io::smart_map::stored_size(&p.descriptor));
             let b = match stored {
                 Some((w, h)) => Some([0.0, 0.0, w, h]),
-                None => *decoded.get_or_insert_with(|| source_box(doc, sm)),
+                None => {
+                    authorize_source(s, "layer.smartObjects.replaceContents", doc, &sm.source)?;
+                    *decoded.get_or_insert_with(|| source_box(doc, sm))
+                }
             };
             Ok((l, b.ok_or_else(|| other("the smart object's contents are unavailable, so their box is unknown"))?))
         })

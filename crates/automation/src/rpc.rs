@@ -749,6 +749,9 @@ mod tests {
             (json!({"path": "design.png"}), "layer"),
             (json!({"layer": layer}), "path"),
             (json!({"layer": layer, "path": "design.png", "fit": "cover"}), "fit"),
+            // Not a string: refused, as the engine command refuses it, rather than taken as keep.
+            (json!({"layer": layer, "path": "design.png", "fit": true}), "fit"),
+            (json!({"layer": layer, "path": "design.png", "fit": 1}), "fit"),
         ] {
             let refused = h.handle("doc.replaceContents", params).unwrap_err().to_string();
             assert!(refused.contains(reason), "{refused}");

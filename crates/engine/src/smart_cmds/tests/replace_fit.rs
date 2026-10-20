@@ -158,6 +158,38 @@ fn stretch_fills_the_old_box_through_a_warp_under_a_perspective() {
     );
 }
 
+fn deny_replace_paths(cmd: &str, p: &Value) -> Result<()> {
+    if cmd == "layer.smartObjects.replaceContents" && p.get("path").is_some() {
+        return Err(other(format!("source path refused: {}", p["path"])));
+    }
+    Ok(())
+}
+
+/// Without a stored size, stretch and contain read the old contents' box from the old source.
+/// For a linked file that reads a path the document holds, so an untrusted session's gate sees
+/// it first, and a refusal leaves the document as it was.
+#[test]
+fn a_fit_from_a_linked_source_asks_the_session_gate_first() {
+    let dir = tmp_dir("linked");
+    let (mut s, id) = smart_session();
+    let old = png_file(&dir, "old.png", 20, 10, [0.0, 0.0, 1.0]);
+    set_placement(&mut s, id, |sm| sm.source = SmartSource::Linked { path: old.clone() });
+    let new = std::fs::read(png_file(&dir, "new.png", 10, 5, [1.0, 0.0, 0.0])).unwrap();
+    s.authorize = Some(deny_replace_paths);
+    let before = s.active().unwrap().doc.clone();
+    for fit in [Fit::Stretch, Fit::Contain] {
+        let e = replace_contents_fit(&mut s, id, "new.png", new.clone(), fit).unwrap_err().to_string();
+        assert!(e.contains("source path refused") && e.contains("old.png"), "{fit:?}: {e}");
+        assert!(Arc::ptr_eq(&before, &s.active().unwrap().doc), "{fit:?}");
+    }
+    // Keep needs no old box; without a gate (a trusted session) the linked file is read.
+    replace_contents_fit(&mut s, id, "new.png", new.clone(), Fit::Keep).unwrap();
+    s.execute("edit.undo", json!({})).unwrap();
+    s.authorize = None;
+    replace_contents_fit(&mut s, id, "new.png", new, Fit::Stretch).unwrap();
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 #[test]
 fn keep_is_the_default_and_keeps_the_pixel_size() {
     let dir = tmp_dir("keep");
