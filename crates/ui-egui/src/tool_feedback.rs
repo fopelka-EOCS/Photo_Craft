@@ -52,8 +52,17 @@ pub fn is_selection_tool(tool: Tool) -> bool {
 
 /// The effective selection mode of `tool` for the options-bar mode `bar` (0 New, 1 Add,
 /// 2 Subtract, 3 Intersect) and the held modifiers: exactly what the tool's gesture will use.
-pub fn selection_mode(_tool: Tool, bar: u8, m: egui::Modifiers) -> &'static str {
-    if m.shift && m.alt {
+pub fn selection_mode(tool: Tool, bar: u8, m: egui::Modifiers) -> &'static str {
+    // `select.quick` has no intersect mode; the options bar omits that button for this tool.
+    if tool == Tool::QuickSelection {
+        if m.shift {
+            "add"
+        } else if m.alt {
+            "subtract"
+        } else {
+            ["replace", "add", "subtract"][bar.min(2) as usize]
+        }
+    } else if m.shift && m.alt {
         "intersect"
     } else if m.shift {
         "add"
@@ -262,6 +271,7 @@ mod tests {
         assert_eq!(badge(&app, Tool::QuickSelection, alt), Some(Badge::Subtract));
         app.ui.selection_mode = 1;
         assert_eq!(badge(&app, Tool::QuickSelection, none), Some(Badge::Add));
+        assert_eq!(badge(&app, Tool::QuickSelection, both), Some(Badge::Add));
         app.ui.selection_mode = 0;
         assert_eq!(badge(&app, Tool::ObjectSelection, none), None);
         assert_eq!(badge(&app, Tool::ObjectSelection, shift), Some(Badge::Add));

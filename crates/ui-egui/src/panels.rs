@@ -1187,7 +1187,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         }
                     }
                     Tool::Lasso | Tool::PolygonLasso | Tool::MagneticLasso if t.pro => {
-                        selection_mode_buttons(app, ui);
+                        selection_mode_buttons(app, ui, true, false);
                         widgets::vline(ui, 22.0);
                         opt_label(ui, tl!("Feather"));
                         widgets::value_field(ui, &mut app.ui.tool_options.feather, 0.0..=1000.0, "px", 62.0);
@@ -1234,7 +1234,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         }
                     }
                     Tool::MagicWand => {
-                        selection_mode_buttons(app, ui);
+                        selection_mode_buttons(app, ui, true, false);
                         widgets::vline(ui, 22.0);
                         opt_label(ui, tl!("Tolerance"));
                         widgets::value_field(ui, &mut app.ui.tool_options.tolerance, 0.0..=255.0, "", 58.0);
@@ -4443,19 +4443,24 @@ fn effect_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, l: &Layer, depth: usi
 }
 
 /// New / add / subtract / intersect selection buttons (shared by selection tools).
-pub(crate) fn selection_mode_buttons(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+pub(crate) fn selection_mode_buttons(app: &mut PhotocraftApp, ui: &mut egui::Ui, intersect: bool, quick_selection_new: bool) {
     ui.spacing_mut().item_spacing.x = 2.0;
-    for (i, (icon, tip)) in [
+    let modes = [
         ("square", tl!("New selection").to_string()),
         ("plus", crate::i18n::fmt(tl!("Add to selection  ({key})"), &[("key", &crate::shortcuts::pretty("Shift"))])),
         ("minus", crate::i18n::fmt(tl!("Subtract from selection  ({key})"), &[("key", &crate::shortcuts::pretty("Alt"))])),
         ("squares-subtract", crate::i18n::fmt(tl!("Intersect with selection  ({key})"), &[("key", &crate::shortcuts::pretty("Shift+Alt"))])),
-    ]
-    .iter()
-    .enumerate()
-    {
-        if icons::button(ui, icon, 24.0, app.ui.selection_mode == i as u8, tip).clicked() {
+    ];
+    let n = if intersect { modes.len() } else { modes.len() - 1 };
+    for (i, (icon, tip)) in modes.iter().take(n).enumerate() {
+        let active = app.ui.selection_mode == i as u8 || (!intersect && i + 1 == n && app.ui.selection_mode >= n as u8);
+        if icons::button(ui, icon, 24.0, active, tip).clicked() {
             app.ui.selection_mode = i as u8;
+            if quick_selection_new && i == 0 {
+                app.ui.polygon_mode = "qs-replace".into();
+            } else if quick_selection_new {
+                app.ui.polygon_mode.clear();
+            }
         }
     }
     ui.spacing_mut().item_spacing.x = 8.0;
