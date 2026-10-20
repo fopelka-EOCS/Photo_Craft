@@ -896,7 +896,7 @@ pub fn destructive_eyedropper(s: &crate::Session, kind: &str, p: &Value) -> Resu
     if p.get("eyedropper").is_none() {
         return Ok(None);
     }
-    let p = crate::channel_cmds::inject_target(s, "image.adjustments.curves", p.clone());
+    let p = crate::channel_cmds::inject_target(s, &format!("image.adjustments.{kind}"), p.clone());
     if crate::channel_cmds::gray_target(&p).is_none() {
         return eyedropper_from_params(s, kind, &p);
     }

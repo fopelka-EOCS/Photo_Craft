@@ -112,6 +112,74 @@ fn scalar_picker_reads_unstored_mask_defaults_and_ignores_colour_transparency() 
 }
 
 #[test]
+fn offset_sparse_masks_sample_document_coordinates_and_unstored_defaults() {
+    for mode in [ColorMode::Rgb, ColorMode::Grayscale, ColorMode::Lab, ColorMode::Cmyk] {
+        for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
+            // Independent native-depth expectations for the stored patch and its default.
+            let quantize = |v: f64| match depth {
+                SampleType::U8 => (v * 255.0).round() / 255.0,
+                SampleType::U16 => (v * 65535.0).round() / 65535.0,
+                _ => v,
+            };
+            for linked in [false, true] {
+                for (dx, dy) in [(0, 0), (7, 5), (-12, -14), (52, 34)] {
+                    let mut doc = Document::new("Offset mask", Size::new(64, 48), mode, depth);
+                    let mut pixels = Surface::new(PixelFormat::new(mode, depth, true));
+                    let mut values = vec![0.1; mode.color_channels() + 1];
+                    *values.last_mut().unwrap() = 1.0;
+                    pixels.fill_rect(Rect::from_xywh(9, 11, 4, 5), &values);
+                    let mut mask = Surface::with_default(PixelFormat::new(ColorMode::Grayscale, depth, false), &[0.6]);
+                    mask.fill_rect(Rect::from_xywh(10, 12, 3, 3), &[0.25]);
+                    let mut layer = Layer::new("Small offset layer", LayerContent::Raster(pixels));
+                    layer.mask = Some(LayerMask { surface: mask, linked, ..LayerMask::reveal_all() });
+                    let id = layer.id;
+                    doc.layers.push(layer);
+                    let mut s = Session::new();
+                    s.add_document(doc, None);
+                    s.select_layer(id).unwrap();
+                    // Actual moves exercise masks that travel with the layer or move alone,
+                    // including a stored patch extending beyond either canvas corner.
+                    s.execute("layer.translate", json!({"target":"mask","dx":dx,"dy":dy})).unwrap();
+                    s.active_mut().unwrap().channel_view.target = ChannelTarget::LayerMask;
+                    let patch = Rect::from_xywh(10 + dx, 12 + dy, 3, 3);
+                    for (x, y) in [((11 + dx).clamp(0, 63), (13 + dy).clamp(0, 47)), (11, 13), (63, 47)] {
+                        for size in [1, 3] {
+                            let r = size / 2;
+                            let (mut sum, mut count) = (0.0, 0);
+                            for yy in (y - r).max(0)..=(y + r).min(47) {
+                                for xx in (x - r).max(0)..=(x + r).min(63) {
+                                    sum += quantize(if patch.contains(xx, yy) { 0.25 } else { 0.6 });
+                                    count += 1;
+                                }
+                            }
+                            let expected = quantize(sum / f64::from(count)) * 255.0;
+                            for kind in ["levels", "curves"] {
+                                let mut p = json!({"eyedropper":{"point":"white","at":[x,y],"size":size}});
+                                let a = adjust_params::destructive_eyedropper(&s, kind, &p).unwrap().unwrap();
+                                // Dialog sampling follows the current channel; direct commands
+                                // can name it explicitly. Both must resolve the same plane.
+                                p["target"] = json!("mask");
+                                assert_eq!(a, adjust_params::destructive_eyedropper(&s, kind, &p).unwrap().unwrap());
+                                let values = adjust_params::to_params(&a);
+                                let actual = if kind == "levels" {
+                                    values["inWhite"].as_f64().unwrap()
+                                } else {
+                                    values["points"].as_array().unwrap().last().unwrap()[0].as_f64().unwrap()
+                                };
+                                assert!(
+                                    (actual - expected).abs() < 0.02,
+                                    "{mode:?} {depth:?} linked={linked} shift={dx},{dy} at={x},{y} size={size} {kind}: {actual} != {expected}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn scalar_picker_respects_selection_coverage_when_applied() {
     for target in [json!("mask"), json!("quickMask"), json!({"channel":0})] {
         let mut s = session(ColorMode::Lab, SampleType::U16);

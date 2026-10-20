@@ -4,7 +4,7 @@ Completed 2026-10-17 against upstream main `2a952f164c0b4cf936b1c6497db10dd09534
 
 Levels now lists only the selected target by its actual name, using literal custom names and translated built-in names like Curves. Its controls and Auto use the matching parameter key and histogram for individual RGB/CMYK/Lab components. It uses grayscale controls and the edited plane's histogram for raster masks, alpha/spot channels and Quick Mask in every document colour mode. Curves/Levels Action dialogs resolve their recorded explicit target before choosing defaults. Their channel context survives Reset, pencil editing and sampling. Grayscale black/white eyedroppers sample the committed plane directly at native depth, including default samples, and update the visible neutral curve. Explicit scalar Action previews use the same CPU preview path as a normally selected scalar channel.
 
-## Validation
+## Validation (2026-10-17)
 
 - Full engine/UI `cargo test`: **4,988 passed, 0 failed, 32 normally ignored**, including doctest builds and all new tests.
 - The ignored full-registry `panic_hunt` test passed separately.
@@ -13,7 +13,13 @@ Levels now lists only the selected target by its actual name, using literal cust
 - Full-app offscreen before/after screenshots were inspected for Lab Levels gamma, a Lab alpha white-point picker with a real canvas click, an alpha-targeted Action played while Red is selected, and Levels on a selected Green component. Updated candidate captures show `Saved sky` and `Green` in the Levels dropdown.
 - Multiple local review/fix passes completed; the final review found no further actionable functional bugs within the reviewed scope.
 
-The 18 new regression functions exercise RGB, CMYK, Lab and grayscale documents across native 8/16/32-bit samples; real Levels field editing; exact target names, literal spot names, translated built-in names, every RGB/CMYK/Lab component, Levels Auto histogram routing; black/white pickers on masks, alpha/spot and Quick Mask; serialized Action defaults and explicit target precedence; reset, pencil and sampling context; explicit pixel targets; preview/commit agreement; native-depth edge averages and unstored mask defaults; feathered selections; preservation of colour pixels, transparency and other planes; undo/redo, cancel and malformed inputs.
+The initial 18 regression functions exercise RGB, CMYK, Lab and grayscale documents across native 8/16/32-bit samples; real Levels field editing; exact target names, literal spot names, translated built-in names, every RGB/CMYK/Lab component, Levels Auto histogram routing; black/white pickers on masks, alpha/spot and Quick Mask; serialized Action defaults and explicit target precedence; reset, pencil and sampling context; explicit pixel targets; preview/commit agreement; native-depth edge averages and unstored mask defaults; feathered selections; preservation of colour pixels, transparency and other planes; undo/redo, cancel and malformed inputs.
+
+## Review follow-up (2026-10-20)
+
+The destructive picker now passes the actual Levels/Curves command name to target injection. Added one permanent regression (19 regression functions total in this PR) for a sparse mask smaller than the canvas, shifted through actual linked/unlinked layer-mask moves. It checks 1,152 sampling cases across RGB/Gray/Lab/CMYK, U8/U16/F32, normal and partly off-canvas positions, point and 3×3 averages, stored pixels and unstored defaults. Implicit and explicit mask targets must produce the same adjustment; expected native-depth averages are calculated independently. No sampling algorithm changed.
+
+Repeated on Linux: full engine tests **1,906 passed, 0 failed, 19 normally ignored**; all 6 targeted picker tests passed; strict engine all-target Clippy, formatting, layering and wasm passed. The ignored full-registry adversarial test passed separately. The earlier engine/UI result above remains dated to 2026-10-17; the UI was unchanged by this follow-up. No new UI-latency or performance measurement is claimed for this routing-name cleanup.
 
 ## 24 MP release comparison
 
