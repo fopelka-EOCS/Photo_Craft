@@ -160,6 +160,7 @@ pub mod parity;
 pub mod patch_preview;
 pub(crate) mod pattern_fill_ui;
 pub mod pattern_preview;
+pub mod pdf_options_ui;
 pub mod perspective_crop_ui;
 pub mod perspective_ui;
 pub mod pixel_grid;
@@ -291,6 +292,8 @@ pub struct ExportSettings {
     /// The path of the document's own file, which linked smart objects that PSD/PSB embed are
     /// resolved against ([`photocraft_io::ExportOptions::document_path`]).
     pub document_path: Option<std::path::PathBuf>,
+    /// PDF: plain, or PDF/X-1a:2001 from PDF Options.
+    pub pdf: photocraft_io::PdfOptions,
 }
 
 impl Default for ExportSettings {
@@ -308,6 +311,7 @@ impl Default for ExportSettings {
             embed_icc: true,
             embed_metadata: true,
             document_path: None,
+            pdf: photocraft_io::PdfOptions::default(),
         }
     }
 }
@@ -333,6 +337,7 @@ impl ExportSettings {
         opts.image_previews = self.image_previews;
         opts.psd_maximize_compatibility = self.psd_maximize_compatibility;
         opts.document_path = self.document_path.clone();
+        opts.pdf = self.pdf.clone();
         opts
     }
 }
@@ -879,6 +884,8 @@ pub struct PhotocraftApp {
     pub(crate) targa_options: Option<targa_options_ui::Prompt>,
     /// A save to a DDS texture parked behind the DDS Options prompt (see `dds_options_ui`).
     pub(crate) dds_options: Option<dds_options_ui::Prompt>,
+    /// A Save As or Save a Copy to PDF parked behind the PDF Options prompt (see `pdf_options_ui`).
+    pub(crate) pdf_options: Option<pdf_options_ui::Prompt>,
     /// Files read but not opened yet: the first waits on its profile prompt, the rest behind it
     /// (see `open_prompt`).
     pub(crate) held_opens: std::collections::VecDeque<open_prompt::Held>,
@@ -1031,6 +1038,7 @@ impl PhotocraftApp {
             disk_stamps: HashMap::new(),
             targa_options: None,
             dds_options: None,
+            pdf_options: None,
             held_opens: Default::default(),
             allow_close: false,
             stylus: Default::default(),
@@ -1545,6 +1553,13 @@ impl PhotocraftApp {
                 {
                     return r;
                 }
+                // A PDF picked in the dialog asks for its standard (plain, or PDF/X-1a for
+                // print); a script naming a path writes a plain PDF without asking.
+                if pdf_options_ui::is_pdf_path(&path) {
+                    let copy = app.saves_copy(&path, None)?;
+                    pdf_options_ui::park(app, path.clone(), copy, "file.saveAs")?;
+                    return Ok(serde_json::json!({"path": path, "warnings": []}));
+                }
                 let r = app.save_to(path.clone(), choices)?;
                 if plain_save && own.as_deref() == Some(path.as_str()) {
                     app.journal_as_plain_save(&path);
@@ -1808,7 +1823,7 @@ impl PhotocraftApp {
 
     /// TIFF, Targa or DDS Options is waiting on an answer before a save is written.
     pub(crate) fn save_options_open(&self) -> bool {
-        self.tiff_options.is_some() || self.targa_options.is_some() || self.dds_options.is_some()
+        self.tiff_options.is_some() || self.targa_options.is_some() || self.dds_options.is_some() || self.pdf_options.is_some()
     }
 
     /// A print worker may still be handing a job to the system queue.
@@ -2155,6 +2170,7 @@ impl eframe::App for PhotocraftApp {
         tiff_options_ui::show(self, &ctx);
         targa_options_ui::show(self, &ctx);
         dds_options_ui::show(self, &ctx);
+        pdf_options_ui::show(self, &ctx);
         distort_ui::show(self, &ctx);
         camera_raw_ui::show(self, &ctx);
         wide_angle_ui::show(self, &ctx);
