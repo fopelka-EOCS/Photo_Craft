@@ -14,8 +14,9 @@
 //! later (lower-right) cell wins. Work is split per destination tile (parallel on native).
 
 use photocraft_color::PixelFormat;
-use photocraft_geom::Rect;
-use photocraft_raster::Surface;
+use photocraft_geom::{Rect, TileCoord};
+use photocraft_raster::{Surface, Tile};
+use std::sync::Arc;
 
 use crate::transform::{Interp, bicubic};
 
@@ -277,7 +278,18 @@ fn warp_triangles_with(
         })
         .collect();
     let level = tile_level.iter().copied().filter(|&l| l > 0).min().and_then(|l| level_for(src, src_rect, l, n));
-    let work = |((t, tris), &lvl): ((&Rect, &Vec<[usize; 3]>), &usize)| -> Option<(Rect, Vec<f32>)> {
+    // Encoded (and dropped if fully transparent) per tile, in parallel, rather than one tile at a
+    // time once all are done. `t` lies in one tile.
+    let encode = |t: Rect, px: &[f32]| -> Option<(TileCoord, Arc<Tile>)> {
+        let mut one = Surface::new(fmt);
+        one.write_region(t, px);
+        one.prune();
+        if one.tile_count() == 0 {
+            return None;
+        }
+        one.take_tiles(t).pop()
+    };
+    let work = |((t, tris), &lvl): ((&Rect, &Vec<[usize; 3]>), &usize)| -> Option<(TileCoord, Arc<Tile>)> {
         if tris.is_empty() {
             return None;
         }
@@ -336,7 +348,7 @@ fn warp_triangles_with(
             }
         }
         if let Some(lv) = level.as_ref().filter(|lv| lvl >= lv.level) {
-            return lv.shade(*t, &uv, &owner, tris, verts, n);
+            return lv.shade(*t, &uv, &owner, tris, verts, n).and_then(|(r, v)| encode(r, &v));
         }
         // Source footprint of the covered pixels, including the spread of their subsamples.
         let (mut fx0, mut fy0, mut fx1, mut fy1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
@@ -369,6 +381,11 @@ fn warp_triangles_with(
                 f64::from(px[((y - foot.y0) as usize * fw + (x - foot.x0) as usize) * n + c])
             }
         };
+        // Offset of pixel (x, y) when the `taps` x `taps` block from it lies inside `foot`, so
+        // the samplers can index `px` directly instead of bounds-checking every tap.
+        let base = |x: i32, y: i32, taps: i32| -> Option<usize> {
+            (x >= foot.x0 && y >= foot.y0 && x + taps <= foot.x1 && y + taps <= foot.y1).then(|| ((y - foot.y0) as usize * fw + (x - foot.x0) as usize) * n)
+        };
         let mut outp = vec![0.0f32; w * h * n];
         let mut any = false;
         let mut acc = [0.0f64; 8];
@@ -386,6 +403,17 @@ fn warp_triangles_with(
                 Interp::Bilinear => {
                     let (ix, iy) = (u.floor() as i32, v.floor() as i32);
                     let (fx, fy) = (u - f64::from(ix), v - f64::from(iy));
+                    if let Some(o) = base(ix, iy, 2) {
+                        for (dy, wy) in [(0, 1.0 - fy), (1, fy)] {
+                            for (dx, wx) in [(0, 1.0 - fx), (1, fx)] {
+                                let p = &px[o + (dy * fw + dx) * n..][..n];
+                                for (s, v) in acc.iter_mut().zip(p) {
+                                    *s += f64::from(*v) * wx * wy;
+                                }
+                            }
+                        }
+                        return;
+                    }
                     for (dy, wy) in [(0, 1.0 - fy), (1, fy)] {
                         for (dx, wx) in [(0, 1.0 - fx), (1, fx)] {
                             for (c, s) in acc.iter_mut().enumerate().take(n) {
@@ -400,6 +428,21 @@ fn warp_triangles_with(
                     let (u, v) = (snap(u), snap(v));
                     let (ix, iy) = (u.floor() as i32, v.floor() as i32);
                     let (wx, wy) = (bicubic(u - f64::from(ix)), bicubic(v - f64::from(iy)));
+                    if let Some(o) = base(ix - 1, iy - 1, 4) {
+                        for (j, wyj) in wy.iter().enumerate() {
+                            for (i, wxi) in wx.iter().enumerate() {
+                                let k = wxi * wyj;
+                                if k == 0.0 {
+                                    continue;
+                                }
+                                let p = &px[o + (j * fw + i) * n..][..n];
+                                for (s, v) in acc.iter_mut().zip(p) {
+                                    *s += f64::from(*v) * k;
+                                }
+                            }
+                        }
+                        return;
+                    }
                     for (j, wyj) in wy.iter().enumerate() {
                         for (i, wxi) in wx.iter().enumerate() {
                             let k = wxi * wyj;
@@ -451,19 +494,19 @@ fn warp_triangles_with(
             }
             outp[b + a] = al as f32;
         }
-        any.then_some((*t, outp))
+        if !any {
+            return None;
+        }
+        encode(*t, &outp)
     };
     #[cfg(not(target_arch = "wasm32"))]
-    let done: Vec<(Rect, Vec<f32>)> = {
+    let done: Vec<(TileCoord, Arc<Tile>)> = {
         use rayon::prelude::*;
         tiles.par_iter().zip(bins.par_iter()).zip(tile_level.par_iter()).filter_map(work).collect()
     };
     #[cfg(target_arch = "wasm32")]
-    let done: Vec<(Rect, Vec<f32>)> = tiles.iter().zip(bins.iter()).zip(tile_level.iter()).filter_map(work).collect();
-    for (r, v) in done {
-        out.write_region(r, &v);
-    }
-    out.prune();
+    let done: Vec<(TileCoord, Arc<Tile>)> = tiles.iter().zip(bins.iter()).zip(tile_level.iter()).filter_map(work).collect();
+    out.put_tiles(done);
     out
 }
 
