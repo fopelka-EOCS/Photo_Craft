@@ -4616,6 +4616,7 @@ mod color_tests {
                 dragging: false,
                 resize: None,
                 preedit: None,
+                document: None,
             });
             let mut h =
                 egui_kittest::Harness::builder().with_size(vec2(80.0, 120.0)).build_ui_state(|ui, app: &mut PhotocraftApp| color_chips(app, ui, false), app);
@@ -5309,6 +5310,7 @@ mod swatch_type_tests {
             dragging: false,
             resize: None,
             preedit: None,
+            document: None,
         });
         let mut h = Harness::builder().with_size(vec2(300.0, 300.0)).build_ui_state(|ui, app: &mut PhotocraftApp| color_picker(app, ui), app);
         h.run_steps(4);
