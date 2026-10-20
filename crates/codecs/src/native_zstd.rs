@@ -14,6 +14,41 @@ pub fn decode_zstd(bytes: &[u8], max_bytes: usize) -> std::io::Result<Vec<u8>> {
     Ok(decoded)
 }
 
+/// Decodes the first frame under an output budget and a 128 MiB window limit.
+/// Unlike [`decode_zstd`], this does not reserve the output budget up front.
+pub fn decode_zstd_bounded(bytes: &[u8], max_bytes: usize) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut context = zstd::zstd_safe::DCtx::try_create().ok_or_else(|| std::io::Error::other("cannot allocate Zstandard decoder"))?;
+    context.set_parameter(zstd::zstd_safe::DParameter::WindowLogMax(27)).map_err(zstd_error)?;
+    let decoder = zstd::stream::read::Decoder::with_context(bytes, &mut context).single_frame();
+    let limit = u64::try_from(max_bytes).unwrap_or(u64::MAX).saturating_add(1);
+    let mut decoded = Vec::new();
+    decoder.take(limit).read_to_end(&mut decoded)?;
+    if decoded.len() > max_bytes {
+        return Err(std::io::Error::new(std::io::ErrorKind::FileTooLarge, "Zstandard output exceeds its budget"));
+    }
+    Ok(decoded)
+}
+
+/// Compares decoded frames with `expected` without allocating their full output.
+/// Enforces the same 128 MiB window limit as [`decode_zstd_bounded`].
+pub fn zstd_matches(bytes: &[u8], mut expected: &[u8]) -> std::io::Result<bool> {
+    use std::io::Read;
+    let mut context = zstd::zstd_safe::DCtx::try_create().ok_or_else(|| std::io::Error::other("cannot allocate Zstandard decoder"))?;
+    context.set_parameter(zstd::zstd_safe::DParameter::WindowLogMax(27)).map_err(zstd_error)?;
+    let mut decoder = zstd::stream::read::Decoder::with_context(bytes, &mut context);
+    let mut buffer = [0; 64 << 10];
+    loop {
+        let n = decoder.read(&mut buffer)?;
+        if n == 0 {
+            return Ok(expected.is_empty());
+        }
+        let chunk = buffer.get(..n).ok_or_else(|| std::io::Error::other("invalid Zstandard output chunk"))?;
+        let Some(rest) = expected.strip_prefix(chunk) else { return Ok(false) };
+        expected = rest;
+    }
+}
+
 impl ZstdEncoder<'_> {
     /// Creates an encoder that writes independent frames with checksums.
     pub fn new() -> std::io::Result<Self> {
@@ -43,6 +78,50 @@ impl ZstdEncoder<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn streaming_decode_checks_bounds_frames_and_checksums() {
+        use std::io::Write;
+        let bytes = vec![37; 262_147];
+        let known = ZstdEncoder::new().unwrap().compress(&bytes).unwrap();
+        let mut encoder = zstd::stream::write::Encoder::new(Vec::new(), 0).unwrap();
+        encoder.include_checksum(true).unwrap();
+        encoder.write_all(&bytes).unwrap();
+        let unknown = encoder.finish().unwrap();
+        assert_eq!(zstd::zstd_safe::get_frame_content_size(&unknown).unwrap(), None);
+        for mut frame in [known, unknown] {
+            assert_eq!(decode_zstd_bounded(&frame, bytes.len()).unwrap(), bytes);
+            assert!(zstd_matches(&frame, &bytes).unwrap());
+            assert!(!zstd_matches(&frame, &bytes[..bytes.len() - 1]).unwrap());
+            assert!(!zstd_matches(&frame, &[0; 32]).unwrap());
+            assert_eq!(decode_zstd_bounded(&frame, usize::MAX).unwrap(), bytes);
+            assert_eq!(decode_zstd_bounded(&frame, bytes.len() - 1).unwrap_err().kind(), std::io::ErrorKind::FileTooLarge);
+            for end in 0..frame.len() {
+                assert!(decode_zstd_bounded(&frame[..end], bytes.len()).is_err());
+                assert!(!matches!(zstd_matches(&frame[..end], &bytes), Ok(true)));
+            }
+            let joined = [frame.as_slice(), frame.as_slice()].concat();
+            assert_eq!(decode_zstd_bounded(&joined, bytes.len()).unwrap(), bytes);
+            assert!(!zstd_matches(&joined, &bytes).unwrap());
+            let both = [bytes.as_slice(), bytes.as_slice()].concat();
+            assert!(zstd_matches(&joined, &both).unwrap());
+            let mut corrupt = joined;
+            *corrupt.last_mut().unwrap() ^= 1;
+            assert!(zstd_matches(&corrupt, &both).is_err());
+            *frame.last_mut().unwrap() ^= 1;
+            assert!(decode_zstd_bounded(&frame, bytes.len()).is_err());
+            assert!(zstd_matches(&frame, &bytes).is_err());
+        }
+        let mut window = [0x28, 0xb5, 0x2f, 0xfd, 0, 0, 1, 0, 0];
+        assert!(decode_zstd_bounded(&window, 0).unwrap().is_empty());
+        window[5] = 0x90;
+        assert!(decode_zstd_bounded(&window, 0).is_err());
+        assert!(zstd_matches(&window, &[]).is_err());
+        let empty = ZstdEncoder::new().unwrap().compress(&[]).unwrap();
+        assert!(decode_zstd_bounded(&empty, 0).unwrap().is_empty());
+        assert!(zstd_matches(&empty, &[]).unwrap());
+        assert!(!zstd_matches(&empty, &[0]).unwrap());
+    }
 
     #[test]
     fn frames_are_independent_and_checksummed() {

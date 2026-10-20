@@ -1,65 +1,103 @@
 # Optional native Zstandard backend
 
-Opt in to the reference Zstandard C implementation at default level 3 for native-format compression and bounded tile decoding. Blobs retain the bounded Rust streaming reader. Default builds retain the Rust backend. Enabling the feature adds zstd/zstd-sys and requires a C compiler, including a WASM-capable compiler for WASM.
+The `native-zstd` feature selects the reference Zstandard C implementation for `.pcraft` compression and decoding, Affinity archive decoding, and Zstandard TIFF import. Default builds keep Rust Zstandard implementations. TIFF export keeps its existing options. Enable `photocraft-io/native-zstd` to select all three paths.
 
-The feature also enables Zstandard TIFF decoding through the existing TIFF dependency. TIFF export keeps its existing compression options.
-Affinity's `native-zstd` feature selects the reference decoder for its archive entries, with one context reused across concatenated frames and the same window, size and CRC checks.
-Enable `photocraft-io/native-zstd` to select all three. Default Affinity builds retain `ruzstd`.
-The Rust wrapper is aligned with TIFF's dependency; the reference C library remains Zstandard 1.5.7.
-The measurements below cover only native-format operations. TIFF support, native Affinity decoding and the Affinity allocation reductions were not benchmarked.
+Native `.pcraft` compression uses the library default level 3 and independent checksummed frames. The default writer uses `ruzstd` Fastest. Native blob reads stream under the output budget and a 128 MiB window limit. Affinity reuses one decoder context across an entry's concatenated frames, with its existing 64 MiB window, output, import-budget and CRC checks.
 
-The measured backend improves real-photo save/load time and file size. Own-output loading of the 22-layer layout takes 4.9% longer, under 1 ms.
-Acceptance of that tradeoff and the native dependency remains a maintainer decision.
+The feature adds `zstd`/`zstd-sys` and needs a C compiler. WASM builds need a WASM-capable C compiler. The Rust wrapper is 0.13.3 and the C library is Zstandard 1.5.7. Whether to accept this dependency or enable it in official builds remains a maintainer decision.
 
-These timings predate directory byte comparisons, lazy encoder creation, output-buffer reuse and the encoder skip for empty work.
-They also predate borrowed ZIP payloads, direct ownership of decoded tile buffers and hash checks without temporary heap strings.
-These reductions in copies and allocations were not benchmarked and do not establish a fix for the layout read regression.
+General changes also apply to default builds: directory verification compares decoded bytes directly, directory output reuses at most 2 MiB between objects, encoders are created only for new work, ZIP loads borrow checked STORE payloads, decoded tiles transfer their storage into surfaces, and Affinity avoids per-pixel allocations and redundant raster copies. Native verification of objects over 2 MiB compares streamed chunks without a full decoded buffer.
 
-Directory saves retain at most 2 MiB of reusable output between objects and release it when the save ends.
+## Method and limits
 
-Measured on 2026-10-19 against main `d95fdf31`, independently of the other splits. Apple M4 Max, 16 CPUs, 128 GiB, macOS arm64, rustc 1.99.1; release O3, LTO off, 16 codegen units, debug off. Measurements used default priority without concurrent builds or profiling. Five alternating paired samples follow a warmup; confirmation rows use nine pairs. Time change compares the two medians; intervals resample paired ratios. Negative time change means faster. Small differences are not automatically established improvements or regressions.
+Measured on 2026-10-20 against main `872748fb`, with default and native branch builds. Apple M4 Max, 16 CPUs, 128 GiB, macOS arm64, rustc 1.99.1. Release O3, LTO off, 16 codegen units, debug off; repository-locked dependencies. Measurements ran serially at normal priority, without concurrent builds, with 16 Rayon workers. These are manual API measurements, not CI performance assertions or x86/browser results.
 
-The full-resolution CC0 Pixls photographs are P1000475.RW2 (24 MP foliage centre crop, no resampling) and IMG_4059.CR2 (12 MP city), each converted to U8/U16/F32 with the ProPhoto RGB profile. F32 derives from 16-bit development, not HDR capture. MIT psd-tools masks.psd supplies a 640 x 1394 web layout with 22 imported layers and three masks; mask-index.psd supplies a 1000 x 867 illustrated card with a mask. The sources and hashes are pinned by the existing corpus. These are the available authored layered files, not a large layered-photo corpus. No generated noise, repeating ramps, enlarged charts or duplicated photo layers are used.
+CPU is process user plus system time around the operation, including its worker threads. Wall time uses a monotonic clock. Input reads, photo development, thumbnail rendering, output checks and cleanup are outside timers. Load validation remains inside. Directory saves include atomic writes and flushes. ZIP saves use a fresh `PcraftWriter`; common reads use main-written files, while own reads use each backend's files. Directory cases cover a new bundle, an existing bundle with a fresh writer, and a writer with its verification cache populated.
 
-The harness times in-memory operations. Input loading, image conversion, thumbnail rendering and post-operation equivalence checks are outside timers. Format CRC and content-hash validation remain inside load timings. Every save uses a fresh PcraftWriter and a real rendered thumbnail. Common reads use main-encoded files; own-output reads are separate. PSD exports use ZIP merged images at U8/U16, Raw merged images at F32, and normal RLE layer channels at U8/U16 / ZIP prediction at F32. Results do not measure filesystem throughput or browser performance.
+Each configuration has three fresh-process samples, with version order rotated per trial. Layout own reads and the U16 Deflate control have nine paired samples. The embedded-photo own read and large-directory verification have seven pairs. Changes compare medians. The intervals below resample paired ratios. Small three-sample differences do not establish a regression. TIFF compression variants are descriptive comparisons on matching pixels.
 
-| Document | Operation | Main ms | Branch ms | Time change | Paired 95% interval | Main / branch bytes |
-|---|---|---:|---:|---:|---:|---:|
-| layout-masks | load-own (confirm) | 15.664 | 16.430 | +4.9% | +2.9..+6.7% | 433,949 / 404,015 |
-| panasonic-8 | save | 168.402 | 121.899 | -27.6% | -36.6..-27.3% | 49,643,217 / 37,701,432 |
-| panasonic-8 | load-common | 413.392 | 167.135 | -59.6% | -60.1..-59.4% | 49,643,217 / 49,643,217 |
-| panasonic-8 | load-own | 414.007 | 170.341 | -58.9% | -60.2..-58.6% | 49,643,217 / 37,701,432 |
-| panasonic-16 | save | 367.188 | 232.491 | -36.7% | -37.7..-35.7% | 175,681,852 / 143,903,128 |
-| panasonic-16 | load-common | 401.666 | 238.322 | -40.7% | -41.2..-40.2% | 175,681,852 / 175,681,852 |
-| panasonic-16 | load-own | 403.651 | 339.629 | -15.9% | -16.7..-15.4% | 175,681,852 / 143,903,128 |
-| panasonic-32 | save | 644.043 | 456.315 | -29.1% | -36.1..-28.6% | 252,231,671 / 206,015,394 |
-| panasonic-32 | load-common | 1330.527 | 547.415 | -58.9% | -59.2..-58.1% | 252,231,671 / 252,231,671 |
-| panasonic-32 | load-own | 1329.653 | 637.016 | -52.1% | -52.2..-51.1% | 252,231,671 / 206,015,394 |
-| canon-8 | save | 89.255 | 65.432 | -26.7% | -27.2..-26.7% | 26,151,631 / 21,078,090 |
-| canon-8 | load-common | 216.029 | 83.236 | -61.5% | -61.6..-61.2% | 26,151,631 / 26,151,631 |
-| canon-8 | load-own | 215.782 | 86.225 | -60.0% | -60.2..-60.0% | 26,151,631 / 21,078,090 |
-| canon-16 | save | 184.899 | 115.484 | -37.5% | -38.0..-36.8% | 88,750,003 / 72,905,769 |
-| canon-16 | load-common | 192.776 | 113.956 | -40.9% | -41.2..-40.7% | 88,750,003 / 88,750,003 |
-| canon-16 | load-own | 192.402 | 158.457 | -17.6% | -18.5..-16.4% | 88,750,003 / 72,905,769 |
-| canon-32 | save | 324.610 | 232.344 | -28.4% | -30.0..-27.9% | 120,957,984 / 99,956,114 |
-| canon-32 | load-common | 764.505 | 291.715 | -61.8% | -62.0..-61.7% | 120,957,984 / 120,957,984 |
-| canon-32 | load-own | 764.817 | 322.372 | -57.8% | -58.2..-57.3% | 120,957,984 / 99,956,114 |
-| layout-masks | save | 18.203 | 14.859 | -18.4% | -20.0..-18.1% | 433,949 / 404,015 |
-| layout-masks | load-common | 15.895 | 14.809 | -6.8% | -7.8..-4.1% | 433,949 / 433,949 |
-| layout-mask-index | save | 7.122 | 5.229 | -26.6% | -28.1..-22.6% | 344,892 / 168,059 |
-| layout-mask-index | load-common | 6.693 | 5.053 | -24.5% | -26.5..-23.1% | 344,892 / 344,892 |
-| layout-mask-index | load-own | 6.591 | 5.070 | -23.1% | -23.8..-21.6% | 344,892 / 168,059 |
+Memory is current physical footprint sampled every 2 ms during the first operation, with output held. It includes prepared inputs and memory retained by the allocator during setup. Short peaks can be missed. MB means decimal file size; MiB means 1,048,576 bytes of memory. Negative changes mean less time or memory.
 
-Every measured save and load compares the complete document with its source, including tiles and metadata. Native and Rust encoded bytes can differ.
-Unit tests cover independent frames, reference encoder equivalence, both compression directions, output bounds, checksums and truncation.
-Directory verification compares decoded bytes directly with expected bytes. Empty and cached-only saves skip native encoder creation.
-Loads borrow stored ZIP tile/blob payloads and transfer decoded tile storage into the surface. Size, CRC, content hash and shared-tile checks remain.
+Inputs use the pinned CC0 Pixls `IMG_4059.CR2` city photo (12 MP) and `P1000475.RW2` foliage photo (unresampled 24 MP crop), developed with ProPhoto RGB at U8/U16/F32. Float samples derive from U16 development, not HDR capture. Four-layer edits add Levels, Curves and a gradient mask. The embedded-photo edit also contains a masked crop of the other photo and its original 24 MP U16 TIFF. MIT psd-tools `masks.psd` supplies the 22-layer layout and three masks; `mask-index.psd` supplies the illustrated card. No noisy generators, enlarged images or duplicated background-photo layers are timing inputs.
+
+Nine pinned CC0/MIT Affinity files cover raster, vector, brushes and RGB/CMYK data: seven use Zstandard and two are zlib controls. These are small authored documents, not large Affinity photo edits. TIFF variants are independently encoded by libtiff with 64-row strips, integer horizontal or floating-point prediction, Deflate level 6 and Zstandard level 3.
+
+Every measured save is loaded and compared with the complete source document. Loads compare canonical document content, including tile and blob hashes and metadata. All 13 native-written real `.pcraft` documents also load identically with main and the default branch reader. Affinity checks every supported model field and image payload; TIFF checks exact decoded samples, dimensions and layout.
+
+## Photographs
+
+| Document | Save CPU / wall change | Common-read CPU / wall change | Own-read CPU / wall change | Main / native MB | Sampled peak save / own-read change, MiB |
+|---|---:|---:|---:|---:|---:|
+| City U8 | -55.4% / -26.0% | -61.3% / -61.3% | -59.6% / -59.5% | 26.15 / 21.08 | -35.8 / -6.5 |
+| City U16 | -72.0% / -39.4% | -41.4% / -41.4% | -17.6% / -17.6% | 88.75 / 72.91 | -73.9 / -17.7 |
+| City F32 | -57.7% / -28.4% | -61.5% / -61.5% | -57.6% / -57.6% | 120.96 / 99.96 | -81.4 / -25.2 |
+| Foliage U8 | -59.3% / -28.7% | -59.6% / -59.6% | -58.6% / -58.6% | 49.64 / 37.70 | -49.4 / -12.7 |
+| Foliage U16 | -68.9% / -37.0% | -41.4% / -41.4% | -17.0% / -17.0% | 175.68 / 143.90 | -121.3 / -32.2 |
+| Foliage F32 | -58.6% / -28.3% | -58.4% / -58.4% | -51.6% / -51.6% | 252.23 / 206.02 | -147.6 / -48.4 |
+
+## Layered documents
+
+| Document | Save CPU / wall change | Common-read CPU / wall change | Own-read CPU / wall change | Main / native MB | Sampled peak save / own-read change, MiB |
+|---|---:|---:|---:|---:|---:|
+| City edit U8 | -55.0% / -24.2% | -61.2% / -61.2% | -59.4% / -59.4% | 26.22 / 21.13 | -35.0 / -5.8 |
+| City edit U16 | -71.7% / -38.5% | -41.2% / -41.2% | -17.2% / -17.2% | 88.81 / 72.96 | -76.0 / -16.8 |
+| City edit F32 | -57.5% / -27.6% | -61.3% / -61.3% | -57.6% / -57.6% | 121.02 / 100.01 | -82.1 / -27.4 |
+| Foliage edit U16 | -68.4% / -35.8% | -40.9% / -40.9% | -15.8% / -15.8% | 175.78 / 143.99 | -122.7 / -31.0 |
+| 22-layer layout | -72.1% / -19.9% | -7.1% / -7.1% | +1.5% / +1.5% | 0.43 / 0.40 | -13.7 / -0.8 |
+| Illustrated card | -75.4% / -29.5% | -28.8% / -28.8% | -23.8% / -23.8% | 0.34 / 0.17 | -16.6 / -1.0 |
+| Embedded-photo edit | -71.4% / -75.8% | -40.0% / -40.0% | -12.1% / -12.1% | 169.91 / 153.85 | -159.3 / -149.5 |
+
+## Directory saves
+
+Cells show default / native CPU changes. Wall changes are native. All saves include normal atomic writes and flushes.
+
+| Document | First save CPU | Full verification CPU | Cached save CPU | First / verify / cached wall | Sampled peak first / verify / cached change, MiB |
+|---|---:|---:|---:|---:|---:|
+| City U8 | -1.7% / -44.3% | -23.2% / -67.2% | -26.5% / -62.0% | -16.1% / -64.0% / -56.5% | -0.7 / -0.2 / -3.3 |
+| Foliage U16 | +0.7% / -44.8% | -43.2% / -49.5% | -42.6% / -29.5% | -20.4% / -48.2% / -23.1% | -3.4 / -0.2 / -5.1 |
+| 22-layer layout | -11.0% / -25.6% | -29.0% / -25.3% | -52.1% / -54.6% | -3.7% / -19.7% / -34.2% | -4.6 / -0.6 / -2.6 |
+| Embedded-photo edit | -0.6% / -56.4% | -42.6% / -49.6% | -0.6% / +4.8% | -33.5% / -48.2% / +4.8% | -270.7 / -420.5 / -272.5 |
+
+## Affinity
+
+Full reads compare the complete supported document model. Archive reads decode every current entry and are diagnostic; they do not render unsupported content.
+
+| Document | Full-read CPU main / native ms | Full-read wall main / native ms | Default CPU change | Archive CPU change | Sampled peak full-read change, MiB |
+|---|---:|---:|---:|---:|---:|
+| raster_test | 0.540 / 0.211 | 0.538 / 0.210 | -62.0% | -3.3% | -0.1 |
+| layer_test | 0.134 / 0.124 | 0.132 / 0.122 | -6.0% | -2.0% | -0.0 |
+| 12-rgb8 | 0.595 / 0.476 | 0.594 / 0.474 | -2.7% | -79.0% | -0.1 |
+| 12-rgb16 | 0.593 / 0.467 | 0.592 / 0.466 | -3.4% | -75.3% | -0.1 |
+| 12-cmyk8 | 0.614 / 0.493 | 0.612 / 0.491 | -2.8% | -78.3% | -0.1 |
+| 03-brush-strokes | 12.516 / 2.498 | 12.515 / 2.497 | -29.1% | -79.3% | -0.4 |
+| 13-blend-modes | 0.511 / 0.403 | 0.509 / 0.402 | +1.0% | -79.5% | -0.1 |
+| playing-cards | 3.414 / 2.958 | 3.413 / 2.956 | +2.1% | -82.0% | -0.3 |
+| flowers | 0.605 / 0.481 | 0.604 / 0.479 | -0.8% | -63.5% | -0.1 |
+
+## TIFF
+
+The Zstandard files are new supported inputs. Main cannot decode them. These comparisons use matching real pixels, strip geometry and predictors in Deflate and Zstandard variants.
+
+| Photo | CPU Deflate / Zstandard ms | Wall Deflate / Zstandard ms | Sampled peak Deflate / Zstandard MiB | File Deflate / Zstandard MB |
+|---|---:|---:|---:|---:|
+| City U8 | 195.21 / 117.04 | 15.15 / 8.92 | 53.6 / 68.3 | 14.76 / 15.08 |
+| City U16 | 332.65 / 189.41 | 25.92 / 13.99 | 130.0 / 157.1 | 58.76 / 58.15 |
+| City F32 | 792.91 / 524.08 | 60.39 / 38.97 | 220.0 / 257.9 | 80.33 / 79.79 |
+| Foliage U16 | 691.81 / 358.28 | 50.74 / 26.18 | 249.9 / 288.6 | 112.20 / 110.38 |
+
+## Remaining tradeoffs
+
+The 22-layer layout own read is 16.832 → 17.091 ms: +1.5%, or +0.26 ms, with a paired 95% interval of +1.0..+3.3%. Its common-file read is faster. This small own-output cost remains a backend tradeoff; no broader performance ceiling is claimed.
+
+The large embedded-photo cached directory save is 143.847 → 150.725 CPU ms (+4.8%), with an interval of -0.8..+10.0%. It does not establish a slowdown in the final repeat. Cached saves recheck a subset of objects. First directory saves are often limited by filesystem flushes, so CPU gains are larger than wall-time gains.
+
+Default F32 ZIP saves show up to about 5 MiB more sampled peak memory. Native directory cases show up to about 2.5 MiB more in some operations. The zero-copy and scratch paths are retained for CPU performance. Native TIFF Zstandard reads use 15–39 MiB more sampled peak memory than the Deflate variants. The city U8 Zstandard TIFF is about 2.2% larger; the other three Zstandard TIFFs are smaller. This branch adds a reader, not a TIFF encoding policy.
+
+A direct seven-pair comparison of large-object verification before and after streamed comparison reduced sampled peak memory by 133 MiB. CPU changed by -1.5%, with an interval of -3.2..+0.2%; no practical CPU cost was detected.
 
 ## Compatibility checks
 
-The ignored `cross_backend_documents` test in `roundtrip.rs` exchanges complete U8/U16/F32 documents between separately built backends.
-The first run writes Rust fixtures. The next two runs require and read the other backend's files, so missing fixtures fail.
-Run these commands from the repository root:
+The ignored complete-document test exchanges U8/U16/F32 files between default and native builds. The second and third commands require the other backend's files, so missing fixtures fail. From the repository root:
 
 ```sh
 export PHOTOCRAFT_BACKEND_FIXTURES="$(mktemp -d)"
@@ -68,7 +106,6 @@ PHOTOCRAFT_BACKEND_READ_OTHER=1 cargo test -p photocraft-format --locked --featu
 PHOTOCRAFT_BACKEND_READ_OTHER=1 cargo test -p photocraft-format --locked --test roundtrip cross_backend_documents -- --ignored --exact
 ```
 
-The native checks run in CI when sources, tests or manifests change in affinity, codecs, format, io or the listed format dependencies.
-Changes to the lockfile, toolchain, Cargo configuration or CI workflow also trigger them. Manual runs and `full-ci` force them.
-The checks include native decoder unit tests, one Affinity import test, the format suite, fixture exchange, strict Clippy and WASM checks with Clang.
-Default builds keep their existing tests. The optional backend tests add no routine execution to unrelated changes.
+The decoder and directory-verification follow-up passed native decoder units, format units, corruption and round-trip tests, strict Clippy for codecs and format, and a native format WASM check. Focused tests also cover large verification, tampered-object repair and the default directory path. Tests reject truncation, wrong checksums, excessive output and oversized windows, and check concatenated-frame verification. This is not a full workspace test run.
+
+CI runs optional-backend checks only for relevant source, test, dependency and build-input changes; manual runs and `full-ci` force them. It includes decoder tests, an Affinity import, format tests, cross-backend fixtures, strict Clippy and WASM checks with Clang. Default builds keep their existing checks.

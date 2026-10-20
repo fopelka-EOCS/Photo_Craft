@@ -48,6 +48,12 @@ fn new_compressor<'a>() -> Result<Compressor<'a>> {
 /// decoded length must be exactly that (`Corrupt` otherwise).
 fn decompress_bounded(data: &[u8], max: usize, exact: Option<usize>, what: &str) -> Result<Vec<u8>> {
     let zstd = |e: &dyn std::fmt::Display| FormatError::corrupt(format!("{what}: zstd: {e}"));
+    #[cfg(feature = "native-zstd")]
+    if exact.is_none() {
+        return photocraft_codecs::decode_zstd_bounded(data, max).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::FileTooLarge { FormatError::LimitExceeded(format!("{what} exceeds {max} bytes")) } else { zstd(&e) }
+        });
+    }
     let mut dec = ruzstd::decoding::StreamingDecoder::new(data).map_err(|e| zstd(&e))?;
     let mut out = Vec::with_capacity(exact.unwrap_or(0).min(max).min(64 << 20));
     // `max` may be `usize::MAX`: one byte past it must not overflow.
@@ -516,6 +522,10 @@ fn write_object(root: &Path, path: &Path, object: &Object, compressor: &mut Comp
 
 /// Whether `compressed` decodes to exactly `expected`.
 fn content_matches(expected: &[u8], compressed: &[u8], what: &str) -> bool {
+    #[cfg(feature = "native-zstd")]
+    if expected.len() > MAX_DIRECTORY_SCRATCH {
+        return photocraft_codecs::zstd_matches(compressed, expected).unwrap_or(false);
+    }
     decompress(compressed, expected.len(), what).is_ok_and(|actual| actual == expected)
 }
 
@@ -1170,6 +1180,7 @@ fn directory_output_reuse_is_bounded_and_preserves_frames() {
         let actual = std::fs::read(&path).unwrap();
         assert_eq!(actual, expected);
         let content = object.content();
+        assert!(content_matches(&content, &actual, "test"));
         assert_eq!(decompress_bounded(&actual, content.len(), Some(content.len()), "test").unwrap(), content.as_ref());
         assert!(encoded.capacity() <= MAX_DIRECTORY_SCRATCH);
         if i == 0 {
@@ -1179,6 +1190,9 @@ fn directory_output_reuse_is_bounded_and_preserves_frames() {
             assert_eq!(encoded.as_ptr(), first);
         }
         if i == 2 {
+            let mut wrong = content.to_vec();
+            wrong[0] ^= 1;
+            assert!(!content_matches(&wrong, &actual, "test"));
             assert!(actual.len() > MAX_DIRECTORY_SCRATCH);
             assert_eq!(encoded.capacity(), 0);
             assert!(write_object(&root, &root.join("invalid/test.zst"), &object, &mut compressor, &mut encoded).is_err());
@@ -1228,6 +1242,10 @@ mod tests {
         for (object, bytes) in objects.iter().zip(&data) {
             let encoded = object.compressed(&mut compressor).unwrap();
             assert_eq!(decompress(&encoded, bytes.len(), "test").unwrap(), **bytes);
+            assert_eq!(decompress_bounded(&encoded, bytes.len(), None, "blob").unwrap(), **bytes);
+            if !bytes.is_empty() {
+                assert!(matches!(decompress_bounded(&encoded, bytes.len() - 1, None, "blob"), Err(FormatError::LimitExceeded(_))));
+            }
             assert_eq!(decompress_bounded(&encoded, bytes.len(), Some(bytes.len()), "Rust decoder").unwrap(), **bytes);
             let rust = ruzstd::encoding::compress_to_vec(bytes.as_slice(), ruzstd::encoding::CompressionLevel::Fastest);
             assert_eq!(decompress(&rust, bytes.len(), "Rust encoder").unwrap(), **bytes);
