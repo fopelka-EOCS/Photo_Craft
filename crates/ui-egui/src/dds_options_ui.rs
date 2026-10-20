@@ -90,7 +90,8 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     });
     cancel |= modal.should_close();
     p.options = options;
-    if ok || ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)) {
+    // A focused button takes Enter as its click without consuming the key: Enter on Cancel cancels.
+    if ok || (!cancel && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter))) {
         let Some(p) = app.dds_options.take() else { return };
         let settings = ExportSettings { dds: p.options, ..app.save_settings() };
         let mut step = if p.record == "file.save" { serde_json::json!({}) } else { serde_json::json!({"path": p.path}) };

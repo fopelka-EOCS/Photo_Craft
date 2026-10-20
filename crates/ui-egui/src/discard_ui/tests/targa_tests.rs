@@ -228,3 +228,19 @@ fn recorded_plain_save_of_a_targa_keeps_its_bits() {
     assert!(h.state().targa_options.is_none(), "playback doesn't ask");
     assert_eq!(writes.borrow().as_slice(), &[("other.tga".to_string(), asked(Some(32)))]);
 }
+
+/// Enter on a focused Cancel cancels: egui clicks the focused button on Enter without consuming
+/// the key, so the dialog's Enter-for-OK must not save as well.
+#[test]
+fn enter_on_a_focused_cancel_writes_nothing() {
+    let (mut h, writes) = targa_app(false, "unused.tga");
+    h.state_mut().save_as(Some("t.tga".into())).unwrap();
+    h.run_steps(2);
+    h.get_by_label("Cancel").focus();
+    h.run_steps(2);
+    h.key_press(Key::Enter);
+    h.run_steps(3);
+    assert!(h.state().targa_options.is_none());
+    assert!(writes.borrow().is_empty(), "nothing written");
+    assert_eq!(h.state().ui.status, "Save cancelled");
+}
