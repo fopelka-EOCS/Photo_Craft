@@ -190,8 +190,10 @@ impl SplashState {
 
             ui.add_space(10.0);
 
-            // Skip hint
-            ui.label(RichText::new(crate::i18n::t("Click anywhere to skip")).font(FontId::proportional(10.0)).color(Color32::from_white_alpha(45)));
+            // Skip hint (shown only once fonts are ready to avoid tofu glyphs and match dismiss behavior)
+            if self.fonts_preloaded {
+                ui.label(RichText::new(crate::i18n::t("Click anywhere to skip")).font(FontId::proportional(10.0)).color(Color32::from_white_alpha(45)));
+            }
         });
     }
 }

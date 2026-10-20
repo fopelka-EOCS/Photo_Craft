@@ -813,17 +813,19 @@ fn splash_active_blocks_escape_job_cancellation() {
     splash.fonts_preloaded = true;
     h.state_mut().splash = Some(splash);
 
-    // Press Escape key
-    h.input_mut().events.push(egui::Event::Key {
-        key: egui::Key::Escape,
-        physical_key: None,
-        pressed: true,
-        repeat: false,
-        modifiers: egui::Modifiers::NONE,
+    // Press Escape key via Context input
+    let ctx = h.ctx.clone();
+    ctx.input_mut(|i| {
+        i.events.push(egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        })
     });
 
     // Run tick; jobs_ui should NOT cancel the job while splash is active
-    let ctx = h.ctx.clone();
     super::tick(h.state_mut(), &ctx);
     assert!(h.state().session.job(job).is_some(), "job must not be cancelled while splash is active");
 
