@@ -20,9 +20,9 @@ mod recovery_tests;
 /// Photoshop brushes (.abr), gradients (.grd), swatches (.aco, .ase) and keyboard shortcut sets
 /// (.kys), which go to the preset libraries and Edit › Keyboard Shortcuts.
 const OPEN_EXTS: &[&str] = &[
-    "pcraft", "pdn", "ora", "kra", "krz", "psd", "psb", "psdt", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "ico", "qoi", "exr", "hdr",
-    "pbm", "pgm", "ppm", "pam", "pfm", "pcx", "dds", "xpm", "fits", "fit", "fts", "dpx", "cin", "heic", "heif", "hif", "dng", "cr2", "cr3", "nef", "nrw",
-    "arw", "pef", "orf", "rw2", "raf", "abr", "grd", "svg", "svgz", "aco", "ase", "kys", "af", "afdesign", "afphoto", "afpub",
+    "pcraft", "pdn", "ora", "kra", "krz", "psd", "psb", "psdt", "png", "jpg", "jpeg", "jp2", "j2k", "j2c", "tif", "tiff", "webp", "gif", "bmp", "tga", "ico",
+    "qoi", "exr", "hdr", "pbm", "pgm", "ppm", "pam", "pfm", "pcx", "dds", "xpm", "fits", "fit", "fts", "dpx", "cin", "heic", "heif", "hif", "dng", "cr2",
+    "cr3", "nef", "nrw", "arw", "pef", "orf", "rw2", "raf", "abr", "grd", "svg", "svgz", "aco", "ase", "kys", "af", "afdesign", "afphoto", "afpub",
 ];
 const SVG_EXTS: &[&str] = &["svg", "svgz"];
 
@@ -50,6 +50,7 @@ const OPEN_FILTERS: &[(&str, &[&str])] = &[
     ("SVG", SVG_EXTS),
     ("PNG", &["png"]),
     ("JPEG", &["jpg", "jpeg"]),
+    ("JPEG 2000", &["jp2", "j2k", "j2c"]),
     ("HEIF", &["heic", "heif", "hif"]),
     ("TIFF", &["tif", "tiff"]),
     ("WebP", &["webp"]),
@@ -89,6 +90,7 @@ const SAVE_FILTERS: &[(&str, &[&str])] = &[
     ("OpenRaster", &["ora"]),
     ("PNG", &["png"]),
     ("JPEG", &["jpg"]),
+    ("JPEG 2000", &["jp2", "j2k", "j2c"]),
     ("WebP", &["webp"]),
     ("TIFF", &["tif"]),
     ("Targa", &["tga"]),
@@ -699,6 +701,18 @@ mod tests {
     use photocraft_ui_egui::{PhotocraftApp, prefs_ui};
     use serde_json::{Value, json};
 
+    #[test]
+    fn jpeg2000_is_available_in_open_and_save_filters() {
+        for ext in ["jp2", "j2k", "j2c"] {
+            assert!(OPEN_EXTS.contains(&ext));
+            assert!(OPEN_FILTERS.iter().any(|(name, exts)| *name == "JPEG 2000" && exts.contains(&ext)));
+            let filters = save_filters(&format!("image.{ext}"));
+            assert_eq!(filters[0].0, "JPEG 2000");
+            assert!(filters[0].1.iter().any(|e| e == ext));
+        }
+        assert!(!OPEN_EXTS.contains(&"jpx"));
+    }
+
     /// #6121: the file type picked in the save dialog gives the name its extension where the
     /// dialog left the one it opened with, and only there.
     #[test]
@@ -855,7 +869,7 @@ mod tests {
         }
         let _ = invoke(&mut app, "file.saveACopy");
         // Export As, Quick Export, Save for Web (with and without slices).
-        for format in ["png", "jpg", "webp", "tif", "tga"] {
+        for format in ["png", "jpg", "webp", "tif", "tga", "ico", "jp2"] {
             dialog(&mut app, "file.export.exportAs", json!({"format": format}));
         }
         for format in ["png", "jpg", "gif", "webp"] {
@@ -875,13 +889,13 @@ mod tests {
         let exts: Vec<&str> = asked.iter().filter_map(|s| s.rsplit_once('.').map(|(_, e)| e)).collect();
         // The extension each save above should suggest, in order.
         let want = [
-            "psd",                       // Save As untitled
-            "pcraft jpeg gif bmp psd",   // Save As opened .pcraft .jpeg .gif .bmp .dng
-            "psd",                       // Save a Copy
-            "png jpg webp tif tga",      // Export As
-            "png jpg gif webp",          // Quick Export
-            "gif png png jpg wbmp html", // Save for Web: gif png8 png24 jpeg wbmp, then with slices
-            "csv pcpresets",             // Measurement Log, Export Presets
+            "psd",                          // Save As untitled
+            "pcraft jpeg gif bmp psd",      // Save As opened .pcraft .jpeg .gif .bmp .dng
+            "psd",                          // Save a Copy
+            "png jpg webp tif tga ico jp2", // Export As
+            "png jpg gif webp",             // Quick Export
+            "gif png png jpg wbmp html",    // Save for Web: gif png8 png24 jpeg wbmp, then with slices
+            "csv pcpresets",                // Measurement Log, Export Presets
         ]
         .join(" ");
         assert_eq!(exts, want.split(' ').collect::<Vec<_>>());

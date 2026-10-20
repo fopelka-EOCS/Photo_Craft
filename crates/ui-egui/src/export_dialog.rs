@@ -13,7 +13,7 @@ use crate::state::DialogKind;
 use crate::theme::Tokens;
 use crate::{ExportSettings, PhotocraftApp};
 
-const FORMATS: [(&str, &str); 6] = [("png", "PNG"), ("jpg", "JPG"), ("webp", "WebP"), ("tif", "TIFF"), ("tga", "TGA"), ("ico", "ICO")];
+const FORMATS: [(&str, &str); 7] = [("png", "PNG"), ("jpg", "JPG"), ("webp", "WebP"), ("tif", "TIFF"), ("tga", "TGA"), ("ico", "ICO"), ("jp2", "JPEG 2000")];
 
 /// Preferences ▸ remembered dialog settings: Export As writes the settings it was used with
 /// last under its command id and seeds the next dialog from them, as Fill, Liquify and the
@@ -1001,6 +1001,18 @@ mod tests {
         assert_eq!(saved["format"], "webp");
         assert_eq!(saved["scale"], 50);
         assert!(saved.get("path").is_none() && saved.get("__w").is_none() && saved.get("__layer").is_none());
+    }
+
+    #[test]
+    fn jp2_does_not_inherit_lossy_options_from_another_format() {
+        let mut fields = Map::new();
+        fields.insert("format".into(), json!("jp2"));
+        fields.insert("quality".into(), json!(10));
+        fields.insert("lossless".into(), json!(false));
+        let settings = settings(&fields);
+        assert_eq!(settings.jpeg_quality, None);
+        assert_eq!(settings.webp_quality, None);
+        assert!(settings.webp_lossless);
     }
 
     #[test]

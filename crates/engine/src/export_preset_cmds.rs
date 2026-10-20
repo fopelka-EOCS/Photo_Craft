@@ -10,7 +10,7 @@ use crate::{Result, Session};
 
 const MAX_PRESETS: usize = 256;
 const MAX_PX: u32 = 300_000;
-const FORMATS: [&str; 6] = ["png", "jpg", "webp", "tif", "tga", "ico"];
+const FORMATS: [&str; 7] = ["png", "jpg", "webp", "tif", "tga", "ico", "jp2"];
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -196,7 +196,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Save Export Preset",
             menu: &[],
             shortcut: None,
-            params: r#"{"name":str,"settings":{"format":"png|jpg|webp|tif|tga|ico","quality":1..100,"lossless":bool,"transparency":bool,"scale":1..1000,"width":px,"height":px,"lockAspect":bool,"sizing":"scale|pixels","metadata":"none|exif|all","profile":"document|srgb","embedProfile":bool,"tgaBits":"auto|24|32"}} (a saved name is replaced)"#,
+            params: r#"{"name":str,"settings":{"format":"png|jpg|webp|tif|tga|ico|jp2","quality":1..100,"lossless":bool,"transparency":bool,"scale":1..1000,"width":px,"height":px,"lockAspect":bool,"sizing":"scale|pixels","metadata":"none|exif|all","profile":"document|srgb","embedProfile":bool,"tgaBits":"auto|24|32"}} (a saved name is replaced)"#,
             enabled: always,
             run: save,
             journal: false,
@@ -264,6 +264,24 @@ mod tests {
         let mut after = Session::new();
         after.load_prefs_json(&raw).unwrap();
         assert!(after.presets.export_presets.is_empty());
+    }
+
+    #[test]
+    fn jpeg2000_export_preset_survives_preferences_reload() {
+        let mut s = Session::new();
+        let mut options = settings("pixels");
+        options["format"] = json!("jp2");
+        options["lossless"] = json!(true);
+        options["transparency"] = json!(true);
+        let saved = s.execute("file.export.presets.save", json!({"name": "JPEG 2000", "settings": options})).unwrap();
+        assert_eq!(saved["preset"]["settings"]["format"], "jp2");
+
+        let mut restored = Session::new();
+        restored.load_prefs_json(&s.prefs_to_json()).unwrap();
+        let listed = restored.execute("file.export.presets.list", json!({})).unwrap();
+        assert_eq!(listed["presets"], json!([saved["preset"]]));
+        let got = restored.execute("file.export.presets.get", json!({"name": "JPEG 2000"})).unwrap();
+        assert_eq!(got, saved, "JPEG 2000 settings remain available for Export As after restarting");
     }
 
     #[test]

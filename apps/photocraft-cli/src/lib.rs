@@ -16,9 +16,9 @@ photocraft-cli: headless PhotoCraft
 
 USAGE:
   photocraft-cli convert <in> <out> [--format <ext>] [--quality <1-100>] [--tiff-layers] [--tga-bits <24|32>] [--dpx-bits <8|10|12|16>]
-      Convert between formats (.pcraft, .psd, .png, .jpg, .tif, .webp, .exr, …).
+      Convert between formats (.pcraft, .psd, .png, .jpg, .jp2, .j2k, .j2c, .tif, .webp, .exr, …).
       TIFF output is flat unless --tiff-layers keeps the layers (Photoshop layer data).
-      --quality sets the JPEG or WebP quality; a WebP written with a quality is lossy, without one lossless.
+      --quality sets JPEG, JPEG 2000 or WebP quality; JPEG 2000 and WebP are lossless without it.
       --tga-bits sets a TGA's bits per pixel: 32 writes the alpha channel (or else the transparency) as
       its alpha, 24 none. Without it: 32 with an alpha channel or transparency, else 24.
       --dpx-bits sets a DPX's bits per sample. Without it: 8 for an 8-bit document, else 16.
@@ -208,6 +208,7 @@ fn export_opts(a: &Args) -> Result<ExportOptions, String> {
     if let Some(q) = a.get("--quality") {
         let q = q.parse().ok().filter(|q| (1..=100).contains(q)).ok_or_else(|| format!("bad --quality `{q}`: expected a whole number from 1 to 100"))?;
         o.encode.jpeg_quality = q;
+        o.encode.jpeg2000_quality = Some(q);
         // Asking for a quality asks for a lossy WebP; the default WebP stays lossless.
         o.encode.webp_quality = q;
         o.encode.webp_lossless = false;

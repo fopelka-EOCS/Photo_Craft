@@ -478,6 +478,12 @@ fn export_stages(doc: &Document, name_or_ext: &str, opts: &ExportOptions, ctl: &
     if format == photocraft_codecs::Format::Tiff && opts.tiff_layers && tiff_layers::would_write_layers(doc) {
         return tiff_layers::export_layered(doc, opts, ctl);
     }
+    if format == photocraft_codecs::Format::Jpeg2000 {
+        // The requested suffix decides the representation, including when a caller reuses options.
+        let mut opts = opts.clone();
+        opts.encode.jpeg2000_codestream = ext == "j2k" || ext == "j2c";
+        return flat::export_flat_with(doc, format, &opts, ctl);
+    }
     flat::export_flat_with(doc, format, opts, ctl)
 }
 

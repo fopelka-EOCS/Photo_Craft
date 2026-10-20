@@ -31,6 +31,9 @@ image-webp = "0.2"
 zune-jpeg = "0.5"
 zune-core = "0.5"
 jpeg-encoder = "0.6"
+# Temporary exact pin for the current standalone performance/correctness stack (#17–#25, #27, #28).
+# Replace with an upstream release containing the integrated changes once available.
+oxideav-jpeg2000 = { version = "=0.0.17", git = "https://github.com/Streetblock/oxideav-jpeg2000", rev = "a119c849be69d3ff521f0873ca1d5cd78250ad02", default-features = false }
 photocraft-heif = { path = "../heif", optional = true }
 
 # Orientation is applied a band of rows per task on native; wasm stays single-threaded.
@@ -41,6 +44,7 @@ exr = { version = "1.73", default-features = false, features = ["rayon"] }
 
 [dev-dependencies]
 proptest.workspace = true
+hayro-jpeg2000 = { version = "=0.4.1", default-features = false }
 # Oracle decoders for cross-checking in tests only.
 image = { workspace = true, features = ["png", "jpeg", "tiff"] }
 
