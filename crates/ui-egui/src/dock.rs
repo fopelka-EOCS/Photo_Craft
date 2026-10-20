@@ -575,7 +575,8 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, shown: &[Group], mut bod
         {
             actions.push(Action::MoveTab(g, tab, before.and_then(|b| indices.get(b).copied())));
         }
-        // A tab dragged off its strip moves the whole group, as the strip itself does.
+        // Drag the empty strip to move the whole native group. Individual tabs may
+        // already have migrated to shared docking, which suppresses this native path.
         if !locked && app.ui.docking.is_none() && (resp.strip.dragged() || resp.tab_dragging_out.is_some()) {
             dragging = Some(g);
         }

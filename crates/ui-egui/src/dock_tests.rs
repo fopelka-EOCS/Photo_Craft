@@ -1097,18 +1097,44 @@ fn dragging_a_tab_reorders_the_group_and_the_order_persists() {
     }
 }
 
-/// Dragging a tab onto another group's body moves the whole group; onto its tab strip moves only
-/// the tab. A locked workspace keeps both the tab and group order.
+/// Whole native groups still move by dragging the empty part of their tab strip.
+/// Individual tab drags detach instead; locking must suppress both gestures.
 #[test]
-fn a_tab_dragged_off_the_strip_moves_the_group_and_locking_stops_reordering() {
+fn dragging_the_empty_strip_moves_the_whole_native_group_and_respects_locking() {
+    for theme in [ThemeKind::ProMedium, ThemeKind::Studio] {
+        let (app, _, _) = app_with_layers();
+        let mut h = harness(app, vec2(1200.0, 800.0), theme);
+        let empty_strip = |h: &Harness<'static, PhotocraftApp>| {
+            let strip = last_strips(&h.ctx).into_iter().find(|strip| strip.group == Group::Layers).unwrap();
+            let right = strip.tabs.iter().map(|(_, rect)| rect.right()).reduce(f32::max).unwrap();
+            assert!(strip.area.right() - right > 4.0, "{theme:?}: no empty strip to grab");
+            egui::pos2((right + strip.area.right()) * 0.5, strip.area.center().y)
+        };
+        let tabs = h.state().ui.dock.visible_tabs(Group::Layers, is_pro(theme));
+        let source = empty_strip(&h);
+        let target = rect_of(&h, Group::Color).left_top() + vec2(120.0, 40.0);
+        drag(&mut h, source, target);
+        assert_eq!(h.state().ui.dock.order().first(), Some(&Group::Layers), "{theme:?}");
+        assert!(h.state().ui.docking.is_none(), "{theme:?}: whole-group moves stay in the native dock");
+        assert_eq!(h.state().ui.dock.visible_tabs(Group::Layers, is_pro(theme)), tabs);
+        assert!(h.state().ui.dock.tab_order.is_empty(), "{theme:?}: the tabs kept their order");
+
+        h.state_mut().session.prefs.edit(|prefs| prefs.workspace_locked = true);
+        h.run_steps(2);
+        let order = h.state().ui.dock.order();
+        let source = empty_strip(&h);
+        drag(&mut h, source, egui::pos2(source.x, 780.0));
+        assert_eq!(h.state().ui.dock.order(), order, "{theme:?}: locked groups must not move");
+        assert_eq!(h.state().ui.dock.visible_tabs(Group::Layers, is_pro(theme)), tabs);
+        assert!(h.state().ui.docking.is_none());
+    }
+}
+
+/// A locked workspace keeps both the tab and group order and prevents individual detaches.
+#[test]
+fn locking_stops_tab_reordering_and_detaching() {
     let (app, _, _) = app_with_layers();
     let mut h = harness(app, vec2(1200.0, 800.0), ThemeKind::ProMedium);
-    let paths = tab_rect(&h, Group::Layers, 2);
-    let to = rect_of(&h, Group::Color).left_top() + vec2(120.0, 40.0);
-    drag(&mut h, paths.center(), to);
-    assert_eq!(h.state().ui.dock.order().first(), Some(&Group::Layers));
-    assert!(h.state().ui.dock.tab_order.is_empty(), "the tabs kept their order");
-
     h.state_mut().session.prefs.edit(|p| p.workspace_locked = true);
     h.run_steps(2);
     let order = h.state().ui.dock.order();
@@ -1119,6 +1145,7 @@ fn a_tab_dragged_off_the_strip_moves_the_group_and_locking_stops_reordering() {
     let paths = tab_rect(&h, Group::Layers, 2);
     drag(&mut h, paths.center(), paths.center() + vec2(0.0, 500.0));
     assert_eq!(h.state().ui.dock.order(), order);
+    assert!(h.state().ui.docking.is_none(), "locked tabs cannot detach into the shared layout");
 }
 
 #[test]

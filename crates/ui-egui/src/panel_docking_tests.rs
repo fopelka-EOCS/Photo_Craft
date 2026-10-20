@@ -96,6 +96,7 @@ fn harness(app: PhotocraftApp, size: egui::Vec2) -> Harness<'static, PhotocraftA
     harness
 }
 
+/// Simulates a primary-button drag across frames so the dock can update its drop targets.
 fn drag(h: &mut Harness<'static, PhotocraftApp>, from: Pos2, to: Pos2) {
     h.event(Event::PointerMoved(from));
     h.run_steps(1);
@@ -107,6 +108,21 @@ fn drag(h: &mut Harness<'static, PhotocraftApp>, from: Pos2, to: Pos2) {
     }
     h.event(Event::PointerButton { pos: to, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
     h.run_steps(3);
+}
+
+/// Checks that a vertical Channels tab drag creates a lower group without removing other panels.
+#[test]
+fn a_vertical_tab_drag_splits_channels_below_layers_without_clearing_other_panels() {
+    let mut h = harness(app(), vec2(1280.0, 800.0));
+    let source = h.query_all_by_label("Channels").find(|node| node.rect().height() <= 45.0).unwrap().rect().center();
+    let destination = egui::pos2(source.x, 780.0);
+    drag(&mut h, source, destination);
+    let layout = h.state().ui.docking.as_ref().expect("a vertical tab drag must detach Channels");
+    assert!(valid(layout));
+    assert!(layout.contains(&"channels".into()) && layout.contains(&"layers".into()));
+    assert!(layout.contains(&"color".into()) && layout.contains(&"properties".into()), "other panels stay open");
+    assert!(!group_members(layout, "layers").contains(&"channels".into()), "only Channels separates from the Layers group");
+    assert!(!layout.floating.iter().any(|group| group.panels.contains(&"channels".into())), "Channels docks below Layers instead of floating");
 }
 
 #[test]

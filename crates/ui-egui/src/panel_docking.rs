@@ -64,6 +64,28 @@ fn legacy(app: &PhotocraftApp) -> Layout<String> {
     legacy_layout(app, false)
 }
 
+/// Migrates the native dock for a tab drag while retaining measured group heights.
+fn drag_layout(app: &PhotocraftApp, ctx: &egui::Context) -> Layout<String> {
+    let mut layout = legacy(app);
+    let rects = crate::dock::last_rects(ctx);
+    /// Copies visible native group heights into the corresponding migrated splits.
+    fn preserve_heights(node: &mut Node<String>, rects: &[(Group, egui::Rect)]) {
+        if let Node::Split { first, second, size, .. } = node {
+            if let Node::Tabs { panels, .. } = first.as_ref()
+                && let Some(group) = panels.first().and_then(|id| PANELS.iter().find(|p| p.0 == id)).map(|p| p.2)
+                && let Some((_, rect)) = rects.iter().find(|(g, _)| *g == group)
+            {
+                *size = SplitSize::FixedFirst(rect.height());
+            }
+            preserve_heights(second, rects);
+        }
+    }
+    if let Some(root) = &mut layout.root {
+        preserve_heights(root, &rects);
+    }
+    layout
+}
+
 fn legacy_layout(app: &PhotocraftApp, all: bool) -> Layout<String> {
     let pro = matches!(app.ui.theme, crate::theme::ThemeKind::Pro | crate::theme::ThemeKind::ProMedium);
     let mut layout = Layout::default();
@@ -496,6 +518,7 @@ pub(crate) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> bool {
     true
 }
 
+/// Detaches a native tab away from its strip, respecting workspace locking and drag state.
 pub(crate) fn legacy_tab(app: &mut PhotocraftApp, ui: &mut egui::Ui, panel: &str, response: &egui::Response) {
     let suppressed = egui::Id::new("photocraft-panel-docking").with("legacy-suppressed");
     if ui.input(|input| input.pointer.button_pressed(egui::PointerButton::Primary)) {
@@ -505,15 +528,15 @@ pub(crate) fn legacy_tab(app: &mut PhotocraftApp, ui: &mut egui::Ui, panel: &str
         return;
     }
     let Some(panel) = normalize(panel) else { return };
-    // Native tab reordering and vertical whole-group moves stay in the dock.
-    // Crossing the dock column horizontally detaches through the shared layout.
+    // Reorder along the strip; pulling a tab away in either direction detaches that panel.
+    // A small margin avoids accidental detaches while reordering near the strip's edge.
     let strip = egui::Rect::from_min_max(egui::pos2(ui.max_rect().left(), response.rect.top()), egui::pos2(ui.max_rect().right(), response.rect.bottom()));
     if response.dragged()
         && ui.input(|input| input.focused && input.pointer.primary_down() && !input.key_pressed(egui::Key::Escape))
-        && ui.ctx().pointer_interact_pos().is_some_and(|position| position.x < strip.left() - 24.0 || position.x > strip.right() + 24.0)
+        && ui.ctx().pointer_interact_pos().is_some_and(|position| !strip.expand(8.0).contains(position))
         && let Some(id) = normalize(panel)
     {
-        let mut layout = app.ui.docking.clone().unwrap_or_else(|| legacy(app));
+        let mut layout = app.ui.docking.clone().unwrap_or_else(|| drag_layout(app, ui.ctx()));
         let bounds = ui.max_rect();
         let source = egui::Rect::from_min_size(
             egui::pos2(bounds.left(), response.rect.top()),
