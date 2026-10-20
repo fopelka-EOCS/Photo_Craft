@@ -371,6 +371,11 @@ pub type FileStampFn = Box<dyn Fn(&str) -> Option<FileStamp>>;
 /// [`jobs_ui::SaveCtl::commit`] right before replacing the file, and write nothing if that fails.
 pub type SaveFileFn = std::sync::Arc<dyn Fn(&Document, &str, &ExportSettings, &jobs_ui::SaveCtl) -> Result<Vec<String>, String> + Send + Sync>;
 
+/// A save's result says it went to a background job that hasn't written the file yet.
+fn is_pending(r: &Value) -> bool {
+    r.get("pending").and_then(Value::as_bool) == Some(true)
+}
+
 /// The revision a document counts as saved at after `written` went to its writer: that one when
 /// the writer confirms the bytes were stored, else still `previous`, so the document stays
 /// unsaved. A browser download is only a request the user can cancel (#4962).
@@ -1538,8 +1543,19 @@ impl PhotocraftApp {
             return Err("Answer TIFF or Targa Options before starting another save".into());
         }
         let r = self.write_save(path, None, None)?;
-        self.session.journal.push(("file.save".into(), Value::Object(Default::default())));
+        self.journal_save(is_pending(&r), ("file.save".into(), Value::Object(Default::default())));
         Ok(r)
+    }
+
+    /// Journal a save's `step` once its file is written (#7889): now for a save that finished,
+    /// or when the background save just started (`pending`) succeeds, so a failed or cancelled
+    /// save never reaches an action being recorded.
+    pub(crate) fn journal_save(&mut self, pending: bool, step: (String, Value)) {
+        let started = self.jobs.last_started.filter(|_| pending);
+        match started.and_then(|job| self.jobs.saves.iter_mut().find(|s| s.job == job)) {
+            Some(save) => save.journal = Some(step),
+            None => self.session.journal.push(step),
+        }
     }
 
     /// Writes the Save As and journals it as a `file.saveAs` step with its path (and TIFF or
@@ -1553,13 +1569,19 @@ impl PhotocraftApp {
         if let Some(bits) = tga_bits {
             step["tgaBits"] = bits.bits().into();
         }
-        self.session.journal.push(("file.saveAs".into(), step));
+        self.journal_save(is_pending(&r), ("file.saveAs".into(), step));
         Ok(r)
     }
 
-    /// Re-label the Save As just journaled for `path` as File › Save (see [`Self::save_dialog_flow`]).
+    /// Re-label the Save As just journaled for `path` as File › Save (see [`Self::save_dialog_flow`]),
+    /// or the one a background save to `path` will journal when it ends.
     pub(crate) fn journal_as_plain_save(&mut self, path: &str) {
-        if let Some(last) = self.session.journal.last_mut()
+        let pending = self.jobs.saves.iter_mut().find(|s| !s.ended && s.path == path).and_then(|s| s.journal.as_mut());
+        let step = match pending {
+            Some(step) => Some(step),
+            None => self.session.journal.last_mut(),
+        };
+        if let Some(last) = step
             && last.0 == "file.saveAs"
             && last.1.get("path").and_then(Value::as_str) == Some(path)
             && last.1.as_object().is_some_and(|o| o.len() == 1)
@@ -1653,11 +1675,17 @@ impl PhotocraftApp {
     /// `None` when the save went to a background job (#2017), which finishes it in
     /// [`jobs_ui::tick`].
     pub(crate) fn write_document(&mut self, path: String, settings: &ExportSettings, copy: bool) -> Result<Option<(String, Vec<String>)>, String> {
+        // While an action records, write at once, as its playback does (#7889): the save's
+        // step then lands in that recording in call order, and only once the file is written,
+        // whatever the recording does while a background save would still be running.
         if self.background_jobs
+            && self.session.actions.recording.is_none()
             && let Some(save) = self.services.save_file.clone()
         {
             return jobs_ui::start_save(self, path, settings.clone(), copy, save, false);
         }
+        // A background save started before the recording may still be writing this file.
+        jobs_ui::may_save(self, &path)?;
         let st = self.session.active().ok_or("no document")?;
         let (doc, written, previous) = (st.doc.id, st.revision, st.saved_revision);
         let export = self.services.export.as_ref().ok_or("no exporter configured")?;

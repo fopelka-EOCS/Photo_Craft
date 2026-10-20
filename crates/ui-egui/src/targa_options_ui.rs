@@ -81,9 +81,10 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         let settings = ExportSettings { tga_bits: Some(p.bits), ..app.save_settings() };
         let step = serde_json::json!({"path": p.path, "tgaBits": p.bits.bits()});
         let written = app.with_document(p.doc, |app| app.write_document(p.path, &settings, p.copy));
-        if written.is_ok() {
-            // An action being recorded keeps the Save As or Save a Copy with this answer (#2032).
-            app.session.journal.push((p.record.into(), step));
+        if let Ok(w) = &written {
+            // An action being recorded keeps the Save As or Save a Copy with this answer (#2032),
+            // once written (#7889).
+            app.journal_save(w.is_none(), (p.record.into(), step));
         }
         match written {
             Err(e) => {
