@@ -60,13 +60,9 @@ impl Service {
                 let answer = self.client.link_poll(&handle).await.map_err(fault);
                 post(Event::Linked(answer));
             }
-            Job::SignOut => match fetch_logout().await {
-                Ok(()) => {
+            Job::SignOut => {
+                if fetch_logout().await.is_ok() {
                     let _ = web_sys::window().and_then(|w| w.location().reload().ok());
-                }
-                Err(reason) => {
-                    log::error!("sign-out failed: {reason}");
-                    post(Event::Account(Err(Fault::Refused(format!("Sign-out failed: {reason}")))));
                 }
             },
             Job::List(path) => {
@@ -139,9 +135,9 @@ async fn fetch_logout() -> Result<(), String> {
     let promised = fetch.call1(global.as_ref(), req.as_ref()).map_err(|e| format!("{e:?}"))?;
     let promised: js_sys::Promise = promised.dyn_into().map_err(|_| "not a promise".to_owned())?;
     let response = wasm_bindgen_futures::JsFuture::from(promised).await.map_err(|e| format!("{e:?}"))?;
-    let response: web_sys::Response = response.dyn_into().map_err(|_| "not a response".to_owned())?;
+    let response: web_sys::Response = response.dyn_into().map_err(|_| "logout response was not a Response".to_owned())?;
     if !response.ok() {
-        return Err(format!("HTTP {}", response.status()));
+        return Err(format!("logout failed with HTTP {}", response.status()));
     }
     Ok(())
 }
