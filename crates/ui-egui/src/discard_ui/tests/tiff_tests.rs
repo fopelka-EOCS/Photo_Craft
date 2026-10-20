@@ -154,3 +154,18 @@ fn close_all_waits_for_each_layered_tiff_write() {
     assert!(h.state().session.documents().is_empty());
     assert!(h.state().discard.is_none());
 }
+
+/// Enter on a focused Cancel cancels: it never doubles as the OK shortcut.
+#[test]
+fn enter_on_a_focused_cancel_writes_nothing() {
+    let (mut h, writes, _, _) = tiff_prompt("file.close");
+    h.key_press(Key::Y);
+    h.run_steps(3);
+    assert!(h.state().tiff_options.is_some());
+    h.get_by_label("Cancel").focus();
+    h.run_steps(1);
+    h.key_press(Key::Enter);
+    h.run_steps(3);
+    assert!(writes.borrow().is_empty(), "nothing written");
+    assert!(h.state().tiff_options.is_none(), "the prompt is closed");
+}

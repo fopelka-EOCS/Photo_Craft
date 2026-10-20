@@ -201,3 +201,18 @@ fn closing_after_a_targa_save_waits_for_targa_options() {
     assert!(h.state().discard.is_none());
     assert!(h.state().session.documents().is_empty());
 }
+
+/// Enter on a focused Cancel cancels: it never doubles as the OK shortcut.
+#[test]
+fn enter_on_a_focused_cancel_writes_nothing() {
+    let (mut h, writes) = targa_app(false, "unused.tga");
+    h.state_mut().save_as(Some("t.tga".into())).unwrap();
+    h.run_steps(2);
+    h.get_by_label("Cancel").focus();
+    h.run_steps(1);
+    h.key_press(Key::Enter);
+    h.run_steps(3);
+    assert!(writes.borrow().is_empty(), "nothing written");
+    assert!(h.state().targa_options.is_none(), "the prompt is closed");
+    assert_eq!(h.state().ui.status, "Save cancelled");
+}

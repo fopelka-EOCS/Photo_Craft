@@ -65,7 +65,9 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     cancel |= modal.should_close();
     p.discard_layers = discard;
     p.dont_ask_again = dont_ask;
-    if ok || ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)) {
+    // Enter on a focused Cancel activates Cancel; the same key press must not also confirm.
+    let enter = !cancel && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+    if (ok || enter) && !cancel {
         let Some(p) = app.tiff_options.take() else { return };
         if p.dont_ask_again {
             app.session.edit_prefs(|prefs| prefs.file_handling.ask_before_saving_layered_tiff = false);
