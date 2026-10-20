@@ -173,6 +173,61 @@ fn invalid_batch_changes_nothing_and_monitor_commands_do_not_edit_documents() {
     assert_eq!((before.history.can_undo(), before.history.can_redo()), (after.history.can_undo(), after.history.can_redo()));
 }
 
+#[test]
+fn malformed_monitor_requests_preserve_settings_and_runtime_revision() {
+    let identity = key(1);
+    let mut s = Session::new();
+    s.color.set_displays(Ok(vec![display(1, Some(identity.clone()), Some(Builtin::Srgb))]));
+    choose(&mut s, DEFAULT_DISPLAY, "rec2020");
+    choose(&mut s, &identity, "display-p3");
+    let settings = s.color.settings.clone();
+    let revision = s.color.monitor_files.revision;
+    let too_many_clears: Vec<_> = (0..=MAX_RULES).map(|n| format!("disconnected-{n}")).collect();
+    let mut cases = vec![
+        (json!({"set": [{"display": identity, "profile": "srgb"}, {"display": identity, "profile": "auto"}]}), "duplicate display change"),
+        (json!({"clear": [identity, identity]}), "invalid or duplicate display key to clear"),
+        (json!({"set": [{"display": identity, "profile": "srgb"}], "clear": [identity]}), "invalid or duplicate display key to clear"),
+        (json!({"refresh": true, "set": [{"display": "default", "profile": "srgb"}]}), "refresh cannot be combined with changes"),
+        (json!({"refresh": true, "clear": [identity]}), "refresh cannot be combined with changes"),
+        (json!({"set": [{"display": "default", "profile": "srgb"}], "clear": too_many_clears}), "too many monitor changes"),
+        (json!({"set": [{"display": "default", "profile": "srgb"}], "unexpected": true}), "unknown field"),
+        (json!({"set": [{"display": "default", "profile": "srgb", "unexpected": true}]}), "unknown field"),
+    ];
+    for invalid in [String::new(), DEFAULT_DISPLAY.into(), "invalid\0key".into(), "x".repeat(MAX_KEY + 1)] {
+        cases.push((json!({"clear": [identity, invalid]}), "invalid or duplicate display key to clear"));
+    }
+    for (params, expected) in cases {
+        let error = s.execute(COMMAND, params.clone()).unwrap_err();
+        assert!(matches!(&error, EngineError::BadParams { cmd, msg } if cmd == COMMAND && msg.contains(expected)), "{params}: {error}");
+        assert_eq!(s.color.settings, settings, "{params}");
+        assert_eq!(s.color.monitor_files.revision, revision, "{params}");
+    }
+}
+
+#[test]
+fn sixty_four_physical_rules_plus_default_are_allowed_but_an_extra_rule_changes_nothing() {
+    let mut s = Session::new();
+    let displays = (1..=MAX_RULES + 1).map(|n| {
+        let id = u32::try_from(n).unwrap();
+        display(id, Some(key(id)), Some(Builtin::Srgb))
+    });
+    s.color.set_displays(Ok(displays.collect()));
+    let mut changes = vec![json!({"display": "default", "profile": "rec2020"})];
+    for n in 1..=MAX_RULES {
+        changes.push(json!({"display": key(u32::try_from(n).unwrap()), "profile": "display-p3"}));
+    }
+    s.execute(COMMAND, json!({"set": changes})).unwrap();
+    assert_eq!(s.color.settings.monitor_overrides.len(), MAX_RULES);
+    assert_eq!(s.color.settings.monitor_profile, "rec2020");
+    let settings = s.color.settings.clone();
+    let revision = s.color.monitor_files.revision;
+    let extra = key(u32::try_from(MAX_RULES + 1).unwrap());
+    let error = s.execute(COMMAND, json!({"set": [{"display": extra, "profile": "display-p3"}]})).unwrap_err();
+    assert!(matches!(error, EngineError::BadParams { cmd, msg } if cmd == COMMAND && msg.contains("at most 64")));
+    assert_eq!(s.color.settings, settings);
+    assert_eq!(s.color.monitor_files.revision, revision);
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn stale_and_cancelled_background_changes_cannot_overwrite_newer_choices() {
@@ -235,6 +290,51 @@ impl Drop for TempDir {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn lenient_preference_loading_preserves_monitor_choices_and_invalidates_cached_files() {
+    let dir = TempDir::new();
+    let path = dir.profile();
+    let spec = path.to_str().unwrap();
+    let identity = key(1);
+    std::fs::write(&path, Builtin::Rec2020.profile().to_bytes().as_slice()).unwrap();
+    let mut s = Session::new();
+    s.color.set_displays(Ok(vec![display(1, Some(identity.clone()), Some(Builtin::Srgb))]));
+    choose(&mut s, DEFAULT_DISPLAY, "rec2020");
+    choose(&mut s, &identity, spec);
+    let original_fingerprint = s.color.monitor_status_for(Some(1)).fingerprint;
+    let revision = s.color.monitor_files.revision;
+    assert!(s.color.monitor_files.files.contains_key(spec));
+
+    let mut saved: Value = serde_json::from_str(&s.prefs_to_json()).unwrap();
+    saved["colorSettings"]["workingRgb"] = json!("display-p3");
+    saved["colorSettings"]["bpc"] = json!("yes");
+    saved["general"]["exportClipboard"] = json!(false);
+    saved["general"]["beepWhenDone"] = json!("yes");
+    let mut expected_color = s.color.settings.clone();
+    expected_color.working_rgb = "display-p3".into();
+    expected_color.bpc = ColorSettings::default().bpc;
+    std::fs::write(&path, Builtin::DisplayP3.profile().to_bytes().as_slice()).unwrap();
+
+    let invalid = s.load_prefs_json(&saved.to_string()).unwrap();
+    let invalid_paths: BTreeSet<_> = invalid.iter().map(crate::prefs::InvalidPref::path).collect();
+    assert_eq!(invalid_paths, BTreeSet::from(["colorSettings.bpc".into(), "general.beepWhenDone".into()]));
+    assert_eq!(s.color.settings, expected_color, "valid default and physical monitor choices survive unrelated malformed fields");
+    assert!(!s.prefs().general.export_clipboard);
+    assert_eq!(s.prefs().general.beep_when_done, crate::prefs::General::default().beep_when_done);
+    assert!(s.color.monitor_files.files.is_empty());
+    assert_ne!(s.color.monitor_files.revision, revision);
+    assert!(s.color.monitor_status_for(Some(1)).loading);
+    monitor_is(&s, None, Builtin::Rec2020);
+    monitor_is(&s, Some(1), Builtin::Srgb);
+
+    s.execute(COMMAND, json!({"refresh": true})).unwrap();
+    let refreshed = s.color.monitor_status_for(Some(1));
+    assert!(!refreshed.loading);
+    assert_ne!(refreshed.fingerprint, original_fingerprint);
+    assert_eq!(s.color.monitor_for(Some(1)).description, Builtin::DisplayP3.profile().description);
 }
 
 #[cfg(not(target_arch = "wasm32"))]

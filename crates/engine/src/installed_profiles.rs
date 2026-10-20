@@ -126,12 +126,15 @@ pub struct MonitorCatalog {
     pub profiles: Vec<MonitorCatalogProfile>,
     pub complete: bool,
     pub truncated: bool,
-    /// Unreadable files/folders and profiles that cannot be RGB monitor destinations.
+    /// Unreadable files/folders, excluded directory symlinks and profiles that cannot be
+    /// RGB monitor destinations.
     pub skipped: usize,
 }
 
 /// Search profile folders off the UI thread. No global cache: each explicit refresh observes
 /// current bytes even when a calibration tool keeps the same filename, length and timestamp.
+/// Within these folders, directory symlinks are skipped instead of expanding the search beyond
+/// its roots; file symlinks still use the same bounded regular-file reader as other profiles.
 /// The web cannot search native profile folders and returns an empty, partial catalog.
 pub fn monitor_catalog(dirs: &[PathBuf]) -> MonitorCatalog {
     #[cfg(not(target_arch = "wasm32"))]
@@ -187,6 +190,11 @@ fn monitor_catalog_with_limits(dirs: &[PathBuf], max_entries: usize, byte_budget
                     continue;
                 };
                 let path = entry.path();
+                if kind.is_symlink() && std::fs::metadata(&path).is_ok_and(|metadata| metadata.is_dir()) {
+                    // Do not recurse through linked directories, even when they are acyclic.
+                    self.catalog.skipped += 1;
+                    continue;
+                }
                 if kind.is_dir() {
                     if depth < MAX_DEPTH {
                         self.directory(&path, depth + 1);
@@ -408,14 +416,25 @@ mod tests {
 
     #[cfg(all(not(target_arch = "wasm32"), unix))]
     #[test]
-    fn monitor_catalog_does_not_follow_directory_symlink_cycles() {
+    fn monitor_catalog_counts_directory_symlinks_as_skipped_and_reads_file_symlinks() {
         let d = temp_dir("monitor-symlinks");
+        let external = temp_dir("monitor-symlink-target");
+        std::fs::write(external.join("external.icc"), Builtin::DisplayP3.profile().to_bytes().as_slice()).unwrap();
+        std::os::unix::fs::symlink(&external, d.join("vendor/calibrations")).unwrap();
         std::os::unix::fs::symlink(&d, d.join("vendor/cycle")).unwrap();
-        std::fs::write(d.join("display.icc"), Builtin::Srgb.profile().to_bytes().as_slice()).unwrap();
+        let original = d.join("display.icc");
+        let alias = d.join("linked.icm");
+        std::fs::write(&original, Builtin::Srgb.profile().to_bytes().as_slice()).unwrap();
+        std::os::unix::fs::symlink(&original, &alias).unwrap();
         let catalog = monitor_catalog(std::slice::from_ref(&d));
-        assert_eq!(catalog.profiles.len(), 1);
+        assert_eq!(catalog.skipped, 2, "both acyclic and cyclic directory links are excluded");
+        assert_eq!(catalog.profiles.len(), 2);
+        let paths: Vec<_> = catalog.profiles.iter().map(|profile| profile.path.as_str()).collect();
+        assert_eq!(paths, vec![original.to_str().unwrap(), alias.to_str().unwrap()]);
+        assert!(catalog.profiles.iter().all(|profile| profile.fingerprint == crate::monitor_cmds::fingerprint(&Builtin::Srgb.profile().to_bytes())));
         assert!(!catalog.truncated);
         std::fs::remove_dir_all(d).unwrap();
+        std::fs::remove_dir_all(external).unwrap();
     }
 
     #[test]

@@ -488,6 +488,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn excessive_helper_errors_are_bounded() {
+        let _spawns = crate::CHILD_SPAWNS.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         let error =
             run_helper(std::process::Command::new("/bin/sh").args(["-c", "head -c 20000 /dev/zero >&2"]), std::time::Duration::from_secs(5)).unwrap_err();
         assert!(error.contains("size limit"), "{error}");

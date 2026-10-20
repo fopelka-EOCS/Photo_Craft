@@ -6881,6 +6881,7 @@ mod tests {
 
     #[test]
     fn navigator_on_gpu_uses_main_display_rule_and_refreshes_on_move() {
+        let _gpu = photocraft_testkit::gpu_lock();
         let Ok(rs) = std::panic::catch_unwind(|| egui_kittest::wgpu::create_render_state(crate::gpu_canvas::wgpu_setup(), Default::default())) else {
             eprintln!("skipping: no GPU adapter");
             return;

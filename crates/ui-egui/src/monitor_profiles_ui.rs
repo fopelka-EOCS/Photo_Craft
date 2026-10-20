@@ -168,9 +168,19 @@ pub fn poll(app: &mut PhotocraftApp, ctx: &egui::Context) {
         && app.session.authorize.is_none()
     {
         app.monitor_profiles.refresh_again = false;
+        let status = app.ui.status.clone();
+        let status_error = app.ui.status_error;
         match app.run(COMMAND, json!({"refresh":true})) {
-            Ok(v) => app.monitor_profiles.refresh = v["job"].as_u64().map(JobId),
-            Err(e) => app.ui.status = e,
+            Ok(v) => {
+                app.monitor_profiles.refresh = v["job"].as_u64().map(JobId);
+                // An automatic refresh must not acknowledge an unrelated unread error.
+                app.ui.status = status;
+                app.ui.status_error = status_error;
+            }
+            Err(e) => {
+                app.ui.status = e;
+                app.ui.status_error = true;
+            }
         }
     }
 }
@@ -197,6 +207,7 @@ fn error(app: &mut PhotocraftApp, id: u64, message: &str) {
         d.fields.insert("__error".into(), json!(message));
     }
     app.ui.status = message.into();
+    app.ui.status_error = true;
 }
 pub fn apply(app: &mut PhotocraftApp, id: u64, close: bool) -> Result<Value, String> {
     if busy(app) {
@@ -255,27 +266,29 @@ fn finish(app: &mut PhotocraftApp, id: u64, close: bool, before: Snapshot) -> Re
     }
     Ok(())
 }
-pub fn on_event(app: &mut PhotocraftApp, e: &JobEvent) -> bool {
+/// Complete a monitor job before its control waiters receive a reply. A successful worker
+/// is not a successful Apply until preferences have also been saved.
+pub fn on_event(app: &mut PhotocraftApp, e: &JobEvent) -> Option<Result<(), String>> {
     if app.monitor_profiles.refresh == Some(e.id) {
         app.monitor_profiles.refresh = None;
         if let JobOutcome::Done(v) = &e.outcome {
             app.monitor_profiles.refresh_again |= v["stale"] == true;
         }
-        return true;
+        return Some(Ok(()));
     }
     if app.monitor_profiles.apply.as_ref().is_some_and(|p| p.job == e.id) {
         if let Some(p) = app.monitor_profiles.apply.take() {
             match &e.outcome {
                 JobOutcome::Done(_) => {
-                    let _ = finish(app, p.dialog, p.close, p.before);
+                    return Some(finish(app, p.dialog, p.close, p.before));
                 }
                 JobOutcome::Failed(e) => error(app, p.dialog, e),
                 JobOutcome::Cancelled => {}
             }
         }
-        return true;
+        return Some(Ok(()));
     }
-    false
+    None
 }
 pub fn cancel(app: &mut PhotocraftApp, id: u64) {
     if app.monitor_profiles.apply.as_ref().is_some_and(|p| p.dialog == id)
@@ -470,6 +483,75 @@ mod tests {
         assert_eq!(fields["choices"][DEFAULT_DISPLAY], "display-p3");
         assert_eq!(fields["__error"], "disk full");
     }
+    #[test]
+    fn waiting_control_reply_includes_monitor_preference_save_result() {
+        for method in ["ui.dialog.apply", "ui.dialog.confirm"] {
+            for fail_save in [true, false] {
+                let mut app = app();
+                app.background_jobs = true;
+                let writes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+                let count = Arc::clone(&writes);
+                app.services.save_prefs = Some(Box::new(move |_| {
+                    count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    if fail_save { Err("disk full".into()) } else { Ok(()) }
+                }));
+                let id = open(&mut app);
+                choose(&mut app, id, "display-p3");
+                let ctx = egui::Context::default();
+                let (request, rx) = crate::control::ControlRequest::new(method, json!({"dialog":id}));
+                let crate::control::Outcome::AfterJob(job) = crate::control::handle(&mut app, &ctx, &request) else {
+                    panic!("expected asynchronous monitor apply");
+                };
+                app.jobs.waiters.push((job, request.reply));
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+                let reply = loop {
+                    crate::jobs_ui::tick(&mut app, &ctx);
+                    if let Ok(reply) = rx.try_recv() {
+                        break reply;
+                    }
+                    assert!(std::time::Instant::now() < deadline, "monitor apply did not reply");
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                };
+                assert_eq!(writes.load(std::sync::atomic::Ordering::SeqCst), 1);
+                assert_eq!(reply["ok"], !fail_save, "{method}: {reply}");
+                assert!(!busy(&app));
+                if fail_save {
+                    assert_eq!(reply["error"], "disk full");
+                    assert_eq!(app.session.color.settings.monitor_profile, "auto");
+                    let fields = &app.ui.dialog_mut(id).unwrap().fields;
+                    assert_eq!(fields["choices"][DEFAULT_DISPLAY], "display-p3");
+                    assert_eq!(fields["baseline"][DEFAULT_DISPLAY], "auto");
+                    assert_eq!(fields["__error"], "disk full");
+                } else {
+                    assert_eq!(app.session.color.settings.monitor_profile, "display-p3");
+                    assert_eq!(app.ui.dialog_mut(id).is_none(), method == "ui.dialog.confirm");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn background_monitor_refresh_preserves_unread_status() {
+        for background in [false, true] {
+            let mut app = app();
+            app.background_jobs = background;
+            app.ui.status = "Previous export failed".into();
+            app.ui.status_error = true;
+            let ctx = egui::Context::default();
+            refresh(&mut app);
+            poll(&mut app, &ctx);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while app.session.has_jobs() {
+                crate::jobs_ui::tick(&mut app, &ctx);
+                assert!(std::time::Instant::now() < deadline, "monitor refresh did not finish");
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            assert_eq!(app.ui.status, "Previous export failed");
+            assert!(app.ui.status_error);
+            assert!(app.monitor_profiles.refresh.is_none());
+        }
+    }
+
     #[test]
     fn cancelling_pending_apply_never_commits_and_stale_dialog_remains_pinned() {
         let mut app = app();

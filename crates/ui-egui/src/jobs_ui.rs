@@ -435,11 +435,14 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
     {
         beep();
     }
+    // Monitor Apply includes persistence and may roll back a successful worker result.
+    let monitor = crate::monitor_profiles_ui::on_event(app, &e);
     // Control requests waiting on this job.
-    let reply = match &e.outcome {
-        JobOutcome::Done(v) => json!({"ok": true, "result": v}),
-        JobOutcome::Failed(err) => json!({"ok": false, "error": err}),
-        JobOutcome::Cancelled => json!({"ok": false, "error": "cancelled"}),
+    let reply = match (&e.outcome, &monitor) {
+        (_, Some(Err(err))) => json!({"ok": false, "error": err}),
+        (JobOutcome::Done(v), _) => json!({"ok": true, "result": v}),
+        (JobOutcome::Failed(err), _) => json!({"ok": false, "error": err}),
+        (JobOutcome::Cancelled, _) => json!({"ok": false, "error": "cancelled"}),
     };
     app.jobs.waiters.retain(|(job, tx)| {
         if *job == e.id {
@@ -449,7 +452,7 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
             true
         }
     });
-    if crate::monitor_profiles_ui::on_event(app, &e) {
+    if monitor.is_some() {
         return;
     }
     // A Free Transform commit's session ends with its job (then reported like any job).
