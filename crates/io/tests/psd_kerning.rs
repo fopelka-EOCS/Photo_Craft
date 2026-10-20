@@ -167,20 +167,26 @@ fn hostile_text_index_never_sizes_the_save() {
     assert_eq!(chars(b), chars(&t), "a remapped TextIndex must still restore Optical kerning");
 }
 
+/// A file's own `Txt2` for one Metrics text "AV" (object 0) that a save of unchanged text reads
+/// back unchanged — Photoshop's own blocks are such a fixed point (#2374) — with Photoshop's
+/// glyph pen positions (`/21 /1`) when `pen_positions`.
+fn file_txt2(pen_positions: bool) -> Vec<u8> {
+    let t = layer("AV", &[(2, Kerning::Metrics, 0.0)]);
+    let mut e = photocraft_text::psd::parse_txt2(&photocraft_text::psd::build_txt2(&[(0, &t)], None)).unwrap();
+    if pen_positions {
+        let Some(E::Array(objects)) = e.get_mut("1").and_then(|o| o.get_mut("1")) else { panic!("text objects") };
+        objects[0].set("21", E::Dict(vec![("1".into(), E::Array(vec![E::Real(10.0), E::Real(20.0)]))]));
+    }
+    let E::Dict(items) = e else { panic!("Txt2 dictionary") };
+    photocraft_text::engine_data::write_bare(&items)
+}
+
 /// A save must not drop what the file held beyond the style runs: the previous `Txt2`'s glyph
 /// pen positions (`/21 /1`) survive a resave of unchanged text, and go away with the text they
 /// described rather than lying about the new one.
 #[test]
 fn txt2_extras_survive_a_resave_of_unchanged_text() {
-    let obj = E::Dict(vec![
-        ("0".into(), E::Dict(vec![("0".into(), E::String("AV\r".into())), ("6".into(), E::Dict(vec![("0".into(), E::Array(vec![]))]))])),
-        ("21".into(), E::Dict(vec![("1".into(), E::Array(vec![E::Real(10.0), E::Real(20.0)]))])),
-    ]);
-    let prev = photocraft_text::engine_data::write_bare(&[
-        ("98".into(), E::Dict(vec![("0".into(), E::Int(14))])),
-        ("0".into(), E::dict()),
-        ("1".into(), E::Dict(vec![("1".into(), E::Array(vec![obj]))])),
-    ]);
+    let prev = file_txt2(true);
     let save = |text: &str| {
         let t = layer(text, &[(text.len(), Kerning::Metrics, 0.0)]);
         let mut doc = Document::new("k", photocraft_geom::Size::new(64, 32), photocraft_color::ColorMode::Rgb, photocraft_color::SampleType::U8);
@@ -190,14 +196,38 @@ fn txt2_extras_survive_a_resave_of_unchanged_text() {
         doc.metadata.psd_global_blocks.push((*b"8BIM", *b"Txt2", std::sync::Arc::new(prev.clone())));
         let bytes = photocraft_io::export(&doc, "k.psd", &Default::default()).unwrap().bytes;
         let file = photocraft_psd::PsdFile::from_bytes(&bytes).unwrap();
-        photocraft_text::psd::parse_txt2(&file.global_blocks.iter().find(|b| &b.key == b"Txt2").unwrap().data).unwrap()
+        file.global_blocks.iter().find(|b| &b.key == b"Txt2").map(|b| photocraft_text::psd::parse_txt2(&b.data).unwrap())
     };
-    let kept = save("AV");
+    let kept = save("AV").expect("an unchanged Txt2 is kept");
     let object = kept.path(&["1", "1"]).and_then(E::as_array).unwrap()[0].clone();
     assert_eq!(object.path(&["21", "1"]).and_then(E::as_array).map(|items| items.len()), Some(2), "pen positions survive a resave of unchanged text");
-    let stale = save("AX");
-    let object = stale.path(&["1", "1"]).and_then(E::as_array).unwrap()[0].clone();
-    assert!(object.get("21").is_none(), "positions of another text are stale and dropped");
+    // Edited text: the whole block goes rather than a regenerated one Photoshop refuses (-50).
+    assert!(save("AX").is_none(), "an edited text must not write a regenerated file Txt2");
+}
+
+/// A file's `Txt2` that would have to change is dropped, not regenerated: Photoshop refuses a
+/// file whose text objects lack what it keeps beside the text (error -50) but opens one without
+/// the block. Covers an added type layer, an emptied one, and an Optical layer.
+#[test]
+fn changed_file_txt2_is_dropped_not_regenerated() {
+    let prev = file_txt2(false);
+    let has_txt2 = |texts: &[(&str, Kerning)]| {
+        let mut doc = Document::new("k", photocraft_geom::Size::new(64, 32), photocraft_color::ColorMode::Rgb, photocraft_color::SampleType::U8);
+        for (text, mode) in texts {
+            let mut t = layer(text, &[(text.chars().count(), *mode, 0.0)]);
+            photocraft_text::TextEngine::new().render_layer(&mut t, doc.resolution_dpi, doc.pixel_format());
+            doc.layers.push(Layer::new(*text, LayerContent::Text(t)));
+        }
+        doc.metadata.psd_global_blocks.push((*b"8BIM", *b"Txt2", std::sync::Arc::new(prev.clone())));
+        let bytes = photocraft_io::export(&doc, "k.psd", &Default::default()).unwrap().bytes;
+        let back = photocraft_io::import("k.psd", &bytes).unwrap().document;
+        assert_eq!(back.layers.len(), texts.len(), "every type layer survives");
+        photocraft_psd::PsdFile::from_bytes(&bytes).unwrap().global_blocks.iter().any(|b| &b.key == b"Txt2")
+    };
+    assert!(has_txt2(&[("AV", Kerning::Metrics)]), "unchanged: kept");
+    assert!(!has_txt2(&[("AV", Kerning::Metrics), ("NEW", Kerning::Metrics)]), "added layer: dropped");
+    assert!(!has_txt2(&[("", Kerning::Metrics)]), "emptied layer: dropped");
+    assert!(!has_txt2(&[("AV", Kerning::Optical)]), "Optical edit of a file block: dropped");
 }
 
 /// Kerning that can't be represented (non-finite) and bad PSD fields never panic and stay sane.

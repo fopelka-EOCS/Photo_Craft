@@ -1747,8 +1747,16 @@ fn document_to_psd_nested(doc: &Document, opts: &PsdExportOptions, depth: u32, c
     // one mode EngineData can't carry; #1348).
     let txt2 =
         (previous.is_some() || photocraft_text::psd::needs_txt2(&text_layers)).then(|| photocraft_text::psd::build_txt2(&text_layers, previous.as_deref()));
+    // A file's block that had to change (a type layer added, or its text edited — an emptied
+    // layer included) is not written at all: the regenerated objects lack what Photoshop keeps
+    // beside the text and runs (frames, paragraph runs, …), and Photoshop refuses such a file
+    // with error -50 — while one without `Txt2` opens and rebuilds it from each `TySh`. An
+    // unchanged block still goes back byte for byte (#2374).
+    // ponytail: an Optical layer of such a file reopens here as Metrics; write complete
+    // Photoshop text objects to keep it.
+    let txt2 = txt2.filter(|t| previous.as_ref().is_none_or(|p| p == t));
     for (sig, key, data) in preserved {
-        if txt2.is_some() && key == *b"Txt2" {
+        if (txt2.is_some() || previous.is_some()) && key == *b"Txt2" {
             continue;
         }
         // A kept layer block (one the import could not read, #2700) describes layers the
