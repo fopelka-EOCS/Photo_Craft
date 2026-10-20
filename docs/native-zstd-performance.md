@@ -2,9 +2,15 @@
 
 Opt in to the reference Zstandard C implementation at default level 3 for native-format compression and bounded tile decoding. Blobs retain the bounded Rust streaming reader. Default builds retain the Rust backend. Enabling the feature adds zstd/zstd-sys and requires a C compiler, including a WASM-capable compiler for WASM.
 
-The opt-in backend gives substantial real-photo save/load and size improvements, but own-output loading of the 22-layer layout is about 5% slower (under 1 ms), confirmed separately. Decoder-context reuse and native decoding of sized blobs did not remove the regression; both changes were removed. Fast mode introduced photo size regressions, while level 5 still regressed layout loading. Those diagnostic variants are not retained. Production code remains unchanged, with the small-layout read tradeoff explicit.
+The measured backend improves real-photo save/load time and file size. Own-output loading of the 22-layer layout takes 4.9% longer, under 1 ms.
+Acceptance of that tradeoff and the native dependency remains a maintainer decision.
 
-Measured on 2026-10-19 against main `d95fdf3181c01ad41e95456091a394b105a9afb2`, independently of the other splits. Apple M4 Max, 16 CPUs, 128 GiB, macOS arm64, rustc 1.99.1; release O3, LTO off, 16 codegen units, debug off. Builds used nice 10 and warm APFS-cloned caches; measurements used default priority without concurrent builds or profiling. Five alternating paired samples follow a warmup; confirmation and fix runs use nine pairs. Time change compares the two medians; intervals resample paired ratios. Negative time change means faster. Small differences are not automatically established improvements or regressions.
+These timings predate directory byte comparisons, lazy encoder creation, output-buffer reuse and the encoder skip for empty work.
+Those changes were not benchmarked and do not establish a fix for the layout read regression.
+
+Directory saves retain at most 2 MiB of reusable output between objects and release it when the save ends.
+
+Measured on 2026-10-19 against main `d95fdf31`, independently of the other splits. Apple M4 Max, 16 CPUs, 128 GiB, macOS arm64, rustc 1.99.1; release O3, LTO off, 16 codegen units, debug off. Measurements used default priority without concurrent builds or profiling. Five alternating paired samples follow a warmup; confirmation rows use nine pairs. Time change compares the two medians; intervals resample paired ratios. Negative time change means faster. Small differences are not automatically established improvements or regressions.
 
 The full-resolution CC0 Pixls photographs are P1000475.RW2 (24 MP foliage centre crop, no resampling) and IMG_4059.CR2 (12 MP city), each converted to U8/U16/F32 with the ProPhoto RGB profile. F32 derives from 16-bit development, not HDR capture. MIT psd-tools masks.psd supplies a 640 x 1394 web layout with 22 imported layers and three masks; mask-index.psd supplies a 1000 x 867 illustrated card with a mask. The sources and hashes are pinned by the existing corpus. These are the available authored layered files, not a large layered-photo corpus. No generated noise, repeating ramps, enlarged charts or duplicated photo layers are used.
 
@@ -37,23 +43,24 @@ The shared harness times in-memory operations. Input loading, image conversion, 
 | layout-mask-index | load-common | 6.693 | 5.053 | -24.5% | -26.5..-23.1% | 344,892 / 344,892 |
 | layout-mask-index | load-own | 6.591 | 5.070 | -23.1% | -23.8..-21.6% | 344,892 / 168,059 |
 
-Every real save and load compares the complete document with its source, including tiles and metadata. Native and Rust encoded bytes may differ. Existing unit tests cover independent frames, reference encoder equivalence, Rust/native cross-decoding, output bounds, checksums and truncation. Current main also read native-written versions of all eight real documents with full document equality.
+Every measured save and load compares the complete document with its source, including tiles and metadata. Native and Rust encoded bytes can differ.
+Unit tests cover independent frames, reference encoder equivalence, both compression directions, output bounds, checksums and truncation.
+Directory verification compares decoded bytes directly with expected bytes. Empty and cached-only saves skip native encoder creation.
 
-Current main read all eight real native-written documents with complete equality. The real-image harness checks full document equality on every native save and load. Earlier split validation remains in the branch performance document; no production-code change is retained and no synthetic timing test was run.
+## Compatibility checks
 
-Local raw evidence and the shared harness: `.local/perf-real-261019/` in the repository checkout (ignored). This comparison supersedes the earlier synthetic performance table. Small synthetic unit fixtures remain correctness checks; ignored synthetic timing tests were not run.
+The ignored `cross_backend_documents` test in `roundtrip.rs` exchanges complete U8/U16/F32 documents between separately built backends.
+The first run writes Rust fixtures. The next two runs require and read the other backend's files, so missing fixtures fail.
+Run these commands from the repository root:
 
-## Earlier split validation
+```sh
+export PHOTOCRAFT_BACKEND_FIXTURES="$(mktemp -d)"
+cargo test -p photocraft-format --locked --test roundtrip cross_backend_documents -- --ignored --exact
+PHOTOCRAFT_BACKEND_READ_OTHER=1 cargo test -p photocraft-format --locked --features native-zstd --test roundtrip cross_backend_documents -- --ignored --exact
+PHOTOCRAFT_BACKEND_READ_OTHER=1 cargo test -p photocraft-format --locked --test roundtrip cross_backend_documents -- --ignored --exact
+```
 
-These checks passed when the split was prepared; they were not all rerun for this benchmark review. Current affected checks are listed above where production code changed.
-
-- `cargo test -p photocraft-format -p photocraft-codecs --locked`: passed (929 passed, 4 ignored).
-- `cargo clippy -p photocraft-format -p photocraft-codecs --locked --all-targets -- -D warnings`: passed.
-- `cargo xtask layers`: passed.
-- `cargo check -p photocraft-format -p photocraft-codecs --locked --target wasm32-unknown-unknown`: passed.
-- `cargo test -p photocraft-format -p photocraft-codecs --locked --features photocraft-format/native-zstd`: passed (930 passed, 4 ignored).
-- `cargo clippy -p photocraft-format -p photocraft-codecs --locked --all-targets --features photocraft-format/native-zstd -- -D warnings`: passed.
-- `cargo check -p photocraft-format --locked --target wasm32-unknown-unknown --features native-zstd`: passed.
-- `cargo xtask test-corpus -p codecs`: passed (795 passed, 3 ignored).
-- Cross-backend complete-document fixtures: default → native → default, U8/U16/F32, passed.
-- Workflow actionlint: passed with existing Node 20 action deprecations filtered; unfiltered actionlint reports those pre-existing deprecations.
+The native checks run in CI when sources, tests or manifests change in codecs, format or their workspace dependencies.
+Changes to the lockfile, toolchain, Cargo configuration or CI workflow also trigger them. Manual runs and `full-ci` force them.
+The checks include the native unit tests, format suite, fixture exchange, strict Clippy and a WASM check with Clang.
+Default builds keep their existing tests. The optional backend tests add no routine execution to unrelated changes.

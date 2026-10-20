@@ -31,9 +31,14 @@ type Compressor<'a> = std::marker::PhantomData<&'a ()>;
 #[cfg(feature = "native-zstd")]
 type Compressor<'a> = photocraft_codecs::ZstdEncoder<'a>;
 
+/// Creates the selected encoder for one compression worker or directory save.
 fn new_compressor<'a>() -> Result<Compressor<'a>> {
     #[cfg(feature = "native-zstd")]
-    return Ok(Compressor::new()?);
+    {
+        #[cfg(test)]
+        tests::COMPRESSORS.with(|n| n.set(n.get() + 1));
+        return Ok(Compressor::new()?);
+    }
     #[cfg(not(feature = "native-zstd"))]
     Ok(Default::default())
 }
@@ -433,12 +438,26 @@ enum Object {
 }
 
 impl Object {
-    fn compressed<'a>(&'a self, _compressor: &mut Compressor<'a>) -> Result<Vec<u8>> {
+    /// Compresses one object with the selected backend.
+    fn compressed(&self, _compressor: &mut Compressor<'_>) -> Result<Vec<u8>> {
         let bytes = self.content();
         #[cfg(feature = "native-zstd")]
         return Ok(_compressor.compress(&bytes)?);
         #[cfg(not(feature = "native-zstd"))]
         Ok(ruzstd::encoding::compress_to_vec(bytes.as_ref(), ruzstd::encoding::CompressionLevel::Fastest))
+    }
+
+    /// Replaces a directory save's temporary output without compacting each small object.
+    fn compress_into(&self, _compressor: &mut Compressor<'_>, encoded: &mut Vec<u8>) -> Result<()> {
+        let bytes = self.content();
+        #[cfg(feature = "native-zstd")]
+        _compressor.compress_into(&bytes, encoded)?;
+        #[cfg(not(feature = "native-zstd"))]
+        {
+            encoded.clear();
+            ruzstd::encoding::compress(bytes.as_ref(), encoded, ruzstd::encoding::CompressionLevel::Fastest);
+        }
+        Ok(())
     }
 
     /// The bytes this object stores (tiles little-endian).
@@ -450,9 +469,25 @@ impl Object {
     }
 }
 
+/// At most 2 MiB of output scratch survives between objects in one directory save.
+const MAX_DIRECTORY_SCRATCH: usize = 2 << 20;
+
+/// Writes an independent frame and releases oversized output after the write.
+fn write_object(root: &Path, path: &Path, object: &Object, compressor: &mut Compressor<'_>, encoded: &mut Vec<u8>) -> Result<()> {
+    object.compress_into(compressor, encoded)?;
+    if encoded.capacity() > MAX_DIRECTORY_SCRATCH {
+        encoded.shrink_to_fit();
+    }
+    let result = write_bundle_file(root, path, encoded);
+    if encoded.capacity() > MAX_DIRECTORY_SCRATCH {
+        *encoded = Vec::new();
+    }
+    result
+}
+
 /// Whether `compressed` decodes to exactly `expected`.
 fn content_matches(expected: &[u8], compressed: &[u8], what: &str) -> bool {
-    decompress(compressed, expected.len(), what).is_ok_and(|actual| hash_bytes(&actual) == hash_bytes(expected))
+    decompress(compressed, expected.len(), what).is_ok_and(|actual| actual == expected)
 }
 
 fn file_signature(metadata: &std::fs::Metadata) -> Option<FileSignature> {
@@ -708,6 +743,9 @@ type Compressed<'a> = (&'a String, Arc<Vec<u8>>);
 
 /// Compresses `objects` on scoped worker threads (sequentially on wasm).
 fn par_compress<'a>(objects: &[(&'a String, &'a Object)]) -> Result<Vec<Compressed<'a>>> {
+    if objects.is_empty() {
+        return Ok(Vec::new());
+    }
     let threads = if cfg!(target_arch = "wasm32") { 1 } else { std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 32) };
     if threads < 2 || objects.len() < 2 {
         let mut compressor = new_compressor()?;
@@ -854,7 +892,8 @@ impl PcraftWriter {
             None => 0,
         };
         let recheck = self.rolling_recheck(&p.objects);
-        let mut compressor = new_compressor()?;
+        let mut compressor = None;
+        let mut encoded = Vec::new();
         for (path, obj) in &p.objects {
             let object_path = dir.join(path);
             // bundle_root and list_objects validated the fixed parent directories once. Check
@@ -889,7 +928,11 @@ impl PcraftWriter {
                 Object::Tile(..) => stats.tiles_written += 1,
                 Object::Blob(_) => stats.blobs_written += 1,
             }
-            write_bundle_file(dir, &object_path, &obj.compressed(&mut compressor)?)?;
+            let compressor = match &mut compressor {
+                Some(c) => c,
+                None => compressor.insert(new_compressor()?),
+            };
+            write_object(dir, &object_path, obj, compressor, &mut encoded)?;
             let written = path_signature(&object_path)?;
             if let Some(cache) = &mut self.verified_directory {
                 match written {
@@ -1039,10 +1082,81 @@ pub(crate) fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
+/// Buffer reuse preserves frame bytes and releases large outputs, including failed writes.
+#[test]
+fn directory_output_reuse_is_bounded_and_preserves_frames() {
+    let dir = std::env::temp_dir().join(format!("photocraft-output-reuse-{}", std::process::id()));
+    let root = bundle_root(&dir).unwrap();
+    let path = root.join("blobs/test.zst");
+    let mut compressor = new_compressor().unwrap();
+    let mut encoded = Vec::new();
+    let mut first = std::ptr::null();
+    // Incompressible bytes exercise the output limit, without a timing fixture or document.
+    let mut state = 0x1234_5678u32;
+    let big: Vec<u8> = (0..MAX_DIRECTORY_SCRATCH + 4096)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            state as u8
+        })
+        .collect();
+    for (i, bytes) in [vec![42; 1024], vec![19; 1024], big, vec![]].into_iter().enumerate() {
+        let object = Object::Blob(Arc::new(bytes));
+        let expected = object.compressed(&mut new_compressor().unwrap()).unwrap();
+        write_object(&root, &path, &object, &mut compressor, &mut encoded).unwrap();
+        let actual = std::fs::read(&path).unwrap();
+        assert_eq!(actual, expected);
+        let content = object.content();
+        assert_eq!(decompress_bounded(&actual, content.len(), Some(content.len()), "test").unwrap(), content.as_ref());
+        assert!(encoded.capacity() <= MAX_DIRECTORY_SCRATCH);
+        if i == 0 {
+            first = encoded.as_ptr();
+        }
+        if i == 1 {
+            assert_eq!(encoded.as_ptr(), first);
+        }
+        if i == 2 {
+            assert!(actual.len() > MAX_DIRECTORY_SCRATCH);
+            assert_eq!(encoded.capacity(), 0);
+            assert!(write_object(&root, &root.join("invalid/test.zst"), &object, &mut compressor, &mut encoded).is_err());
+            assert_eq!(encoded.capacity(), 0);
+        }
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(all(test, feature = "native-zstd"))]
 mod tests {
     use super::*;
 
+    thread_local! {
+        pub(super) static COMPRESSORS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    /// Empty and cached-only saves need no encoder, while new objects share one.
+    #[test]
+    fn unchanged_saves_skip_encoder_creation() {
+        use photocraft_color::{Color, ColorMode};
+        let doc = Document::with_background("reuse", photocraft_geom::Size::new(1, 1), ColorMode::Rgb, SampleType::U8, Color::BLACK);
+        let mut writer = PcraftWriter::new();
+        COMPRESSORS.set(0);
+        assert!(par_compress(&[]).unwrap().is_empty());
+        assert_eq!(COMPRESSORS.get(), 0);
+        let (first, _) = writer.save_zip(&doc, &SaveOptions::default()).unwrap();
+        assert_eq!(COMPRESSORS.get(), 1);
+        assert_eq!(writer.save_zip(&doc, &SaveOptions::default()).unwrap().0, first);
+        assert_eq!(COMPRESSORS.get(), 1);
+        let dir = std::env::temp_dir().join(format!("photocraft-native-reuse-{}", std::process::id()));
+        writer.save_dir(&doc, &dir, &SaveOptions::default()).unwrap();
+        assert_eq!(COMPRESSORS.get(), 2);
+        writer.save_dir(&doc, &dir, &SaveOptions::default()).unwrap();
+        assert_eq!(COMPRESSORS.get(), 2);
+        assert_eq!(crate::load_path(&dir).unwrap(), doc);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Reusing a native encoder preserves independent frames in both readers.
     #[test]
     fn reused_compressor_produces_independent_frames() {
         let data: Vec<Arc<Vec<u8>>> =
@@ -1051,8 +1165,6 @@ mod tests {
         let mut compressor = new_compressor().unwrap();
         for (object, bytes) in objects.iter().zip(&data) {
             let encoded = object.compressed(&mut compressor).unwrap();
-            #[cfg(not(feature = "native-zstd"))]
-            assert_eq!(encoded, ruzstd::encoding::compress_to_vec(bytes.as_slice(), ruzstd::encoding::CompressionLevel::Fastest));
             assert_eq!(decompress(&encoded, bytes.len(), "test").unwrap(), **bytes);
             assert_eq!(decompress_bounded(&encoded, bytes.len(), Some(bytes.len()), "Rust decoder").unwrap(), **bytes);
             let rust = ruzstd::encoding::compress_to_vec(bytes.as_slice(), ruzstd::encoding::CompressionLevel::Fastest);

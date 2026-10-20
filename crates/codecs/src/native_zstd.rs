@@ -15,19 +15,28 @@ pub fn decode_zstd(bytes: &[u8], max_bytes: usize) -> std::io::Result<Vec<u8>> {
 }
 
 impl ZstdEncoder<'_> {
+    /// Creates an encoder that writes independent frames with checksums.
     pub fn new() -> std::io::Result<Self> {
         let mut encoder = zstd::zstd_safe::CCtx::try_create().ok_or_else(|| std::io::Error::other("cannot allocate Zstandard encoder"))?;
         encoder.set_parameter(zstd::zstd_safe::CParameter::ChecksumFlag(true)).map_err(zstd_error)?;
         Ok(Self(encoder))
     }
 
+    /// Returns a compact, owned frame for storage or caching.
     pub fn compress(&mut self, bytes: &[u8]) -> std::io::Result<Vec<u8>> {
         let mut encoded = Vec::new();
-        encoded.try_reserve_exact(zstd::zstd_safe::compress_bound(bytes.len())).map_err(std::io::Error::other)?;
-        self.0.compress2(&mut encoded, bytes).map_err(zstd_error)?;
+        self.compress_into(bytes, &mut encoded)?;
         // Avoid retaining the input-sized allocation for saved objects.
         encoded.shrink_to_fit();
         Ok(encoded)
+    }
+
+    /// Replaces the output with one complete frame, reusing its allocation.
+    pub fn compress_into(&mut self, bytes: &[u8], encoded: &mut Vec<u8>) -> std::io::Result<()> {
+        encoded.clear();
+        encoded.try_reserve_exact(zstd::zstd_safe::compress_bound(bytes.len())).map_err(std::io::Error::other)?;
+        self.0.compress2(encoded, bytes).map_err(zstd_error)?;
+        Ok(())
     }
 }
 
@@ -40,8 +49,11 @@ mod tests {
         let mut encoder = ZstdEncoder::new().unwrap();
         let mut reference = zstd::bulk::Compressor::new(0).unwrap();
         reference.include_checksum(true).unwrap();
+        let mut reused = Vec::new();
         for bytes in [vec![42; 262_144], vec![], (0..262_147).map(|i| ((i * 37 + i / 97) % 251) as u8).collect(), vec![19; 1_048_576]] {
             let mut encoded = encoder.compress(&bytes).unwrap();
+            encoder.compress_into(&bytes, &mut reused).unwrap();
+            assert_eq!(reused, encoded);
             assert_eq!(encoded, reference.compress(&bytes).unwrap());
             assert_eq!(zstd::stream::decode_all(encoded.as_slice()).unwrap(), bytes);
             assert_eq!(decode_zstd(&encoded, bytes.len()).unwrap(), bytes);

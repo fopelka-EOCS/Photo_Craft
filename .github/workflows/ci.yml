@@ -46,6 +46,7 @@ jobs:
     outputs:
       legs: ${{ steps.pick.outputs.legs }}
       web: ${{ steps.pick.outputs.web }}
+      native-zstd: ${{ steps.pick.outputs.native-zstd }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -54,6 +55,7 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha }}
+          BEFORE: ${{ github.event.before }}
           FULL: ${{ contains(github.event.pull_request.labels.*.name, 'full-ci') }}
         run: |
           # No macOS on PRs or main: the org's 5 macOS slots are kept for release builds, and
@@ -65,6 +67,16 @@ jobs:
           linux='{"os":"ubuntu-latest","part":"all"}'
           win() { printf '{"os":"windows-latest","part":"%s"}' "$1"; }
           all="[$linux,$(win unit),$(win integration)]"
+          # Check the optional backend only when its crates, dependencies or build inputs change.
+          native_base="$BASE"
+          if [ "$EVENT" = push ]; then native_base="$BEFORE"; fi
+          if [ "$EVENT" = workflow_dispatch ] || [ "$FULL" = true ] || ! git cat-file -e "$native_base^{commit}" 2>/dev/null; then
+            echo "native-zstd=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$native_base" HEAD | grep -E '^(crates/(codecs|format|cms|color|doc|geom|raster)/(src/|tests/|benches/|examples/|Cargo\.toml$|build\.rs$)|Cargo\.(toml|lock)$|rust-toolchain(\.toml)?$|\.cargo/|\.github/workflows/ci\.yml$)' > /dev/null; then
+            echo "native-zstd=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "native-zstd=false" >> "$GITHUB_OUTPUT"
+          fi
           if [ "$EVENT" != pull_request ] || [ "$FULL" = true ]; then
             echo "legs=$all" >> "$GITHUB_OUTPUT"
             echo "web=true" >> "$GITHUB_OUTPUT"
@@ -208,10 +220,16 @@ jobs:
         run: cargo test --workspace --locked --features heif --doc
 
       - name: Test reference Zstandard
-        if: matrix.part == 'all' || matrix.part == 'unit'
+        if: needs.platforms.outputs.native-zstd == 'true' && (matrix.part == 'all' || matrix.part == 'unit')
+        shell: bash
+        env:
+          PHOTOCRAFT_BACKEND_FIXTURES: ${{ runner.temp }}/native-zstd-fixtures
         run: |
           cargo test -p photocraft-codecs --lib --locked --features native-zstd native_zstd
+          cargo test -p photocraft-format --locked --test roundtrip cross_backend_documents -- --ignored --exact
           cargo test -p photocraft-format --locked --features native-zstd
+          PHOTOCRAFT_BACKEND_READ_OTHER=1 cargo test -p photocraft-format --locked --features native-zstd --test roundtrip cross_backend_documents -- --ignored --exact
+          PHOTOCRAFT_BACKEND_READ_OTHER=1 cargo test -p photocraft-format --locked --test roundtrip cross_backend_documents -- --ignored --exact
           cargo clippy -p photocraft-format -p photocraft-codecs --all-targets --locked --features photocraft-format/native-zstd -- -D warnings
 
   # The Windows tests used to be one job named `test (windows-latest)`; they're now legs named
@@ -332,6 +350,7 @@ jobs:
   wasm:
     timeout-minutes: 30
     name: wasm32 check
+    needs: platforms
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -344,9 +363,12 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
       - name: Check wasm-safe crates
-        run: |
-          cargo xtask wasm
-          cargo check -p photocraft-format --target wasm32-unknown-unknown --locked --features native-zstd
+        run: cargo xtask wasm
+      - name: Check reference Zstandard on wasm
+        if: needs.platforms.outputs.native-zstd == 'true'
+        env:
+          CC_wasm32_unknown_unknown: clang
+        run: cargo check -p photocraft-format --target wasm32-unknown-unknown --locked --features native-zstd
 
   web:
     timeout-minutes: 60
