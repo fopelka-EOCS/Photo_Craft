@@ -239,6 +239,10 @@ photocraft-cli batch --help
 photocraft-cli mcp
 ```
 
+PNG output is flattened: `--out wave-final.png` writes the merged image and warns that layers, masks and blend modes were not kept. Write `.psd`, `.pcraft` or a TIFF with `--tiff-layers` to keep them.
+
+On Windows the installer does not add `photocraft-cli` to `PATH`: call it from its install folder (for example `C:\Program Files\PhotoCraft`) or add that folder to `PATH`. Windows PowerShell 5.1 also strips the inner double quotes of a `--params` argument before the CLI sees them; write `--params '{\"amount\":80}'` there, or run the commands in PowerShell 7, `cmd` or Git Bash, where they work as written.
+
 The desktop app also offers an authenticated, loopback-only control channel (`photocraft --control`) for inspecting UI state, driving tools with pointer events, and taking offscreen screenshots. Every image in this README was rendered that way. See [`docs/control-protocol.md`](docs/control-protocol.md).
 
 ## Under the hood
