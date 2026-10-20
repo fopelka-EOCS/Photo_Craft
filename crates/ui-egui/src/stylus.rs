@@ -247,9 +247,6 @@ impl Stylus {
             self.frame.retain(|s| s.pressure > 0.0);
         }
         self.peak = self.frame.iter().fold(self.peak, |m, s| m.max(s.pressure));
-        if self.contacts.is_empty() {
-            self.touch_pen = false;
-        }
     }
 
     /// Finger contacts must not start or extend canvas strokes (Preferences › Tools › Disable Touch
@@ -262,7 +259,20 @@ impl Stylus {
         if self.contacts.len() >= 2 {
             return true;
         }
-        !self.contacts.is_empty() && !self.touch_pen && self.feed.get().is_none()
+        if self.feed.get().is_some() {
+            return false;
+        }
+        self.contacts.iter().any(|id| self.touch_contact_is_finger(*id))
+    }
+
+    /// Finger vs pen for a live touch contact ([`PenContacts`] when `raw_input_hook` ran).
+    fn touch_contact_is_finger(&self, id: egui::TouchId) -> bool {
+        if let Some((_, pen)) = self.pen_contacts.down.iter().find(|(c, _)| *c == id) {
+            return !pen;
+        }
+        // Offscreen harnesses omit `raw_input_hook`, so `pen_contacts` may be empty while stylus
+        // contacts are live; match the old `touch_pen` heuristic until observe runs.
+        !self.touch_pen
     }
 
     /// The pen's current sample. When the pen touched during this frame but has lifted since
@@ -489,6 +499,7 @@ impl PenContacts {
         }
         pen
     }
+
 }
 
 /// Turn egui's touch press-and-hold off while a pen contact is down (and through the frame it
@@ -753,21 +764,26 @@ mod tests {
         use egui::TouchPhase::{End, Start};
         let mut s = Stylus::default();
         s.disable_touch_drawing = true;
-        s.update(&[touch_id(1, Start, None)]);
+        let ev = |phase, force| touch_id(1, phase, force);
+        let go = |s: &mut Stylus, events: &[egui::Event]| {
+            s.pen_contacts.observe(events);
+            s.update(events);
+        };
+        go(&mut s, &[ev(Start, None)]);
         assert!(s.finger_blocks_drawing());
-        s.update(&[touch_id(1, End, None)]);
-        s.update(&[]);
+        go(&mut s, &[ev(End, None)]);
+        go(&mut s, &[]);
         assert!(!s.finger_blocks_drawing());
-        s.update(&[touch_id(2, Start, Some(0.4))]);
+        go(&mut s, &[touch_id(2, Start, Some(0.4))]);
         assert!(!s.finger_blocks_drawing(), "pressure marks a stylus contact");
-        s.update(&[touch_id(2, End, None)]);
-        s.update(&[]);
+        go(&mut s, &[touch_id(2, End, None)]);
+        go(&mut s, &[]);
         s.disable_touch_drawing = false;
-        s.update(&[touch_id(3, Start, None)]);
+        go(&mut s, &[touch_id(3, Start, None)]);
         assert!(!s.finger_blocks_drawing());
         s.disable_touch_drawing = true;
         assert!(s.finger_blocks_drawing());
-        s.update(&[touch_id(4, Start, None)]);
+        go(&mut s, &[touch_id(4, Start, None)]);
         assert!(s.finger_blocks_drawing(), "two fingers block strokes for gestures");
     }
 
