@@ -2778,6 +2778,7 @@ fontWeight	Italic	Курсив
 	Auto Hide Notifications	Автоскрытие уведомлений
 	Notification Duration (seconds)	Длительность уведомления (секунды)
 	Bundle Arrow-Key Nudges	Объединять сдвиги стрелками
+	Disable touch drawing	Отключить рисование касанием
 	Nudge Bundle Pause (ms)	Пауза объединения сдвигов (мс)
 	Appearance Mode	Режим оформления
 	Dark Theme	Тёмная тема

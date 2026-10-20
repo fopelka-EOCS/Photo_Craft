@@ -2929,6 +2929,7 @@ fontWeight	Italic	Itálico
 	Auto Hide Notifications	Ocultar notificações automaticamente
 	Notification Duration (seconds)	Duração da notificação (segundos)
 	Bundle Arrow-Key Nudges	Agrupar deslocamentos com as setas
+	Disable touch drawing	Desativar desenho com toque
 	Nudge Bundle Pause (ms)	Pausa para agrupar deslocamentos (ms)
 	Appearance Mode	Modo de aparência
 	Dark Theme	Tema escuro

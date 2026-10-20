@@ -2548,6 +2548,7 @@ fontWeight	Italic	Kursiv
 	Auto Hide Notifications	Benachrichtigungen automatisch ausblenden
 	Notification Duration (seconds)	Dauer der Benachrichtigung (Sekunden)
 	Bundle Arrow-Key Nudges	Pfeiltasten-Verschiebungen bündeln
+	Disable touch drawing	Touch-Zeichnen deaktivieren
 	Nudge Bundle Pause (ms)	Pause für gebündelte Verschiebungen (ms)
 	Appearance Mode	Erscheinungsmodus
 	Dark Theme	Dunkles Design

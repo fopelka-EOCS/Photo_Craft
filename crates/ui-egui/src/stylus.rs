@@ -113,6 +113,8 @@ pub struct Stylus {
     pub feed: StylusFeed,
     /// Preferences › Tools › Use Tablet Pressure: off, a pen paints like a mouse.
     pub use_pressure: bool,
+    /// Preferences › Tools › Disable Touch Drawing: finger contacts must not stroke on the canvas.
+    pub disable_touch_drawing: bool,
     /// Preferences › Tools › Pressure Curve (`None`: linear), with the points it was built from.
     pressure_curve: Option<photocraft_engine::prefs::PressureCurve>,
     curve_points: Vec<[f32; 2]>,
@@ -156,6 +158,7 @@ impl Default for Stylus {
         Self {
             feed: StylusFeed::default(),
             use_pressure: true,
+            disable_touch_drawing: false,
             pressure_curve: None,
             curve_points: Vec::new(),
             end: None,
@@ -244,6 +247,32 @@ impl Stylus {
             self.frame.retain(|s| s.pressure > 0.0);
         }
         self.peak = self.frame.iter().fold(self.peak, |m, s| m.max(s.pressure));
+    }
+
+    /// Finger contacts must not start or extend canvas strokes (Preferences › Tools › Disable Touch
+    /// Drawing). The mouse and a stylus (tablet feed or a touch contact with pen identity) still
+    /// paint. Two or more contacts are always blocked so pinch gestures stay navigation-only.
+    pub fn finger_blocks_drawing(&self) -> bool {
+        if !self.disable_touch_drawing {
+            return false;
+        }
+        if self.contacts.len() >= 2 {
+            return true;
+        }
+        if self.feed.get().is_some() {
+            return false;
+        }
+        self.contacts.iter().any(|id| self.touch_contact_is_finger(*id))
+    }
+
+    /// Finger vs pen for a live touch contact ([`PenContacts`] when `raw_input_hook` ran).
+    fn touch_contact_is_finger(&self, id: egui::TouchId) -> bool {
+        if let Some((_, pen)) = self.pen_contacts.down.iter().find(|(c, _)| *c == id) {
+            return !pen;
+        }
+        // Offscreen harnesses omit `raw_input_hook`, so `pen_contacts` may be empty while stylus
+        // contacts are live; match the old `touch_pen` heuristic until observe runs.
+        !self.touch_pen
     }
 
     /// The pen's current sample. When the pen touched during this frame but has lifted since
@@ -727,6 +756,33 @@ mod tests {
         // A force-less move mid-stroke keeps the last force.
         s.update(&[touch_id(8, Move, None)]);
         assert_eq!(s.pressure(), 0.3);
+    }
+
+    #[test]
+    fn finger_blocks_drawing_respects_the_preference_and_pen_identity() {
+        use egui::TouchPhase::{End, Start};
+        let mut s = Stylus { disable_touch_drawing: true, ..Default::default() };
+        let ev = |phase, force| touch_id(1, phase, force);
+        let go = |s: &mut Stylus, events: &[egui::Event]| {
+            s.pen_contacts.observe(events);
+            s.update(events);
+        };
+        go(&mut s, &[ev(Start, None)]);
+        assert!(s.finger_blocks_drawing());
+        go(&mut s, &[ev(End, None)]);
+        go(&mut s, &[]);
+        assert!(!s.finger_blocks_drawing());
+        go(&mut s, &[touch_id(2, Start, Some(0.4))]);
+        assert!(!s.finger_blocks_drawing(), "pressure marks a stylus contact");
+        go(&mut s, &[touch_id(2, End, None)]);
+        go(&mut s, &[]);
+        s.disable_touch_drawing = false;
+        go(&mut s, &[touch_id(3, Start, None)]);
+        assert!(!s.finger_blocks_drawing());
+        s.disable_touch_drawing = true;
+        assert!(s.finger_blocks_drawing());
+        go(&mut s, &[touch_id(4, Start, None)]);
+        assert!(s.finger_blocks_drawing(), "two fingers block strokes for gestures");
     }
 
     #[test]

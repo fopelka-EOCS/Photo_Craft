@@ -3609,6 +3609,7 @@ cameraRaw	Masking	Маскування
 	Auto Hide Notifications	Автоматично приховувати сповіщення
 	Notification Duration (seconds)	Тривалість сповіщення (секунди)
 	Bundle Arrow-Key Nudges	Поєднувати зсуви стрілками
+	Disable touch drawing	Вимкнути малювання дотиком
 	Nudge Bundle Pause (ms)	Пауза поєднання зсувів (мс)
 	Appearance Mode	Режим вигляду
 	Dark Theme	Темна тема
