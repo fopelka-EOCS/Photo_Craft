@@ -12,12 +12,14 @@ use std::sync::Arc;
 use photocraft_cms::{ColorSpace, Profile, ProfileClass};
 use photocraft_color::ColorMode;
 
-use crate::{ExportSettings, PhotocraftApp};
+use crate::PhotocraftApp;
 
-/// A CMYK profile the output condition can be: its label in the menu and the profile.
+/// A CMYK profile the output condition can be: its label in the menu, how a save names it
+/// (`"pdfOutputProfile"`: `document`, `working-cmyk` or the file's path) and the profile.
 #[derive(Clone)]
 pub struct Candidate {
     pub label: String,
+    pub spec: String,
     pub profile: Arc<Profile>,
 }
 
@@ -61,23 +63,23 @@ pub fn is_pdf_path(path: &str) -> bool {
 /// every installed CMYK output profile, each once (by description).
 fn candidates(app: &PhotocraftApp, doc: &photocraft_doc::Document) -> Vec<Candidate> {
     let mut list: Vec<Candidate> = Vec::new();
-    let mut push = |label: String, profile: Arc<Profile>| {
+    let mut push = |label: String, spec: String, profile: Arc<Profile>| {
         if profile.color_space == ColorSpace::Cmyk && !list.iter().any(|c| c.profile.description == profile.description) {
-            list.push(Candidate { label, profile });
+            list.push(Candidate { label, spec, profile });
         }
     };
     if doc.mode == ColorMode::Cmyk {
         let p = photocraft_engine::color_cmds::document_profile(doc);
-        push(crate::i18n::fmt(tl!("Document: {profile}"), &[("profile", &p.description)]), p);
+        push(crate::i18n::fmt(tl!("Document: {profile}"), &[("profile", &p.description)]), "document".into(), p);
     }
     let working = app.session.color.working(ColorMode::Cmyk);
-    push(crate::i18n::fmt(tl!("Working CMYK: {profile}"), &[("profile", &working.description)]), working);
+    push(crate::i18n::fmt(tl!("Working CMYK: {profile}"), &[("profile", &working.description)]), "working-cmyk".into(), working);
     for p in photocraft_engine::installed_profiles::installed() {
         if p.color_space != ColorSpace::Cmyk || p.class != ProfileClass::Output {
             continue;
         }
         if let Ok(profile) = photocraft_engine::color_cmds::resolve_profile(&p.path, None, Some(ColorMode::Cmyk)) {
-            push(p.description.clone(), profile);
+            push(p.description.clone(), p.path.clone(), profile);
         }
     }
     list
@@ -105,21 +107,17 @@ fn remembered_id() -> egui::Id {
     egui::Id::new("pdf-options-last")
 }
 
-/// The [`photocraft_io::PdfOptions`] for `p`'s answer.
-pub fn options(p: &Prompt, intent: photocraft_cms::Intent, bpc: bool) -> Result<photocraft_io::PdfOptions, String> {
+/// The save choices for `p`'s answer (`None`: a plain PDF), as a script or a recorded action
+/// would pass them.
+pub fn params(p: &Prompt) -> Result<Option<photocraft_engine::file_cmds::PdfParams>, String> {
     if !p.x1a {
-        return Ok(photocraft_io::PdfOptions::default());
+        return Ok(None);
     }
     let c = p.candidates.get(p.profile).ok_or("PDF/X-1a needs a CMYK output profile; none is installed")?;
     if !c.fits_x1a() {
         return Err(format!("PDF/X-1a:2001 needs an ICC version 2 output profile and \"{}\" is version {}", c.profile.description, c.profile.version.0));
     }
-    // A CMYK or gray document already in the condition keeps its numbers.
-    let same = p.mode == ColorMode::Grayscale || (p.mode == ColorMode::Cmyk && p.source.description == c.profile.description);
-    let source = (!same).then(|| p.source.to_bytes());
-    Ok(photocraft_io::PdfOptions {
-        x1a: Some(photocraft_io::PdfX1a { profile: c.profile.to_bytes(), source, intent, bpc, bleed_pt: f64::from(p.bleed_mm.max(0.0)) * 72.0 / 25.4 }),
-    })
+    Ok(Some(photocraft_engine::file_cmds::PdfParams { profile: Some(c.spec.clone()), bleed_mm: f64::from(p.bleed_mm.clamp(0.0, 50.0)) }))
 }
 
 pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
@@ -199,19 +197,31 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let enter = can_save && !cancel && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
     if ok || enter {
         let Some(p) = app.pdf_options.take() else { return };
-        let (intent, bpc) = (app.session.color.settings.intent(), app.session.color.settings.bpc);
-        let pdf = match options(&p, intent, bpc) {
-            Ok(pdf) => pdf,
-            Err(e) => {
-                app.ui.status = crate::i18n::fmt(tl!("Save failed: {error}"), &[("error", &e)]);
-                app.ui.status_error = true;
-                return;
-            }
+        let fail = |app: &mut PhotocraftApp, e: String| {
+            app.ui.status = crate::i18n::fmt(tl!("Save failed: {error}"), &[("error", &e)]);
+            app.ui.status_error = true;
         };
+        let chosen = match params(&p) {
+            Ok(chosen) => chosen,
+            Err(e) => return fail(app, e),
+        };
+        let mut settings = app.save_settings();
+        if let Some(pdf) = &chosen {
+            let request = photocraft_engine::file_cmds::PdfRequest::resolve(&app.session.color, pdf).map_err(|e| e.to_string());
+            let doc = app.session.documents().iter().find(|d| d.doc.id == p.doc).map(|d| d.doc.clone());
+            match (request, doc) {
+                (Ok(request), Some(doc)) => settings.pdf = request.options_for(&doc),
+                (Err(e), _) => return fail(app, e),
+                (_, None) => return fail(app, tl!("The document is closed").into()),
+            }
+        }
         let desc = p.candidates.get(p.profile).map(|c| c.profile.description.clone()).unwrap_or_default();
         ctx.data_mut(|d| d.insert_persisted::<Remembered>(remembered_id(), (p.x1a, desc, p.bleed_mm)));
-        let settings = ExportSettings { pdf, ..app.save_settings() };
-        let step = if p.record == "file.save" { serde_json::json!({}) } else { serde_json::json!({"path": p.path}) };
+        let mut step = if p.record == "file.save" { serde_json::json!({}) } else { serde_json::json!({"path": p.path}) };
+        if let Some(pdf) = &chosen {
+            // An action being recorded plays the save back as PDF/X-1a with the same condition.
+            pdf.record(&mut step);
+        }
         let written = app.with_document(p.doc, |app| app.write_document(p.path, &settings, p.copy));
         if written.is_ok() {
             // An action being recorded keeps the Save As or Save a Copy.

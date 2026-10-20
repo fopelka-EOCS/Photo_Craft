@@ -342,33 +342,42 @@ impl ExportSettings {
     }
 }
 
-/// The format answers a save takes instead of asking: the Targa bits per pixel and the DDS options
-/// (`"tgaBits"`, `"ddsCompression"`, `"ddsMipmaps"`). `None` asks in Save As and takes the
-/// default in automation saves, which never prompt.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+/// The format answers a save takes instead of asking: the Targa bits per pixel, the DDS options
+/// and PDF/X-1a (`"tgaBits"`, `"ddsCompression"`, `"ddsMipmaps"`, `"pdfStandard"`,
+/// `"pdfOutputProfile"`, `"pdfBleedMm"`). `None` asks in Save As and takes the default in
+/// automation saves, which never prompt.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct FormatChoices {
     pub tga_bits: Option<photocraft_io::TgaBits>,
     pub dds: Option<photocraft_io::DdsOptions>,
+    pub pdf: Option<photocraft_engine::file_cmds::PdfParams>,
 }
 
 impl FormatChoices {
     /// The answers in command `cmd`'s params; a bad value is an error.
     pub fn from_params(params: &Value, cmd: &str) -> Result<Self, String> {
-        Ok(FormatChoices { tga_bits: targa_options_ui::bits_param(params, cmd)?, dds: dds_options_ui::options_param(params, cmd)? })
+        Ok(FormatChoices {
+            tga_bits: targa_options_ui::bits_param(params, cmd)?,
+            dds: dds_options_ui::options_param(params, cmd)?,
+            pdf: photocraft_engine::file_cmds::pdf_params(params, cmd).map_err(|e| e.to_string())?,
+        })
     }
 
     /// The export settings with these answers applied.
-    pub(crate) fn apply(self, settings: ExportSettings) -> ExportSettings {
+    pub(crate) fn apply(&self, settings: ExportSettings) -> ExportSettings {
         ExportSettings { tga_bits: self.tga_bits, dds: self.dds.unwrap_or(settings.dds), ..settings }
     }
 
     /// Adds the answers to a recorded save step.
-    fn record(self, step: &mut Value) {
+    fn record(&self, step: &mut Value) {
         if let Some(bits) = self.tga_bits {
             step["tgaBits"] = bits.bits().into();
         }
         if let Some(dds) = self.dds {
             dds_options_ui::record(dds, step);
+        }
+        if let Some(pdf) = &self.pdf {
+            pdf.record(step);
         }
     }
 }
@@ -1599,7 +1608,7 @@ impl PhotocraftApp {
         if self.save_options_open() {
             return Err("Answer the TIFF, Targa or DDS Options before starting another save".into());
         }
-        let r = self.write_save(path, None, choices)?;
+        let r = self.write_save(path, None, &choices)?;
         let mut step = Value::Object(Default::default());
         choices.record(&mut step);
         self.session.journal.push(("file.save".into(), step));
@@ -1609,7 +1618,7 @@ impl PhotocraftApp {
     /// Writes the Save As and journals it as a `file.saveAs` step with its path (and TIFF,
     /// Targa or DDS answer), so an action being recorded keeps it (#2032).
     fn save_as_step(&mut self, path: String, tiff_layers: Option<bool>, choices: FormatChoices) -> Result<Value, String> {
-        let r = self.write_save(path.clone(), tiff_layers, choices)?;
+        let r = self.write_save(path.clone(), tiff_layers, &choices)?;
         let mut step = serde_json::json!({"path": path});
         if let Some(layers) = tiff_layers {
             step["tiffLayers"] = layers.into();
@@ -1713,9 +1722,13 @@ impl PhotocraftApp {
     /// Writes the active document to a known path. `tiff_layers` is the TIFF Options answer:
     /// `Some(false)` discards the layers and saves a copy. `choices` are the Targa bits per
     /// pixel (`None`: 32 with an alpha channel or transparency, else 24) and the DDS options.
-    fn write_save(&mut self, path: String, tiff_layers: Option<bool>, choices: FormatChoices) -> Result<Value, String> {
+    fn write_save(&mut self, path: String, tiff_layers: Option<bool>, choices: &FormatChoices) -> Result<Value, String> {
         let copy = self.saves_copy(&path, tiff_layers)?;
-        let settings = choices.apply(ExportSettings { tiff_layers: tiff_layers.unwrap_or(ExportSettings::default().tiff_layers), ..self.save_settings() });
+        let mut settings = choices.apply(ExportSettings { tiff_layers: tiff_layers.unwrap_or(ExportSettings::default().tiff_layers), ..self.save_settings() });
+        if let Some(pdf) = &choices.pdf {
+            let request = photocraft_engine::file_cmds::PdfRequest::resolve(&self.session.color, pdf).map_err(|e| e.to_string())?;
+            settings.pdf = request.options_for(&self.session.active().ok_or("no document")?.doc);
+        }
         match self.write_document(path.clone(), &settings, copy)? {
             Some((path, warnings)) => Ok(serde_json::json!({"path": path, "warnings": warnings})),
             None => Ok(serde_json::json!({"path": path, "warnings": [], "pending": true, "job": self.jobs.last_started.map(|j| j.0)})),

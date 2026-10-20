@@ -423,7 +423,7 @@ fn export_x1a(doc: &Document, x: &PdfX1a, secs: u64) -> std::result::Result<Expo
             // Paper stays paper: the transform lands white a fraction of a percent off zero
             // ink, which would print a tint over every blank area.
             if mode != ColorMode::Cmyk {
-                for (src, ink) in samples.chunks_exact(device).zip(out.chunks_exact_mut(4)) {
+                for (src, ink) in samples.chunks_exact(device).zip(out.as_chunks_mut::<4>().0) {
                     if src.iter().all(|&v| v >= 1.0) {
                         ink.fill(0.0);
                     }

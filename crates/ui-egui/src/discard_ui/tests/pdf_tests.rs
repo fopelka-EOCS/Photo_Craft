@@ -3,7 +3,7 @@
 use super::*;
 use crate::{FileDialogAnswer, pdf_options_ui};
 use egui_kittest::kittest::Queryable;
-use std::{cell::RefCell, rc::Rc, sync::Arc};
+use std::{cell::RefCell, rc::Rc};
 
 /// What one export was asked for: `None` for a plain PDF, else the PDF/X-1a bleed (pt) and
 /// whether the colour is converted.
@@ -26,7 +26,9 @@ fn pdf_app(to: &str) -> (Prompted, Writes) {
         written.borrow_mut().push((path.to_string(), serde_json::from_slice(bytes).unwrap()));
         Ok(())
     }));
-    let h = egui_kittest::Harness::builder().with_size(egui::vec2(800.0, 600.0)).build_ui_state(
+    let builder = egui_kittest::Harness::builder().with_size(egui::vec2(800.0, 600.0));
+    let builder = if std::env::var_os("PHOTOCRAFT_PDF_SNAPSHOTS").is_some() { builder.wgpu() } else { builder };
+    let h = builder.build_ui_state(
         |ui, app| {
             show(app, ui.ctx());
             pdf_options_ui::show(app, ui.ctx());
@@ -39,13 +41,31 @@ fn pdf_app(to: &str) -> (Prompted, Writes) {
     (h, writes)
 }
 
-/// An ICC v2 CMYK output condition (the built-in profile relabelled v2.1; no v2 profile ships).
-fn v2_condition() -> pdf_options_ui::Candidate {
+/// Saves what the harness shows when `PHOTOCRAFT_PDF_SNAPSHOTS` names a folder (for reviews).
+fn capture(h: &mut Prompted, name: &str) {
+    if let Some(dir) = std::env::var_os("PHOTOCRAFT_PDF_SNAPSHOTS") {
+        let dir = std::path::PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        h.render().unwrap().save(dir.join(format!("{name}.png"))).unwrap();
+    }
+}
+
+/// An ICC v2 CMYK profile file (the built-in profile relabelled v2.1; no v2 profile ships), as
+/// an installed printer profile would be, and its path.
+fn v2_profile_file() -> String {
     let mut b = photocraft_cms::Builtin::CoatedCmyk.profile().to_bytes().to_vec();
     b[8] = 2;
     b[9] = 0x10;
-    let profile = Arc::new(photocraft_cms::Profile::parse(&b).unwrap());
-    pdf_options_ui::Candidate { label: "Test v2".into(), profile }
+    let path = std::env::temp_dir().join(format!("photocraft-pdf-tests-v2-{}.icc", std::process::id()));
+    std::fs::write(&path, b).unwrap();
+    path.to_string_lossy().into_owned()
+}
+
+/// That profile as an output condition in the menu.
+fn v2_condition() -> pdf_options_ui::Candidate {
+    let spec = v2_profile_file();
+    let profile = photocraft_engine::color_cmds::resolve_profile(&spec, None, None).unwrap();
+    pdf_options_ui::Candidate { label: "Test v2".into(), spec, profile }
 }
 
 /// Save As to a PDF picked in the dialog asks first, and writes a plain PDF when the standard
@@ -56,6 +76,7 @@ fn save_as_to_a_pdf_asks_and_writes_plain_by_default() {
     h.state_mut().save_as(None).unwrap();
     h.run_steps(3);
     assert!(h.state().pdf_options.as_ref().is_some_and(|p| !p.x1a && !p.copy));
+    capture(&mut h, "01-pdf-options");
     assert!(writes.borrow().is_empty(), "nothing is written before the answer");
     h.key_press(Key::Enter);
     h.run_steps(3);
@@ -77,6 +98,7 @@ fn pdf_x1a_writes_the_chosen_condition_and_bleed() {
         p.bleed_mm = 3.0;
     }
     h.run_steps(2);
+    capture(&mut h, "02-pdf-x1a");
     h.get_by_label("Save PDF").click();
     h.run_steps(3);
     let w = writes.borrow();
@@ -100,6 +122,7 @@ fn a_version_4_condition_cant_be_saved_as_x1a() {
         p.x1a = true;
     }
     h.run_steps(2);
+    capture(&mut h, "03-pdf-x1a-v4-refused");
     h.key_press(Key::Enter);
     h.run_steps(3);
     assert!(writes.borrow().is_empty(), "nothing written");
@@ -134,4 +157,45 @@ fn save_a_copy_to_a_pdf_asks_and_keeps_the_document() {
     h.run_steps(3);
     assert_eq!(writes.borrow().as_slice(), &[("copy.pdf".to_string(), None)]);
     assert_ne!(h.state().session.active().unwrap().path.as_deref(), Some("copy.pdf"));
+}
+
+/// The answer is recorded, so an action plays the save back as PDF/X-1a with the same condition
+/// and bleed; a script passes the same params and is never asked.
+#[test]
+fn pdf_x1a_is_recorded_and_scripted_with_the_same_params() {
+    let (mut h, writes) = pdf_app("r.pdf");
+    h.state_mut().save_as(None).unwrap();
+    h.run_steps(3);
+    let spec = {
+        let p = h.state_mut().pdf_options.as_mut().unwrap();
+        p.candidates.push(v2_condition());
+        p.profile = p.candidates.len() - 1;
+        p.x1a = true;
+        p.bleed_mm = 5.0;
+        p.candidates[p.profile].spec.clone()
+    };
+    h.run_steps(2);
+    h.key_press(Key::Enter);
+    h.run_steps(3);
+    let (id, step) = h.state().session.journal.last().cloned().expect("a recorded step");
+    assert_eq!(id, "file.saveAs");
+    assert_eq!(step, json!({"path": "r.pdf", "pdfStandard": "x1a2001", "pdfOutputProfile": spec, "pdfBleedMm": 5.0}));
+
+    let ctx = h.ctx.clone();
+    let mut scripted = step.clone();
+    scripted["path"] = "s.pdf".into();
+    crate::menus::invoke(h.state_mut(), &ctx, "file.saveAs", scripted).unwrap();
+    assert!(h.state().pdf_options.is_none(), "never asked");
+    let w = writes.borrow();
+    assert_eq!(w.len(), 2);
+    assert_eq!(w[1].0, "s.pdf");
+    assert!(w[1].1.is_some_and(|(bleed, converted)| (bleed - 5.0 * 72.0 / 25.4).abs() < 1e-9 && converted), "{:?}", w[1]);
+    for bad in [
+        json!({"path": "b.pdf", "pdfStandard": "x4"}),
+        json!({"path": "b.pdf", "pdfBleedMm": 3}),
+        json!({"path": "b.pdf", "pdfStandard": "x1a2001", "pdfBleedMm": -1}),
+    ] {
+        assert!(crate::menus::invoke(h.state_mut(), &ctx, "file.saveAs", bad.clone()).is_err(), "{bad}");
+    }
+    assert_eq!(w.len(), 2, "bad params write nothing");
 }
