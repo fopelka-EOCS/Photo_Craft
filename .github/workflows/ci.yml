@@ -226,6 +226,7 @@ jobs:
           PHOTOCRAFT_BACKEND_FIXTURES: ${{ runner.temp }}/native-zstd-fixtures
         run: |
           cargo test -p photocraft-codecs --lib --locked --features native-zstd native_zstd
+          cargo test -p photocraft-codecs --test tiff_pages --locked --features native-zstd zstd
           cargo test -p photocraft-format --locked --test roundtrip cross_backend_documents -- --ignored --exact
           cargo test -p photocraft-format --locked --features native-zstd
           PHOTOCRAFT_BACKEND_READ_OTHER=1 cargo test -p photocraft-format --locked --features native-zstd --test roundtrip cross_backend_documents -- --ignored --exact

@@ -2,6 +2,9 @@
 
 Opt in to the reference Zstandard C implementation at default level 3 for native-format compression and bounded tile decoding. Blobs retain the bounded Rust streaming reader. Default builds retain the Rust backend. Enabling the feature adds zstd/zstd-sys and requires a C compiler, including a WASM-capable compiler for WASM.
 
+The feature also enables Zstandard TIFF decoding through the existing TIFF dependency. TIFF export keeps its existing compression options. The measurements below cover only native-format operations.
+The Rust wrapper is aligned with TIFF's dependency; the reference C library remains Zstandard 1.5.7. This build change and the Affinity reader reductions were not benchmarked.
+
 The measured backend improves real-photo save/load time and file size. Own-output loading of the 22-layer layout takes 4.9% longer, under 1 ms.
 Acceptance of that tradeoff and the native dependency remains a maintainer decision.
 
