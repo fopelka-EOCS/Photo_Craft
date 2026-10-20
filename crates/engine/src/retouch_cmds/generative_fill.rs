@@ -185,7 +185,7 @@ fn generate(doc: &Document, fill_with: super::generative::Filler, ctx: &crate::j
     let ts = (THUMB as f64 / w.max(h) as f64).min(1.0);
     let (tw, th) = (((w as f64 * ts).round() as usize).max(1), ((h as f64 * ts).round() as usize).max(1));
     let small = infer_resize(&mixed, w, h, 3, tw, th);
-    let bytes: Vec<u8> = small.chunks_exact(3).flat_map(|c| [c[0], c[1], c[2], 1.0].map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)).collect();
+    let bytes: Vec<u8> = small.as_chunks::<3>().0.iter().flat_map(|c| [c[0], c[1], c[2], 1.0].map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)).collect();
     ctx.progress(1.0, label);
     Ok(Variation { seed: seed.unwrap_or(0), region: Region { rect: win, ch: n, data }, thumb: (tw, th, Arc::new(bytes)) })
 }
