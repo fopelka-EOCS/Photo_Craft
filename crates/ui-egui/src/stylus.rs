@@ -761,10 +761,7 @@ mod tests {
     #[test]
     fn finger_blocks_drawing_respects_the_preference_and_pen_identity() {
         use egui::TouchPhase::{End, Start};
-        let mut s = Stylus {
-            disable_touch_drawing: true,
-            ..Default::default()
-        };
+        let mut s = Stylus { disable_touch_drawing: true, ..Default::default() };
         let ev = |phase, force| touch_id(1, phase, force);
         let go = |s: &mut Stylus, events: &[egui::Event]| {
             s.pen_contacts.observe(events);
