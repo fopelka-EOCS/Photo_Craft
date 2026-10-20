@@ -5051,8 +5051,9 @@ fn draw_drag_preview(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &View
                 Tool::GenerativeInfill | Tool::GenerativeRemoval | Tool::ReflectionRemoval | Tool::GenerativeEnhance => {
                     crate::theme::Tokens::get(painter.ctx()).accent.gamma_multiply(0.45)
                 }
-                // The Object Selection Brush shows its stroke like Quick Selection's.
-                Tool::ObjectSelectionBrush => Color32::from_white_alpha(60),
+                // The Object Selection Brush tints its stroke in the accent colour, more strongly
+                // than the Generative Brushes: a faint white trail was hard to see.
+                Tool::ObjectSelectionBrush => crate::theme::Tokens::get(painter.ctx()).accent.gamma_multiply(0.6),
                 // Photoshop paints the area to heal in half-opaque dark grey; a faint white trail
                 // barely showed on light pixels (#7342).
                 Tool::SpotHealing => Color32::from_black_alpha(128),
