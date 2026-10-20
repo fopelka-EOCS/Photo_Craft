@@ -181,3 +181,7 @@ sync_github_name = true
 
 [people.00xJS]
 sync_github_name = true
+
+[people.alexlewinski]
+real_name = "Alex Lewinski"
+sync_github_name = true
