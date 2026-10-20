@@ -1137,3 +1137,36 @@ fn brush_and_pencil_paint_a_cmyk_pick_with_the_picked_inks() {
         assert!(got.iter().zip(cyan).all(|(a, b)| (a - b).abs() < 0.02), "{cmd}: {got:?}");
     }
 }
+
+#[test]
+fn mixer_load_fills_the_reservoir_from_the_canvas_and_keeps_the_foreground() {
+    let mut s = session(80, 40);
+    s.execute("paint.stroke", json!({"points": [[4, 20], [60, 20]], "size": 6, "color": "#0000ff"})).unwrap();
+    s.execute("tools.setColors", json!({"foreground": "#ff0000"})).unwrap();
+    // Over transparency nothing is loaded.
+    let r = s.execute("paint.mixerLoad", json!({"x": 30, "y": 5})).unwrap();
+    assert_eq!(r["loaded"], json!(false));
+    assert!(s.tools.mixer.reservoir.is_none());
+    // On the blue stroke the reservoir takes its colour; the foreground stays red.
+    let r = s.execute("paint.mixerLoad", json!({"x": 30, "y": 20})).unwrap();
+    assert_eq!(r["loaded"], json!(true));
+    assert_eq!(s.tools.mixer.reservoir, Some([0.0, 0.0, 1.0, 1.0]));
+    assert_eq!(s.tools.foreground, [1.0, 0.0, 0.0, 1.0]);
+    // The next dry stroke paints the sampled blue, not the foreground.
+    let brush = json!({"pressureSize": false, "spacing": 0.25});
+    let dry = |y: i32, size: u32| json!({"points": [[5, y], [40, y]], "size": size, "wet": 0, "load": 100, "mix": 0, "brush": brush});
+    s.execute("paint.mixerBrush", dry(30, 8)).unwrap();
+    assert_eq!(rgba(&s, 20, 30), [0.0, 0.0, 1.0, 1.0]);
+    // A new foreground colour takes the reservoir back.
+    s.execute("tools.setColors", json!({"foreground": "#00ff00"})).unwrap();
+    s.execute("paint.mixerBrush", dry(36, 4)).unwrap();
+    assert_eq!(rgba(&s, 20, 36), [0.0, 1.0, 0.0, 1.0]);
+    // Bad coordinates are an error, not a panic, and leave the reservoir, the foreground and the
+    // document untouched.
+    let (mixer, foreground) = (s.tools.mixer.clone(), s.tools.foreground);
+    let revision = s.active().unwrap().revision;
+    assert!(s.execute("paint.mixerLoad", json!({"x": "a", "y": 1})).is_err());
+    assert_eq!(s.tools.mixer, mixer);
+    assert_eq!(s.tools.foreground, foreground);
+    assert_eq!(s.active().unwrap().revision, revision);
+}

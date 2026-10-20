@@ -44,6 +44,9 @@ pub struct MixerState {
     pub amount: f32,
     /// Colour picked up from the canvas (straight RGBA), None = clean.
     pub pickup: Option<[f32; 4]>,
+    /// The foreground colour in effect when the reservoir was loaded from the canvas
+    /// (`load_sampled`), None when it holds the foreground itself.
+    pub sampled_over: Option<[f32; 4]>,
 }
 
 impl MixerState {
@@ -51,6 +54,17 @@ impl MixerState {
     pub fn load(&mut self, color: [f32; 4]) {
         self.reservoir = Some(color);
         self.amount = 1.0;
+        self.sampled_over = None;
+    }
+    /// Load the reservoir with a colour sampled from the canvas (⌥-click) while `foreground` is
+    /// the foreground colour; `holds_sample` stays true until the foreground changes.
+    pub fn load_sampled(&mut self, color: [f32; 4], foreground: [f32; 4]) {
+        self.load(color);
+        self.sampled_over = Some(foreground);
+    }
+    /// Whether the reservoir holds a canvas sample taken while `foreground` was the foreground.
+    pub fn holds_sample(&self, foreground: [f32; 4]) -> bool {
+        self.reservoir.is_some() && self.sampled_over == Some(foreground)
     }
     /// Clean the brush (drop the picked-up colour).
     pub fn clean(&mut self) {

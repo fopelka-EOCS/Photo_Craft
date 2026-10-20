@@ -648,7 +648,13 @@ fn mixer_brush(s: &mut Session, p: &Value) -> Result<Value> {
     let sample_all = m.sample_all_layers;
     let (clean, load_after) = (flag(p, "cleanAfterStroke", true), flag(p, "loadAfterStroke", true));
     let mut state = s.tools.mixer.clone();
-    if load_after || state.reservoir.is_none() {
+    // An ⌥-click sample (`paint.mixerLoad`) is kept while the foreground is unchanged and no
+    // `color` is given; otherwise the reservoir takes the foreground.
+    if state.holds_sample(s.tools.foreground) && p.get("color").is_none() {
+        if load_after {
+            state.amount = 1.0;
+        }
+    } else if load_after || state.reservoir.is_none() {
         state.load(color(p.get("color"), s.tools.foreground));
     }
     let id = if crate::channel_cmds::is_channel_target(p) { None } else { Some(layer_id(s, p)?) };
@@ -677,6 +683,32 @@ fn mixer_brush(s: &mut Session, p: &Value) -> Result<Value> {
     }
     s.tools.mixer = state;
     Ok(damage_json(s, dmg))
+}
+
+/// `paint.mixerLoad`: ⌥-click with the Mixer Brush loads the reservoir from the canvas colour at
+/// (`x`, `y`) (Photoshop's Current Brush Load), from the layers Sample All Layers names. The
+/// foreground colour is left alone. Over transparency or off the canvas nothing is loaded.
+fn mixer_load(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "paint.mixerLoad";
+    let coord = |k: &str| {
+        let v = p.get(k).and_then(Value::as_f64).filter(|v| v.is_finite());
+        v.ok_or_else(|| bad(cmd, format!("`{k}` must be a finite number (document pixels)")))
+    };
+    let (x, y) = (coord("x")?, coord("y")?);
+    let size = crate::sample_cmds::size_param(cmd, p)?;
+    let which = if flag(p, "sampleAllLayers", s.tools.brush.mixer.sample_all_layers) {
+        crate::sample_cmds::SampleLayers::All
+    } else {
+        crate::sample_cmds::SampleLayers::Current
+    };
+    let d = s.active().ok_or(EngineError::NoDocument)?;
+    let [r, g, b, a] = crate::sample_cmds::sample_color(&d.doc, d.active_layer, x, y, size, which);
+    if a.is_nan() || a <= 0.0 {
+        return Ok(json!({"loaded": false}));
+    }
+    let foreground = s.tools.foreground;
+    s.tools.mixer.load_sampled([r, g, b, 1.0], foreground);
+    Ok(json!({"loaded": true, "color": [r, g, b, 1.0]}))
 }
 
 /// `paint.colorReplacement`'s stroke and settings. The replacement colour is the brush colour
@@ -1138,6 +1170,14 @@ pub fn specs() -> Vec<CommandSpec> {
             r##"{"points":[…],"brush":{…}?,"preset":name?,"size":0.5..5000 px?,"wet":0..100=brush.mixer.wet,"load":0..100=brush.mixer.load,"mix":0..100=brush.mixer.mix,"flow":0..100=brush.mixer.flow,"color":"#rrggbb"?=foreground,"sampleAllLayers":bool=brush.mixer.sampleAllLayers,"cleanAfterStroke":bool=true,"loadAfterStroke":bool=true,"seed":u64?}"##,
             has_paintable,
             mixer_brush,
+            true
+        ),
+        spec!(
+            "paint.mixerLoad",
+            "Load Mixer Brush",
+            r##"{"x":px,"y":px,"size":"point"|1|3|5|11|31|51|101=1,"sampleAllLayers":bool=brush.mixer.sampleAllLayers} → {"loaded":bool,"color"?:[r,g,b,a]} (loads the Mixer Brush reservoir from the canvas colour there, as ⌥-click does; the foreground colour is unchanged; the next strokes keep that load while the foreground stays as it is)"##,
+            has_paintable,
+            mixer_load,
             true
         ),
         spec!(

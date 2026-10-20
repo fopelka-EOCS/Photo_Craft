@@ -4099,7 +4099,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                 t if resizing && crate::brush_resize::applies(t) => egui::CursorIcon::None,
                 // ⌥ turns a painting tool into the Eyedropper (`alt_eyedropper`): its cursor too,
                 // unless Preferences › Cursors › Other Cursors asks for the precise crosshair.
-                t if app.alt_sampling || (app.drag.is_none() && alt_samples(t, crate::workspace_ui::sticky_mods(app, ui.input(|i| i.modifiers)))) => {
+                t if app.alt_sampling || (app.drag.is_none() && alt_picks(t, crate::workspace_ui::sticky_mods(app, ui.input(|i| i.modifiers)))) => {
                     // While it samples (button held), the comparison ring replaces the cursor (#213).
                     if let Some(icon) = eyedropper_ring(app, &painter, &xf, p, response.is_pointer_button_down_on()) {
                         icon
@@ -5143,6 +5143,18 @@ pub(crate) fn alt_samples(tool: Tool, mods: egui::Modifiers) -> bool {
     mods.alt && !mods.ctrl && matches!(tool, Tool::Brush | Tool::Pencil | Tool::Gradient | Tool::PaintBucket)
 }
 
+/// ⌥ with the Mixer Brush loads its reservoir from the canvas (`paint.mixerLoad`), as in
+/// Photoshop, instead of setting the foreground colour (#4873). It shows the Eyedropper cursor.
+pub(crate) fn alt_loads_mixer(tool: Tool, mods: egui::Modifiers) -> bool {
+    // Control+Alt is the brush-resize drag (`brush_resize`), not sampling.
+    mods.alt && !mods.ctrl && tool == Tool::MixerBrush
+}
+
+/// Tools whose ⌥ press is a sample: the Eyedropper cursor shows and no stroke starts.
+pub(crate) fn alt_picks(tool: Tool, mods: egui::Modifiers) -> bool {
+    alt_samples(tool, mods) || alt_loads_mixer(tool, mods)
+}
+
 /// Preferences › Cursors › Other Cursors asks for the precise crosshair, or Caps Lock swaps the
 /// standard cursor for it (and back), as in Photoshop (#4639).
 fn precise_other_cursor(app: &PhotocraftApp) -> bool {
@@ -5183,17 +5195,26 @@ pub(crate) fn paint_bucket_cursor(ctx: &egui::Context, p: Pos2) -> egui::CursorI
 /// painting and sampling.
 fn alt_eyedropper(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers) -> bool {
     if matches!(ev, ToolEvent::Down { .. }) {
-        app.alt_sampling = alt_samples(app.active_tool(), mods);
+        app.alt_sampling = alt_picks(app.active_tool(), mods);
     }
     if !app.alt_sampling {
         return false;
     }
     match ev {
+        // The Mixer Brush loads its reservoir; the foreground colour stays as it is.
+        ToolEvent::Down { x, y, .. } | ToolEvent::Move { x, y, .. } if app.active_tool() == Tool::MixerBrush => load_mixer_reservoir(app, x, y),
         // Without ⌥: the sample sets the foreground colour, whatever the Eyedropper would do.
         ToolEvent::Down { x, y, .. } | ToolEvent::Move { x, y, .. } => sample_eyedropper(app, x, y, egui::Modifiers::NONE),
         ToolEvent::Up { .. } => app.alt_sampling = false,
     }
     true
+}
+
+/// Load the Mixer Brush reservoir with the canvas colour at document point (x, y), from the layers
+/// its Sample All Layers option names and the Eyedropper's Sample Size (`paint.mixerLoad`).
+fn load_mixer_reservoir(app: &mut PhotocraftApp, x: f64, y: f64) {
+    let size = app.ui.tool_options.eyedropper_size;
+    let _ = app.run("paint.mixerLoad", json!({"x": x, "y": y, "size": size}));
 }
 
 fn sample_eyedropper(app: &mut PhotocraftApp, x: f64, y: f64, mods: egui::Modifiers) {
@@ -7605,6 +7626,9 @@ mod tests {
         // Control+Alt stays the brush-resize gesture, never a sample.
         assert!(!alt_samples(Tool::Brush, egui::Modifiers { alt: true, ctrl: true, ..Default::default() }));
         assert!(!alt_samples(Tool::Eraser, alt), "⌥ with the Eraser is not the Eyedropper");
+        assert!(!alt_samples(Tool::MixerBrush, alt), "⌥ with the Mixer Brush loads its reservoir, it does not set the foreground");
+        assert!(alt_loads_mixer(Tool::MixerBrush, alt) && alt_picks(Tool::MixerBrush, alt));
+        assert!(!alt_loads_mixer(Tool::MixerBrush, egui::Modifiers { alt: true, ctrl: true, ..Default::default() }));
     }
 
     /// #2078: the opaque mask-view texture must show the live stroke, not cover it with
