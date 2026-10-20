@@ -369,11 +369,7 @@ fn select_quick_mode(app: &mut PhotocraftApp, mods: egui::Modifiers) -> &'static
         return "add";
     }
     if mode == "replace" && app.ui.selection_mode == 0 && !mods.shift && !mods.alt {
-        let has_sel = app
-            .session
-            .active()
-            .and_then(|st| st.doc.selection.as_ref())
-            .is_some_and(|s| !s.content_bounds().is_empty());
+        let has_sel = app.session.active().and_then(|st| st.doc.selection.as_ref()).is_some_and(|s| !s.content_bounds().is_empty());
         if has_sel && app.session.journal.last().is_some_and(|(id, _)| id == "select.quick") {
             return "add";
         }
