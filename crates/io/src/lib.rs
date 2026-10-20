@@ -66,6 +66,9 @@ pub mod svg;
 mod text_import;
 pub mod text_styles_map;
 pub mod tiff_layers;
+mod tx;
+pub use photocraft_codecs::TxWrap;
+pub use tx::{TX_TILE_SIZES, TxDataType, TxFilter, TxFixNan, TxOptions, TxPreset};
 pub mod vector_map;
 
 pub use photocraft_codecs::DpxBits;
@@ -213,6 +216,9 @@ pub struct ExportOptions {
     /// PSD/PSB: embed the thumbnail image resource (1036), Preferences › File Handling › Image
     /// Previews. On by default, as Photoshop's Always Save.
     pub image_previews: bool,
+    /// `.tx` texture: the TX Options answer. `None` writes [`TxOptions::default`] (the V-Ray
+    /// preset), so scripted saves and the CLI write the same texture as the dialog's default.
+    pub tx: Option<TxOptions>,
     /// PSD/PSB: write the real merged image, Preferences › File Handling › Maximize PSD and PSB
     /// File Compatibility (see [`PsdExportOptions::maximize_compatibility`]). On by default, as
     /// Photoshop's Always.
@@ -231,6 +237,7 @@ impl Default for ExportOptions {
             xmp: XmpEmbed::All,
             tga_bits: None,
             image_previews: true,
+            tx: None,
             psd_maximize_compatibility: true,
             document_path: None,
         }
@@ -345,6 +352,9 @@ fn import_stages(name: &str, bytes: &[u8], ctl: &photocraft_raster::Interrupt, m
     if is_svg_input(name, bytes) {
         return svg::import_svg_with_group_depth(name, bytes, max_group_depth);
     }
+    if is_tx_texture(name, bytes) {
+        return flat::import_tx(name, bytes);
+    }
     flat::import_flat(name, bytes)
 }
 
@@ -362,6 +372,13 @@ fn is_svg_input(name: &str, bytes: &[u8]) -> bool {
 
 fn extension(name_or_ext: &str) -> String {
     name_or_ext.rsplit(['.', '/', '\\']).next().unwrap_or(name_or_ext).to_ascii_lowercase()
+}
+
+/// Whether `name` and `bytes` are a `.tx` render texture (a TIFF named `.tx`), which opens
+/// read-only (see [`import`]). For open paths that don't get the importer's
+/// [`ImportResult::source_read_only`], such as the app's inline and automation opens.
+pub fn is_tx_texture(name: &str, bytes: &[u8]) -> bool {
+    has_extension(name, "tx") && photocraft_codecs::detect(bytes) == Some(photocraft_codecs::Format::Tiff)
 }
 
 fn has_extension(name: &str, expected: &str) -> bool {
@@ -473,6 +490,11 @@ fn export_stages(doc: &Document, name_or_ext: &str, opts: &ExportOptions, ctl: &
         file.header.validate()?;
         let bytes = file.to_bytes()?;
         return Ok(ExportResult { bytes, warnings });
+    }
+    if ext == "tx" {
+        // A texture, not a TIFF save: `.tx` is deliberately not one of TIFF's extensions, so
+        // only this path writes it (tiled, MIP-mapped; see `tx`).
+        return tx::export_tx(doc, &opts.tx.clone().unwrap_or_default(), ctl);
     }
     let format = photocraft_codecs::from_extension(&ext).ok_or_else(|| IoError::UnknownFormat(name_or_ext.to_string()))?;
     if format == photocraft_codecs::Format::Tiff && opts.tiff_layers && tiff_layers::would_write_layers(doc) {

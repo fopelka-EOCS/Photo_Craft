@@ -3252,3 +3252,29 @@ curves	Smooth	Lisser
 	Use	Utiliser
 	In Front	Devant
 	Behind	Derrière
+# TX Options (.tx render texture)
+	TX Options	Options TX
+	Data type	Type de données
+	As document	Comme le document
+	16 bit float (half)	Float 16 bits (half)
+	32 bit float	Float 32 bits
+	MIP map	MIP map
+	Build MIP levels down to 1×1	Créer les niveaux MIP jusqu’à 1×1
+	Auto (Lanczos 3; triangle for HDR)	Auto (Lanczos 3 ; triangle pour le HDR)
+	Triangle (HDR)	Triangle (HDR)
+	Box (maketx: bilinear)	Box (maketx : bilinéaire)
+	Tile size	Taille des tuiles
+	Deflate + predictor	Deflate + prédicteur
+	Wrap mode	Mode de répétition
+	Horizontal (s)	Horizontal (s)
+	Vertical (t)	Vertical (t)
+	Clamp	Bord étendu
+	Periodic	Périodique
+	Detection	Détection
+	Write equal RGB channels as gray	Écrire les canaux RVB identiques en niveaux de gris
+	Write one colour as a single tile	Écrire une couleur unique en une seule tuile
+	Repair NaN / Inf	Réparer NaN / Inf
+	Average 3×3 (box3)	Moyenne 3×3 (box3)
+	Highlight compression (HDR, --hicomp)	Compression des hautes lumières (HDR, --hicomp)
+	Values and bit depth are written as they are, without colour conversion. Alpha is stored premultiplied; an alpha that is opaque everywhere is dropped.	Les valeurs et la profondeur de bits sont écrites telles quelles, sans conversion des couleurs. L’alpha est enregistré prémultiplié ; un alpha opaque partout est supprimé.
+	Compression	Compression

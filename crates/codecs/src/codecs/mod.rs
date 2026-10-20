@@ -14,6 +14,7 @@ pub(crate) mod tga;
 pub(crate) mod tiff;
 pub(crate) mod tiff_exif;
 pub(crate) mod tiff_ifd;
+pub(crate) mod tx;
 pub(crate) mod via_image;
 pub(crate) mod vp8;
 pub(crate) mod webp;

@@ -3426,3 +3426,29 @@ curves	Smooth	매끄럽게
 	In Front	앞
 	Behind	뒤
 	Blend	혼합
+# TX Options (.tx render texture)
+	TX Options	TX 옵션
+	Data type	데이터 유형
+	As document	문서와 동일
+	16 bit float (half)	16비트 부동소수점 (half)
+	32 bit float	32비트 부동소수점
+	MIP map	MIP 맵
+	Build MIP levels down to 1×1	1×1까지 MIP 레벨 생성
+	Auto (Lanczos 3; triangle for HDR)	자동 (Lanczos 3, HDR은 삼각형)
+	Triangle (HDR)	삼각형 (HDR)
+	Box (maketx: bilinear)	박스 (maketx: 쌍선형)
+	Tile size	타일 크기
+	Deflate + predictor	Deflate + 예측자
+	Wrap mode	랩 모드
+	Horizontal (s)	가로 (s)
+	Vertical (t)	세로 (t)
+	Clamp	가장자리 고정
+	Periodic	주기적
+	Detection	감지
+	Write equal RGB channels as gray	같은 RGB 채널을 회색으로 저장
+	Write one colour as a single tile	단색을 타일 하나로 저장
+	Repair NaN / Inf	NaN / Inf 복구
+	Average 3×3 (box3)	3×3 평균 (box3)
+	Highlight compression (HDR, --hicomp)	하이라이트 압축 (HDR, --hicomp)
+	Values and bit depth are written as they are, without colour conversion. Alpha is stored premultiplied; an alpha that is opaque everywhere is dropped.	값과 비트 심도는 색상 변환 없이 그대로 기록됩니다. 알파는 미리 곱한 상태로 저장되며, 모든 곳이 불투명한 알파는 생략됩니다.
+	Compression	압축

@@ -3974,3 +3974,28 @@ cameraData	Lens	Lens
 	Use	Kullan
 	In Front	Önde
 	Behind	Arkada
+# TX Options (.tx render texture)
+	TX Options	TX Seçenekleri
+	Data type	Veri türü
+	As document	Belgedeki gibi
+	16 bit float (half)	16 bit float (half)
+	32 bit float	32 bit float
+	MIP map	MIP haritası
+	Build MIP levels down to 1×1	MIP düzeylerini 1×1'e kadar oluştur
+	Auto (Lanczos 3; triangle for HDR)	Otomatik (Lanczos 3; HDR için üçgen)
+	Triangle (HDR)	Üçgen (HDR)
+	Box (maketx: bilinear)	Box (maketx: çift doğrusal)
+	Tile size	Döşeme boyutu
+	Deflate + predictor	Deflate + öngörücü
+	Wrap mode	Tekrarlama modu
+	Horizontal (s)	Yatay (s)
+	Vertical (t)	Dikey (t)
+	Clamp	Kenarı uzat
+	Periodic	Periyodik
+	Detection	Algılama
+	Write equal RGB channels as gray	Eşit RGB kanallarını gri olarak yaz
+	Write one colour as a single tile	Tek rengi tek döşeme olarak yaz
+	Repair NaN / Inf	NaN / Inf onar
+	Average 3×3 (box3)	3×3 ortalama (box3)
+	Highlight compression (HDR, --hicomp)	Parlak alan sıkıştırma (HDR, --hicomp)
+	Values and bit depth are written as they are, without colour conversion. Alpha is stored premultiplied; an alpha that is opaque everywhere is dropped.	Değerler ve bit derinliği renk dönüşümü olmadan olduğu gibi yazılır. Alfa önceden çarpılmış olarak saklanır; her yerde opak olan bir alfa atlanır.

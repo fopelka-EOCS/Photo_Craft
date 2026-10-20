@@ -4361,3 +4361,28 @@ shape	Appearance	Aspetto
 	Use	Usa
 	In Front	Davanti
 	Behind	Dietro
+# TX Options (.tx render texture)
+	TX Options	Opzioni TX
+	Data type	Tipo di dati
+	As document	Come il documento
+	16 bit float (half)	Float a 16 bit (half)
+	32 bit float	Float a 32 bit
+	MIP map	Mappa MIP
+	Build MIP levels down to 1×1	Crea i livelli MIP fino a 1×1
+	Auto (Lanczos 3; triangle for HDR)	Auto (Lanczos 3; triangolo per HDR)
+	Triangle (HDR)	Triangolo (HDR)
+	Box (maketx: bilinear)	Box (maketx: bilineare)
+	Tile size	Dimensione tessera
+	Deflate + predictor	Deflate + predittore
+	Wrap mode	Modalità di ripetizione
+	Horizontal (s)	Orizzontale (s)
+	Vertical (t)	Verticale (t)
+	Clamp	Estendi bordo
+	Periodic	Periodico
+	Detection	Rilevamento
+	Write equal RGB channels as gray	Scrivi i canali RGB uguali come grigio
+	Write one colour as a single tile	Scrivi un colore unico come una sola tessera
+	Repair NaN / Inf	Ripara NaN / Inf
+	Average 3×3 (box3)	Media 3×3 (box3)
+	Highlight compression (HDR, --hicomp)	Compressione delle luci (HDR, --hicomp)
+	Values and bit depth are written as they are, without colour conversion. Alpha is stored premultiplied; an alpha that is opaque everywhere is dropped.	Valori e profondità di bit vengono scritti così come sono, senza conversione del colore. L’alfa viene salvato premoltiplicato; un alfa opaco ovunque viene omesso.

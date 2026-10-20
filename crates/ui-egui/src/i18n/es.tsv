@@ -4206,3 +4206,28 @@ navigator	Zoom	Zoom
 	Use	Usar
 	In Front	Delante
 	Behind	Detrás
+# TX Options (.tx render texture)
+	TX Options	Opciones de TX
+	Data type	Tipo de datos
+	As document	Como el documento
+	16 bit float (half)	Float de 16 bits (half)
+	32 bit float	Float de 32 bits
+	MIP map	Mapa MIP
+	Build MIP levels down to 1×1	Crear niveles MIP hasta 1×1
+	Auto (Lanczos 3; triangle for HDR)	Auto (Lanczos 3; triángulo para HDR)
+	Triangle (HDR)	Triángulo (HDR)
+	Box (maketx: bilinear)	Box (maketx: bilineal)
+	Tile size	Tamaño de tesela
+	Deflate + predictor	Deflate + predictor
+	Wrap mode	Modo de repetición
+	Horizontal (s)	Horizontal (s)
+	Vertical (t)	Vertical (t)
+	Clamp	Extender borde
+	Periodic	Periódico
+	Detection	Detección
+	Write equal RGB channels as gray	Escribir canales RGB iguales como gris
+	Write one colour as a single tile	Escribir un solo color como una tesela
+	Repair NaN / Inf	Reparar NaN / Inf
+	Average 3×3 (box3)	Promedio 3×3 (box3)
+	Highlight compression (HDR, --hicomp)	Compresión de luces (HDR, --hicomp)
+	Values and bit depth are written as they are, without colour conversion. Alpha is stored premultiplied; an alpha that is opaque everywhere is dropped.	Los valores y la profundidad de bits se escriben tal cual, sin conversión de color. El alfa se guarda premultiplicado; un alfa opaco en todas partes se omite.

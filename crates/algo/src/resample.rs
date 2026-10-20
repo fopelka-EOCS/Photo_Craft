@@ -311,14 +311,63 @@ fn resize(s: &Surface, sx: f64, sy: f64, filter: Resample, canvas: Option<Rect>)
     resize_with_budget(s, sx, sy, filter, canvas, READ_BUDGET)
 }
 
+/// Why [`try_resize_surface_in_canvas`] stopped without a result.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResizeStop {
+    /// `ctl` asked to stop.
+    Cancelled,
+    /// A tile of the result could not be allocated.
+    OutOfMemory,
+}
+
+/// [`resize_surface_in_canvas`] for long-running callers (texture export): checks `ctl` between
+/// bands of rows and between passes, and returns an error instead of aborting when the result's
+/// tiles can't be allocated. The pixels are exactly [`resize_surface_in_canvas`]'s.
+pub fn try_resize_surface_in_canvas(
+    s: &Surface,
+    sx: f64,
+    sy: f64,
+    filter: Resample,
+    canvas: Rect,
+    ctl: &photocraft_raster::Interrupt,
+) -> Result<Surface, ResizeStop> {
+    let (out, stop) = resize_stoppable(s, sx, sy, filter, Some(canvas), READ_BUDGET, ctl, true);
+    match stop {
+        Some(why) => Err(why),
+        None if ctl.cancelled() => Err(ResizeStop::Cancelled),
+        None => Ok(out),
+    }
+}
+
 /// Runs `filter`'s passes. Between two passes the image is stored in its own format, which
 /// clips it (and rounds it at 8 and 16 bits) as Photoshop does; the smaller scale goes first, so
 /// the intermediate image is never larger than the result.
 fn resize_with_budget(s: &Surface, sx: f64, sy: f64, filter: Resample, canvas: Option<Rect>, budget: usize) -> Surface {
+    // Never interrupted and written infallibly, so no stop reason can come back.
+    resize_stoppable(s, sx, sy, filter, canvas, budget, &photocraft_raster::Interrupt::NONE, false).0
+}
+
+/// [`resize_with_budget`] that can stop early: on a cancel through `ctl`, or (when `fallible`) on a
+/// failed tile allocation, it returns the partial surface with the reason, which the caller must
+/// then discard. Without `fallible` the result's tiles are allocated as before (an abort on OOM).
+#[allow(clippy::too_many_arguments)]
+fn resize_stoppable(
+    s: &Surface,
+    sx: f64,
+    sy: f64,
+    filter: Resample,
+    canvas: Option<Rect>,
+    budget: usize,
+    ctl: &photocraft_raster::Interrupt,
+    fallible: bool,
+) -> (Surface, Option<ResizeStop>) {
     let mut cur: Option<Surface> = None;
     let mut canvas = canvas;
     for p in plan(filter, sx, sy) {
-        let next = resize_pass(cur.as_ref().unwrap_or(s), p, canvas, budget);
+        let (next, stop) = resize_pass(cur.as_ref().unwrap_or(s), p, canvas, budget, ctl, fallible);
+        if stop.is_some() {
+            return (next, stop);
+        }
         canvas = canvas.map(|c| scaled_rect(c, p.sx, p.sy));
         cur = Some(next);
     }
@@ -330,12 +379,19 @@ fn resize_with_budget(s: &Surface, sx: f64, sy: f64, filter: Resample, canvas: O
         out = crate::apply(&out, &p, area, dst, None);
     }
     out.prune();
-    out
+    (out, None)
 }
 
 /// One pass. With `canvas`, the content and the canvas repeat their edge outwards (see
 /// [`resize_surface_in_canvas`]).
-fn resize_pass(s: &Surface, pass: Pass, canvas: Option<Rect>, budget: usize) -> Surface {
+fn resize_pass(
+    s: &Surface,
+    pass: Pass,
+    canvas: Option<Rect>,
+    budget: usize,
+    ctl: &photocraft_raster::Interrupt,
+    fallible: bool,
+) -> (Surface, Option<ResizeStop>) {
     let Pass { sx, sy, kx, ky } = pass;
     let edge = canvas.map(|c| s.content_bounds().union(&c)).filter(|a| !a.is_empty());
     let fmt = s.format();
@@ -343,7 +399,7 @@ fn resize_pass(s: &Surface, pass: Pass, canvas: Option<Rect>, budget: usize) -> 
     let src = s.content_bounds();
     let dst = scaled_rect(src, sx, sy);
     if dst.is_empty() {
-        return out;
+        return (out, None);
     }
     let n = fmt.channels();
     let alpha = fmt.alpha;
@@ -451,6 +507,9 @@ fn resize_pass(s: &Surface, pass: Pass, canvas: Option<Rect>, budget: usize) -> 
     #[cfg(target_arch = "wasm32")]
     let group = 1;
     for chunk in bands.chunks(group) {
+        if ctl.cancelled() {
+            return (out, Some(ResizeStop::Cancelled));
+        }
         #[cfg(not(target_arch = "wasm32"))]
         let parts: Vec<(Rect, Vec<f32>)> = {
             use rayon::prelude::*;
@@ -459,10 +518,14 @@ fn resize_pass(s: &Surface, pass: Pass, canvas: Option<Rect>, budget: usize) -> 
         #[cfg(target_arch = "wasm32")]
         let parts: Vec<(Rect, Vec<f32>)> = chunk.iter().map(run).collect();
         for (r, d) in parts {
-            out.write_region(r, &d);
+            if !fallible {
+                out.write_region(r, &d);
+            } else if out.try_write_region(r, &d).is_err() {
+                return (out, Some(ResizeStop::OutOfMemory));
+            }
         }
     }
-    out
+    (out, None)
 }
 
 /// Moves a surface by whole pixels (default pixel kept).
@@ -811,6 +874,21 @@ mod tests {
     }
 
     /// Reading the source in row chunks gives exactly what one read of the whole window gives.
+    #[test]
+    fn try_resize_matches_and_stops_on_cancel() {
+        let s = ramp(SampleType::F32);
+        let canvas = Rect::new(0, 0, 700, 500);
+        for f in [Resample::Lanczos, Resample::Bilinear, Resample::Bicubic] {
+            let want = resize_surface_in_canvas(&s, 0.37, 0.41, f, canvas);
+            let got = try_resize_surface_in_canvas(&s, 0.37, 0.41, f, canvas, &photocraft_raster::Interrupt::NONE).unwrap();
+            let r = want.content_bounds().union(&got.content_bounds());
+            assert_eq!(want.read_region(r), got.read_region(r), "{f:?}");
+        }
+        let stop = || true;
+        let ctl = photocraft_raster::Interrupt::cancel_only(&stop);
+        assert_eq!(try_resize_surface_in_canvas(&s, 0.5, 0.5, Resample::Lanczos, canvas, &ctl).err(), Some(ResizeStop::Cancelled));
+    }
+
     #[test]
     fn chunked_reads_match_a_single_read() {
         let mut s = ramp(SampleType::F32);

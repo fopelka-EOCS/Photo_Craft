@@ -3852,3 +3852,28 @@ navigator	Zoom	Zvětšení
 	Use	Použít
 	In Front	Vpředu
 	Behind	Vzadu
+# TX Options (.tx render texture)
+	TX Options	Možnosti TX
+	Data type	Datový typ
+	As document	Jako dokument
+	16 bit float (half)	16bitový float (half)
+	32 bit float	32bitový float
+	MIP map	MIP mapa
+	Build MIP levels down to 1×1	Vytvořit úrovně MIP až do 1×1
+	Auto (Lanczos 3; triangle for HDR)	Auto (Lanczos 3; trojúhelník pro HDR)
+	Triangle (HDR)	Trojúhelník (HDR)
+	Box (maketx: bilinear)	Box (maketx: bilineární)
+	Tile size	Velikost dlaždice
+	Deflate + predictor	Deflate + prediktor
+	Wrap mode	Režim opakování
+	Horizontal (s)	Vodorovně (s)
+	Vertical (t)	Svisle (t)
+	Clamp	Ořezat na okraj
+	Periodic	Periodicky
+	Detection	Detekce
+	Write equal RGB channels as gray	Stejné kanály RGB zapsat jako šedou
+	Write one colour as a single tile	Jednu barvu zapsat jako jedinou dlaždici
+	Repair NaN / Inf	Opravit NaN / Inf
+	Average 3×3 (box3)	Průměr 3×3 (box3)
+	Highlight compression (HDR, --hicomp)	Komprese světel (HDR, --hicomp)
+	Values and bit depth are written as they are, without colour conversion. Alpha is stored premultiplied; an alpha that is opaque everywhere is dropped.	Hodnoty a bitová hloubka se zapíší beze změny, bez převodu barev. Alfa se ukládá přednásobená; alfa, která je všude neprůhledná, se vynechá.

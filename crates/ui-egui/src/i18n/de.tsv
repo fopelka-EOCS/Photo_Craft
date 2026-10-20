@@ -3245,3 +3245,29 @@ curves	Smooth	Glätten
 	In Front	Davor
 	Behind	Dahinter
 	Blend	Mischen
+# TX Options (.tx render texture)
+	TX Options	TX-Optionen
+	Data type	Datentyp
+	As document	Wie Dokument
+	16 bit float (half)	16 Bit Float (Half)
+	32 bit float	32 Bit Float
+	MIP map	MIP-Map
+	Build MIP levels down to 1×1	MIP-Stufen bis 1×1 erzeugen
+	Auto (Lanczos 3; triangle for HDR)	Auto (Lanczos 3; Dreieck für HDR)
+	Triangle (HDR)	Dreieck (HDR)
+	Box (maketx: bilinear)	Box (maketx: bilinear)
+	Tile size	Kachelgröße
+	Deflate + predictor	Deflate + Prädiktor
+	Wrap mode	Randverhalten
+	Horizontal (s)	Horizontal (s)
+	Vertical (t)	Vertikal (t)
+	Clamp	Rand fortsetzen
+	Periodic	Periodisch
+	Detection	Erkennung
+	Write equal RGB channels as gray	Gleiche RGB-Kanäle als Graustufen schreiben
+	Write one colour as a single tile	Eine einzige Farbe als eine Kachel schreiben
+	Repair NaN / Inf	NaN / Inf reparieren
+	Average 3×3 (box3)	Mittelwert 3×3 (box3)
+	Highlight compression (HDR, --hicomp)	Lichterkompression (HDR, --hicomp)
+	Values and bit depth are written as they are, without colour conversion. Alpha is stored premultiplied; an alpha that is opaque everywhere is dropped.	Werte und Bittiefe werden unverändert geschrieben, ohne Farbumrechnung. Alpha wird vormultipliziert gespeichert; ein überall deckender Alphakanal entfällt.
+	Compression	Komprimierung

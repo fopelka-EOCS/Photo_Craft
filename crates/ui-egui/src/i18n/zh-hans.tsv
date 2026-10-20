@@ -2868,3 +2868,29 @@ curves	Smooth	平滑
 	In Front	前面
 	Behind	后面
 	Blend	混合
+# TX Options (.tx render texture)
+	TX Options	TX 选项
+	Data type	数据类型
+	As document	与文档相同
+	16 bit float (half)	16 位浮点 (half)
+	32 bit float	32 位浮点
+	MIP map	MIP 贴图
+	Build MIP levels down to 1×1	生成 MIP 级别直至 1×1
+	Auto (Lanczos 3; triangle for HDR)	自动（Lanczos 3；HDR 用三角）
+	Triangle (HDR)	三角 (HDR)
+	Box (maketx: bilinear)	Box（maketx：双线性）
+	Tile size	图块大小
+	Deflate + predictor	Deflate + 预测器
+	Wrap mode	环绕模式
+	Horizontal (s)	水平 (s)
+	Vertical (t)	垂直 (t)
+	Clamp	钳制边缘
+	Periodic	周期
+	Detection	检测
+	Write equal RGB channels as gray	将相同的 RGB 通道写为灰度
+	Write one colour as a single tile	将单一颜色写为一个图块
+	Repair NaN / Inf	修复 NaN / Inf
+	Average 3×3 (box3)	3×3 平均 (box3)
+	Highlight compression (HDR, --hicomp)	高光压缩（HDR，--hicomp）
+	Values and bit depth are written as they are, without colour conversion. Alpha is stored premultiplied; an alpha that is opaque everywhere is dropped.	数值和位深度按原样写入，不进行颜色转换。Alpha 以预乘形式存储；处处不透明的 Alpha 会被省略。
+	Compression	压缩

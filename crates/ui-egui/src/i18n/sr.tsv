@@ -4317,3 +4317,28 @@ shape	Appearance	Izgled
 	Use	Koristi
 	In Front	Ispred
 	Behind	Iza
+# TX Options (.tx render texture)
+	TX Options	TX opcije
+	Data type	Tip podataka
+	As document	Kao dokument
+	16 bit float (half)	16-bitni float (half)
+	32 bit float	32-bitni float
+	MIP map	MIP mapa
+	Build MIP levels down to 1×1	Napravi MIP nivoe do 1×1
+	Auto (Lanczos 3; triangle for HDR)	Automatski (Lanczos 3; trougao za HDR)
+	Triangle (HDR)	Trougao (HDR)
+	Box (maketx: bilinear)	Box (maketx: bilinearno)
+	Tile size	Veličina pločice
+	Deflate + predictor	Deflate + prediktor
+	Wrap mode	Režim ponavljanja
+	Horizontal (s)	Horizontalno (s)
+	Vertical (t)	Vertikalno (t)
+	Clamp	Produži ivicu
+	Periodic	Periodično
+	Detection	Prepoznavanje
+	Write equal RGB channels as gray	Upiši jednake RGB kanale kao sivu
+	Write one colour as a single tile	Upiši jednu boju kao jednu pločicu
+	Repair NaN / Inf	Popravi NaN / Inf
+	Average 3×3 (box3)	Prosek 3×3 (box3)
+	Highlight compression (HDR, --hicomp)	Kompresija svetlih delova (HDR, --hicomp)
+	Values and bit depth are written as they are, without colour conversion. Alpha is stored premultiplied; an alpha that is opaque everywhere is dropped.	Vrednosti i dubina bita upisuju se nepromenjeno, bez konverzije boja. Alfa se čuva predmnožena; alfa koja je svuda neprozirna se izostavlja.

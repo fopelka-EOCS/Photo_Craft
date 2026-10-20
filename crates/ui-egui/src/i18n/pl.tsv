@@ -3843,3 +3843,29 @@ curves	Smooth	Wygładź
 	Use	Użyj
 	In Front	Z przodu
 	Behind	Z tyłu
+# TX Options (.tx render texture)
+	TX Options	Opcje TX
+	Data type	Typ danych
+	As document	Jak dokument
+	16 bit float (half)	16-bitowy float (half)
+	32 bit float	32-bitowy float
+	MIP map	Mapa MIP
+	Build MIP levels down to 1×1	Twórz poziomy MIP aż do 1×1
+	Auto (Lanczos 3; triangle for HDR)	Auto (Lanczos 3; trójkąt dla HDR)
+	Triangle (HDR)	Trójkąt (HDR)
+	Box (maketx: bilinear)	Box (maketx: dwuliniowy)
+	Tile size	Rozmiar kafelka
+	Deflate + predictor	Deflate + predyktor
+	Wrap mode	Tryb powtarzania
+	Horizontal (s)	Poziomo (s)
+	Vertical (t)	Pionowo (t)
+	Clamp	Przedłużenie krawędzi
+	Periodic	Okresowo
+	Detection	Wykrywanie
+	Write equal RGB channels as gray	Zapisuj jednakowe kanały RGB jako szarość
+	Write one colour as a single tile	Zapisuj jeden kolor jako jeden kafelek
+	Repair NaN / Inf	Napraw NaN / Inf
+	Average 3×3 (box3)	Średnia 3×3 (box3)
+	Highlight compression (HDR, --hicomp)	Kompresja świateł (HDR, --hicomp)
+	Values and bit depth are written as they are, without colour conversion. Alpha is stored premultiplied; an alpha that is opaque everywhere is dropped.	Wartości i głębia bitowa są zapisywane bez zmian, bez konwersji kolorów. Alfa jest zapisywana jako przemnożona; alfa nieprzezroczysta wszędzie jest pomijana.
+	Compression	Kompresja

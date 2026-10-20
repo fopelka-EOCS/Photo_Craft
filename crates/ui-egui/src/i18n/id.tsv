@@ -3239,3 +3239,29 @@ curves	Smooth	Haluskan
 	Use	Gunakan
 	In Front	Di Depan
 	Behind	Di Belakang
+# TX Options (.tx render texture)
+	TX Options	Opsi TX
+	Data type	Tipe data
+	As document	Sesuai dokumen
+	16 bit float (half)	Float 16 bit (half)
+	32 bit float	Float 32 bit
+	MIP map	MIP map
+	Build MIP levels down to 1×1	Buat level MIP hingga 1×1
+	Auto (Lanczos 3; triangle for HDR)	Otomatis (Lanczos 3; segitiga untuk HDR)
+	Triangle (HDR)	Segitiga (HDR)
+	Box (maketx: bilinear)	Box (maketx: bilinear)
+	Tile size	Ukuran ubin
+	Deflate + predictor	Deflate + prediktor
+	Wrap mode	Mode pengulangan
+	Horizontal (s)	Horizontal (s)
+	Vertical (t)	Vertikal (t)
+	Clamp	Tahan tepi
+	Periodic	Periodik
+	Detection	Deteksi
+	Write equal RGB channels as gray	Tulis kanal RGB yang sama sebagai abu-abu
+	Write one colour as a single tile	Tulis satu warna sebagai satu ubin
+	Repair NaN / Inf	Perbaiki NaN / Inf
+	Average 3×3 (box3)	Rata-rata 3×3 (box3)
+	Highlight compression (HDR, --hicomp)	Kompresi sorotan (HDR, --hicomp)
+	Values and bit depth are written as they are, without colour conversion. Alpha is stored premultiplied; an alpha that is opaque everywhere is dropped.	Nilai dan kedalaman bit ditulis apa adanya, tanpa konversi warna. Alfa disimpan dalam bentuk premultiplied; alfa yang buram di semua tempat dihilangkan.
+	Compression	Kompresi

@@ -3731,3 +3731,29 @@ curves	Smooth	Làm mượt
 	Use	Dùng
 	In Front	Phía trước
 	Behind	Phía sau
+# TX Options (.tx render texture)
+	TX Options	Tùy chọn TX
+	Data type	Kiểu dữ liệu
+	As document	Như tài liệu
+	16 bit float (half)	Float 16-bit (half)
+	32 bit float	Float 32-bit
+	MIP map	MIP map
+	Build MIP levels down to 1×1	Tạo các mức MIP đến 1×1
+	Auto (Lanczos 3; triangle for HDR)	Tự động (Lanczos 3; tam giác cho HDR)
+	Triangle (HDR)	Tam giác (HDR)
+	Box (maketx: bilinear)	Box (maketx: song tuyến)
+	Tile size	Kích thước ô
+	Deflate + predictor	Deflate + bộ dự đoán
+	Wrap mode	Chế độ lặp
+	Horizontal (s)	Ngang (s)
+	Vertical (t)	Dọc (t)
+	Clamp	Kéo dài cạnh
+	Periodic	Tuần hoàn
+	Detection	Phát hiện
+	Write equal RGB channels as gray	Ghi các kênh RGB bằng nhau thành xám
+	Write one colour as a single tile	Ghi một màu thành một ô
+	Repair NaN / Inf	Sửa NaN / Inf
+	Average 3×3 (box3)	Trung bình 3×3 (box3)
+	Highlight compression (HDR, --hicomp)	Nén vùng sáng (HDR, --hicomp)
+	Values and bit depth are written as they are, without colour conversion. Alpha is stored premultiplied; an alpha that is opaque everywhere is dropped.	Giá trị và độ sâu bit được ghi nguyên trạng, không chuyển đổi màu. Alpha được lưu ở dạng nhân trước; alpha mờ đục ở mọi nơi sẽ bị bỏ.
+	Compression	Nén

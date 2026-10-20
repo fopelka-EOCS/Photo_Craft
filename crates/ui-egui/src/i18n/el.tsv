@@ -3944,3 +3944,28 @@ curves	Smooth	Εξομάλυνση
 	Use	Χρήση
 	In Front	Μπροστά
 	Behind	Πίσω
+# TX Options (.tx render texture)
+	TX Options	Επιλογές TX
+	Data type	Τύπος δεδομένων
+	As document	Όπως το έγγραφο
+	16 bit float (half)	16 bit float (half)
+	32 bit float	32 bit float
+	MIP map	MIP map
+	Build MIP levels down to 1×1	Δημιουργία επιπέδων MIP έως 1×1
+	Auto (Lanczos 3; triangle for HDR)	Αυτόματο (Lanczos 3· τρίγωνο για HDR)
+	Triangle (HDR)	Τρίγωνο (HDR)
+	Box (maketx: bilinear)	Box (maketx: διγραμμικό)
+	Tile size	Μέγεθος πλακιδίου
+	Deflate + predictor	Deflate + πρόβλεψη
+	Wrap mode	Λειτουργία επανάληψης
+	Horizontal (s)	Οριζόντια (s)
+	Vertical (t)	Κατακόρυφα (t)
+	Clamp	Συγκράτηση άκρου
+	Periodic	Περιοδικό
+	Detection	Ανίχνευση
+	Write equal RGB channels as gray	Εγγραφή ίσων καναλιών RGB ως γκρι
+	Write one colour as a single tile	Εγγραφή ενός χρώματος ως ένα πλακίδιο
+	Repair NaN / Inf	Επιδιόρθωση NaN / Inf
+	Average 3×3 (box3)	Μέσος όρος 3×3 (box3)
+	Highlight compression (HDR, --hicomp)	Συμπίεση φωτεινών (HDR, --hicomp)
+	Values and bit depth are written as they are, without colour conversion. Alpha is stored premultiplied; an alpha that is opaque everywhere is dropped.	Οι τιμές και το βάθος bit γράφονται ως έχουν, χωρίς μετατροπή χρώματος. Το άλφα αποθηκεύεται προπολλαπλασιασμένο· ένα άλφα που είναι παντού αδιαφανές παραλείπεται.

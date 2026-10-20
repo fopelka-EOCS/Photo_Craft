@@ -4004,3 +4004,28 @@ curves	Smooth	Vloeiend maken
 	Use	Gebruiken
 	In Front	Voor
 	Behind	Achter
+# TX Options (.tx render texture)
+	TX Options	TX-opties
+	Data type	Gegevenstype
+	As document	Zoals document
+	16 bit float (half)	16-bits float (half)
+	32 bit float	32-bits float
+	MIP map	MIP-map
+	Build MIP levels down to 1×1	MIP-niveaus maken tot 1×1
+	Auto (Lanczos 3; triangle for HDR)	Auto (Lanczos 3; driehoek voor HDR)
+	Triangle (HDR)	Driehoek (HDR)
+	Box (maketx: bilinear)	Box (maketx: bilineair)
+	Tile size	Tegelgrootte
+	Deflate + predictor	Deflate + predictor
+	Wrap mode	Herhaalmodus
+	Horizontal (s)	Horizontaal (s)
+	Vertical (t)	Verticaal (t)
+	Clamp	Rand doortrekken
+	Periodic	Periodiek
+	Detection	Detectie
+	Write equal RGB channels as gray	Gelijke RGB-kanalen als grijs schrijven
+	Write one colour as a single tile	Eén kleur als één tegel schrijven
+	Repair NaN / Inf	NaN / Inf herstellen
+	Average 3×3 (box3)	Gemiddelde 3×3 (box3)
+	Highlight compression (HDR, --hicomp)	Compressie van hoge lichten (HDR, --hicomp)
+	Values and bit depth are written as they are, without colour conversion. Alpha is stored premultiplied; an alpha that is opaque everywhere is dropped.	Waarden en bitdiepte worden ongewijzigd geschreven, zonder kleurconversie. Alfa wordt voorvermenigvuldigd opgeslagen; een overal dekkende alfa vervalt.

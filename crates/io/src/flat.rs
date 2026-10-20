@@ -190,6 +190,53 @@ pub fn import_tiff_page(name: &str, bytes: &[u8], page: Option<usize>) -> Result
         None => (codecs::decode_with(bytes, &keep)?, codecs::tiff_orientation(bytes)),
         Some(p) => (codecs::decode_tiff_page(bytes, p, &keep)?, codecs::tiff_page_orientation(bytes, p)),
     };
+    tiff_to_document(name, img, orientation)
+}
+
+/// A `.tx` texture (written by OpenImageIO's `maketx` for V-Ray, Arnold, RenderMan and others): a
+/// tiled TIFF with one directory per MIP level, full resolution first. It opens as that level,
+/// read-only: Save can't write the MIP chain and tiling back, so it asks for a new name instead of
+/// replacing the texture with a plain TIFF. The smaller levels are derived from the first one, so
+/// leaving them out loses nothing and the "more pages" warning is dropped for a MIP chain.
+pub(crate) fn import_tx(name: &str, bytes: &[u8]) -> Result<ImportResult, IoError> {
+    let keep = codecs::DecodeOptions { keep_orientation: true, ..Default::default() };
+    let mut img = codecs::decode_with(bytes, &keep)?;
+    if codecs::tiff_info(bytes).is_ok_and(|info| is_mip_chain(&info)) {
+        img.warnings.retain(|w| !matches!(w, codecs::DecodeWarning::MorePages { .. }));
+    }
+    let mut r = tiff_to_document(name, img, codecs::tiff_orientation(bytes))?;
+    r.source_read_only = true;
+    Ok(r)
+}
+
+/// Whether the page that opens starts a MIP pyramid as `maketx` writes it. From that page (the one
+/// [`codecs::TiffInfo::default_page`] picks, so a leading thumbnail is skipped) over the full-resolution
+/// main-chain pages the "more pages" warning counts: every level is tiled, each one shrinks the one
+/// before by half (rounded down or up, never below 1), and the chain ends at 1×1. Every page the
+/// warning counts ([`codecs::TiffInfo::page_count`]) must be one of those levels: none before the
+/// page that opens, none without a size. Anything less conclusive keeps the warning, so real extra
+/// pages are never left out silently.
+fn is_mip_chain(info: &codecs::TiffInfo) -> bool {
+    let Some(start) = info.default_page() else { return false };
+    let counted = |p: &codecs::TiffPage| p.parent.is_none() && p.kind == codecs::TiffPageKind::Page;
+    if info.pages.iter().take(start).any(counted) {
+        return false;
+    }
+    let levels: Vec<_> = info.pages.iter().skip(start).filter(|p| counted(p)).collect();
+    if levels.len() != info.page_count() || levels.iter().any(|p| p.width == 0 || p.height == 0) {
+        return false;
+    }
+    let halves = |big: u32, small: u32| small == (big / 2).max(1) || small == big.div_ceil(2).max(1);
+    let next_level =
+        |a: &codecs::TiffPage, b: &codecs::TiffPage| (a.width, a.height) != (b.width, b.height) && halves(a.width, b.width) && halves(a.height, b.height);
+    levels.len() > 1
+        && levels.iter().all(|p| p.tiled)
+        && levels.last().is_some_and(|p| p.width == 1 && p.height == 1)
+        && levels.windows(2).all(|l| next_level(l[0], l[1]))
+}
+
+/// A decoded TIFF page as a document: its Photoshop layers when it carries them, else one layer.
+fn tiff_to_document(name: &str, img: Image, orientation: u16) -> Result<ImportResult, IoError> {
     if let Some(layers) = img.meta.photoshop_layers.as_deref().filter(|l| !l.is_empty()) {
         let mut r = crate::tiff_layers::import_layered(name, &img, layers)?;
         if orientation != 1 {
@@ -332,7 +379,7 @@ pub fn document_to_image(doc: &Document, warnings: &mut Vec<String>) -> Result<I
 }
 
 /// `cmyk_target` / `lab_target`: the format stores CMYK / Lab pixels.
-fn document_to_image_for(doc: &Document, warnings: &mut Vec<String>, cmyk_target: bool, lab_target: bool) -> Result<Image, IoError> {
+pub(crate) fn document_to_image_for(doc: &Document, warnings: &mut Vec<String>, cmyk_target: bool, lab_target: bool) -> Result<Image, IoError> {
     let (w, h) = (doc.size.width, doc.size.height);
     let canvas = doc.bounds();
     let fmt = doc.pixel_format();
@@ -762,7 +809,7 @@ fn convert_from(
 
 /// Colour-managed CMYK → sRGB for formats that cannot store CMYK (the document's embedded
 /// CMYK profile when it parses, else the built-in coated CMYK; relative colorimetric + BPC).
-fn cmyk_image_to_srgb(img: &Image) -> Result<Image, IoError> {
+pub(crate) fn cmyk_image_to_srgb(img: &Image) -> Result<Image, IoError> {
     use photocraft_cms::{Builtin, ColorSpace, Intent, Profile, Transform};
     let src = img
         .icc

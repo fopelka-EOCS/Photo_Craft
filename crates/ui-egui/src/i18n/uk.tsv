@@ -3952,3 +3952,29 @@ curves	Smooth	Згладити
 	Use	Використати
 	In Front	Спереду
 	Behind	Ззаду
+# TX Options (.tx render texture)
+	TX Options	Параметри TX
+	Data type	Тип даних
+	As document	Як у документі
+	16 bit float (half)	16-бітний float (half)
+	32 bit float	32-бітний float
+	MIP map	MIP-карта
+	Build MIP levels down to 1×1	Будувати рівні MIP до 1×1
+	Auto (Lanczos 3; triangle for HDR)	Авто (Lanczos 3; трикутник для HDR)
+	Triangle (HDR)	Трикутник (HDR)
+	Box (maketx: bilinear)	Box (maketx: білінійний)
+	Tile size	Розмір плитки
+	Deflate + predictor	Deflate + предиктор
+	Wrap mode	Режим повторення
+	Horizontal (s)	По горизонталі (s)
+	Vertical (t)	По вертикалі (t)
+	Clamp	Продовжити край
+	Periodic	Періодично
+	Detection	Розпізнавання
+	Write equal RGB channels as gray	Записувати однакові канали RGB як сірий
+	Write one colour as a single tile	Записувати один колір однією плиткою
+	Repair NaN / Inf	Виправити NaN / Inf
+	Average 3×3 (box3)	Середнє 3×3 (box3)
+	Highlight compression (HDR, --hicomp)	Стиснення світлих ділянок (HDR, --hicomp)
+	Values and bit depth are written as they are, without colour conversion. Alpha is stored premultiplied; an alpha that is opaque everywhere is dropped.	Значення й бітова глибина записуються як є, без перетворення кольору. Альфа зберігається попередньо помноженою; альфа, непрозора всюди, відкидається.
+	Compression	Стиснення

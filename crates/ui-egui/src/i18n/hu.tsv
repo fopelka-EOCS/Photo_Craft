@@ -4163,3 +4163,28 @@ cameraRaw	Yellow	Sárga
 	Use	Használat
 	In Front	Elöl
 	Behind	Mögött
+# TX Options (.tx render texture)
+	TX Options	TX-beállítások
+	Data type	Adattípus
+	As document	A dokumentum szerint
+	16 bit float (half)	16 bites float (half)
+	32 bit float	32 bites float
+	MIP map	MIP-térkép
+	Build MIP levels down to 1×1	MIP-szintek készítése 1×1-ig
+	Auto (Lanczos 3; triangle for HDR)	Automatikus (Lanczos 3; HDR-hez háromszög)
+	Triangle (HDR)	Háromszög (HDR)
+	Box (maketx: bilinear)	Box (maketx: bilineáris)
+	Tile size	Csempeméret
+	Deflate + predictor	Deflate + prediktor
+	Wrap mode	Ismétlési mód
+	Horizontal (s)	Vízszintes (s)
+	Vertical (t)	Függőleges (t)
+	Clamp	Szél folytatása
+	Periodic	Periodikus
+	Detection	Felismerés
+	Write equal RGB channels as gray	Azonos RGB-csatornák írása szürkeként
+	Write one colour as a single tile	Egyetlen szín írása egy csempeként
+	Repair NaN / Inf	NaN / Inf javítása
+	Average 3×3 (box3)	Átlag 3×3 (box3)
+	Highlight compression (HDR, --hicomp)	Csúcsfények tömörítése (HDR, --hicomp)
+	Values and bit depth are written as they are, without colour conversion. Alpha is stored premultiplied; an alpha that is opaque everywhere is dropped.	Az értékek és a bitmélység változatlanul íródnak ki, színkonverzió nélkül. Az alfa előszorzottan tárolódik; a mindenhol átlátszatlan alfa elmarad.

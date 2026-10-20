@@ -4034,3 +4034,28 @@ layerLabel	No Color	Sem cor
 	Use	Usar
 	In Front	Na frente
 	Behind	Atrás
+# TX Options (.tx render texture)
+	TX Options	Opções de TX
+	Data type	Tipo de dados
+	As document	Como o documento
+	16 bit float (half)	Float de 16 bits (half)
+	32 bit float	Float de 32 bits
+	MIP map	Mapa MIP
+	Build MIP levels down to 1×1	Criar níveis MIP até 1×1
+	Auto (Lanczos 3; triangle for HDR)	Auto (Lanczos 3; triângulo para HDR)
+	Triangle (HDR)	Triângulo (HDR)
+	Box (maketx: bilinear)	Box (maketx: bilinear)
+	Tile size	Tamanho do bloco
+	Deflate + predictor	Deflate + preditor
+	Wrap mode	Modo de repetição
+	Horizontal (s)	Horizontal (s)
+	Vertical (t)	Vertical (t)
+	Clamp	Estender borda
+	Periodic	Periódico
+	Detection	Detecção
+	Write equal RGB channels as gray	Gravar canais RGB iguais como cinza
+	Write one colour as a single tile	Gravar uma única cor como um bloco
+	Repair NaN / Inf	Reparar NaN / Inf
+	Average 3×3 (box3)	Média 3×3 (box3)
+	Highlight compression (HDR, --hicomp)	Compressão de realces (HDR, --hicomp)
+	Values and bit depth are written as they are, without colour conversion. Alpha is stored premultiplied; an alpha that is opaque everywhere is dropped.	Os valores e a profundidade de bits são gravados como estão, sem conversão de cor. O alfa é armazenado pré-multiplicado; um alfa opaco em toda parte é descartado.

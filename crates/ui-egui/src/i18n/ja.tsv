@@ -3921,3 +3921,29 @@ curves	Smooth	スムーズ
 	Use	使用
 	In Front	前面
 	Behind	背面
+# TX Options (.tx render texture)
+	TX Options	TX オプション
+	Data type	データ型
+	As document	ドキュメントと同じ
+	16 bit float (half)	16 ビット浮動小数点 (half)
+	32 bit float	32 ビット浮動小数点
+	MIP map	MIP マップ
+	Build MIP levels down to 1×1	1×1 まで MIP レベルを作成
+	Auto (Lanczos 3; triangle for HDR)	自動 (Lanczos 3、HDR は三角)
+	Triangle (HDR)	三角 (HDR)
+	Box (maketx: bilinear)	ボックス (maketx: バイリニア)
+	Tile size	タイルサイズ
+	Deflate + predictor	Deflate + 予測子
+	Wrap mode	ラップモード
+	Horizontal (s)	水平 (s)
+	Vertical (t)	垂直 (t)
+	Clamp	端を延長
+	Periodic	周期
+	Detection	検出
+	Write equal RGB channels as gray	等しい RGB チャンネルをグレーで書き出す
+	Write one colour as a single tile	単色を 1 タイルで書き出す
+	Repair NaN / Inf	NaN / Inf を修復
+	Average 3×3 (box3)	3×3 平均 (box3)
+	Highlight compression (HDR, --hicomp)	ハイライト圧縮 (HDR、--hicomp)
+	Values and bit depth are written as they are, without colour conversion. Alpha is stored premultiplied; an alpha that is opaque everywhere is dropped.	値とビット深度はカラー変換なしでそのまま書き出されます。アルファは乗算済みで保存され、全体が不透明なアルファは省略されます。
+	Compression	圧縮

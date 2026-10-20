@@ -15,19 +15,23 @@ pub const USAGE: &str = "\
 photocraft-cli: headless PhotoCraft
 
 USAGE:
-  photocraft-cli convert <in> <out> [--format <ext>] [--quality <1-100>] [--tiff-layers] [--tga-bits <24|32>] [--dpx-bits <8|10|12|16>]
+  photocraft-cli convert <in> <out> [--format <ext>] [--quality <1-100>] [--tiff-layers] [--tga-bits <24|32>] [--dpx-bits <8|10|12|16>] [--tx-preset <vray|classic>] [--tx-args <maketx options>]
       Convert between formats (.pcraft, .psd, .png, .jpg, .tif, .webp, .exr, …).
       TIFF output is flat unless --tiff-layers keeps the layers (Photoshop layer data).
       --quality sets the JPEG or WebP quality; a WebP written with a quality is lossy, without one lossless.
       --tga-bits sets a TGA's bits per pixel: 32 writes the alpha channel (or else the transparency) as
       its alpha, 24 none. Without it: 32 with an alpha channel or transparency, else 24.
       --dpx-bits sets a DPX's bits per sample. Without it: 8 for an 8-bit document, else 16.
+      A .tx output is a tiled, MIP-mapped render texture (as maketx writes it). --tx-preset picks
+      vray (the default; Lanczos 3, triangle for a half or float texture) or classic (maketx --oiio
+      --tile 64 64 --filter lanczos3 --monochrome-detect); --tx-args adds maketx options on top,
+      e.g. '--filter triangle' or '--filter box --hicomp'.
   photocraft-cli info <file> [--compact]
       Print the document as JSON (size, mode, depth, layer tree).
-  photocraft-cli run (<file> | --new <json>) --cmd <id> [--params <json>] [--cmd …] [--out <file>] [--format <ext>] [--quality <1-100>] [--tiff-layers] [--tga-bits <24|32>] [--dpx-bits <8|10|12|16>]
+  photocraft-cli run (<file> | --new <json>) --cmd <id> [--params <json>] [--cmd …] [--out <file>] [--format <ext>] [--quality <1-100>] [--tiff-layers] [--tga-bits <24|32>] [--dpx-bits <8|10|12|16>] [--tx-preset <vray|classic>] [--tx-args <maketx options>]
       Open a file, run engine commands in order, save the result. Each --params
       applies to the preceding --cmd. Prints each command's JSON result.
-  photocraft-cli batch --actions <actions.json|set.atn> [--action <name>] --in <dir> --out <dir> [--format <ext>] [--quality <1-100>] [--in-place] [--tiff-layers] [--tga-bits <24|32>] [--dpx-bits <8|10|12|16>]
+  photocraft-cli batch --actions <actions.json|set.atn> [--action <name>] --in <dir> --out <dir> [--format <ext>] [--quality <1-100>] [--in-place] [--tiff-layers] [--tga-bits <24|32>] [--dpx-bits <8|10|12|16>] [--tx-preset <vray|classic>] [--tx-args <maketx options>]
       Apply an action list to every image in a directory. A Photoshop Actions file (.atn) is a
       set: its action --action names plays, as below. JSON steps are [id, params] pairs,
       {\"command\": id, \"params\": {…}} objects or bare ids, as a recorded action or droplet stores them
@@ -69,17 +73,22 @@ struct Subcommand {
 }
 
 const SUBCOMMANDS: &[Subcommand] = &[
-    Subcommand { name: "convert", values: &["--format", "--quality", "--tga-bits", "--dpx-bits"], bare: &["--tiff-layers"], run: convert },
+    Subcommand {
+        name: "convert",
+        values: &["--format", "--quality", "--tga-bits", "--dpx-bits", "--tx-preset", "--tx-args"],
+        bare: &["--tiff-layers"],
+        run: convert,
+    },
     Subcommand { name: "info", values: &[], bare: &["--compact"], run: |a, out, _| info(a, out) },
     Subcommand {
         name: "run",
-        values: &["--new", "--cmd", "--params", "--out", "--format", "--quality", "--tga-bits", "--dpx-bits"],
+        values: &["--new", "--cmd", "--params", "--out", "--format", "--quality", "--tga-bits", "--dpx-bits", "--tx-preset", "--tx-args"],
         bare: &["--tiff-layers"],
         run: run_cmds,
     },
     Subcommand {
         name: "batch",
-        values: &["--actions", "--action", "--in", "--out", "--format", "--quality", "--tga-bits", "--dpx-bits"],
+        values: &["--actions", "--action", "--in", "--out", "--format", "--quality", "--tga-bits", "--dpx-bits", "--tx-preset", "--tx-args"],
         bare: &["--in-place", "--tiff-layers"],
         run: batch,
     },
@@ -214,6 +223,17 @@ fn export_opts(a: &Args) -> Result<ExportOptions, String> {
     }
     if let Some(b) = a.get("--tga-bits") {
         o.tga_bits = Some(b.parse().ok().and_then(photocraft_io::TgaBits::from_bits).ok_or_else(|| format!("bad --tga-bits `{b}`: expected 24 or 32"))?);
+    }
+    if a.get("--tx-preset").is_some() || a.get("--tx-args").is_some() {
+        let mut tx = match a.get("--tx-preset") {
+            None | Some("vray") => photocraft_io::TxOptions::default(),
+            Some("classic") => photocraft_io::TxOptions::preset(photocraft_io::TxPreset::Classic),
+            Some(p) => return Err(format!("bad --tx-preset `{p}`: expected vray or classic")),
+        };
+        if let Some(args) = a.get("--tx-args") {
+            tx.apply_maketx_args(args).map_err(|e| format!("bad --tx-args: {e}"))?;
+        }
+        o.tx = Some(tx);
     }
     if let Some(b) = a.get("--dpx-bits") {
         o.encode.dpx_bits =
@@ -438,7 +458,8 @@ fn same_dir(a: &Path, b: &Path) -> bool {
 
 fn is_input(p: &Path) -> bool {
     let known = |e: &str| {
-        matches!(e, "pcraft" | "psd" | "psb" | "pdn" | "ora" | "kra" | "krz" | "af" | "afdesign" | "afphoto" | "afpub")
+        // `.tx` textures are TIFFs the codecs read but deliberately don't list (only `photocraft_io` writes one).
+        matches!(e, "pcraft" | "psd" | "psb" | "pdn" | "ora" | "kra" | "krz" | "af" | "afdesign" | "afphoto" | "afpub" | "tx")
             || photocraft_codecs::from_extension(e).is_some_and(|f| photocraft_codecs::caps(f).read)
     };
     p.is_file() && p.extension().is_some_and(|e| known(&e.to_string_lossy().to_ascii_lowercase()))
@@ -711,6 +732,24 @@ mod batch_action_set_tests {
         let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
         let code = run(&args, &mut output, &mut errors);
         (code, String::from_utf8(output).unwrap(), String::from_utf8(errors).unwrap())
+    }
+
+    /// A folder of `.tx` textures (tiled MIP-mapped TIFFs the codecs read; only `photocraft_io` writes them) is picked
+    /// up by `batch`, and each one is written in the format asked for.
+    #[test]
+    fn batch_picks_up_tx_textures_and_writes_the_chosen_format() {
+        let dir = std::env::temp_dir().join(format!("photocraft-cli-tx-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = |name: &str| dir.join(name).to_string_lossy().to_string();
+        std::fs::create_dir_all(dir.join("in")).unwrap();
+        let (code, _, stderr) = invoke(&["run", "--new", r#"{"width":8,"height":6}"#, "--out", &path("in/wall.tif")]);
+        assert_eq!(code, 0, "{stderr}");
+        std::fs::rename(dir.join("in/wall.tif"), dir.join("in/wall.tx")).unwrap();
+        std::fs::write(dir.join("steps.json"), r#"["image.adjustments.invert"]"#).unwrap();
+        let (code, stdout, stderr) = invoke(&["batch", "--actions", &path("steps.json"), "--in", &path("in"), "--out", &path("out"), "--format", "png"]);
+        assert_eq!(code, 0, "{stdout}{stderr}");
+        assert!(dir.join("out/wall.png").is_file(), "{stdout}{stderr}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A batched action that plays another action of its set finds it in every file's session; a
