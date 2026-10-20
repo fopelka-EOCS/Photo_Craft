@@ -25,7 +25,7 @@ fn bad(msg: impl Into<String>) -> EngineError {
     EngineError::BadParams { cmd: RUN.into(), msg: msg.into() }
 }
 
-fn adapter_error(error: adapter::Error) -> EngineError {
+pub(crate) fn adapter_error(error: adapter::Error) -> EngineError {
     match error {
         adapter::Error::Canceled => EngineError::Cancelled,
         error => EngineError::Other(format!("adapter: {error}")),

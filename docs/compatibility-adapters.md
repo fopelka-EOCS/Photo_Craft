@@ -132,6 +132,19 @@ runtimes or probe files; it describes adapters already registered by trusted app
 - A depth result is representable in the core API; `depthLayer` writeback is explicitly unsupported
   in this initial engine bridge. It is not silently stored as RGB, a selection or a mask.
 
+### `select.subject` integration
+
+When the user triggers **Select › Subject** (`select.subject`), the host automatically inspects the session's
+adapter registry:
+- If an adapter is registered that declares the `select-subject` operation (`output_kind: mask`), the command
+  prioritizes dispatching to that adapter (enabling NPU/GPU/CPU AI subject segmentation, similar to Affinity Photo's
+  on-device ML selection pipeline).
+- The returned single-channel mask is converted into a selection region, optionally refined with edge smoothing
+  (`enhanceEdge: true`), and applied to the document selection under the requested mode (`replace`, `add`, `subtract`,
+  `intersect`) with full undo support.
+- If no adapter is registered, or if `forceClassical: true` / `"method": "classical"` is passed, the engine
+  transparently falls back to the classical saliency and GrabCut algorithm.
+
 This first bridge accepts an explicit raster-layer pixel target and the canvas rectangle in
 RGB, Gray, CMYK and Lab documents at 8/16/32-bit depth. Indexed, Bitmap, Duotone and Multichannel
 documents are explicitly unsupported in this engine bridge: their expanded storage is not a

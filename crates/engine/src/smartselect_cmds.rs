@@ -8,8 +8,10 @@ use photocraft_algo::segment::{Sampler, SurfaceSampler, focus, grabcut, quick, s
 use photocraft_algo::selection::{Region, SelectionMode, combine_region};
 use photocraft_doc::{Document, Layer, LayerContent, LayerId, LayerMask};
 use photocraft_geom::Rect;
+use photocraft_plugins::adapter::{self, Image, Limits, OutputKind, Request};
 use serde_json::{Value, json};
 
+use crate::adapter_cmds::adapter_error;
 use crate::commands::CommandSpec;
 use crate::{EngineError, Result, Session};
 
@@ -293,6 +295,171 @@ impl SubjectCache {
     }
 }
 
+struct SubjectContext;
+
+impl adapter::Context for SubjectContext {
+    fn cancelled(&self) -> bool {
+        false
+    }
+
+    fn progress(&self, _fraction: f32) {}
+}
+
+fn subject_from_adapter(s: &Session, doc: &Document, layer_id: Option<LayerId>, all_layers: bool, p: &Value) -> Result<Option<Option<Region>>> {
+    let force_classical = b(p, "forceClassical", false) || p.get("method").and_then(Value::as_str) == Some("classical");
+    if force_classical {
+        return Ok(None);
+    }
+
+    let provider = p.get("provider").and_then(Value::as_str);
+    let registered = match provider {
+        Some(id) => {
+            let entry = s.adapters.get(id).ok_or_else(|| bad("select.subject", &format!("adapter `{id}` is not registered")))?;
+            let desc = entry.descriptor();
+            if !desc.operations.iter().any(|op| op.id == "select-subject") {
+                return Err(bad("select.subject", &format!("adapter `{id}` does not advertise operation `select-subject`")));
+            }
+            Some(entry)
+        }
+        None => s.adapters.list().iter().find(|d| d.operations.iter().any(|op| op.id == "select-subject")).and_then(|d| s.adapters.get(&d.id)),
+    };
+
+    let Some(registered) = registered else {
+        return Ok(None);
+    };
+
+    let descriptor = registered.descriptor();
+    let operation = descriptor
+        .operations
+        .iter()
+        .find(|op| op.id == "select-subject")
+        .ok_or_else(|| bad("select.subject", "adapter does not advertise `select-subject`"))?;
+
+    if operation.output_kind != OutputKind::Mask {
+        return Err(bad("select.subject", "`select-subject` operation must produce a mask"));
+    }
+
+    if let Some(device_id) = p.get("device").and_then(Value::as_str) {
+        let device =
+            descriptor.devices.iter().find(|d| d.id == device_id).ok_or_else(|| bad("select.subject", "adapter does not advertise the requested device"))?;
+        if !device.operations.iter().any(|o| o == "select-subject") {
+            return Err(bad("select.subject", "requested device does not advertise `select-subject`"));
+        }
+    }
+
+    let bounds = doc.bounds();
+    let (width, height) = (bounds.width(), bounds.height());
+    if width == 0 || height == 0 {
+        return Ok(Some(None));
+    }
+
+    let (channels, color_mode, alpha, data) = if !all_layers
+        && let Some(surf) = layer_id.and_then(|id| doc.layer(id)).and_then(Layer::surface)
+        && surf.format().mode == photocraft_color::ColorMode::Rgb
+    {
+        let ch = surf.channels();
+        let mut d = Vec::new();
+        surf.read_region_into(bounds, &mut d);
+        (u8::try_from(ch).unwrap_or(4), "rgb".to_string(), surf.format().alpha, d)
+    } else {
+        let rgba = CompositeSampler(doc).rgba(bounds);
+        let mut d = Vec::with_capacity(rgba.len() * 4);
+        for px in rgba {
+            d.extend_from_slice(&px);
+        }
+        (4, "rgb".to_string(), true, d)
+    };
+
+    if !operation.color_modes.iter().any(|m| m == &color_mode) {
+        return Err(bad("select.subject", &format!("adapter does not advertise color mode `{color_mode}` for `select-subject`")));
+    }
+
+    let input_image = Image {
+        x: bounds.x0,
+        y: bounds.y0,
+        width,
+        height,
+        channels,
+        color_mode,
+        source_depth: doc.depth.bits() as u8,
+        alpha,
+        icc_profile: doc.icc_profile.as_deref().cloned().unwrap_or_default(),
+        data,
+    };
+
+    let limits = Limits::default();
+    input_image.validate(&limits).map_err(adapter_error)?;
+
+    let selection = doc.selection.as_ref().and_then(|surf| {
+        let mut d = Vec::new();
+        surf.read_region_into(bounds, &mut d);
+        let sel_img = Image {
+            x: bounds.x0,
+            y: bounds.y0,
+            width,
+            height,
+            channels: 1,
+            color_mode: "gray".into(),
+            source_depth: 32,
+            alpha: false,
+            icc_profile: Vec::new(),
+            data: d,
+        };
+        sel_img.validate(&limits).ok().map(|_| sel_img)
+    });
+
+    let request = Request {
+        operation: "select-subject".into(),
+        resource: p.get("resource").and_then(Value::as_str).map(String::from),
+        params: p.get("params").cloned().unwrap_or_else(|| json!({})),
+        device: p.get("device").and_then(Value::as_str).map(String::from),
+        allow_fallback: b(p, "allowFallback", false),
+        image: input_image,
+        selection,
+    };
+
+    let response = registered.run(&request, &SubjectContext, &limits).map_err(adapter_error)?;
+
+    if response.output.kind != OutputKind::Mask {
+        return Err(bad("select.subject", "expected mask output from `select-subject`"));
+    }
+    let mask_image = response.output.image;
+
+    mask_image.validate(&limits).map_err(adapter_error)?;
+
+    if mask_image.width != width || mask_image.height != height {
+        return Err(bad("select.subject", "mask dimensions do not match document canvas bounds"));
+    }
+
+    let mut mask_u8 = Vec::with_capacity((width * height) as usize);
+    let mut any_positive = false;
+    for &sample in &mask_image.data {
+        let u = (sample.clamp(0.0, 1.0) * 255.0).round() as u8;
+        if u > 0 {
+            any_positive = true;
+        }
+        mask_u8.push(u);
+    }
+
+    if !any_positive {
+        return Ok(Some(None));
+    }
+
+    let region = Region { bbox: bounds, mask: mask_u8 };
+    let trimmed = photocraft_algo::segment::trim_region(region);
+
+    let final_region = if b(p, "enhanceEdge", false) {
+        let enhance = ENHANCE;
+        with_doc_sampler(doc, layer_id, all_layers, |smp, _| {
+            trimmed.and_then(|r| matting::refine_mask(smp, &matting::region_reader(&r), r.bbox, bounds, &enhance))
+        })
+    } else {
+        trimmed
+    };
+
+    Ok(Some(final_region))
+}
+
 fn select_subject(s: &mut Session, p: &Value) -> Result<Value> {
     let all_layers = b(p, "sampleAllLayers", true);
     let d = s.active().ok_or(EngineError::NoDocument)?;
@@ -304,7 +471,10 @@ fn select_subject(s: &mut Session, p: &Value) -> Result<Value> {
         c.region.clone()
     } else {
         let doc = std::sync::Arc::clone(&d.doc);
-        let region = with_doc_sampler(&doc, d.active_layer, all_layers, |smp, doc| subject::select_subject(smp, doc.bounds())).map(std::sync::Arc::new);
+        let region = match subject_from_adapter(s, &doc, d.active_layer, all_layers, p)? {
+            Some(r) => r.map(std::sync::Arc::new),
+            None => with_doc_sampler(&doc, d.active_layer, all_layers, |smp, doc| subject::select_subject(smp, doc.bounds())).map(std::sync::Arc::new),
+        };
         s.subject_cache = SubjectCache { doc: std::sync::Arc::downgrade(&doc), doc_id: Some(doc.id), target, region: region.clone() };
         region
     };
@@ -516,7 +686,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "select.subject",
             "Subject",
             ["Select"],
-            r##"{"sampleAllLayers":bool=true,"mode":"replace|add|subtract|intersect"="replace"}"##,
+            r##"{"sampleAllLayers":bool=true,"mode":"replace|add|subtract|intersect"="replace","provider":text?,"device":text?,"resource":text?,"params":object={},"enhanceEdge":bool=false,"forceClassical":bool=false}"##,
             has_doc,
             select_subject
         ),
@@ -1040,5 +1210,91 @@ mod tests {
         });
         s.execute("select.focusArea", json!({})).unwrap();
         assert!(cov(&s, 30, 50) >= 0.5 && cov(&s, 130, 50) < 0.5);
+    }
+
+    use photocraft_plugins::adapter::{Adapter, Context, Descriptor, Device, DeviceKind, Execution, Operation, Output, Response};
+
+    struct MockSubjectAdapter {
+        descriptor: Descriptor,
+        center: (i32, i32),
+        radius: i32,
+    }
+
+    impl Adapter for MockSubjectAdapter {
+        fn descriptor(&self) -> Descriptor {
+            self.descriptor.clone()
+        }
+
+        fn run(&self, request: &Request, _ctx: &dyn Context) -> adapter::Result<Response> {
+            let limits = Limits::default();
+            request.image.validate(&limits)?;
+            let (w, h) = (request.image.width, request.image.height);
+            let mut data = vec![0.0f32; (w * h) as usize];
+            for y in 0..h as i32 {
+                for x in 0..w as i32 {
+                    let dx = x - self.center.0;
+                    let dy = y - self.center.1;
+                    if dx * dx + dy * dy <= self.radius * self.radius {
+                        data[(y as usize) * (w as usize) + (x as usize)] = 1.0;
+                    }
+                }
+            }
+            let mask = Image {
+                x: request.image.x,
+                y: request.image.y,
+                width: w,
+                height: h,
+                channels: 1,
+                color_mode: "gray".into(),
+                source_depth: 32,
+                alpha: false,
+                icc_profile: Vec::new(),
+                data,
+            };
+            Ok(Response {
+                output: Output { kind: OutputKind::Mask, image: mask },
+                execution: Execution { devices: vec!["mock.npu".into()], backend: "mock-npu".into(), fallback_reason: None },
+            })
+        }
+    }
+
+    #[test]
+    fn select_subject_dispatches_to_registered_adapter_and_undoes() {
+        use std::sync::Arc;
+        let mut s = session_with(100, 100, 8, |_, _| [0.5, 0.5, 0.5]);
+        let desc = Descriptor {
+            api_version: adapter::API_VERSION,
+            id: "org.photocraft.mock.npu".into(),
+            name: "Mock NPU Subject Selection".into(),
+            version: "1.0.0".into(),
+            operations: vec![Operation { id: "select-subject".into(), output_kind: OutputKind::Mask, color_modes: vec!["rgb".into()] }],
+            devices: vec![Device {
+                id: "npu.0".into(),
+                kind: DeviceKind::Npu,
+                backend: "mock-directml".into(),
+                name: "Hexagon NPU (Mock)".into(),
+                operations: vec!["select-subject".into()],
+            }],
+            resource_formats: Vec::new(),
+            params_schema: json!({}),
+        };
+
+        s.register_adapter(Arc::new(MockSubjectAdapter { descriptor: desc, center: (50, 50), radius: 20 })).unwrap();
+
+        // 1. Calling select.subject dispatches to the NPU adapter
+        let res = s.execute("select.subject", json!({})).unwrap();
+        assert_eq!(res["selected"], true);
+        assert_eq!(res["changed"], true);
+        assert!(cov(&s, 50, 50) > 0.9);
+        assert!(cov(&s, 10, 10) < 0.1);
+
+        // 2. Undo clears the selection
+        s.execute("edit.undo", json!({})).unwrap();
+        assert!(s.active().unwrap().doc.selection.is_none());
+
+        // 3. forceClassical forces bypassing the adapter
+        let res_classical = s.execute("select.subject", json!({"forceClassical": true})).unwrap();
+        // Flat gray field has no salient subject in classical GrabCut
+        assert_eq!(res_classical["changed"], false);
     }
 }
