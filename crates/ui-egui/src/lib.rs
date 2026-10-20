@@ -1578,13 +1578,16 @@ impl PhotocraftApp {
         self.save_as_step(path, None, choices)
     }
 
-    /// File › Save back to the document's own layered file, recorded as a `file.save` step.
-    pub(crate) fn save_in_place(&mut self, path: String) -> Result<Value, String> {
+    /// File › Save back to the document's own file, recorded as a `file.save` step with the
+    /// Targa or DDS answer in `choices` (a replayed Save of a flat file brings its own).
+    pub(crate) fn save_in_place(&mut self, path: String, choices: FormatChoices) -> Result<Value, String> {
         if self.save_options_open() {
             return Err("Answer the TIFF, Targa or DDS Options before starting another save".into());
         }
-        let r = self.write_save(path, None, FormatChoices::default())?;
-        self.session.journal.push(("file.save".into(), Value::Object(Default::default())));
+        let r = self.write_save(path, None, choices)?;
+        let mut step = Value::Object(Default::default());
+        choices.record(&mut step);
+        self.session.journal.push(("file.save".into(), step));
         Ok(r)
     }
 
@@ -1601,14 +1604,25 @@ impl PhotocraftApp {
         Ok(r)
     }
 
-    /// Re-label the Save As just journaled for `path` as File › Save (see [`Self::save_dialog_flow`]).
+    /// Re-label the Save As just journaled for `path` as File › Save (see [`Self::save_dialog_flow`]),
+    /// keeping its Targa or DDS answer so playback writes the file the same way. A save parked
+    /// behind Targa or DDS Options hasn't been journaled yet: it is recorded as File › Save once
+    /// answered.
     pub(crate) fn journal_as_plain_save(&mut self, path: &str) {
+        let parked = [self.targa_options.as_mut().map(|p| (&p.path, &mut p.record)), self.dds_options.as_mut().map(|p| (&p.path, &mut p.record))];
+        if let Some((_, record)) = parked.into_iter().flatten().find(|(p, record)| p.as_str() == path && **record == "file.saveAs") {
+            *record = "file.save";
+            return;
+        }
         if let Some(last) = self.session.journal.last_mut()
             && last.0 == "file.saveAs"
             && last.1.get("path").and_then(Value::as_str) == Some(path)
-            && last.1.as_object().is_some_and(|o| o.len() == 1)
+            && let Some(step) = last.1.as_object()
+            && step.keys().all(|k| matches!(k.as_str(), "path" | "tgaBits" | "ddsCompression" | "ddsMipmaps"))
         {
-            *last = ("file.save".into(), Value::Object(Default::default()));
+            let mut step = step.clone();
+            step.remove("path");
+            *last = ("file.save".into(), Value::Object(step));
         }
     }
 
@@ -1621,7 +1635,9 @@ impl PhotocraftApp {
         if id == "file.save" {
             // The file the action is played on: one that holds the whole document, or a flat
             // file a recorded Save confirmed in the dialog while the document is still a plain
-            // raster, so it is never flattened over (#3531, #3806).
+            // raster, so it is never flattened over (#3531, #3806). A flat file's recorded Targa
+            // or DDS answer stands in for the prompt.
+            let choices = FormatChoices::from_params(params, id)?;
             let st = self.session.active().ok_or("no document")?;
             let flat_own = |p: &str| {
                 !photocraft_engine::file_cmds::saves_in_place(p)
@@ -1631,7 +1647,7 @@ impl PhotocraftApp {
             let path = st.path.clone().filter(|p| photocraft_engine::file_cmds::holds_at(&st.doc, p) || flat_own(p)).ok_or(
                 "Save writes back only to the document's own PSD, PSB, .pcraft or OpenRaster file (OpenRaster only when it holds everything), or to its own flat file while the document is a single plain layer",
             )?;
-            return self.save_in_place(path);
+            return self.save_in_place(path, choices);
         }
         let path = params.get("path").and_then(Value::as_str).filter(|p| !p.is_empty()).ok_or("Save As needs a `path`")?;
         let choices = FormatChoices::from_params(params, id)?;

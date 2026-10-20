@@ -158,3 +158,44 @@ fn recorded_dds_saves_keep_their_options_and_replay_without_asking() {
     assert!(h.state().dds_options.is_none(), "playback doesn't ask");
     assert_eq!(writes.borrow().as_slice(), &want);
 }
+
+/// File › Save confirming the document's own texture asks DDS Options, and an action being
+/// recorded keeps it as a plain Save with the answer (scripted options too): played back, it
+/// writes the texture the action is played on as recorded, without asking (#3531).
+#[test]
+fn recorded_plain_save_of_a_dds_texture_keeps_its_options() {
+    let (mut h, writes) = dds_app("own.dds");
+    let ctx = h.ctx.clone();
+    crate::menus::invoke(h.state_mut(), &ctx, "file.saveAs", json!({"path": "own.dds", "ddsCompression": "none"})).unwrap();
+    assert_eq!(h.state().session.active().unwrap().path.as_deref(), Some("own.dds"));
+    h.state_mut().run("actions.record", json!({})).unwrap();
+    crate::menus::invoke(h.state_mut(), &ctx, "file.save", json!({})).unwrap();
+    h.run_steps(3);
+    assert!(h.state().dds_options.is_some(), "confirming its own texture asks DDS Options");
+    h.get_by_label("BC1 / DXT1").click();
+    h.run_steps(2);
+    h.get_by_label("OK").click();
+    h.run_steps(3);
+    h.state_mut().services.file_dialog = Some(crate::file_dialog::fake(vec![Some(FileDialogAnswer::SaveTo("own.dds".into()))]).0);
+    crate::menus::invoke(h.state_mut(), &ctx, "file.save", json!({"ddsCompression": "bc3", "ddsMipmaps": true})).unwrap();
+    h.run_steps(3);
+    assert!(h.state().dds_options.is_none(), "scripted options don't ask");
+    h.state_mut().run("actions.stop", json!({})).unwrap();
+    let bc1 = DdsOptions { compression: DdsCompression::Bc1, mipmaps: false };
+    let bc3 = DdsOptions { compression: DdsCompression::Bc3, mipmaps: true };
+    assert_eq!(&writes.borrow()[1..], &[("own.dds".to_string(), bc1), ("own.dds".to_string(), bc3)]);
+    let steps = &h.state().session.actions.list[0].steps;
+    assert_eq!(
+        steps,
+        &[
+            ("file.save".into(), json!({"ddsCompression": "bc1", "ddsMipmaps": false})),
+            ("file.save".into(), json!({"ddsCompression": "bc3", "ddsMipmaps": true}))
+        ]
+    );
+    crate::menus::invoke(h.state_mut(), &ctx, "file.saveAs", json!({"path": "other.dds", "ddsCompression": "none"})).unwrap();
+    writes.borrow_mut().clear();
+    let played = h.state_mut().run("actions.play", json!({"action": 0})).unwrap();
+    assert!(played.get("failed").is_none(), "{played}");
+    assert!(h.state().dds_options.is_none(), "playback doesn't ask");
+    assert_eq!(writes.borrow().as_slice(), &[("other.dds".to_string(), bc1), ("other.dds".to_string(), bc3)]);
+}

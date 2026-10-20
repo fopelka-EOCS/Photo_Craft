@@ -244,6 +244,8 @@ fn save_a_copy_writes_the_dds_options_asked_for() {
         assert_eq!(photocraft_io::import("a.dds", &bytes).unwrap().document.size, photocraft_geom::Size::new(16, 12), "{params}");
     }
     let mut s = session(8, 8, 8);
+    let state = |s: &Session| s.active().map(|st| (st.revision, st.path.clone(), st.is_dirty()));
+    let before = state(&s);
     for bad in [json!({"ddsCompression": "bc7"}), json!({"ddsCompression": 1}), json!({"ddsMipmaps": "yes"}), json!({"ddsMipmaps": 1})] {
         let out = join(&dir, "bad.dds");
         let mut p = bad.clone();
@@ -251,6 +253,7 @@ fn save_a_copy_writes_the_dds_options_asked_for() {
         let r = s.execute("file.saveACopy", p);
         assert!(matches!(r, Err(EngineError::BadParams { .. })), "{bad}: {r:?}");
         assert!(!std::path::Path::new(&out).exists(), "{bad}: nothing written");
+        assert_eq!(state(&s), before, "{bad}: the document is untouched");
     }
 }
 

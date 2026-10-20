@@ -51,7 +51,7 @@ pub fn confirm(app: &mut PhotocraftApp, fields: &Map<String, Value>) -> Result<V
             app.journal_as_plain_save(&path);
             Ok(r)
         } else {
-            app.save_in_place(path)
+            app.save_in_place(path, crate::FormatChoices::default())
         }
     })
 }
