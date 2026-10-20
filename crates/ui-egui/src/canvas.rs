@@ -269,9 +269,21 @@ pub(crate) fn marquee_preview_px(app: &PhotocraftApp, d: &Drag) -> Option<[f64; 
         r = square_px(r, d.start, last);
         if o.marquee_style == "fixedRatio" {
             let size = app.session.active()?.doc.size;
+            let limits = [f64::from(size.width), f64::from(size.height)];
+            // A snapped square may be one pixel larger than the short canvas side. Shifting
+            // cannot fit that span: shorten its dragged edges before moving it inside.
+            let side = (r[2] - r[0]).min(limits[0]).min(limits[1]);
+            for axis in 0..2 {
+                let excess = (r[axis + 2] - r[axis]) - side;
+                if last[axis] < d.start[axis] {
+                    r[axis] += excess;
+                } else {
+                    r[axis + 2] -= excess;
+                }
+            }
             // Pixel snapping can grow a centred square by one pixel. Move it back inside
             // without clipping a side and losing the equal width and height.
-            for (axis, limit) in [f64::from(size.width), f64::from(size.height)].into_iter().enumerate() {
+            for (axis, limit) in limits.into_iter().enumerate() {
                 let offset = (-r[axis]).max(0.0) - (r[axis + 2] - limit).max(0.0);
                 r[axis] += offset;
                 r[axis + 2] += offset;

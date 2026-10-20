@@ -920,3 +920,22 @@ fn centred_fixed_ratio_square_pixel_snapping_stays_inside_canvas() {
     assert!(r[0] >= 0.0 && r[1] >= 0.0 && r[2] <= 400.0 && r[3] <= 300.0, "pixel-snapped centred square escaped canvas: {r:?}");
     assert_eq!(r[2] - r[0], r[3] - r[1], "fitting must preserve the square");
 }
+
+#[test]
+fn fixed_ratio_square_spanning_short_side_keeps_preview_and_commit_inside() {
+    for (start, end) in [([50.5, 0.0], [500.0, 400.0]), ([350.5, 300.0], [-100.0, -100.0]), ([50.5, 300.0], [500.0, -100.0]), ([350.5, 0.0], [-100.0, 400.0])] {
+        let mut h = harness(Tool::RectMarquee);
+        let app = h.state_mut();
+        app.ui.extras.snap = false;
+        app.ui.tool_options.marquee_style = "fixedRatio".into();
+        app.ui.tool_options.marquee_width = 1.0;
+        app.ui.tool_options.marquee_height = 1.0;
+        app.drag = Some(crate::canvas::Drag::new(Tool::RectMarquee, start, vec![[end[0], end[1], 1.0]], Modifiers::NONE, false));
+        let r = crate::canvas::marquee_preview_px(app, app.drag.as_ref().unwrap()).unwrap();
+        assert!(r[0] >= 0.0 && r[1] >= 0.0 && r[2] <= 400.0 && r[3] <= 300.0, "short-side square escaped: {r:?}");
+        assert_eq!([r[2] - r[0], r[3] - r[1]], [300.0, 300.0]);
+        crate::canvas::tool_event(app, crate::canvas::ToolEvent::Up { x: end[0], y: end[1] }, Modifiers::NONE);
+        let committed = selection(&h);
+        assert_eq!(r, [committed.x0, committed.y0, committed.x1, committed.y1].map(f64::from));
+    }
+}
