@@ -1,5 +1,5 @@
-//! Photoshop's layer and selection keys reach their commands: ⌘, toggles visibility, ⌘\ targets
-//! the mask, / toggles Lock Transparent Pixels, ⌘⌥2 loads luminosity, ⌘⌥⌫ fills from history.
+//! Photoshop's layer and selection keys reach their commands: ⌘\ targets the mask, / toggles
+//! Lock Transparent Pixels, ⌘⌥2 loads luminosity, ⌘⌥⌫ fills from history (⌘, is Settings).
 
 use egui::{Key, Modifiers};
 use serde_json::json;
@@ -30,12 +30,11 @@ fn active(app: &PhotocraftApp) -> &photocraft_doc::Layer {
 }
 
 #[test]
-fn command_comma_toggles_the_layers_visibility() {
+fn command_comma_does_not_hide_layers() {
     let mut app = app();
+    let visible = active(&app).visible;
     press(&mut app, Key::Comma, Modifiers::COMMAND);
-    assert!(!active(&app).visible);
-    press(&mut app, Key::Comma, Modifiers::COMMAND);
-    assert!(active(&app).visible);
+    assert_eq!(active(&app).visible, visible, "⌘, is Edit ▸ Settings, not Layer ▸ Hide Layers");
 }
 
 #[test]
