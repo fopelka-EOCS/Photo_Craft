@@ -933,7 +933,8 @@ fn contain_box(old: [f64; 4], new: [f64; 4]) -> [f64; 4] {
 /// Re-aims `sm`'s placement so that the box `new` (source pixels of new contents) lands where
 /// `old` did: the map becomes `placement ∘ S` with `S` taking `new` onto `old`. A warp absorbs
 /// `S` in its box (a preset first becomes its exact mesh); without one, `S` joins the
-/// perspective or the affine transform.
+/// perspective or the affine transform. A warp acts in source space, before the perspective
+/// (`place_source_projective`), so with both the perspective stays as it is.
 fn stretch_placement(sm: &mut SmartObject, old: [f64; 4], new: [f64; 4]) {
     let (ow, oh, nw, nh) = (old[2] - old[0], old[3] - old[1], new[2] - new[0], new[3] - new[1]);
     if !(ow > 0.0 && oh > 0.0 && nw > 0.0 && nh > 0.0) || [ow, oh, nw, nh].iter().any(|v| !v.is_finite()) || old == new {
