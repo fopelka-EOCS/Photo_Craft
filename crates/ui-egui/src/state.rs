@@ -1216,6 +1216,15 @@ pub struct UiState {
     /// Selected row in the Paths panel ("work" or a saved path name).
     #[serde(default)]
     pub selected_path: Option<String>,
+    /// Document ids (`DocId.0`) whose work path is explicitly hidden on canvas, because the user
+    /// clicked the Paths panel's empty area to deselect it there (#7461). Per document — not a
+    /// single flag — so deselecting in one open document doesn't hide the work path in another.
+    /// Distinguishes "explicitly deselected" from `selected_path`'s default `None` ("nothing
+    /// selected yet"), which must keep showing the work path for existing callers (e.g. a work
+    /// path set directly through the engine, with no panel interaction at all). Not persisted:
+    /// `DocId`s are fresh each session, so there is nothing meaningful to restore on reload.
+    #[serde(skip)]
+    pub work_path_hidden: Vec<u64>,
     /// Layers panel kind filter ("pixel", "adjustment", "type", "shape", "smart"); empty = all.
     #[serde(default)]
     pub layer_filter: Vec<String>,
@@ -1406,6 +1415,7 @@ impl Default for UiState {
             direct_selection: Default::default(),
             corner_radius: None,
             selected_path: None,
+            work_path_hidden: Vec::new(),
             panels: Panels::default(),
             views: Vec::new(),
             dialogs: Vec::new(),

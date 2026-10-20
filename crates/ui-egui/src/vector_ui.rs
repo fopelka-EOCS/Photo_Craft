@@ -4,7 +4,7 @@
 
 use egui::{Color32, Pos2, Rect, Sense, Stroke, pos2, vec2};
 use photocraft_doc::vector::Path;
-use photocraft_doc::{Document, LayerContent};
+use photocraft_doc::{DocId, Document, LayerContent};
 use photocraft_geom::Affine;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -471,7 +471,13 @@ fn commit_path(app: &mut PhotocraftApp, pen: &PenPath, closed: bool) {
         if target.is_some() {
             params["op"] = json!("combine");
         }
-        app.run("path.set", params).inspect(|_| app.ui.selected_path = Some(name))
+        let doc_id = app.session.active().map(|st| st.doc.id);
+        app.run("path.set", params).inspect(|_| {
+            app.ui.selected_path = Some(name);
+            if let Some(doc_id) = doc_id {
+                show_work_path(app, doc_id);
+            }
+        })
     };
     if let Err(e) = r {
         app.ui.status = e;
@@ -700,6 +706,9 @@ pub fn path_to_selection(app: &mut PhotocraftApp, params: Value) -> Result<Value
         let on_layer = app.ui.tool_options.vector_mode == "shape" || targeted_vector_mask(app).is_some();
         pen_commit(app, false);
         app.ui.selected_path = Some(if on_layer { "layer" } else { "work" }.into());
+        if let Some(doc_id) = app.session.active().map(|st| st.doc.id) {
+            show_work_path(app, doc_id);
+        }
     }
     let name = active_path_name(app)
         .ok_or_else(|| tl!("No path to make a selection from: draw one with the Pen tool or select one in the Paths panel.").to_string())?;
@@ -978,6 +987,20 @@ pub(crate) fn draw_handle(painter: &egui::Painter, anchor: Pos2, handle: Pos2, a
     painter.circle_filled(handle, 3.0, accent);
 }
 
+/// Hides `doc`'s work path outline on canvas (#7461), e.g. after the Paths panel's empty area is
+/// clicked to deselect it there. Scoped to `doc` so it doesn't affect other open documents.
+pub(crate) fn hide_work_path(app: &mut PhotocraftApp, doc: DocId) {
+    if !app.ui.work_path_hidden.contains(&doc.0) {
+        app.ui.work_path_hidden.push(doc.0);
+    }
+}
+
+/// Reverses [`hide_work_path`]: called wherever a path is (re)selected or created, so the outline
+/// doesn't stay stuck hidden once the user is working with paths again.
+pub(crate) fn show_work_path(app: &mut PhotocraftApp, doc: DocId) {
+    app.ui.work_path_hidden.retain(|&id| id != doc.0);
+}
+
 /// Work path / active shape path outlines, anchors, and the pen path in progress.
 pub fn draw_overlay(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform, doc: &Document) {
     let tool = app.ui.tool;
@@ -1003,7 +1026,9 @@ pub fn draw_overlay(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform
     } else if paths {
         // Paths remain visible as outlines with any tool. Path Selection adds anchor squares; Direct
         // Selection has its own overlay above.
-        if let Some(wp) = &doc.work_path {
+        if let Some(wp) = &doc.work_path
+            && !app.ui.work_path_hidden.contains(&doc.id.0)
+        {
             draw_path(wp, tool == Tool::PathSelection);
         }
         let st = app.session.active();
@@ -1796,6 +1821,7 @@ pub fn paths_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     action = Some(("path.toSelection", json!({"name": key, "mode": mode})));
                 } else if resp.clicked() {
                     app.ui.selected_path = Some(key.clone());
+                    show_work_path(app, doc.id);
                 }
                 // Double-clicking the Work Path saves it (Photoshop's "Save Path").
                 if !load && resp.double_clicked() && *kind == PathRow::Work {
@@ -1829,6 +1855,7 @@ pub fn paths_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             let rest = rest.intersect(Rect::from_min_size(rest.min, vec2(rest.width(), rest.height().min(4000.0))));
             if rest.is_positive() && ui.interact(rest, ui.id().with("paths-empty"), Sense::click()).clicked() {
                 app.ui.selected_path = None;
+                hide_work_path(app, doc.id);
             }
         },
     );
@@ -1875,11 +1902,16 @@ pub fn paths_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     if let Some(name) = stroke_dialog {
         crate::canvas_tool_menu::stroke_path_dialog(app, &name);
     }
-    if let Some((cmd, p)) = action
-        && let Err(e) = app.run(cmd, p)
-    {
-        app.ui.status = e;
-        app.ui.status_error = true;
+    if let Some((cmd, p)) = action {
+        match app.run(cmd, p) {
+            // Making a new work path from the selection must show it, in case it was hidden (#7461).
+            Ok(_) if cmd == "select.toWorkPath" => show_work_path(app, doc.id),
+            Ok(_) => {}
+            Err(e) => {
+                app.ui.status = e;
+                app.ui.status_error = true;
+            }
+        }
     }
 }
 

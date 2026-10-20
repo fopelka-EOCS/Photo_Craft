@@ -531,7 +531,13 @@ pub fn draw_overlay(app: &PhotocraftApp, painter: &egui::Painter, to_scr: &dyn F
     } else {
         candidates(app)
     };
+    // A work path hidden via the Paths panel (#7461) stays editable here (that's a visibility
+    // preference, not a lock), just not drawn — matching `vector_ui::draw_overlay`'s own check.
+    let work_hidden = app.session.active().is_some_and(|st| app.ui.work_path_hidden.contains(&st.doc.id.0));
     for (r, path) in shown {
+        if work_hidden && r == PathRef::Work {
+            continue;
+        }
         let path = match &ds.drag {
             Some(Drag::Edit { target, preview: Some(p), .. }) if *target == r => p.clone(),
             _ => path,

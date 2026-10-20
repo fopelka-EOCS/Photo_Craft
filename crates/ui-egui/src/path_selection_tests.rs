@@ -331,3 +331,175 @@ fn path_overlay_drawn_for_non_vector_tools() {
          the path must be drawn regardless of the active tool",
     );
 }
+
+/// #7461: clicking the Paths panel's empty area deselects the work path, as the panel's row UI
+/// has always done (`app.ui.selected_path = None`), but before this fix `draw_overlay` only
+/// checked `doc.work_path.is_some()` — never `selected_path` — so the outline stayed on the
+/// canvas regardless. Two parts: (1) drive the real Paths panel and confirm the real click handler
+/// sets the new `work_path_hidden` flag; (2) reuse the exact canvas setup from
+/// `path_overlay_drawn_for_non_vector_tools` above (known-good pixel sampling) to confirm
+/// `draw_overlay` actually hides the outline once that flag is set, and still shows it by default
+/// otherwise — the same guarantee that test protects.
+#[test]
+fn deselecting_in_paths_panel_sets_work_path_hidden() {
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    app.run("file.new", json!({"width": 200, "height": 200})).unwrap();
+    app.run("path.set", json!({"name": "work", "path": rect_path(50.0, 10.0, 100.0, 80.0)})).unwrap();
+    app.ui.selected_path = Some("work".into());
+
+    let mut h = Harness::builder().with_size(vec2(400.0, 400.0)).build_ui_state(
+        |ui, app: &mut PhotocraftApp| {
+            let ctx = ui.ctx().clone();
+            if !ctx.fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                return;
+            }
+            egui::CentralPanel::default().show(ui, |ui| crate::vector_ui::paths_panel(app, ui));
+        },
+        app,
+    );
+    PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ALL[0]);
+    h.run_steps(6);
+
+    let doc_id = h.state().session.active().unwrap().doc.id.0;
+    assert!(!h.state().ui.work_path_hidden.contains(&doc_id), "a freshly selected work path must not start hidden");
+
+    // Click the Paths panel's empty area below the "Work Path" row, exactly as a user would.
+    let row = h.get_by_label("Work Path").rect();
+    let empty_at = egui::pos2(row.center().x, row.bottom() + 100.0);
+    click(&mut h, empty_at, Modifiers::NONE);
+
+    assert!(h.state().ui.selected_path.is_none(), "clicking the empty area should clear selected_path");
+    assert!(h.state().ui.work_path_hidden.contains(&doc_id), "clicking the empty area should hide the work path overlay");
+}
+
+/// #7461 review follow-up: `work_path_hidden` must be scoped per document, not a single flag —
+/// otherwise deselecting the work path in one open document would wrongly hide it in every other
+/// open document too, since `doc.work_path.is_some()` is a per-document condition.
+#[test]
+fn hiding_the_work_path_in_one_document_does_not_affect_another() {
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    app.run("file.new", json!({"width": 200, "height": 200})).unwrap();
+    app.run("path.set", json!({"name": "work", "path": rect_path(0.0, 0.0, 10.0, 10.0)})).unwrap();
+    let doc_a = app.session.active().unwrap().doc.id;
+
+    let other = app.session.active().unwrap().doc.as_ref().clone();
+    app.session.add_document(other, None);
+    app.run("path.set", json!({"name": "work", "path": rect_path(0.0, 0.0, 10.0, 10.0)})).unwrap();
+    let doc_b = app.session.active().unwrap().doc.id;
+    assert_ne!(doc_a, doc_b, "the cloned document must get a fresh id");
+
+    crate::vector_ui::hide_work_path(&mut app, doc_a);
+    assert!(app.ui.work_path_hidden.contains(&doc_a.0));
+    assert!(!app.ui.work_path_hidden.contains(&doc_b.0), "hiding doc A's work path must not hide doc B's");
+
+    crate::vector_ui::hide_work_path(&mut app, doc_b);
+    crate::vector_ui::show_work_path(&mut app, doc_a);
+    assert!(!app.ui.work_path_hidden.contains(&doc_a.0), "showing doc A's work path must not affect doc B");
+    assert!(app.ui.work_path_hidden.contains(&doc_b.0));
+}
+
+/// #7461 review follow-up: a fourth call site CodeRabbit's initial review caught — making a new
+/// work path from a selection (the Paths panel's "Make work path from selection" button, bound to
+/// `select.toWorkPath`) — also needs to clear a previously-hidden work path.
+#[test]
+fn select_to_work_path_shows_a_previously_hidden_work_path() {
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    app.run("file.new", json!({"width": 200, "height": 200})).unwrap();
+    app.run("select.rect", json!({"x": 10, "y": 10, "width": 20, "height": 20})).unwrap();
+    let doc_id = app.session.active().unwrap().doc.id;
+    crate::vector_ui::hide_work_path(&mut app, doc_id);
+    assert!(app.ui.work_path_hidden.contains(&doc_id.0));
+
+    let mut h = Harness::builder().with_size(vec2(400.0, 400.0)).build_ui_state(
+        |ui, app: &mut PhotocraftApp| {
+            let ctx = ui.ctx().clone();
+            if !ctx.fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                return;
+            }
+            egui::CentralPanel::default().show(ui, |ui| crate::vector_ui::paths_panel(app, ui));
+        },
+        app,
+    );
+    PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ALL[0]);
+    h.run_steps(6);
+
+    let at = h.get_by_label("Make work path from selection").rect().center();
+    click(&mut h, at, Modifiers::NONE);
+
+    assert!(h.state().session.active().unwrap().doc.work_path.is_some(), "the selection should have become a work path: {}", h.state().ui.status);
+    assert!(!h.state().ui.work_path_hidden.contains(&doc_id.0), "making a new work path from the selection must show it");
+}
+
+/// See `deselecting_in_paths_panel_sets_work_path_hidden` above for the panel half of #7461; this
+/// is the canvas half, proving `draw_overlay` itself respects `work_path_hidden`.
+#[test]
+fn work_path_outline_respects_work_path_hidden() {
+    fn hits_with(hidden: bool) -> usize {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 200, "height": 200})).unwrap();
+        app.sync_views();
+        app.run("path.set", json!({"name": "work", "path": rect_path(50.0, 10.0, 100.0, 80.0)})).unwrap();
+        app.ui.tool = Tool::Brush;
+        let doc_id = app.session.active().unwrap().doc.id.0;
+        app.ui.work_path_hidden = if hidden { vec![doc_id] } else { Vec::new() };
+
+        let mut h = Harness::builder().with_size(vec2(900.0, 700.0)).build_ui_state(
+            |ui, app: &mut PhotocraftApp| {
+                let ctx = ui.ctx().clone();
+                if !ctx.fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                    return;
+                }
+                egui::CentralPanel::default().show(ui, |ui| crate::canvas::document_area(app, ui));
+            },
+            app,
+        );
+        PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ALL[0]);
+        h.run_steps(6);
+        {
+            let v = &mut h.state_mut().ui.views[0];
+            v.zoom = 2.0;
+            v.center = [100.0, 100.0];
+            v.fit_pending = false;
+        }
+        h.run_steps(3);
+
+        let accent = crate::theme::Tokens::get(&h.ctx).accent;
+        let xf = crate::canvas::ViewXform::active(h.state()).expect("active document view");
+        let ppp = h.ctx.pixels_per_point();
+        let img = h.render().unwrap();
+        let accent_r = accent.r();
+        let accent_g = accent.g();
+        let accent_b = accent.b();
+        let is_accent_stroke = |pixel: [u8; 4]| {
+            let denom = f32::from(255u8.saturating_sub(accent_r)).max(1.0);
+            let coverage = f32::from(255u8.saturating_sub(pixel[0])) / denom;
+            if !(0.2..=1.05).contains(&coverage) {
+                return false;
+            }
+            let blended = |channel: u8| 255.0 + coverage * (f32::from(channel) - 255.0);
+            (f32::from(pixel[1]) - blended(accent_g)).abs() <= 12.0 && (f32::from(pixel[2]) - blended(accent_b)).abs() <= 12.0
+        };
+        let has_accent_near = |at: egui::Pos2| {
+            let cx = (at.x * ppp).round() as i32;
+            let cy = (at.y * ppp).round() as i32;
+            let radius = (2.0 * ppp).ceil() as i32;
+            for y in (cy - radius)..=(cy + radius) {
+                for x in (cx - radius)..=(cx + radius) {
+                    if x >= 0 && y >= 0 && (x as u32) < img.width() && (y as u32) < img.height() {
+                        let pixel = img.get_pixel(x as u32, y as u32);
+                        if is_accent_stroke([pixel[0], pixel[1], pixel[2], pixel[3]]) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            false
+        };
+        (70..=130).step_by(5).filter(|x| has_accent_near(xf.to_screen(*x as f32, 10.0))).count()
+    }
+
+    let shown = hits_with(false);
+    assert!(shown >= 10, "expected the work path outline to be visible by default (work_path_hidden = false), found only {shown} hit(s)");
+    let hidden = hits_with(true);
+    assert_eq!(hidden, 0, "expected the work path outline to be hidden once work_path_hidden = true (#7461), found {hidden} hit(s)");
+}
