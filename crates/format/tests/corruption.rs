@@ -77,15 +77,17 @@ fn missing_manifest_is_error() {
 }
 
 #[test]
-fn swapped_tile_content_fails_hash_check() {
+fn swapped_tile_and_blob_content_fails_hash_check() {
     let b = sample();
     let r = zip::ZipReader::new(&b).unwrap();
-    let tiles: Vec<_> = r.entries.iter().filter(|e| e.name.starts_with("tiles/")).map(|e| e.name.clone()).collect();
-    let other = r.read_by_name(&tiles[1], usize::MAX).unwrap();
-    let first = tiles[0].clone();
-    let b2 = rebuild(&b, |n, d| Some(if n == first { other.clone() } else { d }));
-    let e = load_from_bytes(&b2).unwrap_err();
-    assert!(e.to_string().contains("hash"), "{e}");
+    for prefix in ["tiles/", "blobs/"] {
+        let entries: Vec<_> = r.entries.iter().filter(|e| e.name.starts_with(prefix)).collect();
+        let other = r.read(entries[1], usize::MAX).unwrap();
+        let first = &entries[0].name;
+        let b2 = rebuild(&b, |n, d| Some(if n == first { other.clone() } else { d }));
+        let e = load_from_bytes(&b2).unwrap_err();
+        assert!(e.to_string().contains("hash"), "{prefix}: {e}");
+    }
 }
 
 #[test]

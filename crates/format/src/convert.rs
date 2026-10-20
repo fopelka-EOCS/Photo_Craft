@@ -356,10 +356,10 @@ impl Loader<'_> {
             }
             let mut bytes = self.fetch.tile(&t.hash, len)?;
             swap_to_le(&mut bytes, f.sample);
-            s.tile_mut(c).bytes_mut().copy_from_slice(&bytes);
-            if let Some(tile) = s.tile(c) {
-                self.tiles.entry(f.sample).or_default().insert(t.hash.clone(), tile.clone());
-            }
+            let tile = Tile::from_bytes(&f, bytes.into_boxed_slice()).ok_or_else(|| FormatError::corrupt(format!("tile {} has wrong size", t.hash)))?;
+            let tile = Arc::new(tile);
+            s.put_tiles([(c, tile.clone())]);
+            self.tiles.entry(f.sample).or_default().insert(t.hash.clone(), tile);
         }
         Ok(s)
     }

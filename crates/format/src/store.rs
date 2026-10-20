@@ -1,5 +1,6 @@
 //! Object storage (ZIP or directory), incremental writer and loader.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -88,6 +89,12 @@ fn png(img: &Rgba8Image) -> Result<Vec<u8>> {
 
 pub trait ByteSource {
     fn get(&self, path: &str, max: usize) -> Result<Vec<u8>>;
+
+    /// Reads with the same limits as [`Self::get`], borrowing when the source permits it.
+    /// Sources that only implement `get` keep returning owned buffers.
+    fn get_cow(&self, path: &str, max: usize) -> Result<Cow<'_, [u8]>> {
+        self.get(path, max).map(Cow::Owned)
+    }
 }
 
 pub(crate) struct ZipSource<'a> {
@@ -104,6 +111,26 @@ impl ByteSource for ZipSource<'_> {
     fn get(&self, path: &str, max: usize) -> Result<Vec<u8>> {
         self.zip.read_by_name(path, max)
     }
+
+    fn get_cow(&self, path: &str, max: usize) -> Result<Cow<'_, [u8]>> {
+        let entry = self.zip.find(path).ok_or_else(|| FormatError::corrupt(format!("missing `{path}`")))?;
+        self.zip.read_cow(entry, max)
+    }
+}
+
+#[test]
+fn zip_source_borrows_checked_payloads() {
+    let mut zip = ZipWriter::new();
+    zip.add("tiles/test.zst", b"payload").unwrap();
+    let mut bytes = zip.finish().unwrap();
+    let offset = bytes.windows(7).position(|b| b == b"payload").unwrap();
+    let source = ZipSource::new(&bytes).unwrap();
+    assert!(matches!(source.get_cow("tiles/test.zst", 7).unwrap(), Cow::Borrowed(b"payload")));
+    assert_eq!(source.get_cow("tiles/test.zst", 7).unwrap().as_ptr(), bytes[offset..].as_ptr());
+    assert!(source.get_cow("tiles/test.zst", 6).is_err());
+    assert!(source.get_cow("missing", 7).is_err());
+    bytes[offset] ^= 1;
+    assert!(ZipSource::new(&bytes).unwrap().get_cow("tiles/test.zst", 7).is_err());
 }
 
 pub(crate) struct DirSource {
@@ -245,9 +272,9 @@ impl Fetch for LoadFetch<'_> {
         }
         self.account(len)?;
         let path = tile_path(hash);
-        let z = self.src.get(&path, len + len / 8 + 4096)?;
+        let z = self.src.get_cow(&path, len + len / 8 + 4096)?;
         let data = decompress(&z, len, &path)?;
-        if hash_bytes(&data) != hash {
+        if blake3::hash(&data).to_hex().as_str() != hash {
             return Err(FormatError::corrupt(format!("{path}: content does not match its hash")));
         }
         Ok(data)
@@ -261,12 +288,14 @@ impl Fetch for LoadFetch<'_> {
             return Err(FormatError::corrupt(format!("invalid blob hash `{hash}`")));
         }
         let path = blob_path(hash);
-        let z = self.src.get(&path, self.opts.max_blob_bytes)?;
+        // The budget limits decoded bytes; allow the same frame overhead as tiles.
+        let max_compressed = self.opts.max_blob_bytes.saturating_add(self.opts.max_blob_bytes / 8).saturating_add(4096);
+        let z = self.src.get_cow(&path, max_compressed)?;
         // Blob length is not in the manifest; the frame header bounds it and
         // we cap at max_blob_bytes.
         let data = decompress_bounded(&z, self.opts.max_blob_bytes, None, &path)?;
         self.account(data.len())?;
-        if hash_bytes(&data) != hash {
+        if blake3::hash(&data).to_hex().as_str() != hash {
             return Err(FormatError::corrupt(format!("{path}: content does not match its hash")));
         }
         let data = Arc::new(data);
@@ -1080,6 +1109,39 @@ fn list_objects(dir: &Path) -> Result<HashSet<String>> {
 pub(crate) fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
     crate::atomic::atomic_write(path, data)?;
     Ok(())
+}
+
+/// Blob limits apply to decoded bytes, including empty and expanding frames.
+#[test]
+fn blob_budget_allows_frame_overhead() {
+    for bytes in [vec![], vec![42], (0..32).collect()] {
+        let hash = hash_bytes(&bytes);
+        let mut encoded = Object::Blob(Arc::new(bytes.clone())).compressed(&mut new_compressor().unwrap()).unwrap();
+        assert!(encoded.len() > bytes.len());
+        for corrupt in [false, true] {
+            if corrupt {
+                encoded.pop();
+            }
+            let mut zip = ZipWriter::new();
+            zip.add(&blob_path(&hash), &encoded).unwrap();
+            let zip = zip.finish().unwrap();
+            let source = ZipSource::new(&zip).unwrap();
+            let fetch = |max| LoadFetch {
+                src: &source,
+                opts: LoadOptions { max_blob_bytes: max, max_total_bytes: bytes.len() as u64, ..LoadOptions::default() },
+                total: 0,
+                blobs: HashMap::new(),
+            };
+            if corrupt {
+                assert!(fetch(bytes.len()).blob(&hash).is_err());
+            } else {
+                assert_eq!(*fetch(bytes.len()).blob(&hash).unwrap(), bytes);
+                if !bytes.is_empty() {
+                    assert!(matches!(fetch(bytes.len() - 1).blob(&hash), Err(FormatError::LimitExceeded(_))));
+                }
+            }
+        }
+    }
 }
 
 /// Buffer reuse preserves frame bytes and releases large outputs, including failed writes.

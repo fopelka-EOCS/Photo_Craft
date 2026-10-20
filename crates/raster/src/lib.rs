@@ -42,6 +42,13 @@ pub struct Tile {
 }
 
 impl Tile {
+    /// Takes ownership of pixels without copying. Samples must be in native byte order.
+    /// Returns `None` if the buffer length does not match one tile in `format`.
+    pub fn from_bytes(format: &PixelFormat, data: Box<[u8]>) -> Option<Self> {
+        let bytes = ((TILE_SIZE * TILE_SIZE) as usize).checked_mul(format.bytes_per_pixel())?;
+        (data.len() == bytes).then_some(Self { data })
+    }
+
     fn try_filled(format: &PixelFormat, pixel: &[u8]) -> Result<Self, AllocationError> {
         let n = (TILE_SIZE * TILE_SIZE) as usize;
         let bytes = n.checked_mul(format.bytes_per_pixel()).ok_or(AllocationError::SizeOverflow)?;
@@ -1257,6 +1264,24 @@ mod tests {
     use super::*;
     use photocraft_color::PixelFormat;
     use proptest::prelude::*;
+
+    #[test]
+    fn tile_from_bytes_keeps_the_allocation_and_checks_size() {
+        for format in [PixelFormat::GRAY8, PixelFormat::RGBA8, PixelFormat::CMYKA8] {
+            for sample in SampleType::ALL {
+                let format = format.with_sample(sample);
+                let len = (TILE_SIZE * TILE_SIZE) as usize * format.bytes_per_pixel();
+                let bytes = vec![37; len].into_boxed_slice();
+                let ptr = bytes.as_ptr();
+                let tile = Tile::from_bytes(&format, bytes).unwrap();
+                assert_eq!(tile.bytes().as_ptr(), ptr);
+                assert!(tile.bytes().iter().all(|&b| b == 37));
+                for invalid in [0, len - 1, len + 1] {
+                    assert!(Tile::from_bytes(&format, vec![0; invalid].into_boxed_slice()).is_none());
+                }
+            }
+        }
+    }
 
     fn write_region_reference(surface: &mut Surface, r: Rect, data: &[f32]) {
         let n = surface.channels();

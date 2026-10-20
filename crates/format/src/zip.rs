@@ -3,6 +3,7 @@
 //! unzipped and re-zipped by another tool still loads). No ZIP64, no
 //! encryption, no multi-disk archives.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io::Read;
 
@@ -198,6 +199,11 @@ impl<'a> ZipReader<'a> {
 
     /// Entry payload (decompressed), at most `max` bytes, CRC-checked.
     pub fn read(&self, e: &Entry, max: usize) -> Result<Vec<u8>, FormatError> {
+        self.read_cow(e, max).map(Cow::into_owned)
+    }
+
+    /// Borrows STORE payloads after the same size and CRC checks as [`Self::read`].
+    pub(crate) fn read_cow(&self, e: &Entry, max: usize) -> Result<Cow<'a, [u8]>, FormatError> {
         if e.uncompressed > max {
             return Err(FormatError::LimitExceeded(format!("zip entry `{}` is {} bytes (max {max})", e.name, e.uncompressed)));
         }
@@ -208,7 +214,7 @@ impl<'a> ZipReader<'a> {
             .and_then(|end| self.bytes.get(e.data_offset..end))
             .ok_or_else(|| FormatError::corrupt(format!("zip entry `{}` out of range", e.name)))?;
         let data = match e.method {
-            0 => raw.to_vec(),
+            0 => Cow::Borrowed(raw),
             8 => {
                 // The uncompressed length comes from an untrusted ZIP header: a
                 // small forged archive must not reserve gigabytes up front, so the
@@ -218,7 +224,7 @@ impl<'a> ZipReader<'a> {
                     .take((max as u64).saturating_add(1))
                     .read_to_end(&mut out)
                     .map_err(|err| FormatError::corrupt(format!("zip entry `{}`: {err}", e.name)))?;
-                out
+                Cow::Owned(out)
             }
             m => {
                 return Err(FormatError::Unsupported(format!("zip compression method {m} for `{}`", e.name)));
@@ -261,6 +267,11 @@ mod tests {
         assert_eq!(r.read_by_name("dir/b.bin", 100).unwrap(), [0, 1, 2, 3]);
         assert!(r.read_by_name("empty", 0).unwrap().is_empty());
         assert!(matches!(r.read_by_name("a.txt", 3), Err(FormatError::LimitExceeded(_))));
+        for e in &r.entries {
+            let payload = r.read_cow(e, e.uncompressed).unwrap();
+            assert!(matches!(payload, Cow::Borrowed(_)));
+            assert_eq!(payload.as_ptr(), bytes[e.data_offset..].as_ptr());
+        }
     }
 
     #[test]
@@ -358,6 +369,7 @@ mod tests {
         bytes[central + 24..central + 28].copy_from_slice(&length);
 
         let archive = ZipReader::new(&bytes).unwrap();
+        assert!(matches!(archive.read_cow(archive.find("manifest.json").unwrap(), content.len()).unwrap(), Cow::Owned(_)));
         assert_eq!(archive.read_by_name("manifest.json", usize::MAX).unwrap(), content);
         assert_eq!(archive.read_by_name("manifest.json", content.len()).unwrap(), content);
         assert!(matches!(archive.read_by_name("manifest.json", content.len() - 1), Err(FormatError::LimitExceeded(_))));

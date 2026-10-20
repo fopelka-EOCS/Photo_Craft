@@ -6,7 +6,8 @@ The measured backend improves real-photo save/load time and file size. Own-outpu
 Acceptance of that tradeoff and the native dependency remains a maintainer decision.
 
 These timings predate directory byte comparisons, lazy encoder creation, output-buffer reuse and the encoder skip for empty work.
-Those changes were not benchmarked and do not establish a fix for the layout read regression.
+They also predate borrowed ZIP payloads, direct ownership of decoded tile buffers and hash checks without temporary heap strings.
+These reductions in copies and allocations were not benchmarked and do not establish a fix for the layout read regression.
 
 Directory saves retain at most 2 MiB of reusable output between objects and release it when the save ends.
 
@@ -14,7 +15,7 @@ Measured on 2026-10-19 against main `d95fdf31`, independently of the other split
 
 The full-resolution CC0 Pixls photographs are P1000475.RW2 (24 MP foliage centre crop, no resampling) and IMG_4059.CR2 (12 MP city), each converted to U8/U16/F32 with the ProPhoto RGB profile. F32 derives from 16-bit development, not HDR capture. MIT psd-tools masks.psd supplies a 640 x 1394 web layout with 22 imported layers and three masks; mask-index.psd supplies a 1000 x 867 illustrated card with a mask. The sources and hashes are pinned by the existing corpus. These are the available authored layered files, not a large layered-photo corpus. No generated noise, repeating ramps, enlarged charts or duplicated photo layers are used.
 
-The shared harness times in-memory operations. Input loading, image conversion, thumbnail rendering, hashes and equivalence checks are outside timers. Every save uses a fresh PcraftWriter and a real rendered thumbnail. Common reads use main-encoded files; own-output reads are separate. PSD exports use ZIP merged images at U8/U16, Raw merged images at F32, and normal RLE layer channels at U8/U16 / ZIP prediction at F32. Results do not measure filesystem throughput or browser performance.
+The harness times in-memory operations. Input loading, image conversion, thumbnail rendering and post-operation equivalence checks are outside timers. Format CRC and content-hash validation remain inside load timings. Every save uses a fresh PcraftWriter and a real rendered thumbnail. Common reads use main-encoded files; own-output reads are separate. PSD exports use ZIP merged images at U8/U16, Raw merged images at F32, and normal RLE layer channels at U8/U16 / ZIP prediction at F32. Results do not measure filesystem throughput or browser performance.
 
 | Document | Operation | Main ms | Branch ms | Time change | Paired 95% interval | Main / branch bytes |
 |---|---|---:|---:|---:|---:|---:|
@@ -46,6 +47,7 @@ The shared harness times in-memory operations. Input loading, image conversion, 
 Every measured save and load compares the complete document with its source, including tiles and metadata. Native and Rust encoded bytes can differ.
 Unit tests cover independent frames, reference encoder equivalence, both compression directions, output bounds, checksums and truncation.
 Directory verification compares decoded bytes directly with expected bytes. Empty and cached-only saves skip native encoder creation.
+Loads borrow stored ZIP tile/blob payloads and transfer decoded tile storage into the surface. Size, CRC, content hash and shared-tile checks remain.
 
 ## Compatibility checks
 
