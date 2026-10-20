@@ -144,13 +144,8 @@ impl Headless {
     pub fn replace_contents(&mut self, index: Option<usize>, path: &str, params: &Value) -> Result<Value, AutomationError> {
         let layer =
             params.get("layer").and_then(Value::as_u64).ok_or_else(|| AutomationError::BadRequest("doc.replaceContents needs a numeric `layer`".into()))?;
-        let fit = match params.get("fit").and_then(Value::as_str) {
-            None => photocraft_engine::smart_cmds::Fit::Keep,
-            Some("keep") => photocraft_engine::smart_cmds::Fit::Keep,
-            Some("stretch") => photocraft_engine::smart_cmds::Fit::Stretch,
-            Some("contain") => photocraft_engine::smart_cmds::Fit::Contain,
-            Some(other) => return Err(AutomationError::BadRequest(format!("`fit` must be \"keep\", \"stretch\" or \"contain\", not {other:?}"))),
-        };
+        let fit = photocraft_engine::smart_cmds::Fit::from_param(params.get("fit"))
+            .ok_or_else(|| AutomationError::BadRequest(format!("`fit` must be \"keep\", \"stretch\" or \"contain\", not {}", params["fit"])))?;
         let clip = match params.get("clipToCanvas") {
             None | Some(Value::Null) => false,
             Some(Value::Bool(b)) => *b,

@@ -119,6 +119,7 @@ impl Headless {
                 let mut opts =
                     photocraft_io::ExportOptions { tiff_layers: p.get("tiffLayers").and_then(Value::as_bool).unwrap_or(false), tga_bits, ..Default::default() };
                 opts.encode.dpx_bits = photocraft_engine::file_cmds::dpx_bits_param(&p, "doc.save").map_err(|e| bad(e.to_string()))?;
+                opts.encode.dds = photocraft_engine::file_cmds::dds_param(&p, "doc.save").map_err(|e| bad(e.to_string()))?.unwrap_or_default();
                 if let Some(q) = p.get("quality").and_then(Value::as_u64) {
                     opts.encode.jpeg_quality = q.clamp(1, 100) as u8;
                     opts.encode.webp_quality = q.clamp(1, 100) as u8;
@@ -750,6 +751,9 @@ mod tests {
             (json!({"layer": layer}), "path"),
             (json!({"layer": layer, "path": "design.png", "fit": "cover"}), "fit"),
             (json!({"layer": layer, "path": "design.png", "clipToCanvas": "yes"}), "clipToCanvas"),
+            // Not a string: refused, as the engine command refuses it, rather than taken as keep.
+            (json!({"layer": layer, "path": "design.png", "fit": true}), "fit"),
+            (json!({"layer": layer, "path": "design.png", "fit": 1}), "fit"),
         ] {
             let refused = h.handle("doc.replaceContents", params).unwrap_err().to_string();
             assert!(refused.contains(reason), "{refused}");

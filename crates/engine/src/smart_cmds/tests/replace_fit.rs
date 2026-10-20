@@ -81,6 +81,11 @@ fn near(a: Rect, b: Rect, tol: i32) -> bool {
 /// Renders the same placement twice: once from a full-size file (`fit` keep), once from a
 /// smaller file with `fit: "stretch"`. Both must cover the same pixels.
 fn full_vs_stretched(tag: &str, setup: impl Fn(&mut SmartObject, [f64; 4])) {
+    full_vs_stretched_from(tag, |w, h| (w.div_ceil(2), h.div_ceil(2)), setup);
+}
+
+/// [`full_vs_stretched`] from a file of `size(w, h)` for old contents of `w × h`.
+fn full_vs_stretched_from(tag: &str, size: impl Fn(u32, u32) -> (u32, u32), setup: impl Fn(&mut SmartObject, [f64; 4])) {
     let dir = tmp_dir(tag);
     let (mut full, id) = smart_session();
     let b = old_box(&full, id);
@@ -89,7 +94,8 @@ fn full_vs_stretched(tag: &str, setup: impl Fn(&mut SmartObject, [f64; 4])) {
     replace(&mut full, id, &png_file(&dir, "full.png", w, h, [1.0, 0.0, 0.0]), None);
     let (mut small, id2) = smart_session();
     set_placement(&mut small, id2, |sm| setup(sm, b));
-    replace(&mut small, id2, &png_file(&dir, "small.png", w.div_ceil(2), h.div_ceil(2), [1.0, 0.0, 0.0]), Some("stretch"));
+    let (sw, sh) = size(w, h);
+    replace(&mut small, id2, &png_file(&dir, "small.png", sw, sh, [1.0, 0.0, 0.0]), Some("stretch"));
     let (a, c) = (rendered(&full, id), rendered(&small, id2));
     assert!(near(a.content_bounds(), c.content_bounds(), 1), "{tag}: {:?} vs {:?}", a.content_bounds(), c.content_bounds());
     assert!(alpha_diff(&a, &c) < 0.03, "{tag}: alpha diff {}", alpha_diff(&a, &c));
@@ -131,6 +137,57 @@ fn stretch_fills_the_old_box_through_a_preset_warp() {
 #[test]
 fn stretch_fills_the_old_box_through_a_perspective() {
     full_vs_stretched("perspective", |sm, _| sm.perspective = Some([1.0, 0.1, -6.0, 0.05, 1.1, 5.0, 0.002, 0.001, 1.0]));
+}
+
+#[test]
+fn stretch_fills_the_old_box_through_a_warp_under_a_perspective() {
+    // The warp acts in source space, before the perspective, so it alone absorbs the stretch.
+    // A file of another aspect through a bulge: stretching the perspective instead would show
+    // only the left half of the bulge, widened.
+    full_vs_stretched_from(
+        "warp-perspective",
+        |w, h| (w.div_ceil(2), h),
+        |sm, b| {
+            let mesh = BezierMesh::identity(b, 1, 1).map_points(|p| {
+                let (cx, cy) = ((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0);
+                [p[0] + 0.15 * (p[0] - cx), p[1] + 0.25 * (p[1] - cy) * ((p[0] - cx).abs() / (b[2] - b[0]))]
+            });
+            sm.warp = Some(Warp::custom(mesh, b));
+            sm.perspective = Some([1.0, 0.1, -6.0, 0.05, 1.1, 5.0, 0.002, 0.001, 1.0]);
+        },
+    );
+}
+
+fn deny_replace_paths(cmd: &str, p: &Value) -> Result<()> {
+    if cmd == "layer.smartObjects.replaceContents" && p.get("path").is_some() {
+        return Err(other(format!("source path refused: {}", p["path"])));
+    }
+    Ok(())
+}
+
+/// Without a stored size, stretch and contain read the old contents' box from the old source.
+/// For a linked file that reads a path the document holds, so an untrusted session's gate sees
+/// it first, and a refusal leaves the document as it was.
+#[test]
+fn a_fit_from_a_linked_source_asks_the_session_gate_first() {
+    let dir = tmp_dir("linked");
+    let (mut s, id) = smart_session();
+    let old = png_file(&dir, "old.png", 20, 10, [0.0, 0.0, 1.0]);
+    set_placement(&mut s, id, |sm| sm.source = SmartSource::Linked { path: old.clone() });
+    let new = std::fs::read(png_file(&dir, "new.png", 10, 5, [1.0, 0.0, 0.0])).unwrap();
+    s.authorize = Some(deny_replace_paths);
+    let before = s.active().unwrap().doc.clone();
+    for fit in [Fit::Stretch, Fit::Contain] {
+        let e = replace_contents_fit(&mut s, id, "new.png", new.clone(), fit).unwrap_err().to_string();
+        assert!(e.contains("source path refused") && e.contains("old.png"), "{fit:?}: {e}");
+        assert!(Arc::ptr_eq(&before, &s.active().unwrap().doc), "{fit:?}");
+    }
+    // Keep needs no old box; without a gate (a trusted session) the linked file is read.
+    replace_contents_fit(&mut s, id, "new.png", new.clone(), Fit::Keep).unwrap();
+    s.execute("edit.undo", json!({})).unwrap();
+    s.authorize = None;
+    replace_contents_fit(&mut s, id, "new.png", new, Fit::Stretch).unwrap();
+    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]

@@ -1137,14 +1137,22 @@ pub enum Fit {
     Contain,
 }
 
-fn fit_param(p: &Value) -> Result<Fit> {
-    match p.get("fit") {
-        None | Some(Value::Null) => Ok(Fit::Keep),
-        Some(Value::String(f)) if f == "keep" => Ok(Fit::Keep),
-        Some(Value::String(f)) if f == "stretch" => Ok(Fit::Stretch),
-        Some(Value::String(f)) if f == "contain" => Ok(Fit::Contain),
-        Some(o) => Err(other(format!("`fit` must be \"keep\", \"stretch\" or \"contain\", not {o}"))),
+impl Fit {
+    /// A request's `fit` option: absent or null is [`Fit::Keep`]; `None` for anything but
+    /// `"keep"`, `"stretch"` or `"contain"`.
+    pub fn from_param(v: Option<&Value>) -> Option<Fit> {
+        match v {
+            None | Some(Value::Null) => Some(Fit::Keep),
+            Some(Value::String(f)) if f == "keep" => Some(Fit::Keep),
+            Some(Value::String(f)) if f == "stretch" => Some(Fit::Stretch),
+            Some(Value::String(f)) if f == "contain" => Some(Fit::Contain),
+            Some(_) => None,
+        }
     }
+}
+
+fn fit_param(p: &Value) -> Result<Fit> {
+    Fit::from_param(p.get("fit")).ok_or_else(|| other(format!("`fit` must be \"keep\", \"stretch\" or \"contain\", not {}", p["fit"])))
 }
 
 /// Replace Contents from a file's name and bytes: what the desktop and web file pickers hand over.
@@ -1171,7 +1179,7 @@ pub fn replace_contents_with(s: &mut Session, id: LayerId, file_name: &str, byte
     // The old boxes first: without a stored size they decode the old contents, which must not
     // push the new file out of a small source cache.
     let from = match fit {
-        Fit::Stretch | Fit::Contain => Some(authored_boxes(doc, id)?),
+        Fit::Stretch | Fit::Contain => Some(authored_boxes(s, doc, id)?),
         Fit::Keep => None,
     };
     let bytes = Arc::new(bytes);
@@ -1209,8 +1217,9 @@ fn visible_clip(l: &Layer, canvas: Rect) -> Rect {
 
 /// The box (source pixels) each instance of `id`'s contents was authored for: its `soLD` stored
 /// size when the layer came from a PSD (cheap), else the box of the decoded contents, which the
-/// instances share (decoded once).
-fn authored_boxes(doc: &Document, id: LayerId) -> Result<Vec<(LayerId, [f64; 4])>> {
+/// instances share (decoded once). A linked file's path comes from the document, so the
+/// session's gate sees it before it is read, as for Replace Contents' own path.
+fn authored_boxes(s: &Session, doc: &Document, id: LayerId) -> Result<Vec<(LayerId, [f64; 4])>> {
     let mut decoded = None;
     instances(doc, smart(doc, id)?.contents_id)
         .into_iter()
@@ -1220,7 +1229,10 @@ fn authored_boxes(doc: &Document, id: LayerId) -> Result<Vec<(LayerId, [f64; 4])
                 sm.psd_raw.as_deref().and_then(|d| photocraft_io::smart_map::parse_sold(d)).and_then(|p| photocraft_io::smart_map::stored_size(&p.descriptor));
             let b = match stored {
                 Some((w, h)) => Some([0.0, 0.0, w, h]),
-                None => *decoded.get_or_insert_with(|| source_box(doc, sm)),
+                None => {
+                    authorize_source(s, "layer.smartObjects.replaceContents", doc, &sm.source)?;
+                    *decoded.get_or_insert_with(|| source_box(doc, sm))
+                }
             };
             Ok((l, b.ok_or_else(|| other("the smart object's contents are unavailable, so their box is unknown"))?))
         })
@@ -1244,7 +1256,8 @@ fn contain_box(old: [f64; 4], new: [f64; 4]) -> [f64; 4] {
 /// Re-aims `sm`'s placement so that the box `new` (source pixels of new contents) lands where
 /// `old` did: the map becomes `placement ∘ S` with `S` taking `new` onto `old`. A warp absorbs
 /// `S` in its box (a preset first becomes its exact mesh); without one, `S` joins the
-/// perspective or the affine transform.
+/// perspective or the affine transform. A warp acts in source space, before the perspective
+/// (`place_source_projective`), so with both the perspective stays as it is.
 fn stretch_placement(sm: &mut SmartObject, old: [f64; 4], new: [f64; 4]) {
     let (ow, oh, nw, nh) = (old[2] - old[0], old[3] - old[1], new[2] - new[0], new[3] - new[1]);
     if !(ow > 0.0 && oh > 0.0 && nw > 0.0 && nh > 0.0) || [ow, oh, nw, nh].iter().any(|v| !v.is_finite()) || old == new {
