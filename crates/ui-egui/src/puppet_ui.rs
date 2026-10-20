@@ -476,10 +476,13 @@ mod tests {
         crate::distort_ui::drop_foreign(&mut app);
         assert!(app.distort.puppet.is_some());
         app.session.execute("file.new", json!({"width": 32, "height": 32, "depth": 8})).unwrap();
-        assert!(crate::distort_ui::display_doc(&app, 1).is_some());
+        let active = app.session.active_index().unwrap();
+        // The session stays until drop_foreign; the preview must not follow this document (#5115).
+        assert!(app.distort.puppet.is_some());
+        assert!(crate::distort_ui::display_doc(&app, active).is_none());
         crate::distort_ui::drop_foreign(&mut app);
         assert!(app.distort.puppet.is_none());
-        assert!(crate::distort_ui::display_doc(&app, 1).is_none());
+        assert!(crate::distort_ui::display_doc(&app, active).is_none());
         // Closing the document it was started on drops it too.
         assert!(app.session.set_active(0));
         crate::distort_ui::menu(&mut app, &ctx, "edit.puppetWarp", &json!({})).unwrap().unwrap();
