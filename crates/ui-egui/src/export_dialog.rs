@@ -1,6 +1,6 @@
 //! File › Export › Export As… (and Quick Export as PNG): format, quality, transparency and scale,
 //! with a preview and an estimated file size. The estimate encodes a small proxy and scales by
-//! pixel count, so the dialog stays instant on 36 MP documents.
+//! pixel count. AVIF shows a colour-managed source preview without encoding a proxy.
 
 use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
@@ -13,7 +13,12 @@ use crate::state::DialogKind;
 use crate::theme::Tokens;
 use crate::{ExportSettings, PhotocraftApp};
 
-const FORMATS: [(&str, &str); 6] = [("png", "PNG"), ("jpg", "JPG"), ("webp", "WebP"), ("tif", "TIFF"), ("tga", "TGA"), ("ico", "ICO")];
+const FORMATS: [(&str, &str); 7] = [("png", "PNG"), ("jpg", "JPG"), ("webp", "WebP"), ("avif", "AVIF"), ("tif", "TIFF"), ("tga", "TGA"), ("ico", "ICO")];
+
+/// Export As formats available in this build; AVIF is offered only with its encoder enabled.
+fn format_options() -> Vec<(String, &'static str)> {
+    FORMATS.iter().filter(|(ext, _)| *ext != "avif" || photocraft_codecs::Format::Avif.caps().write).map(|(ext, label)| (ext.to_string(), *label)).collect()
+}
 
 /// Preferences ▸ remembered dialog settings: Export As writes the settings it was used with
 /// last under its command id and seeds the next dialog from them, as Fill, Liquify and the
@@ -24,7 +29,7 @@ pub(crate) const COMMAND: &str = "file.export.exportAs";
 /// no longer matches a control (a hand-edited preferences file) is left at its default.
 fn seed_remembered(app: &PhotocraftApp, f: &mut Map<String, Value>) {
     let Some(Value::Object(saved)) = app.session.prefs().dialogs.get(COMMAND) else { return };
-    if let Some(v) = saved.get("format").and_then(Value::as_str).filter(|v| FORMATS.iter().any(|(k, _)| k == v)) {
+    if let Some(v) = saved.get("format").and_then(Value::as_str).filter(|v| format_options().iter().any(|(k, _)| k.as_str() == *v)) {
         f.insert("format".into(), json!(v));
     }
     if let Some(v) = saved.get("quality").and_then(Value::as_f64).filter(|v| (1.0..=100.0).contains(v)) {
@@ -245,12 +250,17 @@ fn n(f: &Map<String, Value>, k: &str, d: f64) -> f64 {
 fn export_document(doc: &Document, f: &Map<String, Value>, max_side: Option<u32>) -> Result<Document, String> {
     let mut session = photocraft_engine::Session::new();
     session.add_document(doc.clone(), None);
-    if s(f, "profile") == "srgb" && doc.icc_profile.is_some() {
+    // AVIF's exporter always converts to sRGB, including gray and duotone handling.
+    // Keep that conversion in one place rather than applying the optional profile control too.
+    if s_fmt(f) != "avif" && s(f, "profile") == "srgb" && doc.icc_profile.is_some() {
         session.execute("edit.convertToProfile", json!({"profile": "srgb", "intent": "perceptual"})).map_err(|e| e.to_string())?;
     }
     let (w, h) = export_pixels(f64::from(doc.size.width), f64::from(doc.size.height), f, max_side)?;
     if s_fmt(f) == "ico" && (w > 256.0 || h > 256.0) && max_side.is_none() {
         return Err("ICO export is limited to 256 × 256 pixels; reduce the export scale".into());
+    }
+    if s_fmt(f) == "avif" && (w > 65_535.0 || h > 65_535.0) && max_side.is_none() {
+        return Err("AVIF export is limited to 65535 pixels per side; reduce the export size".into());
     }
     if (w - doc.size.width as f64).abs() >= 1.0 || (h - doc.size.height as f64).abs() >= 1.0 {
         session
@@ -353,7 +363,7 @@ fn export_pixels(src_w: f64, src_h: f64, f: &Map<String, Value>, max_side: Optio
 fn set_format_defaults(f: &mut Map<String, Value>, fmt: &str, prefs: &photocraft_engine::prefs::Export) {
     f.insert("format".into(), json!(fmt));
     match fmt {
-        "jpg" => {
+        "jpg" | "avif" => {
             f.insert("quality".into(), json!(prefs.jpeg_quality));
         }
         "webp" => {
@@ -379,20 +389,22 @@ fn tga_bits(f: &Map<String, Value>) -> Option<photocraft_io::TgaBits> {
     s(f, "tgaBits").parse().ok().and_then(photocraft_io::TgaBits::from_bits)
 }
 
+/// Map saved dialog choices to effective export options. AVIF shares JPEG's quality scale,
+/// while disabling ICC and metadata embedding without changing the saved choices.
 fn settings(f: &Map<String, Value>) -> ExportSettings {
     let fmt = s_fmt(f);
     let quality = n(f, "quality", 85.0).clamp(1.0, 100.0) as u8;
     let metadata = s(f, "metadata");
     ExportSettings {
-        jpeg_quality: (fmt == "jpg").then_some(quality),
+        jpeg_quality: matches!(fmt.as_str(), "jpg" | "avif").then_some(quality),
         webp_lossless: fmt != "webp" || lossless(f),
         webp_quality: (fmt == "webp" && !lossless(f)).then_some(quality),
-        xmp_all: metadata == "all",
+        xmp_all: fmt != "avif" && metadata == "all",
         tga_bits: if fmt == "tga" { tga_bits(f) } else { None },
-        embed_icc: f.get("embedProfile").and_then(Value::as_bool).unwrap_or(true),
+        embed_icc: fmt != "avif" && f.get("embedProfile").and_then(Value::as_bool).unwrap_or(true),
         // Metadata: None drops EXIF and resolution as well as XMP. A missing key keeps them,
         // which is what Export As wrote before the choice existed.
-        embed_metadata: metadata != "none",
+        embed_metadata: fmt != "avif" && metadata != "none",
         ..Default::default()
     }
 }
@@ -417,6 +429,9 @@ fn scaled_estimate(bytes: usize, doc: &Document, proxy: &Document, f: &Map<Strin
 
 /// Estimated size (bytes) from the already prepared proxy encode, scaled by pixel count.
 fn estimate(app: &PhotocraftApp, doc: &Document, proxy: &Document, f: &Map<String, Value>) -> Option<u64> {
+    if s_fmt(f) == "avif" {
+        return None;
+    }
     let export = app.services.export.as_ref()?;
     let (bytes, _) = export(proxy, &format!("estimate.{}", s_fmt(f)), &settings(f)).ok()?;
     Some(scaled_estimate(bytes.len(), doc, proxy, f))
@@ -429,14 +444,17 @@ struct PreviewPixels {
     rgba: Vec<u8>,
 }
 
-fn preview_pixels(proxy: &Document, estimate: Option<u64>) -> PreviewPixels {
-    let img = photocraft_compose::thumbnail(proxy, 360);
+/// Render a prepared proxy into RGBA8 pixels with an optional encoded-size estimate.
+fn preview_pixels(proxy: &Document, estimate: Option<u64>, fmt: &str) -> PreviewPixels {
+    let img = preview_image(proxy, fmt);
     PreviewPixels { estimate, width: img.width as usize, height: img.height as usize, rgba: img.pixels }
 }
 
+/// Prepare the proxy, byte estimate and pixels synchronously. AVIF skips proxy encoding
+/// and displays a colour-managed source preview.
 fn preview_sync(app: &PhotocraftApp, doc: &Document, f: &Map<String, Value>) -> Result<PreviewPixels, String> {
     let proxy = preview_proxy(doc, f)?;
-    Ok(preview_pixels(&proxy, estimate(app, doc, &proxy, f)))
+    Ok(preview_pixels(&proxy, estimate(app, doc, &proxy, f), &s_fmt(f)))
 }
 
 #[derive(Clone)]
@@ -504,7 +522,7 @@ fn poll_or_start_preview(
             let source = source_document_from(doc.clone(), &fields).unwrap_or(doc);
             let proxy = preview_proxy(&source, &fields)?;
             let estimate = estimate_native(&source, &proxy, &fields);
-            Ok::<_, String>(preview_pixels(&proxy, estimate))
+            Ok::<_, String>(preview_pixels(&proxy, estimate, &s_fmt(&fields)))
         }))
         .unwrap_or_else(|_| Err("preview worker panicked".into()));
         *shared.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(prepared);
@@ -522,6 +540,9 @@ fn poll_or_start_preview(
 /// The native exporter uses this same IO encoder. Keep the entire estimate off the UI thread.
 #[cfg(not(target_arch = "wasm32"))]
 fn estimate_native(doc: &Document, proxy: &Document, f: &Map<String, Value>) -> Option<u64> {
+    if s_fmt(f) == "avif" {
+        return None;
+    }
     let bytes = photocraft_io::export(proxy, &format!("estimate.{}", s_fmt(f)), &settings(f).io_options()).ok()?.bytes;
     Some(scaled_estimate(bytes.len(), doc, proxy, f))
 }
@@ -702,6 +723,92 @@ fn preset_fields(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String,
     }
 }
 
+/// Cache key for settings affecting preview pixels or size. AVIF's source preview depends
+/// on sizing and transparency; encoder-only settings do not invalidate it.
+fn preview_signature(f: &Map<String, Value>) -> String {
+    let fmt = s_fmt(f);
+    if fmt == "avif" {
+        // The source preview changes with sizing and matting, not encoder-only settings.
+        return format!(
+            "avif:{}:{}:{}:{}:{}",
+            f.get("transparency").and_then(Value::as_bool).unwrap_or(true),
+            n(f, "scale", 100.0),
+            n(f, "width", 0.0),
+            n(f, "height", 0.0),
+            s(f, "sizing")
+        );
+    }
+    format!(
+        "{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+        fmt,
+        n(f, "quality", 85.0),
+        lossless(f),
+        f.get("transparency").map(|v| v.to_string()).unwrap_or_default(),
+        n(f, "scale", 100.0),
+        n(f, "width", 0.0),
+        n(f, "height", 0.0),
+        s(f, "metadata"),
+        s(f, "tgaBits"),
+        s(f, "profile"),
+        f.get("embedProfile").and_then(Value::as_bool).unwrap_or(true),
+        s(f, "sizing")
+    )
+}
+
+/// Render a format-aware thumbnail without changing the document. AVIF applies RGB/gray
+/// profile conversion and duotone inks before quantization, retaining transparency;
+/// CMYK/Lab composites are already sRGB.
+fn preview_image(doc: &Document, fmt: &str) -> photocraft_raster::Rgba8Image {
+    use photocraft_cms::{Builtin, ColorSpace, Intent, Transform};
+    use photocraft_doc::ColorMode;
+
+    let shown = if fmt == "avif" && doc.mode == ColorMode::Duotone {
+        doc.duotone.as_ref().map(|inks| {
+            // Match flat export's ink simulation on a copy, leaving the source intact.
+            let mut shown = doc.clone();
+            shown.layers.push(photocraft_doc::Layer::new("Duotone", photocraft_doc::LayerContent::Adjustment(inks.display_adjustment())));
+            shown.mode = ColorMode::Rgb;
+            shown.icc_profile = None;
+            shown.duotone = None;
+            shown
+        })
+    } else {
+        None
+    };
+    let doc = shown.as_ref().unwrap_or(doc);
+    let mut buf = photocraft_compose::thumbnail_buffer(doc, 360);
+    if fmt == "avif" && !matches!(doc.mode, ColorMode::Cmyk | ColorMode::Lab) {
+        // Match AVIF export's profile, intent and BPC before reducing to 8-bit. CMYK/Lab
+        // composites are already sRGB. Gray needs its actual profile, including LUTs,
+        // rather than the RGB/TRC approximation used by the canvas display texture.
+        let gray = doc.pixel_format().mode == ColorMode::Grayscale;
+        let space = if gray { ColorSpace::Gray } else { ColorSpace::Rgb };
+        let dst = if gray { Builtin::SGray.profile() } else { Builtin::Srgb.profile() };
+        let src = doc
+            .icc_profile
+            .as_ref()
+            .and_then(|b| photocraft_engine::color_cmds::profile_from_bytes(b).ok())
+            .filter(|p| p.color_space == space)
+            .unwrap_or_else(|| Arc::new(dst.clone()));
+        let transform = if src.same_colors(dst) { None } else { Transform::new(&src, dst, Intent::Perceptual, true).ok() };
+        if gray {
+            let mut values: Vec<f32> = buf.px.iter().map(|p| photocraft_color::convert::rgb_to_gray([p[0], p[1], p[2]])).collect();
+            if let Some(t) = transform {
+                t.apply(&mut values, 1);
+            }
+            // A gray file is neutral even if a fill or layer style produced coloured RGB.
+            for (p, v) in buf.px.iter_mut().zip(values) {
+                p[..3].fill(v);
+            }
+        } else if let Some(t) = transform {
+            t.apply(buf.px.as_flattened_mut(), 4);
+        }
+    }
+    buf.to_rgba8()
+}
+
+/// Draw Export As settings and the cached preview. AVIF shows fixed colour and metadata
+/// limits without changing saved choices, and reports file size after the final export.
 pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     let t = Tokens::get(ui.ctx());
     let Some(doc) = app.session.active().map(|s| s.doc.clone()) else { return };
@@ -713,7 +820,7 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(tl!("Format")).color(t.text_dim));
                 let mut fmt = s_fmt(f);
-                let opts: Vec<(String, &str)> = FORMATS.iter().map(|(k, l)| (k.to_string(), *l)).collect();
+                let opts = format_options();
                 if crate::widgets::dropdown(ui, "export-format", &mut fmt, &opts, 130.0) {
                     set_format_defaults(f, &fmt, &app.session.prefs().export);
                 }
@@ -724,7 +831,7 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
                 crate::widgets::checkbox(ui, &mut ll, tl!("Lossless"));
                 f.insert("lossless".into(), json!(ll));
             }
-            if fmt == "jpg" || (fmt == "webp" && !lossless(f)) {
+            if matches!(fmt.as_str(), "jpg" | "avif") || (fmt == "webp" && !lossless(f)) {
                 let mut q = n(f, "quality", 85.0) as f32;
                 crate::widgets::slider_row(ui, tl!("Quality"), &mut q, 1.0..=100.0, "%", None);
                 f.insert("quality".into(), json!(q.round()));
@@ -745,28 +852,41 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
                 crate::widgets::checkbox(ui, &mut tr, tl!("Transparency"));
                 f.insert("transparency".into(), json!(tr));
             }
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(tl!("Metadata")).color(t.text_dim));
-                let mut m = s(f, "metadata");
-                let opts: Vec<(String, &str)> = vec![("none".into(), tl!("None")), ("exif".into(), tl!("EXIF")), ("all".into(), tl!("All"))];
-                if crate::widgets::dropdown(ui, "export-metadata", &mut m, &opts, 130.0) {
-                    f.insert("metadata".into(), json!(m));
+            ui.add_enabled_ui(fmt != "avif", |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(tl!("Metadata")).color(t.text_dim));
+                    let mut m = if fmt == "avif" { "none".into() } else { s(f, "metadata") };
+                    let opts: Vec<(String, &str)> = vec![("none".into(), tl!("None")), ("exif".into(), tl!("EXIF")), ("all".into(), tl!("All"))];
+                    if crate::widgets::dropdown(ui, "export-metadata", &mut m, &opts, 130.0) && fmt != "avif" {
+                        f.insert("metadata".into(), json!(m));
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(tl!("Color Profile")).color(t.text_dim));
+                    let mut profile = if fmt == "avif" { "srgb".into() } else { s(f, "profile") };
+                    if profile != "srgb" {
+                        profile = "document".into();
+                    }
+                    let opts: Vec<(String, &str)> = vec![("document".into(), tl!("Document Profile")), ("srgb".into(), tl!("Convert to sRGB"))];
+                    if crate::widgets::dropdown(ui, "export-profile", &mut profile, &opts, 130.0) {
+                        f.insert("profile".into(), json!(profile));
+                    }
+                });
+                let mut embed = fmt != "avif" && f.get("embedProfile").and_then(Value::as_bool).unwrap_or(true);
+                crate::widgets::checkbox(ui, &mut embed, tl!("Embed Color Profile"));
+                if fmt != "avif" {
+                    f.insert("embedProfile".into(), json!(embed));
                 }
             });
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(tl!("Color Profile")).color(t.text_dim));
-                let mut profile = s(f, "profile");
-                if profile != "srgb" {
-                    profile = "document".into();
-                }
-                let opts: Vec<(String, &str)> = vec![("document".into(), tl!("Document Profile")), ("srgb".into(), tl!("Convert to sRGB"))];
-                if crate::widgets::dropdown(ui, "export-profile", &mut profile, &opts, 130.0) {
-                    f.insert("profile".into(), json!(profile));
-                }
-            });
-            let mut embed = f.get("embedProfile").and_then(Value::as_bool).unwrap_or(true);
-            crate::widgets::checkbox(ui, &mut embed, tl!("Embed Color Profile"));
-            f.insert("embedProfile".into(), json!(embed));
+            if fmt == "avif" {
+                ui.add_space(4.0);
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(tl!("AVIF uses 8-bit sRGB. ICC, EXIF and XMP metadata are not preserved.")).color(t.text_dim).size(11.5),
+                    )
+                    .wrap(),
+                );
+            }
             ui.add_space(8.0);
             ui.label(egui::RichText::new(tl!("Image Size")).font(crate::theme::semibold(12.0)).color(t.text));
             let (bw, bh) = (n(f, "__w", f64::from(doc.size.width)), n(f, "__h", f64::from(doc.size.height)));
@@ -783,21 +903,7 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
         ui.vertical(|ui| {
             let layer = f.get("__layer").and_then(Value::as_u64);
             let key = egui::Id::new(("export-preview", doc.id.0, app.session.active().map_or(0, |s| s.revision), layer));
-            let sig = format!(
-                "{}{}{}{}{}{}{}{}{}{}{}{}",
-                s_fmt(f),
-                n(f, "quality", 85.0),
-                lossless(f),
-                f.get("transparency").map(|v| v.to_string()).unwrap_or_default(),
-                n(f, "scale", 100.0),
-                n(f, "width", 0.0),
-                n(f, "height", 0.0),
-                s(f, "metadata"),
-                s(f, "tgaBits"),
-                s(f, "profile"),
-                f.get("embedProfile").and_then(Value::as_bool).unwrap_or(true),
-                s(f, "sizing")
-            );
+            let sig = preview_signature(f);
             let cached: Option<CachedPreview> = ui.data(|d| d.get_temp(key));
             let preview = match cached.filter(|cached| cached.signature == sig) {
                 Some(cached) => Some(cached),
@@ -833,6 +939,9 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
             ui.painter().rect_stroke(r, 0.0, egui::Stroke::new(1.0, t.separator), egui::StrokeKind::Outside);
             let est = preview.as_ref().and_then(|preview| preview.estimate).map_or("—".to_string(), |b| crate::sizing::human_bytes(b as f64));
             ui.label(egui::RichText::new(format!("{}  ≈ {est}", s_fmt(f).to_uppercase())).color(t.text_dim).size(11.5));
+            if s_fmt(f) == "avif" {
+                ui.label(egui::RichText::new(tl!("File size is shown after export.")).color(t.text_dim).size(11.5));
+            }
         });
     });
 }
@@ -859,7 +968,10 @@ pub fn confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value,
         app.ui.status = crate::i18n::fmt(tl!(template), &[("path", &path), ("size", &crate::sizing::human_bytes(bytes.len() as f64))]);
         app.ui.status_error = false;
         let template = "Exported {path}";
-        let what = crate::i18n::fmt(tl!(template), &[("path", &crate::file_open::display_name(&path))]);
+        let mut what = crate::i18n::fmt(tl!(template), &[("path", &crate::file_open::display_name(&path))]);
+        if s_fmt(&f) == "avif" {
+            what.push_str(&format!(" ({})", crate::sizing::human_bytes(bytes.len() as f64)));
+        }
         crate::notices::io_warnings(app, &what, &warnings);
         Ok(json!({"path": path, "bytes": bytes.len(), "warnings": warnings}))
     })
@@ -887,7 +999,10 @@ fn confirm_layers(app: &mut PhotocraftApp, f: &Map<String, Value>, ids: &[photoc
             let write = app.services.write.as_mut().ok_or("no writer configured")?;
             write(&path, &bytes)?;
             let template = "Exported {path}";
-            let what = crate::i18n::fmt(tl!(template), &[("path", &crate::file_open::display_name(&path))]);
+            let mut what = crate::i18n::fmt(tl!(template), &[("path", &crate::file_open::display_name(&path))]);
+            if s_fmt(&f) == "avif" {
+                what.push_str(&format!(" ({})", crate::sizing::human_bytes(bytes.len() as f64)));
+            }
             crate::notices::io_warnings(app, &what, &warnings);
             exported.push(json!({"path": path, "bytes": bytes.len(), "warnings": warnings}));
         }
@@ -1312,5 +1427,231 @@ mod tests {
         assert_eq!(f.get("width"), Some(&json!(100.0)));
         assert_eq!(f.get("height"), Some(&json!(50.0)));
         assert_eq!(f.get("sizing"), Some(&json!("scale")));
+    }
+    #[test]
+    fn tga_bits_invalidate_only_the_encoded_preview() {
+        let mut f = Map::new();
+        f.insert("format".into(), json!("tga"));
+        f.insert("tgaBits".into(), json!("24"));
+        let tga24 = preview_signature(&f);
+        f.insert("tgaBits".into(), json!("32"));
+        assert_ne!(preview_signature(&f), tga24, "changing TGA bits must refresh the encoded size estimate");
+        f.insert("format".into(), json!("avif"));
+        let avif = preview_signature(&f);
+        f.insert("tgaBits".into(), json!("24"));
+        assert_eq!(preview_signature(&f), avif, "TGA bits cannot change AVIF's source preview");
+        assert_eq!(settings(&f).tga_bits, None);
+    }
+    #[test]
+    fn avif_availability_matches_the_compiled_encoder() {
+        assert_eq!(format_options().iter().any(|(ext, _)| ext == "avif"), photocraft_codecs::Format::Avif.caps().write);
+    }
+
+    #[test]
+    fn avif_quality_is_clamped_and_metadata_is_not_promised() {
+        let prefs = photocraft_engine::prefs::Export { jpeg_quality: 67, webp_quality: 31, ..Default::default() };
+        let mut f = Map::new();
+        set_format_defaults(&mut f, "avif", &prefs);
+        f.insert("metadata".into(), json!("all"));
+        f.insert("lossless".into(), json!(true));
+        assert_eq!(settings(&f).jpeg_quality, Some(67));
+        assert_eq!(settings(&f).webp_quality, None);
+        assert!(!settings(&f).xmp_all);
+        assert!(!settings(&f).embed_icc);
+        assert!(!settings(&f).embed_metadata);
+        for (requested, expected) in [(0, 1), (47, 47), (250, 100)] {
+            f.insert("quality".into(), json!(requested));
+            assert_eq!(settings(&f).jpeg_quality, Some(expected));
+        }
+        f.insert("format".into(), json!("png"));
+        assert!(settings(&f).xmp_all, "other formats still honor the metadata choice");
+    }
+
+    #[test]
+    fn avif_preview_does_not_encode_a_proxy_on_the_ui_thread() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let calls = Arc::new(AtomicUsize::new(0));
+        let received = calls.clone();
+        let app = PhotocraftApp::new(
+            photocraft_engine::Session::new(),
+            crate::Services {
+                export: Some(Box::new(move |_, _, _| {
+                    received.fetch_add(1, Ordering::Relaxed);
+                    Ok((vec![0; 10], Vec::new()))
+                })),
+                ..Default::default()
+            },
+        );
+        let doc = Document::with_background(
+            "preview",
+            photocraft_doc::Size::new(8, 8),
+            photocraft_doc::ColorMode::Rgb,
+            photocraft_doc::SampleType::U8,
+            photocraft_doc::Color::WHITE,
+        );
+        let mut f = Map::new();
+        f.insert("format".into(), json!("avif"));
+        assert_eq!(estimate(&app, &doc, &doc, &f), None);
+        #[cfg(not(target_arch = "wasm32"))]
+        assert_eq!(estimate_native(&doc, &doc, &f), None, "the native worker must skip the encoder too");
+        let preview = preview_sync(&app, &doc, &f).unwrap();
+        assert_eq!((preview.width, preview.height), (8, 8));
+        assert_eq!(preview.estimate, None);
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        f.insert("format".into(), json!("png"));
+        assert_eq!(estimate(&app, &doc, &doc, &f), Some(10));
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn avif_preview_reuses_the_thumbnail_for_encoder_only_settings() {
+        let mut f = json!({"format":"avif","quality":85,"scale":100,"transparency":true,"lossless":false,"metadata":"none"}).as_object().unwrap().clone();
+        let original = preview_signature(&f);
+        for quality in [1, 43, 100] {
+            f.insert("quality".into(), json!(quality));
+            assert_eq!(preview_signature(&f), original, "quality only changes the encoded output");
+        }
+        f.insert("lossless".into(), json!(true));
+        f.insert("metadata".into(), json!("all"));
+        f.insert("profile".into(), json!("srgb"));
+        f.insert("embedProfile".into(), json!(true));
+        assert_eq!(preview_signature(&f), original);
+        for (field, value) in [("width", json!(200)), ("height", json!(100)), ("sizing", json!("pixels"))] {
+            f.insert(field.into(), value);
+            assert_ne!(preview_signature(&f), original, "{field} changes the sized preview");
+            f.remove(field);
+        }
+        f.insert("scale".into(), json!(50));
+        assert_ne!(preview_signature(&f), original, "scaling changes the preview");
+        f.insert("scale".into(), json!(100));
+        f.insert("transparency".into(), json!(false));
+        assert_ne!(preview_signature(&f), original, "matting changes the preview");
+
+        for format in ["jpg", "webp", "png"] {
+            f.insert("format".into(), json!(format));
+            f.insert("quality".into(), json!(85));
+            let before = preview_signature(&f);
+            f.insert("quality".into(), json!(43));
+            assert_ne!(preview_signature(&f), before, "{format} keeps its proxy encode invalidation");
+        }
+    }
+
+    #[test]
+    fn avif_export_keeps_the_source_profile_for_the_fixed_srgb_exporter() {
+        use photocraft_cms::Builtin;
+        use photocraft_doc::{Color, ColorMode, SampleType, Size};
+
+        let mut doc = Document::with_background("P3", Size::new(8, 8), ColorMode::Rgb, SampleType::F32, Color::rgba(0.8, 0.5, 0.3, 0.5));
+        doc.icc_profile = Some(Builtin::DisplayP3.profile().to_bytes());
+        let original = doc.clone();
+        let f = json!({"format":"avif", "profile":"srgb", "transparency":true}).as_object().unwrap().clone();
+        let proxy = preview_proxy(&doc, &f).unwrap();
+        assert_eq!(proxy.icc_profile, doc.icc_profile, "AVIF's IO conversion handles the source profile once");
+        let pixels = preview_sync(&PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default()), &doc, &f).unwrap();
+        assert_eq!(pixels.rgba, preview_image(&doc, "avif").pixels);
+        assert_eq!(doc, original);
+    }
+
+    #[test]
+    fn avif_export_rejects_oversize_destination_before_resampling() {
+        use photocraft_doc::{Color, ColorMode, SampleType, Size};
+
+        let doc = Document::with_background("small", Size::new(8, 8), ColorMode::Rgb, SampleType::U8, Color::WHITE);
+        for (width, height) in [(65_536, 1), (1, 65_536)] {
+            let f = json!({"format":"avif", "sizing":"pixels", "width":width, "height":height}).as_object().unwrap().clone();
+            let err = export_document(&doc, &f, None).unwrap_err();
+            assert!(err.contains("65535"), "{err}");
+            let proxy = preview_proxy(&doc, &f).unwrap();
+            assert!(proxy.size.width.max(proxy.size.height) <= 512, "a reduced source preview remains available");
+        }
+    }
+
+    #[test]
+    fn avif_preview_converts_linear_gray_before_quantizing_and_keeps_alpha() {
+        use photocraft_cms::{Builtin, Curve};
+        use photocraft_doc::{Color, ColorMode, SampleType, Size};
+
+        let mut linear = Builtin::GrayGamma22.profile().clone();
+        linear.description = "Synthetic linear gray".into();
+        linear.gray_trc = Some(Curve::Gamma(1.0));
+        let linear = linear.with_encoded_bytes();
+        let color = Color { alpha: 0.5, ..Color::gray(0.25) };
+        for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
+            let mut doc = Document::with_background("linear gray", Size::new(8, 8), ColorMode::Grayscale, depth, color);
+            doc.icc_profile = Some(linear.to_bytes());
+            let raw = preview_image(&doc, "png");
+            let shown = preview_image(&doc, "avif");
+            for (got, original) in shown.pixels.as_chunks::<4>().0.iter().zip(raw.pixels.as_chunks::<4>().0) {
+                assert!(got[..3].iter().all(|&v| v.abs_diff(137) <= 2), "{depth:?}: {got:?}");
+                assert!(original[..3].iter().all(|&v| v.abs_diff(64) <= 1), "other formats keep their existing preview");
+                assert_eq!(got[3], original[3], "ICC conversion preserves straight alpha");
+                assert_eq!(got[3], 128);
+            }
+        }
+    }
+
+    #[test]
+    fn avif_preview_converts_display_p3_to_srgb_and_keeps_alpha() {
+        use photocraft_cms::Builtin;
+        use photocraft_doc::{Color, ColorMode, SampleType, Size};
+
+        for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
+            let mut doc = Document::with_background("P3", Size::new(8, 8), ColorMode::Rgb, depth, Color::rgba(0.8, 0.5, 0.3, 0.5));
+            doc.icc_profile = Some(Builtin::DisplayP3.profile().to_bytes());
+            let shown = preview_image(&doc, "avif");
+            // Published P3 primaries and sRGB curve: P3 (.8, .5, .3) → sRGB (216.7, 122.9, 64.3).
+            for got in shown.pixels.as_chunks::<4>().0 {
+                for (&v, expected) in got[..3].iter().zip([217, 123, 64]) {
+                    assert!(v.abs_diff(expected) <= 2, "{depth:?}: {got:?}");
+                }
+                assert_eq!(got[3], 128);
+            }
+            assert_ne!(shown.pixels, preview_image(&doc, "png").pixels, "the P3 profile changes the preview");
+        }
+    }
+
+    #[test]
+    fn avif_preview_does_not_convert_cmyk_or_lab_composites_twice() {
+        use photocraft_cms::Builtin;
+        use photocraft_doc::{Color, ColorMode, SampleType, Size};
+
+        for (mode, profile) in [(ColorMode::Cmyk, Builtin::CoatedCmyk), (ColorMode::Lab, Builtin::LabD50)] {
+            let mut doc = Document::with_background("already sRGB", Size::new(8, 8), mode, SampleType::U8, Color::rgba(0.8, 0.5, 0.3, 0.5));
+            doc.icc_profile = Some(profile.profile().to_bytes());
+            assert_eq!(preview_image(&doc, "avif").pixels, preview_image(&doc, "png").pixels, "{mode:?} is already sRGB after compositing");
+        }
+    }
+
+    #[test]
+    fn avif_gray_preview_neutralizes_coloured_fills_even_with_an_identity_profile() {
+        use photocraft_cms::Builtin;
+        use photocraft_doc::{Color, ColorMode, Fill, Layer, LayerContent, SampleType, Size};
+
+        let mut doc = Document::new("gray fill", Size::new(8, 8), ColorMode::Grayscale, SampleType::F32);
+        doc.layers.push(Layer::new("colour", LayerContent::Fill(Fill::Solid(Color::rgba(0.8, 0.5, 0.3, 0.5)))));
+        for profile in [None, Some(Builtin::SGray.profile().to_bytes())] {
+            doc.icc_profile = profile;
+            let shown = preview_image(&doc, "avif");
+            // Rec.601 luma: .299*.8 + .587*.5 + .114*.3 = .5669 → 145.
+            assert!(shown.pixels.as_chunks::<4>().0.iter().all(|p| p == &[145, 145, 145, 128]));
+            assert_ne!(shown.pixels, preview_image(&doc, "png").pixels);
+        }
+    }
+
+    #[test]
+    fn avif_duotone_preview_renders_the_inks_without_changing_the_source() {
+        use photocraft_cms::Builtin;
+        use photocraft_doc::{Color, ColorMode, Duotone, DuotoneInk, SampleType, Size};
+
+        let color = Color { alpha: 0.5, ..Color::gray(0.5) };
+        let mut doc = Document::with_background("duotone", Size::new(8, 8), ColorMode::Duotone, SampleType::F32, color);
+        doc.duotone = Some(Duotone { inks: vec![DuotoneInk::new("Black", [0.0; 3]), DuotoneInk::new("Orange", [1.0, 0.5, 0.0])], psd_raw: None });
+        doc.icc_profile = Some(Builtin::GrayGamma22.profile().to_bytes());
+        let original = doc.clone();
+        let shown = preview_image(&doc, "avif");
+        // At half density, black and orange filter white to (.5, .375, .25).
+        assert!(shown.pixels.as_chunks::<4>().0.iter().all(|p| p == &[128, 96, 64, 128]), "{:?}", &shown.pixels[..4]);
+        assert!(preview_image(&doc, "png").pixels.as_chunks::<4>().0.iter().all(|p| p == &[128, 128, 128, 128]));
+        assert_eq!(doc, original);
     }
 }

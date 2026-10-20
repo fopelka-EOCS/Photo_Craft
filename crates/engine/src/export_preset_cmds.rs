@@ -10,7 +10,8 @@ use crate::{Result, Session};
 
 const MAX_PRESETS: usize = 256;
 const MAX_PX: u32 = 300_000;
-const FORMATS: [&str; 6] = ["png", "jpg", "webp", "tif", "tga", "ico"];
+// Keep stored configurations portable between builds; exporting checks encoder availability.
+const FORMATS: [&str; 7] = ["png", "jpg", "webp", "tif", "tga", "ico", "avif"];
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -196,7 +197,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Save Export Preset",
             menu: &[],
             shortcut: None,
-            params: r#"{"name":str,"settings":{"format":"png|jpg|webp|tif|tga|ico","quality":1..100,"lossless":bool,"transparency":bool,"scale":1..1000,"width":px,"height":px,"lockAspect":bool,"sizing":"scale|pixels","metadata":"none|exif|all","profile":"document|srgb","embedProfile":bool,"tgaBits":"auto|24|32"}} (a saved name is replaced)"#,
+            params: r#"{"name":str,"settings":{"format":"png|jpg|webp|tif|tga|ico|avif","quality":1..100,"lossless":bool,"transparency":bool,"scale":1..1000,"width":px,"height":px,"lockAspect":bool,"sizing":"scale|pixels","metadata":"none|exif|all","profile":"document|srgb","embedProfile":bool,"tgaBits":"auto|24|32"}} (a saved name is replaced)"#,
             enabled: always,
             run: save,
             journal: false,
@@ -264,6 +265,44 @@ mod tests {
         let mut after = Session::new();
         after.load_prefs_json(&raw).unwrap();
         assert!(after.presets.export_presets.is_empty());
+    }
+
+    #[test]
+    fn avif_preset_round_trips_through_preferences_and_preset_exports() {
+        let mut s = Session::new();
+        let saved = s
+            .execute(
+                "file.export.presets.save",
+                json!({"name": "Web AVIF", "settings": {"format": "avif", "quality": 62, "transparency": true, "metadata": "none", "profile": "srgb", "embedProfile": false}}),
+            )
+            .unwrap();
+
+        let mut restored = Session::new();
+        restored.load_prefs_json(&s.prefs_to_json()).unwrap();
+        let got = restored.execute("file.export.presets.get", json!({"name": "Web AVIF"})).unwrap();
+        assert_eq!(got, saved);
+        assert_eq!(got["preset"]["settings"]["format"], "avif");
+        assert_eq!(got["preset"]["settings"]["quality"], 62);
+
+        let mut imported = Session::new();
+        imported.load_presets_json(restored.presets.to_json(&restored));
+        assert_eq!(imported.execute("file.export.presets.get", json!({"name": "Web AVIF"})).unwrap(), saved);
+    }
+
+    #[test]
+    fn avif_preset_survives_without_the_encoder_but_export_reports_it() {
+        if photocraft_codecs::Format::Avif.caps().write {
+            return;
+        }
+        let mut s = Session::new();
+        s.execute("file.export.presets.save", json!({"name": "Web AVIF", "settings": {"format": "avif"}})).unwrap();
+        let mut restored = Session::new();
+        restored.load_prefs_json(&s.prefs_to_json()).unwrap();
+        let preset = restored.execute("file.export.presets.get", json!({"name": "Web AVIF"})).unwrap();
+        let format = preset["preset"]["settings"]["format"].as_str().unwrap();
+        let doc = photocraft_doc::Document::new("AVIF", photocraft_geom::Size::new(1, 1), photocraft_color::ColorMode::Rgb, photocraft_color::SampleType::U8);
+        let error = crate::file_cmds::encode(&doc, &format!("output.{format}"), None).unwrap_err().to_string();
+        assert!(error.contains("AVIF cannot be written in this build"), "{error}");
     }
 
     #[test]

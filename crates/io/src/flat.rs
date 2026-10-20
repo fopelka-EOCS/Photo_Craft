@@ -534,6 +534,17 @@ pub fn export_flat(doc: &Document, format: Format, opts: &ExportOptions) -> Resu
 /// encoder does the rest (#3389).
 pub(crate) fn export_flat_with(doc: &Document, format: Format, opts: &ExportOptions, ctl: &photocraft_raster::Interrupt) -> Result<ExportResult, IoError> {
     use photocraft_cms::{Builtin, Intent};
+    // Reject AVIF builds/dimensions before rendering or allocating a full flat pixel buffer.
+    if format == Format::Avif {
+        if !format.caps().write {
+            return Err(IoError::Unsupported(codecs::FidelityWarning::WriteUnsupported { format }.to_string()));
+        }
+        if let Some((max_width, max_height)) = format.max_dimensions()
+            && (doc.size.width > max_width || doc.size.height > max_height)
+        {
+            return Err(IoError::Unsupported(codecs::FidelityWarning::DimensionsExceeded { max_width, max_height }.to_string()));
+        }
+    }
     if let Some(r) = export_mode_specific(doc, format, opts)? {
         return Ok(r);
     }
@@ -571,6 +582,12 @@ pub(crate) fn export_flat_with(doc: &Document, format: Format, opts: &ExportOpti
         // Untagged files read back as sRGB/sGray. Even an ICC-capable format like WebP loses a
         // gray profile when the codec expands gray to RGB. Convert first (as Quick Export does)
         // rather than write values that only mean something under the dropped profile.
+        if format == Format::Avif
+            && let Some(sgray) = avif_gray_to_sgray(&img)?
+        {
+            img = sgray;
+            warnings.push(format!("colours converted to sRGB; {format:?} can't embed the document's colour profile"));
+        }
         if let Some(srgb) = convert_rgb(&img, Builtin::Srgb.profile(), Intent::Perceptual, true, img.sample_type())? {
             img = srgb;
             warnings.push(format!("colours converted to sRGB; {format:?} can't embed the document's colour profile"));
@@ -756,6 +773,28 @@ fn convert_from(
     let out = map_bands(img, img.layout(), sample, |mut vals| {
         t.apply(&mut vals, stride);
         vals
+    })?;
+    Ok(Some(out.with_icc(None)))
+}
+
+/// AVIF expands gray into RGB without a profile: first convert the gray tone curve to sGray,
+/// whose values equal neutral sRGB. Keep the native depth and any alpha until the encode plan.
+fn avif_gray_to_sgray(img: &Image) -> Result<Option<Image>, IoError> {
+    use photocraft_cms::{Builtin, ColorSpace, Intent, Profile, Transform};
+    if !img.layout().is_gray() {
+        return Ok(None);
+    }
+    let src =
+        img.icc.as_ref().and_then(|b| Profile::parse(b).ok()).filter(|p| p.color_space == ColorSpace::Gray).unwrap_or_else(|| Builtin::SGray.profile().clone());
+    let dst = Builtin::SGray.profile();
+    if src.same_colors(dst) {
+        return Ok(None);
+    }
+    let transform = Transform::new(&src, dst, Intent::Perceptual, true).map_err(|e| IoError::Unsupported(e.to_string()))?;
+    let stride = img.layout().channels();
+    let out = map_bands(img, img.layout(), img.sample_type(), |mut values| {
+        transform.apply(&mut values, stride);
+        values
     })?;
     Ok(Some(out.with_icc(None)))
 }

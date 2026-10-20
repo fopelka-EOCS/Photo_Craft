@@ -4317,3 +4317,5 @@ shape	Appearance	Izgled
 	Use	Koristi
 	In Front	Ispred
 	Behind	Iza
+	AVIF uses 8-bit sRGB. ICC, EXIF and XMP metadata are not preserved.	AVIF koristi 8-bitni sRGB. ICC, EXIF i XMP metapodaci se ne čuvaju.
+	File size is shown after export.	Veličina datoteke prikazuje se nakon izvoza.

@@ -4163,3 +4163,5 @@ cameraRaw	Yellow	Sárga
 	Use	Használat
 	In Front	Elöl
 	Behind	Mögött
+	AVIF uses 8-bit sRGB. ICC, EXIF and XMP metadata are not preserved.	Az AVIF 8 bites sRGB-t használ. Az ICC-, EXIF- és XMP-metaadatok nem maradnak meg.
+	File size is shown after export.	A fájlméret az exportálás után jelenik meg.

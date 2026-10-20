@@ -3944,3 +3944,5 @@ curves	Smooth	Εξομάλυνση
 	Use	Χρήση
 	In Front	Μπροστά
 	Behind	Πίσω
+	AVIF uses 8-bit sRGB. ICC, EXIF and XMP metadata are not preserved.	Το AVIF χρησιμοποιεί sRGB 8 bit. Τα μεταδεδομένα ICC, EXIF και XMP δεν διατηρούνται.
+	File size is shown after export.	Το μέγεθος του αρχείου εμφανίζεται μετά την εξαγωγή.

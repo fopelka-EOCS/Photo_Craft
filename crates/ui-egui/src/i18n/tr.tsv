@@ -3974,3 +3974,5 @@ cameraData	Lens	Lens
 	Use	Kullan
 	In Front	Önde
 	Behind	Arkada
+	AVIF uses 8-bit sRGB. ICC, EXIF and XMP metadata are not preserved.	AVIF 8 bit sRGB kullanır. ICC, EXIF ve XMP meta verileri korunmaz.
+	File size is shown after export.	Dosya boyutu dışa aktarımdan sonra gösterilir.
