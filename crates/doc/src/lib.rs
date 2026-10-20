@@ -915,6 +915,9 @@ pub struct Document {
     /// How the document's lossy file was encoded (its JPEG quality, WebP lossy or lossless,
     /// PNG stereo pairing), so a save writes it back the same way rather than at fixed defaults.
     pub file_encoding: FileEncoding,
+    /// The canvas holds both stereo views side by side, left eye first, without packing padding.
+    /// Set when importing MPO, JPS or PNG sTER; persisted in the native document.
+    pub stereo: bool,
 }
 
 /// The encoder settings a document's file was opened or saved with: what File › Save and the
@@ -933,7 +936,8 @@ pub struct FileEncoding {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub webp_quality: Option<u8>,
     /// PNG stereo pairing (the `sTER` chunk's mode byte, PNG Extensions 1.4.0 §3.6): `Some(0)`
-    /// side by side, `Some(1)` stacked, so saving a stereo PNG keeps the mark (#6063).
+    /// cross-fuse (right eye first), `Some(1)` diverging-fuse (left eye first). Both are
+    /// side by side; saving a stereo PNG keeps this eye-order mark (#6063).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub png_stereo: Option<u8>,
 }
@@ -982,6 +986,7 @@ impl Document {
             variables: Variables::default(),
             timeline: None,
             file_encoding: FileEncoding::default(),
+            stereo: false,
         }
     }
 

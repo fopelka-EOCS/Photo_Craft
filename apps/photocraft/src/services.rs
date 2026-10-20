@@ -20,9 +20,9 @@ mod recovery_tests;
 /// Photoshop brushes (.abr), gradients (.grd), swatches (.aco, .ase) and keyboard shortcut sets
 /// (.kys), which go to the preset libraries and Edit › Keyboard Shortcuts.
 const OPEN_EXTS: &[&str] = &[
-    "pcraft", "pdn", "ora", "kra", "krz", "psd", "psb", "psdt", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "ico", "qoi", "exr", "hdr",
-    "pbm", "pgm", "ppm", "pam", "pfm", "pcx", "dds", "xpm", "fits", "fit", "fts", "dpx", "cin", "heic", "heif", "hif", "dng", "cr2", "cr3", "nef", "nrw",
-    "arw", "pef", "orf", "rw2", "raf", "abr", "grd", "svg", "svgz", "aco", "ase", "kys", "af", "afdesign", "afphoto", "afpub",
+    "pcraft", "pdn", "ora", "kra", "krz", "psd", "psb", "psdt", "png", "jpg", "jpeg", "mpo", "jps", "tif", "tiff", "webp", "gif", "bmp", "tga", "ico", "qoi",
+    "exr", "hdr", "pbm", "pgm", "ppm", "pam", "pfm", "pcx", "dds", "xpm", "fits", "fit", "fts", "dpx", "cin", "heic", "heif", "hif", "dng", "cr2", "cr3",
+    "nef", "nrw", "arw", "pef", "orf", "rw2", "raf", "abr", "grd", "svg", "svgz", "aco", "ase", "kys", "af", "afdesign", "afphoto", "afpub",
 ];
 const SVG_EXTS: &[&str] = &["svg", "svgz"];
 
@@ -50,6 +50,8 @@ const OPEN_FILTERS: &[(&str, &[&str])] = &[
     ("SVG", SVG_EXTS),
     ("PNG", &["png"]),
     ("JPEG", &["jpg", "jpeg"]),
+    ("MPO (stereo pair)", &["mpo"]),
+    ("JPS (stereo pair)", &["jps"]),
     ("HEIF", &["heic", "heif", "hif"]),
     ("TIFF", &["tif", "tiff"]),
     ("WebP", &["webp"]),
@@ -89,6 +91,8 @@ const SAVE_FILTERS: &[(&str, &[&str])] = &[
     ("OpenRaster", &["ora"]),
     ("PNG", &["png"]),
     ("JPEG", &["jpg"]),
+    ("MPO (stereo pair)", &["mpo"]),
+    ("JPS (stereo pair)", &["jps"]),
     ("WebP", &["webp"]),
     ("TIFF", &["tif"]),
     ("Targa", &["tga"]),
@@ -849,8 +853,10 @@ mod tests {
         // Save As, Save a Copy.
         // Files in a format Save As can't write, like .dng, should suggest .psd instead.
         let _ = invoke(&mut app, "file.saveAs");
-        for name in ["cat.pcraft", "cat.jpeg", "cat.gif", "cat.bmp", "cat.dng"] {
-            app.session.active_mut().unwrap().path = Some(name.into());
+        for name in ["cat.pcraft", "cat.jpeg", "cat.gif", "cat.bmp", "cat.dng", "cat.mpo", "cat.jps"] {
+            let state = app.session.active_mut().unwrap();
+            state.path = Some(name.into());
+            Arc::make_mut(&mut state.doc).stereo = name.ends_with(".mpo") || name.ends_with(".jps");
             let _ = invoke(&mut app, "file.saveAs");
         }
         let _ = invoke(&mut app, "file.saveACopy");
@@ -875,13 +881,13 @@ mod tests {
         let exts: Vec<&str> = asked.iter().filter_map(|s| s.rsplit_once('.').map(|(_, e)| e)).collect();
         // The extension each save above should suggest, in order.
         let want = [
-            "psd",                       // Save As untitled
-            "pcraft jpeg gif bmp psd",   // Save As opened .pcraft .jpeg .gif .bmp .dng
-            "psd",                       // Save a Copy
-            "png jpg webp tif tga",      // Export As
-            "png jpg gif webp",          // Quick Export
-            "gif png png jpg wbmp html", // Save for Web: gif png8 png24 jpeg wbmp, then with slices
-            "csv pcpresets",             // Measurement Log, Export Presets
+            "psd",                             // Save As untitled
+            "pcraft jpeg gif bmp psd mpo jps", // Save As preserves writable formats, including stereo pairs
+            "psd",                             // Save a Copy
+            "png jpg webp tif tga",            // Export As
+            "png jpg gif webp",                // Quick Export
+            "gif png png jpg wbmp html",       // Save for Web: gif png8 png24 jpeg wbmp, then with slices
+            "csv pcpresets",                   // Measurement Log, Export Presets
         ]
         .join(" ");
         assert_eq!(exts, want.split(' ').collect::<Vec<_>>());
@@ -895,8 +901,8 @@ mod tests {
     /// Every flat format Save As offers is one PhotoCraft writes, and ICO is among them (#4357).
     #[test]
     fn save_as_offers_only_writable_formats_including_ico() {
-        // Layered formats, and PDF, are written by `photocraft-io`, not a codec.
-        let layered = ["psd", "psb", "pcraft", "ora", "pdf"];
+        // These containers, including stereo pairs, are dispatched by `photocraft-io`.
+        let layered = ["psd", "psb", "pcraft", "ora", "pdf", "mpo", "jps"];
         for (name, exts) in SAVE_FILTERS {
             for ext in exts.iter().filter(|e| !layered.contains(e)) {
                 let format = photocraft_codecs::from_extension(ext).unwrap_or_else(|| panic!("{name}: .{ext} is no known format"));
@@ -918,6 +924,19 @@ mod tests {
         assert_eq!(icon.bytes[..4], [0, 0, 1, 0], "an ICO header");
         let err = photocraft_io::export(&doc(300), "icon.ico", &opts).map(|_| ()).unwrap_err().to_string();
         assert!(err.contains("256"), "{err}");
+    }
+
+    #[test]
+    fn stereo_save_filters_select_writable_pair_containers() {
+        let mut doc = Document::new("pair", Size::new(16, 8), ColorMode::Rgb, SampleType::U8);
+        doc.stereo = true;
+        for (ext, label) in [("mpo", "MPO (stereo pair)"), ("jps", "JPS (stereo pair)")] {
+            let path = format!("pair.{ext}");
+            assert_eq!(save_filters(&path)[0].0, label);
+            assert!(OPEN_FILTERS.iter().any(|(name, exts)| *name == label && exts.contains(&ext)));
+            let saved = photocraft_io::export(&doc, &path, &photocraft_io::ExportOptions::default()).unwrap();
+            assert!(photocraft_io::import(&path, &saved.bytes).unwrap().document.stereo);
+        }
     }
 
     /// #4394: with File name extensions shown, Windows kept `image.psd` when the type was changed to

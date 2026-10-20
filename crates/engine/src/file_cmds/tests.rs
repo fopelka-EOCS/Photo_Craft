@@ -1354,3 +1354,38 @@ fn batch_naming_rejects_outputs_that_replace_inputs_before_processing() {
     assert_eq!(std::fs::read(&first).unwrap(), before[0]);
     assert_eq!(std::fs::read(&second).unwrap(), before[1]);
 }
+
+#[test]
+fn batch_folder_includes_stereo_pairs_case_insensitively() {
+    let dir = tmp("stereo-batch");
+    let mut pair = Document::new("pair", photocraft_doc::Size::new(16, 8), photocraft_color::ColorMode::Rgb, photocraft_color::SampleType::U8);
+    pair.stereo = true;
+    let mut wanted = Vec::new();
+    for name in ["a.MPO", "b.JpS"] {
+        let path = join(&dir, name);
+        save_doc(&pair, &path, None).unwrap();
+        wanted.push(path);
+    }
+    std::fs::write(join(&dir, "ignore.txt"), "not an image").unwrap();
+    assert_eq!(list_images(&dir).unwrap(), wanted);
+    for path in wanted {
+        let mut s = Session::new();
+        open_bytes_as(&mut s, &path, &std::fs::read(&path).unwrap(), None, Some(path.clone())).unwrap();
+        assert!(doc(&s).stereo);
+        assert_eq!(doc(&s).size, photocraft_doc::Size::new(16, 8));
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn stereo_documents_need_native_storage_to_retain_their_editable_identity() {
+    let mut doc = Document::new("pair", photocraft_doc::Size::new(16, 8), photocraft_color::ColorMode::Rgb, photocraft_color::SampleType::U8);
+    doc.stereo = true;
+    assert!(holds_at(&doc, "pair.pcraft"));
+    assert!(losses_at(&doc, "pair.pcraft").is_empty());
+    for ext in ["psd", "psb", "ora", "tiff", "jpg"] {
+        let path = format!("pair.{ext}");
+        assert!(!holds_at(&doc, &path), "{ext}");
+        assert!(losses_at(&doc, &path).iter().any(|w| w.contains("stereo metadata")), "{ext}");
+    }
+}

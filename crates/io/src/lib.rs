@@ -345,6 +345,10 @@ fn import_stages(name: &str, bytes: &[u8], ctl: &photocraft_raster::Interrupt, m
     if is_svg_input(name, bytes) {
         return svg::import_svg_with_group_depth(name, bytes, max_group_depth);
     }
+    // Keep both views and normalize their order before editing the canvas.
+    if let Some(layout) = photocraft_codecs::stereo::layout(bytes, has_extension(name, "jps")) {
+        return flat::import_stereo(name, bytes, &layout);
+    }
     flat::import_flat(name, bytes)
 }
 
@@ -384,6 +388,13 @@ pub fn named_for_file<'a>(doc: &'a Document, name: &str) -> std::borrow::Cow<'a,
     }
 }
 
+/// Warn when an export keeps the paired pixels but cannot identify them as stereo on reopen.
+/// Only the native document and the implemented stereo picture formats retain this meaning.
+pub fn stereo_metadata_loss(doc: &Document, name_or_ext: &str) -> Option<&'static str> {
+    (doc.stereo && !matches!(extension(name_or_ext).as_str(), "pcraft" | "mpo" | "jps" | "png"))
+        .then_some("stereo metadata will be lost; the pixels stay side by side. Save as .pcraft to preserve the editable stereo document")
+}
+
 /// Exports `doc` to the format named by `name_or_ext` (a file name, path or
 /// bare extension).
 pub fn export(doc: &Document, name_or_ext: &str, opts: &ExportOptions) -> Result<ExportResult, IoError> {
@@ -396,7 +407,10 @@ pub fn export(doc: &Document, name_or_ext: &str, opts: &ExportOptions) -> Result
 /// export fails with [`IoError::Cancelled`]; otherwise the bytes are exactly [`export`]'s.
 pub fn export_with(doc: &Document, name_or_ext: &str, opts: &ExportOptions, ctl: &photocraft_raster::Interrupt) -> Result<ExportResult, IoError> {
     ctl.check().map_err(|_| IoError::Cancelled)?;
-    let r = export_stages(doc, name_or_ext, opts, ctl)?;
+    let mut r = export_stages(doc, name_or_ext, opts, ctl)?;
+    if let Some(loss) = stereo_metadata_loss(doc, name_or_ext) {
+        r.warnings.push(loss.into());
+    }
     ctl.check().map_err(|_| IoError::Cancelled)?;
     ctl.progress(1.0);
     Ok(r)
@@ -473,6 +487,9 @@ fn export_stages(doc: &Document, name_or_ext: &str, opts: &ExportOptions, ctl: &
         file.header.validate()?;
         let bytes = file.to_bytes()?;
         return Ok(ExportResult { bytes, warnings });
+    }
+    if matches!(ext.as_str(), "mpo" | "jps") || (ext == "png" && doc.stereo) {
+        return flat::export_stereo(doc, &ext, opts, ctl);
     }
     let format = photocraft_codecs::from_extension(&ext).ok_or_else(|| IoError::UnknownFormat(name_or_ext.to_string()))?;
     if format == photocraft_codecs::Format::Tiff && opts.tiff_layers && tiff_layers::would_write_layers(doc) {
