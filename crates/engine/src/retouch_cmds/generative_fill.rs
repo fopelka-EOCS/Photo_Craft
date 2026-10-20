@@ -16,9 +16,9 @@ use super::generative::{CONTEXT, ENHANCE_CONTEXT, Task, filler, task, window_aro
 use super::patch::{coverage, selection_area};
 use super::*;
 use photocraft_doc::{DocId, Layer};
-use std::sync::Arc;
 use photocraft_ml::ModelKind;
 use photocraft_ml::infer::Image;
+use std::sync::Arc;
 
 const CMD: &str = "edit.generativeFill";
 const LABEL: &str = "Generative Fill";
@@ -143,10 +143,14 @@ fn generate(doc: &Document, fill_with: super::generative::Filler, ctx: &crate::j
         return Err(EngineError::Other("internal error: the window's pixels don't match its size".into()));
     }
     ctx.check()?;
-    let rgb: Vec<f32> = img.data.chunks_exact(img.ch).flat_map(|px| {
-        let c = to_rgba(&fmt, px);
-        [c[0], c[1], c[2]].map(|v| v.clamp(0.0, 1.0))
-    }).collect();
+    let rgb: Vec<f32> = img
+        .data
+        .chunks_exact(img.ch)
+        .flat_map(|px| {
+            let c = to_rgba(&fmt, px);
+            [c[0], c[1], c[2]].map(|v| v.clamp(0.0, 1.0))
+        })
+        .collect();
     let hole: Vec<f32> = alpha.iter().map(|a| if *a > 0.01 { 1.0 } else { 0.0 }).collect();
     let scale = (work_limit(mode.kind()) as f64 / w.max(h) as f64).min(1.0);
     let (ww, wh) = (((w as f64 * scale).round() as usize).max(1), ((h as f64 * scale).round() as usize).max(1));
@@ -273,7 +277,11 @@ fn run_mode(s: &mut Session, p: &Value, mode: Mode) -> Result<Value> {
 fn show_variation(s: &mut Session, i: usize) -> Result<Value> {
     const SHOW: &str = "edit.generativeFill.show";
     let g = current(s).ok_or_else(|| bad(SHOW, "Generative Fill isn't open on this document, or the document changed since"))?;
-    let v = g.variations.get(i).cloned().ok_or_else(|| bad(SHOW, format!("there are {} variations; `variation` is 0..{}", g.variations.len(), g.variations.len())))?;
+    let v = g
+        .variations
+        .get(i)
+        .cloned()
+        .ok_or_else(|| bad(SHOW, format!("there are {} variations; `variation` is 0..{}", g.variations.len(), g.variations.len())))?;
     let (above, name, base, label) = (g.above, g.name.clone(), g.base.clone(), g.mode.label());
     let shown_doc = g.shown.as_ref().map(|(_, d)| d.clone());
     if let (Some(d), Some(st)) = (shown_doc, s.active())

@@ -41,7 +41,9 @@ impl SafeTensors {
     pub fn open(path: &Path) -> Result<SafeTensors> {
         let mut file = File::open(path).map_err(|e| Error::io(&format!("Couldn't open {}", path.display()), e))?;
         let size = file.metadata().map(|m| m.len()).unwrap_or(0);
-        let bad = || Error::Invalid(format!("{} isn't a readable .safetensors file.", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()));
+        let bad = || {
+            Error::Invalid(format!("{} isn't a readable .safetensors file.", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()))
+        };
         let mut len = [0u8; 8];
         file.read_exact(&mut len).map_err(|_| bad())?;
         let n = u64::from_le_bytes(len);
@@ -59,7 +61,14 @@ impl SafeTensors {
                 continue;
             }
             let dtype = v.get("dtype").and_then(Value::as_str).ok_or_else(bad)?.to_string();
-            let shape: Vec<usize> = v.get("shape").and_then(Value::as_array).ok_or_else(bad)?.iter().map(|d| d.as_u64().map(|d| d as usize)).collect::<Option<_>>().ok_or_else(bad)?;
+            let shape: Vec<usize> = v
+                .get("shape")
+                .and_then(Value::as_array)
+                .ok_or_else(bad)?
+                .iter()
+                .map(|d| d.as_u64().map(|d| d as usize))
+                .collect::<Option<_>>()
+                .ok_or_else(bad)?;
             let offs = v.get("data_offsets").and_then(Value::as_array).ok_or_else(bad)?;
             let (Some(start), Some(end)) = (offs.first().and_then(Value::as_u64), offs.get(1).and_then(Value::as_u64)) else { return Err(bad()) };
             let elem = elem_size(&dtype);
@@ -86,7 +95,9 @@ impl SafeTensors {
         let mut raw = vec![0u8; (info.end - info.start) as usize];
         {
             let mut f = self.file.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            f.seek(SeekFrom::Start(self.data_start + info.start)).and_then(|_| f.read_exact(&mut raw)).map_err(|e| Error::io("Couldn't read the checkpoint", e))?;
+            f.seek(SeekFrom::Start(self.data_start + info.start))
+                .and_then(|_| f.read_exact(&mut raw))
+                .map_err(|e| Error::io("Couldn't read the checkpoint", e))?;
         }
         let values: Vec<f32> = match info.dtype.as_str() {
             "F32" => raw.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect(),

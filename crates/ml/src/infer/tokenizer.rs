@@ -229,7 +229,9 @@ mod tests {
 
     fn tiny() -> ClipTokenizer {
         let mut vocab = HashMap::new();
-        for (i, t) in ["<|startoftext|>", "<|endoftext|>", "!", "c", "a", "t</w>", "ca", "cat</w>", "s</w>", "a</w>", ",</w>", "1</w>", "2</w>"].iter().enumerate() {
+        for (i, t) in
+            ["<|startoftext|>", "<|endoftext|>", "!", "c", "a", "t</w>", "ca", "cat</w>", "s</w>", "a</w>", ",</w>", "1</w>", "2</w>"].iter().enumerate()
+        {
             vocab.insert(t.to_string(), i as i64 + 10);
         }
         ClipTokenizer::new(vocab, "#version: 0.2\nc a\nca t</w>\n", Some("!")).unwrap()

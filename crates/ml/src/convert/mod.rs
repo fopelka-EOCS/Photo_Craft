@@ -76,7 +76,9 @@ pub fn inspect(ck: &SafeTensors, name: &str) -> Result<Checkpoint> {
             "conditioner.embedders.0.transformer."
         };
         if !any(l) || !any("conditioner.embedders.1.model.transformer.resblocks.") {
-            return Err(Error::Unsupported(format!("{name} is an SDXL model without both of its text encoders (a refiner?), which PhotoCraft can't use for fills.")));
+            return Err(Error::Unsupported(format!(
+                "{name} is an SDXL model without both of its text encoders (a refiner?), which PhotoCraft can't use for fills."
+            )));
         }
         return Ok(Checkpoint {
             version: 3,
@@ -153,7 +155,9 @@ pub fn convert(checkpoint: &Path, out: &Path, vae_from: &[PathBuf], opts: &Optio
         if part == "text_encoder_2" && info.text_2.is_none() {
             continue;
         }
-        if part.starts_with("vae") && let Some(src) = &vae_dir {
+        if part.starts_with("vae")
+            && let Some(src) = &vae_dir
+        {
             for f in ["model.onnx", "model.onnx_data", "weights.pb"] {
                 let from = src.join(part).join(f);
                 if from.is_file() {
@@ -210,7 +214,10 @@ pub fn convert(checkpoint: &Path, out: &Path, vae_from: &[PathBuf], opts: &Optio
     if info.text_2.is_some() {
         files.push(write("tokenizer_2/vocab.json", serde_json::Value::Object(vocab_map()).to_string())?);
         files.push(write("tokenizer_2/merges.txt", CLIP_MERGES.to_string())?);
-        files.push(write("tokenizer_2/tokenizer_config.json", json!({"pad_token": "!", "model_max_length": 77, "tokenizer_class": "CLIPTokenizer"}).to_string())?);
+        files.push(write(
+            "tokenizer_2/tokenizer_config.json",
+            json!({"pad_token": "!", "model_max_length": 77, "tokenizer_class": "CLIPTokenizer"}).to_string(),
+        )?);
     }
     files.push(write("vae_decoder/config.json", json!({"scaling_factor": info.scaling()}).to_string())?);
     files.push(write(
@@ -264,7 +271,10 @@ pub fn checkpoint_to_convert(files: &[PathBuf]) -> Option<&PathBuf> {
     if has_pipeline {
         return None;
     }
-    files.iter().filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("safetensors"))).max_by_key(|p| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0))
+    files
+        .iter()
+        .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("safetensors")))
+        .max_by_key(|p| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0))
 }
 
 #[cfg(test)]

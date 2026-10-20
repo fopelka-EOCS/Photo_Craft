@@ -62,7 +62,9 @@ fn probe(net: &dyn super::net::Network) -> Result<(Port, usize, usize)> {
     let ins = net.inputs();
     let port = ins.iter().find(|p| p.shape.len() == 4).or(ins.first()).cloned().ok_or_else(|| Error::Invalid("The model has no image input.".into()))?;
     if ins.len() > 1 {
-        return Err(Error::Unsupported("This model takes more than an image, so it can't enhance (choose a super-resolution model or a Stable Diffusion model).".into()));
+        return Err(Error::Unsupported(
+            "This model takes more than an image, so it can't enhance (choose a super-resolution model or a Stable Diffusion model).".into(),
+        ));
     }
     let fixed = |i: usize| port.shape.get(i).copied().filter(|v| *v > 0).map(|v| v as usize);
     let (pw, ph) = (fixed(3).unwrap_or(32), fixed(2).unwrap_or(32));
@@ -72,7 +74,10 @@ fn probe(net: &dyn super::net::Network) -> Result<(Port, usize, usize)> {
     let (ow, oh) = (d.get(3).copied().unwrap_or(0), d.get(2).copied().unwrap_or(0));
     let scale = (ow / pw.max(1)).max(oh / ph.max(1)).max(1);
     if d.get(1) != Some(&3) || ow % pw != 0 || oh % ph != 0 || scale > 8 {
-        return Err(Error::Unsupported("This model's result isn't the picture made larger, so it can't enhance. Choose a super-resolution model (×2, ×4) or a Stable Diffusion model.".into()));
+        return Err(Error::Unsupported(
+            "This model's result isn't the picture made larger, so it can't enhance. Choose a super-resolution model (×2, ×4) or a Stable Diffusion model."
+                .into(),
+        ));
     }
     let fixed_w = fixed(3).unwrap_or(0);
     Ok((port, scale, fixed_w))
@@ -318,10 +323,12 @@ mod tests {
         let model = Model { name: "same".into(), files: vec![dir.join("same.onnx")], catalog_id: None };
         let (w, h) = (300, 260);
         // A fine checkerboard of "bricks" 3 px wide.
-        let rgb: Vec<f32> = (0..w * h).flat_map(|i| {
-            let v = if ((i % w) / 3 + (i / w) / 3) % 2 == 0 { 0.8 } else { 0.2 };
-            [v, v * 0.6, v * 0.4]
-        }).collect();
+        let rgb: Vec<f32> = (0..w * h)
+            .flat_map(|i| {
+                let v = if ((i % w) / 3 + (i / w) / 3) % 2 == 0 { 0.8 } else { 0.2 };
+                [v, v * 0.6, v * 0.4]
+            })
+            .collect();
         let contrast = |px: &[f32]| -> f32 {
             let mut s = 0.0;
             for y in 0..h {

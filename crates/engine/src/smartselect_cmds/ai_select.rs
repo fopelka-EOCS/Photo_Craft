@@ -93,12 +93,9 @@ fn ai_object(s: &mut Session, p: &Value) -> Result<Value> {
     let probe = match &ask {
         Ask::Box(r) => r.intersect(&canvas),
         Ask::Point(x, y) => Rect::from_xywh(x.floor() as i32, y.floor() as i32, 1, 1).intersect(&canvas),
-        Ask::Stroke(pts) => pts
-            .iter()
-            .map(|(x, y)| Rect::from_xywh(x.floor() as i32, y.floor() as i32, 1, 1))
-            .reduce(|a, b| a.union(&b))
-            .unwrap_or_default()
-            .intersect(&canvas),
+        Ask::Stroke(pts) => {
+            pts.iter().map(|(x, y)| Rect::from_xywh(x.floor() as i32, y.floor() as i32, 1, 1)).reduce(|a, b| a.union(&b)).unwrap_or_default().intersect(&canvas)
+        }
     };
     if probe.is_empty() {
         return Err(bad(CMD, "that's outside the canvas"));

@@ -312,7 +312,12 @@ fn an_sdxl_checkpoint_fills_after_it_is_prepared() {
     let mut s = doc();
     s.set_models(Some(m));
     let before = px(&s, 70, 40);
-    let r = s.execute("paint.generativeInfill", json!({"points": [[70, 30], [70, 50]], "size": 16, "prompt": "a cat", "negativePrompt": "a dog", "seed": 5, "steps": 2})).unwrap();
+    let r = s
+        .execute(
+            "paint.generativeInfill",
+            json!({"points": [[70, 30], [70, 50]], "size": 16, "prompt": "a cat", "negativePrompt": "a dog", "seed": 5, "steps": 2}),
+        )
+        .unwrap();
     assert_eq!(r["seed"], 5, "{r}");
     assert_ne!(px(&s, 70, 40), before);
     assert_eq!(px(&s, 95, 5), [1.0, 1.0, 1.0, 1.0], "outside the stroke, unchanged");

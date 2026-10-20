@@ -200,7 +200,8 @@ impl Manager {
     /// Switches every use of a model on or off at once.
     pub fn set_enabled_everywhere(&self, id: &str, on: bool) -> Result<()> {
         let mut inner = self.lock();
-        let kinds = inner.store.models().iter().find(|m| m.id == id).map(|m| m.kinds.clone()).ok_or_else(|| Error::NotFound("That model isn't installed.".into()))?;
+        let kinds =
+            inner.store.models().iter().find(|m| m.id == id).map(|m| m.kinds.clone()).ok_or_else(|| Error::NotFound("That model isn't installed.".into()))?;
         for k in kinds {
             inner.store.set_enabled(id, k, on)?;
         }

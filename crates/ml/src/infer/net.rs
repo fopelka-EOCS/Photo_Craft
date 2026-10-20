@@ -307,12 +307,18 @@ mod ort_impl {
         let f16 = |v: Vec<f32>| v.into_iter().map(half::f16::from_f32).collect::<Vec<_>>();
         Ok(match (t.data, want) {
             (Data::F32(v), Elem::F16) => ort::value::Tensor::<half::f16>::from_array((shape, f16(v)))?.into_dyn(),
-            (Data::F32(v), Elem::I64) => ort::value::Tensor::<i64>::from_array((shape, v.into_iter().map(|x| x.round() as i64).collect::<Vec<_>>()))?.into_dyn(),
-            (Data::F32(v), Elem::I32) => ort::value::Tensor::<i32>::from_array((shape, v.into_iter().map(|x| x.round() as i32).collect::<Vec<_>>()))?.into_dyn(),
-            (Data::F32(v), _) => ort::value::Tensor::<f32>::from_array((shape, v))?.into_dyn(),
-            (Data::I64(v), Elem::I32) => {
-                ort::value::Tensor::<i32>::from_array((shape, v.into_iter().map(|x| x.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32).collect::<Vec<_>>()))?.into_dyn()
+            (Data::F32(v), Elem::I64) => {
+                ort::value::Tensor::<i64>::from_array((shape, v.into_iter().map(|x| x.round() as i64).collect::<Vec<_>>()))?.into_dyn()
             }
+            (Data::F32(v), Elem::I32) => {
+                ort::value::Tensor::<i32>::from_array((shape, v.into_iter().map(|x| x.round() as i32).collect::<Vec<_>>()))?.into_dyn()
+            }
+            (Data::F32(v), _) => ort::value::Tensor::<f32>::from_array((shape, v))?.into_dyn(),
+            (Data::I64(v), Elem::I32) => ort::value::Tensor::<i32>::from_array((
+                shape,
+                v.into_iter().map(|x| x.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32).collect::<Vec<_>>(),
+            ))?
+            .into_dyn(),
             (Data::I64(v), Elem::F32) => ort::value::Tensor::<f32>::from_array((shape, v.into_iter().map(|x| x as f32).collect::<Vec<_>>()))?.into_dyn(),
             (Data::I64(v), Elem::F16) => ort::value::Tensor::<half::f16>::from_array((shape, f16(v.into_iter().map(|x| x as f32).collect())))?.into_dyn(),
             (Data::I64(v), _) => ort::value::Tensor::<i64>::from_array((shape, v))?.into_dyn(),

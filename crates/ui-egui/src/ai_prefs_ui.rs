@@ -316,10 +316,7 @@ fn kind_device_row(ui: &mut Ui, kind: ModelKind, m: &Manager, error: &mut Option
         let mut current = own.map_or("main", Device::id).to_string();
         let mut options: Vec<(String, &str)> = vec![("main".to_string(), tl!("As above"))];
         options.extend(
-            Device::ALL
-                .into_iter()
-                .filter(|d| cfg!(windows) || *d != Device::Npu || own == Some(Device::Npu))
-                .map(|d| (d.id().to_string(), tl!(d.title()))),
+            Device::ALL.into_iter().filter(|d| cfg!(windows) || *d != Device::Npu || own == Some(Device::Npu)).map(|d| (d.id().to_string(), tl!(d.title()))),
         );
         if crate::widgets::dropdown(ui, &format!("ai-device-{}", kind.id()), &mut current, &options, 170.0)
             && let Err(e) = m.set_kind_device(kind, Device::from_id(&current))
@@ -449,17 +446,24 @@ fn import_panel(ui: &mut Ui, st: &mut Map<String, Value>, m: &Manager, error: &m
                     st.insert(PICK_FILES.into(), json!({"kinds": kinds.iter().map(|k| k.id()).collect::<Vec<_>>(), "auto": auto, "name": name}));
                 }
                 if crate::widgets::secondary_button(ui, tl!("Choose Folder…"), 110.0)
-                    .on_hover_text(tl!("A Stable Diffusion ONNX pipeline folder (model_index.json with unet, text_encoder, vae_encoder and vae_decoder folders)"))
+                    .on_hover_text(tl!(
+                        "A Stable Diffusion ONNX pipeline folder (model_index.json with unet, text_encoder, vae_encoder and vae_decoder folders)"
+                    ))
                     .clicked()
                 {
-                    st.insert(PICK_FILES.into(), json!({"kinds": kinds.iter().map(|k| k.id()).collect::<Vec<_>>(), "auto": auto, "name": name, "folder": true}));
+                    st.insert(
+                        PICK_FILES.into(),
+                        json!({"kinds": kinds.iter().map(|k| k.id()).collect::<Vec<_>>(), "auto": auto, "name": name, "folder": true}),
+                    );
                 }
             });
             ui.horizontal(|ui| {
                 ui.label(
-                    RichText::new(tl!("ONNX, safetensors, checkpoint or GGUF files (pick an ONNX model and its .data file together), or a diffusion pipeline's folder."))
-                        .size(11.0)
-                        .color(t.text_faint),
+                    RichText::new(tl!(
+                        "ONNX, safetensors, checkpoint or GGUF files (pick an ONNX model and its .data file together), or a diffusion pipeline's folder."
+                    ))
+                    .size(11.0)
+                    .color(t.text_faint),
                 );
             });
         }

@@ -24,15 +24,8 @@ pub enum ModelKind {
 
 impl ModelKind {
     /// The AI tab's section order.
-    pub const ALL: [ModelKind; 7] = [
-        ModelKind::Segmentation,
-        ModelKind::Matting,
-        ModelKind::Removal,
-        ModelKind::Reflection,
-        ModelKind::Inpainting,
-        ModelKind::Enhance,
-        ModelKind::Other,
-    ];
+    pub const ALL: [ModelKind; 7] =
+        [ModelKind::Segmentation, ModelKind::Matting, ModelKind::Removal, ModelKind::Reflection, ModelKind::Inpainting, ModelKind::Enhance, ModelKind::Other];
 
     /// Section heading in the AI tab.
     pub fn title(self) -> &'static str {
@@ -96,7 +89,22 @@ pub fn detect(text: &str) -> Vec<ModelKind> {
     let starts = |p: &str| words.iter().any(|w| w.starts_with(p));
     let has = |p: &str| lower.contains(p);
     let mut out = Vec::new();
-    if has("esrgan") || has("swinir") || has("upscal") || has("super-res") || has("superres") || word("4x") || word("x4") || word("2x") || word("x2") || has("4x_") || has("_x4") || has("_x2") || has("nomos") || has("ultrasharp") || has("realsr") {
+    if has("esrgan")
+        || has("swinir")
+        || has("upscal")
+        || has("super-res")
+        || has("superres")
+        || word("4x")
+        || word("x4")
+        || word("2x")
+        || word("x2")
+        || has("4x_")
+        || has("_x4")
+        || has("_x2")
+        || has("nomos")
+        || has("ultrasharp")
+        || has("realsr")
+    {
         out.push(ModelKind::Enhance);
     }
     if has("reflection") || starts("dereflect") || word("dsrnet") || word("errnet") || word("rdnet") {

@@ -208,10 +208,7 @@ fn single(model: &Model) -> Result<&PathBuf> {
 }
 
 fn not_onnx(model: &Model) -> Error {
-    Error::Unsupported(format!(
-        "{} isn't an ONNX model, so it can't run. AI Object Selection and the removal brushes run .onnx models.",
-        model.name
-    ))
+    Error::Unsupported(format!("{} isn't an ONNX model, so it can't run. AI Object Selection and the removal brushes run .onnx models.", model.name))
 }
 
 // ---------------------------------------------------------------------------------------------

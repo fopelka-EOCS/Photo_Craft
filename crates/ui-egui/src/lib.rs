@@ -2939,9 +2939,9 @@ mod view_sync_tests;
 mod stamp_tests;
 
 #[cfg(test)]
-mod alt_click_tests;
-#[cfg(test)]
 mod ai_screenshot_tests;
+#[cfg(test)]
+mod alt_click_tests;
 #[cfg(test)]
 mod status_bar_tests;
 #[cfg(test)]

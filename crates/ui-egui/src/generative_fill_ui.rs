@@ -51,7 +51,12 @@ pub fn open_sharpen(app: &mut PhotocraftApp) -> Result<Value, String> {
 fn open_mode(app: &mut PhotocraftApp, sharpen: bool) -> Result<Value, String> {
     let st = app.session.active().ok_or("no document")?;
     if st.doc.selection.is_none() {
-        return Err(if sharpen { "Make a selection first: Generative Sharpen sharpens the selection" } else { "Make a selection first: Generative Fill fills the selection" }.into());
+        return Err(if sharpen {
+            "Make a selection first: Generative Sharpen sharpens the selection"
+        } else {
+            "Make a selection first: Generative Fill fills the selection"
+        }
+        .into());
     }
     // A dialog left over from before (it can't be: Cancel and OK clear it) is forgotten.
     let _ = app.run("edit.generativeFill.cancel", json!({}));

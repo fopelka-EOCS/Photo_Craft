@@ -431,8 +431,13 @@ pub fn diffuse_with(loader: &dyn Loader, model: &Model, img: &Image, hole: &[f32
                 }
                 _ => (embed(&te, &tokenizer, &texts.0)?, embed(&te, &tokenizer, &texts.1)?, None),
             };
-            *EMBEDDED.lock().unwrap_or_else(PoisonError::into_inner) =
-                Some(Embedded { encoder: parts.text_encoder.clone(), texts: texts.clone(), cond: cond.clone(), uncond: uncond.clone(), pooled: pooled.clone() });
+            *EMBEDDED.lock().unwrap_or_else(PoisonError::into_inner) = Some(Embedded {
+                encoder: parts.text_encoder.clone(),
+                texts: texts.clone(),
+                cond: cond.clone(),
+                uncond: uncond.clone(),
+                pooled: pooled.clone(),
+            });
             (cond, uncond, pooled)
         }
     };
@@ -452,7 +457,8 @@ pub fn diffuse_with(loader: &dyn Loader, model: &Model, img: &Image, hole: &[f32
         .and_then(|v| v.get("scaling_factor").and_then(Value::as_f64))
         .unwrap_or(0.182_15) as f32;
     step(report, 0.06, "Reading the image…")?;
-    let vae_enc_path = parts.vae_encoder.as_ref().ok_or_else(|| Error::Unsupported(format!("{} has no vae_encoder, so it can't see the image.", model.name)))?;
+    let vae_enc_path =
+        parts.vae_encoder.as_ref().ok_or_else(|| Error::Unsupported(format!("{} has no vae_encoder, so it can't see the image.", model.name)))?;
     let vae_enc = load(loader, vae_enc_path)?;
     let enc_in = vae_enc.inputs();
     let enc_port = find_port(&enc_in, &["sample"], 4).ok_or_else(|| Error::Invalid("The image encoder has no image input.".into()))?;
@@ -473,12 +479,8 @@ pub fn diffuse_with(loader: &dyn Loader, model: &Model, img: &Image, hole: &[f32
     };
 
     // Denoising.
-    let config = parts
-        .scheduler
-        .as_ref()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-        .unwrap_or(Value::Null);
+    let config =
+        parts.scheduler.as_ref().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str::<Value>(&t).ok()).unwrap_or(Value::Null);
     let schedule = Schedule::new(&config, steps);
     let mut rng = Rng(seed);
     let ln = lw * lh * 4;
@@ -517,11 +519,7 @@ pub fn diffuse_with(loader: &dyn Loader, model: &Model, img: &Image, hole: &[f32
             if let Some(first) = hs.first_mut() {
                 *first = b;
             }
-            let mut ins = vec![
-                (sample.name.clone(), Tensor::f32(&s, xs)),
-                (timestep.name.clone(), ts.clone()),
-                (hidden.name.clone(), Tensor::f32(&hs, emb)),
-            ];
+            let mut ins = vec![(sample.name.clone(), Tensor::f32(&s, xs)), (timestep.name.clone(), ts.clone()), (hidden.name.clone(), Tensor::f32(&hs, emb))];
             if let Some((pc, pu)) = &pooled {
                 let width = pc.shape.last().copied().unwrap_or(0);
                 let mut pv = Vec::new();

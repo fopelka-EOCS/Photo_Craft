@@ -96,7 +96,8 @@ pub fn finish_ai_object_selection(app: &mut PhotocraftApp, start: [f64; 2], end:
         (false, true) => "subtract",
         (false, false) => "replace",
     };
-    let mut p = json!({"mode": mode, "sampleAllLayers": app.ui.tool_options.sample_all.ai_object_selection, "model": model_param(app, Tool::AiObjectSelection)});
+    let mut p =
+        json!({"mode": mode, "sampleAllLayers": app.ui.tool_options.sample_all.ai_object_selection, "model": model_param(app, Tool::AiObjectSelection)});
     if w < 2.0 || h < 2.0 {
         p["point"] = json!([end[0], end[1]]);
     } else {
@@ -186,7 +187,9 @@ pub(crate) fn prompt_fields(ui: &mut egui::Ui, id: &str, prompt: &mut String, ne
     }
     ui.add_space(4.0);
     label(ui, tl!("Negative prompt"));
-    ui.add(egui::TextEdit::multiline(negative).id_salt((id, "negative")).hint_text(tl!("What to avoid, e.g. blurry, text")).desired_rows(2).desired_width(width));
+    ui.add(
+        egui::TextEdit::multiline(negative).id_salt((id, "negative")).hint_text(tl!("What to avoid, e.g. blurry, text")).desired_rows(2).desired_width(width),
+    );
     ui.add_space(4.0);
     label(ui, tl!("Seed"));
     ui.horizontal(|ui| {
@@ -255,7 +258,11 @@ fn prompt_button(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             egui::Popup::close_all(ui.ctx());
         }
         ui.add_space(4.0);
-        ui.label(egui::RichText::new(tl!("All three can be left empty. Paint over the area; it fills when you let go.")).color(Tokens::get(ui.ctx()).text_dim).size(11.5));
+        ui.label(
+            egui::RichText::new(tl!("All three can be left empty. Paint over the area; it fills when you let go."))
+                .color(Tokens::get(ui.ctx()).text_dim)
+                .size(11.5),
+        );
     });
 }
 

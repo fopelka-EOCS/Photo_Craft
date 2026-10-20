@@ -73,7 +73,11 @@ fn rig(tag: &str, channels: i64, batch: i64) -> Rig {
     }
     std::fs::write(dir.join("vocab.json"), Value::Object(vocab).to_string()).unwrap();
     std::fs::write(dir.join("merges.txt"), "#version: 0.2\nc a\nca t</w>\n").unwrap();
-    std::fs::write(dir.join("scheduler_config.json"), r#"{"beta_schedule":"scaled_linear","beta_start":0.00085,"beta_end":0.012,"num_train_timesteps":1000,"steps_offset":1,"timestep_spacing":"leading"}"#).unwrap();
+    std::fs::write(
+        dir.join("scheduler_config.json"),
+        r#"{"beta_schedule":"scaled_linear","beta_start":0.00085,"beta_end":0.012,"num_train_timesteps":1000,"steps_offset":1,"timestep_spacing":"leading"}"#,
+    )
+    .unwrap();
     let names = ["text_encoder.onnx", "unet.onnx", "vae_encoder.onnx", "vae_decoder.onnx", "vocab.json", "merges.txt", "scheduler_config.json"];
     for n in names.iter().filter(|n| n.ends_with(".onnx")) {
         std::fs::write(dir.join(n), b"x").unwrap();
@@ -94,7 +98,11 @@ fn rig(tag: &str, channels: i64, batch: i64) -> Rig {
         seen: none(),
     };
     let unet = Fake {
-        inputs: vec![port("sample", Elem::F16, &[batch, channels, -1, -1]), port("timestep", Elem::F16, &[-1]), port("encoder_hidden_states", Elem::F16, &[batch, 77, 8])],
+        inputs: vec![
+            port("sample", Elem::F16, &[batch, channels, -1, -1]),
+            port("timestep", Elem::F16, &[-1]),
+            port("encoder_hidden_states", Elem::F16, &[batch, 77, 8]),
+        ],
         f: Box::new(|ins| {
             let s = get(ins, "sample");
             let b = s.shape[0];
@@ -164,7 +172,10 @@ fn hole_in_middle(w: usize, h: usize) -> Vec<f32> {
 
 #[test]
 fn the_schedule_matches_diffusers_ddim() {
-    let config: Value = serde_json::from_str(r#"{"beta_schedule":"scaled_linear","beta_start":0.00085,"beta_end":0.012,"num_train_timesteps":1000,"steps_offset":1,"timestep_spacing":"leading"}"#).unwrap();
+    let config: Value = serde_json::from_str(
+        r#"{"beta_schedule":"scaled_linear","beta_start":0.00085,"beta_end":0.012,"num_train_timesteps":1000,"steps_offset":1,"timestep_spacing":"leading"}"#,
+    )
+    .unwrap();
     let s = Schedule::new(&config, 25);
     assert_eq!(s.timesteps.len(), 25);
     assert_eq!(s.timesteps.first(), Some(&961));

@@ -116,7 +116,17 @@ impl Graph {
         let data_name = format!("{}_data", model.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "model.onnx".into()));
         let data_path = model.with_file_name(&data_name);
         let file = File::create(&data_path).map_err(|e| Error::io(&format!("Couldn't create {}", data_path.display()), e))?;
-        Ok(Graph { nodes: Vec::new(), inits: Vec::new(), inputs: Vec::new(), outputs: Vec::new(), data: BufWriter::with_capacity(1 << 20, file), data_name, offset: 0, counter: 0, elem })
+        Ok(Graph {
+            nodes: Vec::new(),
+            inits: Vec::new(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            data: BufWriter::with_capacity(1 << 20, file),
+            data_name,
+            offset: 0,
+            counter: 0,
+            elem,
+        })
     }
 
     fn fresh(&mut self, hint: &str) -> String {

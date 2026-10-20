@@ -150,7 +150,8 @@ pub fn unet(b: &mut Builder, heads: Heads) -> Result<()> {
     // embedded, add to the timestep's embedding.
     if b.has(&p("label_emb.0.0.weight")) {
         let width = b.shape(&p("label_emb.0.0.weight"))?.get(1).copied().unwrap_or(2816);
-        let pooled = b.shape("conditioner.embedders.1.model.text_projection").ok().and_then(|s| s.get(1).copied()).unwrap_or_else(|| width.saturating_sub(6 * 256));
+        let pooled =
+            b.shape("conditioner.embedders.1.model.text_projection").ok().and_then(|s| s.get(1).copied()).unwrap_or_else(|| width.saturating_sub(6 * 256));
         let tdim = width.saturating_sub(pooled) / 6;
         let text_embeds = b.g.input("text_embeds", b.g.elem, vec![dyn_dim("batch"), Dim::Fixed(pooled as i64)]);
         let time_ids = b.g.input("time_ids", b.g.elem, vec![dyn_dim("batch"), Dim::Fixed(6)]);
@@ -358,9 +359,13 @@ pub fn text_encoder(b: &mut Builder, text: &Text, heads: i64, length: usize, out
             format!("{prefix}final_layer_norm"),
             false,
         ),
-        Text::OpenClip { prefix } => {
-            (format!("{prefix}token_embedding.weight"), format!("{prefix}positional_embedding"), format!("{prefix}transformer.resblocks."), format!("{prefix}ln_final"), true)
-        }
+        Text::OpenClip { prefix } => (
+            format!("{prefix}token_embedding.weight"),
+            format!("{prefix}positional_embedding"),
+            format!("{prefix}transformer.resblocks."),
+            format!("{prefix}ln_final"),
+            true,
+        ),
     };
     let dim = b.shape(&tok)?.get(1).copied().unwrap_or(768);
     let table = b.weight(&tok)?;
@@ -378,8 +383,20 @@ pub fn text_encoder(b: &mut Builder, text: &Text, heads: i64, length: usize, out
     }
     let used = match out {
         // SD 2 takes OpenCLIP's next-to-last layer.
-        TextOut::Final { skip_last } => if skip_last { n.saturating_sub(1) } else { n },
-        TextOut::Penultimate { pooled } => if pooled { n } else { n.saturating_sub(1) },
+        TextOut::Final { skip_last } => {
+            if skip_last {
+                n.saturating_sub(1)
+            } else {
+                n
+            }
+        }
+        TextOut::Penultimate { pooled } => {
+            if pooled {
+                n
+            } else {
+                n.saturating_sub(1)
+            }
+        }
     };
     let mut penultimate = None;
     for l in 0..used {

@@ -276,11 +276,11 @@ pub(crate) fn pipeline_files_in(dir: &std::path::Path) -> Result<Vec<(std::path:
     }
     let r = diffusion_pipeline("local/folder", "main", "", &entries).ok_or_else(|| {
         Error::Invalid(
-            "That folder isn't an ONNX diffusion pipeline: it needs model_index.json and unet, text_encoder and vae_decoder folders with model.onnx in each.".into(),
+            "That folder isn't an ONNX diffusion pipeline: it needs model_index.json and unet, text_encoder and vae_decoder folders with model.onnx in each."
+                .into(),
         )
     })?;
-    Ok(r
-        .files
+    Ok(r.files
         .into_iter()
         .filter_map(|f| {
             let rel = f.url.rsplit_once("/resolve/main/").map(|(_, r)| percent_decode(r))?;
@@ -451,7 +451,8 @@ mod tests {
             ("vae_decoder/model.onnx", 99_093_889),
             ("vae_encoder/model.onnx", 68_430_178),
         ]);
-        let r = Link::parse("someone/sd-inpainting-onnx").unwrap().resolve(&|u: &str| if u.contains("/tree/") { Ok(t.clone()) } else { Ok(json!({})) }).unwrap();
+        let r =
+            Link::parse("someone/sd-inpainting-onnx").unwrap().resolve(&|u: &str| if u.contains("/tree/") { Ok(t.clone()) } else { Ok(json!({})) }).unwrap();
         let mut names: Vec<&str> = r.files.iter().map(|f| f.name.as_str()).collect();
         names.sort_unstable();
         assert_eq!(
