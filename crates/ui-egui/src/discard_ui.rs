@@ -962,6 +962,9 @@ mod tests {
     #[path = "dds_tests.rs"]
     mod dds_tests;
 
+    #[path = "pdf_tests.rs"]
+    mod pdf_tests;
+
     /// One frame with the window's close button pressed; the commands the guard sent.
     fn window_close_commands(app: &mut PhotocraftApp) -> Vec<egui::ViewportCommand> {
         let mut info = egui::ViewportInfo::default();

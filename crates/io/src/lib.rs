@@ -54,6 +54,7 @@ mod ora;
 pub use ora::losses as ora_losses;
 pub mod pattern_map;
 pub mod pdf;
+pub use pdf::{PdfOptions, PdfX1a};
 mod pdn;
 pub mod pixels;
 mod psd_export;
@@ -220,6 +221,8 @@ pub struct ExportOptions {
     /// The path of the document's own file, which linked smart objects that PSD/PSB and layered
     /// TIFF embed are resolved against ([`doc_path::resolve`]).
     pub document_path: Option<std::path::PathBuf>,
+    /// PDF: plain, or PDF/X-1a:2001 for print (Save As asks in PDF Options).
+    pub pdf: pdf::PdfOptions,
 }
 
 impl Default for ExportOptions {
@@ -233,6 +236,7 @@ impl Default for ExportOptions {
             image_previews: true,
             psd_maximize_compatibility: true,
             document_path: None,
+            pdf: pdf::PdfOptions::default(),
         }
     }
 }
@@ -432,7 +436,7 @@ fn export_stages(doc: &Document, name_or_ext: &str, opts: &ExportOptions, ctl: &
         return ora::export(doc);
     }
     if ext == "pdf" {
-        return pdf::export(doc);
+        return pdf::export_with_options(doc, &opts.pdf);
     }
     if ext == photocraft_format::EXTENSION {
         let doc = named_for_file(doc, name_or_ext);
