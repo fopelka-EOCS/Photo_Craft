@@ -405,10 +405,15 @@ impl LiquifyDialog {
                 return;
             }
             self.view_out.resize(len, [0; 4]);
+            if !try_view_blend(self.selection.as_ref(), bounds, &mut self.view_blend) {
+                self.view_bounds = None;
+                self.view_tex = None;
+                self.view_dirty = None;
+                return;
+            }
             self.view_bounds = Some(bounds);
             self.view_tex = None;
             self.view_dirty = Some(bounds);
-            self.view_blend = preview_blend(self.selection.as_ref(), bounds, usize::MAX);
         }
         let Some(dirty) = self.view_dirty.take().map(|r| r.intersect(&bounds)) else { return };
         if dirty.is_empty() {
@@ -494,6 +499,34 @@ impl LiquifyDialog {
 }
 
 /// Cache original pixels and average coverage at the same resolution as the preview.
+/// Full-resolution selection mixing for a zoomed crop. Reserve before reading pixels and reuse
+/// the previous blend allocation, so rebuilding never keeps two crop-sized blends plus a proxy.
+fn try_view_blend(selection: Option<&(Surface, LayerMask)>, bounds: Rect, out: &mut Vec<PreviewBlend>) -> bool {
+    out.clear();
+    let Some((source, mask)) = selection else { return true };
+    if bounds.is_empty() {
+        return false;
+    }
+    let (width, height) = (bounds.width() as usize, bounds.height() as usize);
+    let Some(len) = width.checked_mul(height).filter(|n| *n <= MAX_VIEW_PREVIEW_PIXELS) else { return false };
+    if out.try_reserve(len).is_err() {
+        return false;
+    }
+    let mut row = Vec::new();
+    if row.try_reserve(width).is_err() {
+        return false;
+    }
+    row.resize(width, [0.0; 4]);
+    for y in bounds.y0..bounds.y1 {
+        source.read_rgba_into(Rect::new(bounds.x0, y, bounds.x1, y + 1), &mut row);
+        for (x, pixel) in row.iter().enumerate() {
+            let alpha = if source.format().alpha { pixel[3] } else { 1.0 };
+            out.push(PreviewBlend { original: [pixel[0] * alpha, pixel[1] * alpha, pixel[2] * alpha, alpha], coverage: mask.value(bounds.x0 + x as i32, y) });
+        }
+    }
+    true
+}
+
 fn preview_blend(selection: Option<&(Surface, LayerMask)>, bounds: Rect, max_side: usize) -> Vec<PreviewBlend> {
     let Some((original, mask)) = selection else { return Vec::new() };
     let original = ProxyImage::new(original, bounds, max_side);
@@ -1431,6 +1464,35 @@ mod tests {
         selected.1.enabled = false;
         assert!(preview_blend(Some(&selected), bounds, 2).iter().all(|p| p.coverage == 1.0));
         assert!(preview_blend(None, bounds, 2).is_empty());
+    }
+
+    #[test]
+    fn zoomed_blend_reuses_storage_and_matches_full_resolution_reference() {
+        let bounds = Rect::new(-3, 5, 7, 9);
+        let mut original = Surface::new(photocraft_doc::PixelFormat::RGBA8);
+        original.fill_rect(bounds, &[0.8, 0.4, 0.2, 0.5]);
+        let mut surface = Surface::new(photocraft_doc::PixelFormat::GRAY8);
+        surface.fill_rect(Rect::new(-3, 5, 2, 9), &[1.0]);
+        let mut selected = (original, LayerMask { surface, enabled: true, linked: true, density: 0.5, feather: 0.0 });
+        let mut out = Vec::new();
+        for enabled in [true, false] {
+            selected.1.enabled = enabled;
+            assert!(try_view_blend(Some(&selected), bounds, &mut out));
+            let expected = preview_blend(Some(&selected), bounds, usize::MAX);
+            assert_eq!(out.len(), 40);
+            for (got, want) in out.iter().zip(expected) {
+                assert_eq!(got.original, want.original);
+                assert_eq!(got.coverage, want.coverage);
+            }
+        }
+        let allocation = out.as_ptr();
+        assert!(try_view_blend(Some(&selected), Rect::new(-2, 6, 4, 8), &mut out));
+        assert_eq!(out.len(), 12);
+        assert_eq!(out.as_ptr(), allocation, "panning reuses the crop blend allocation");
+        assert!(!try_view_blend(Some(&selected), Rect::new(0, 0, i32::MAX, i32::MAX), &mut out));
+        assert!(out.is_empty(), "refused crops leave no stale blend entries");
+        assert!(try_view_blend(None, bounds, &mut out));
+        assert!(out.is_empty(), "no selection uses the unblended renderer");
     }
 
     #[test]
