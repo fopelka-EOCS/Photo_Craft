@@ -932,6 +932,10 @@ pub struct FileEncoding {
     /// Lossy WebP quality.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub webp_quality: Option<u8>,
+    /// Some marks an editable WebP frame stack; zero loops forever. Frame order is the
+    /// layer order and durations are the trailing `(N ms)` in each frame layer's name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub webp_animation_loops: Option<u16>,
     /// PNG stereo pairing (the `sTER` chunk's mode byte, PNG Extensions 1.4.0 §3.6): `Some(0)`
     /// side by side, `Some(1)` stacked, so saving a stereo PNG keeps the mark (#6063).
     #[serde(skip_serializing_if = "Option::is_none")]
