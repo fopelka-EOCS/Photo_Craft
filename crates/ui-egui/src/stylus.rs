@@ -499,7 +499,6 @@ impl PenContacts {
         }
         pen
     }
-
 }
 
 /// Turn egui's touch press-and-hold off while a pen contact is down (and through the frame it
