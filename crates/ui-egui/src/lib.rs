@@ -135,6 +135,7 @@ pub mod mask_trash_prompt;
 pub mod menu_catalog;
 pub mod menu_keys;
 pub mod menu_nav;
+mod menu_window;
 pub mod menus;
 pub mod monitor_status;
 pub mod move_box;
@@ -2090,6 +2091,8 @@ impl eframe::App for PhotocraftApp {
         distort_ui::show(self, &ctx);
         camera_raw_ui::show(self, &ctx);
         wide_angle_ui::show(self, &ctx);
+        // The menu bar's menus in windows of their own beside floating documents.
+        menu_window::show(self, &ctx);
         canvas::extra_windows(self, &ctx);
         notices::show(self, &ctx);
         gpu_status::show_fallback(self, &ctx);

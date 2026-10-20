@@ -100,6 +100,13 @@ fn open_id() -> Id {
     Id::new("pc-menu-open")
 }
 
+/// Record that a menu is open this frame, for menus drawn outside the bar's popups
+/// (`menu_window`): [`is_open`] then holds as for the bar's own.
+pub(crate) fn mark_open(ctx: &egui::Context) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|d| d.insert_temp(open_id(), pass));
+}
+
 /// Is one of the menu bar's menus open? (Shortcuts leave the keys to it meanwhile.)
 pub fn is_open(ctx: &egui::Context) -> bool {
     // Only while the menu bar is still drawn (Full Screen Mode hides it with a menu open).

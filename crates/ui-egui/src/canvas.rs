@@ -6019,8 +6019,11 @@ pub(crate) fn block_main_window(ctx: &egui::Context) {
 /// window goes on top for as long as it is open (its menus are drawn inside it, so they'd be
 /// under the document windows otherwise), and back to normal when it closes, which puts the
 /// document windows above it again. Call from the main window's pass, once a frame.
-fn raise_main_window_for_menus(ctx: &egui::Context, wins: &[crate::state::DocWindow]) {
-    let open = !ctx.embed_viewports() && wins.iter().any(|w| w.open) && (egui::Popup::is_any_open(ctx) || crate::menu_nav::is_open(ctx));
+pub(crate) fn raise_main_window_for_menus(ctx: &egui::Context, wins: &[crate::state::DocWindow]) {
+    // Not for the menu bar's menus while they have windows of their own (menu_window.rs):
+    // those are above the document windows already, and the main window must stay beneath them.
+    let bar_menu = crate::menu_nav::is_open(ctx) && crate::menu_window::current(ctx).is_none();
+    let open = !ctx.embed_viewports() && wins.iter().any(|w| w.open) && (egui::Popup::is_any_open(ctx) || bar_menu);
     let id = egui::Id::new("docwin-main-raised");
     let raised = ctx.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
     if open != raised {
@@ -6148,6 +6151,10 @@ pub fn extra_windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     // unsaved-changes prompt is cancelled.
                     wctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 }
+            }
+            if wctx.input(|i| i.pointer.primary_pressed()) {
+                // A press in a document window closes the menu bar's open menu.
+                crate::menu_window::close(ctx);
             }
             let focused = own_window && wctx.input(|i| i.focused);
             let was = wctx.data(|d| d.get_temp::<bool>(focus_id)).unwrap_or(false);

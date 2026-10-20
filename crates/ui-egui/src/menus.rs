@@ -855,7 +855,7 @@ pub(crate) fn reveal_label() -> &'static str {
 
 /// Translate the fixed command label and substitute the currently configured export format.
 /// Reuse the existing translated PNG sentence, so dynamic formats work in every UI language.
-fn translated_menu_label(lang: crate::i18n::Lang, item: &MenuItem) -> String {
+pub(crate) fn translated_menu_label(lang: crate::i18n::Lang, item: &MenuItem) -> String {
     // A document's name is shown as it is.
     if item.id.starts_with(DOCUMENT_ITEM) {
         return item.label.clone();
@@ -1088,7 +1088,7 @@ pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {
 }
 
 /// Background tint of an Edit › Menus colour name.
-fn menu_tint(name: &str) -> Option<egui::Color32> {
+pub(crate) fn menu_tint(name: &str) -> Option<egui::Color32> {
     Some(match name {
         "red" => egui::Color32::from_rgb(190, 60, 60),
         "orange" => egui::Color32::from_rgb(200, 120, 40),
@@ -1140,6 +1140,10 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
     let top_labels: Vec<String> = TOP_MENUS.iter().map(|top| crate::i18n::tr(lang, top).to_string()).collect();
     let preferred: Vec<Option<char>> = TOP_MENUS.iter().map(|top| crate::menu_keys::TOP_PREFERRED.iter().find(|(t, _)| t == top).map(|(_, c)| *c)).collect();
     let top_mnemonics = crate::menu_keys::assign(&top_labels.iter().map(String::as_str).collect::<Vec<_>>(), &preferred);
+    // Beside floating document windows the menus open in windows of their own (menu_window.rs):
+    // the bar only opens, switches and closes them.
+    let hosted = crate::menu_window::hosted(app_ref, ui.ctx());
+    let hosted_top = crate::menu_window::current(ui.ctx()).map(|o| o.top);
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         let v = &mut ui.style_mut().visuals;
@@ -1165,10 +1169,15 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
                     egui::RichText::new(top_labels[k].as_str()).color(t.text_dim).into()
                 };
                 let mut button = egui::Button::new(label);
-                if focused {
+                if focused || hosted_top == Some(k) {
                     button = button.fill(ui.visuals().widgets.hovered.weak_bg_fill);
                 }
                 let title = ui.add(button);
+                if hosted {
+                    crate::menu_window::title(ui.ctx(), k, &title);
+                    buttons.push(title);
+                    continue;
+                }
                 // The bar's close behaviour and style, as a menu (not bar) config so submenus inside
                 // render as submenus.
                 let bar = egui::containers::menu::MenuConfig::find(ui);
@@ -1219,22 +1228,40 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
                 buttons.push(title);
             }
             edge = if rtl { buttons.iter().map(|b| b.rect.left()).fold(edge, f32::min) } else { buttons.iter().map(|b| b.rect.right()).fold(edge, f32::max) };
-            switch_on_hover(ui.ctx(), &buttons);
+            if !hosted {
+                switch_on_hover(ui.ctx(), &buttons);
+            }
             // ← and → step to the menu on that side, so in screen order.
-            let mut tops: Vec<egui::Id> = buttons.iter().map(egui::Popup::default_response_id).collect();
+            let in_order: Vec<egui::Id> = buttons.iter().map(egui::Popup::default_response_id).collect();
+            let mut tops = in_order.clone();
             if rtl {
                 tops.reverse();
             }
-            nav.keys(ui.ctx(), &tops, &mut clicked);
+            if !hosted {
+                nav.keys(ui.ctx(), &tops, &mut clicked);
+            }
             let mut mnemonics = top_mnemonics.clone();
             if rtl {
                 mnemonics.reverse();
             }
             keys.keys(ui.ctx(), &tops, &mnemonics, &mut nav, &mut clicked);
+            if hosted {
+                // Alt / F10 and the mnemonics open a title's popup: its own window shows it.
+                crate::menu_window::adopt_popups(ui.ctx(), &in_order, &buttons);
+                // A press anywhere else in the main window closes the menus.
+                let on_title = buttons.iter().any(|b| b.is_pointer_button_down_on() || b.clicked());
+                if ui.input(|i| i.pointer.primary_pressed()) && !on_title {
+                    crate::menu_window::close(ui.ctx());
+                }
+            }
         });
     });
     keys.store(ui.ctx());
     nav.store(ui.ctx());
+    if hosted && hosted_top.is_some() {
+        // The application's shortcuts leave the keys to the open menu.
+        crate::menu_nav::mark_open(ui.ctx());
+    }
     // No menu open this frame: nothing is kept.
     app.menu_cache = built.into_inner();
     // The press-drag gesture ends with the button (its release was handled by the rows above).
@@ -1536,7 +1563,7 @@ fn submenu_row<R>(ui: &mut egui::Ui, title: egui::WidgetText, content: impl FnOn
 
 /// A submenu header is enabled only while some item under it (at any depth) can run, so a
 /// submenu of greyed items is greyed too instead of opening onto them (#1976).
-fn submenu_enabled(children: &[&MenuItem]) -> bool {
+pub(crate) fn submenu_enabled(children: &[&MenuItem]) -> bool {
     children.iter().any(|c| c.enabled && c.label != "---")
 }
 
