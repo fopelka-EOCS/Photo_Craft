@@ -221,7 +221,9 @@ pub fn apply(app: &mut PhotocraftApp, id: u64, close: bool) -> Result<Value, Str
         error(app, id, &e);
         return Err(e);
     }
-    if let Some(job) = app.monitor_profiles.refresh.take() {
+    if let Some(job) = app.monitor_profiles.refresh {
+        // Keep ownership until its queued event arrives, so automatic cancellation cannot
+        // overwrite an unread status through the generic job handler.
         app.session.cancel_job(job);
         app.monitor_profiles.refresh_again = true;
     }
@@ -549,6 +551,46 @@ mod tests {
             assert_eq!(app.ui.status, "Previous export failed");
             assert!(app.ui.status_error);
             assert!(app.monitor_profiles.refresh.is_none());
+        }
+    }
+
+    #[test]
+    fn applying_during_refresh_preserves_status_when_cancellation_arrives() {
+        for close in [false, true] {
+            for invalid in [false, true] {
+                let mut app = app();
+                app.background_jobs = true;
+                let ctx = egui::Context::default();
+                let id = open(&mut app);
+                poll(&mut app, &ctx);
+                let refresh = app.monitor_profiles.refresh.unwrap();
+                assert!(app.session.job(refresh).is_some());
+                choose(&mut app, id, if invalid { "" } else { "display-p3" });
+                assert_eq!(apply(&mut app, id, close).is_err(), invalid);
+                let status = app.ui.status.clone();
+                let status_error = app.ui.status_error;
+                assert_eq!(status_error, invalid);
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+                loop {
+                    // Apply has cancelled the refresh, but its completion event is still queued.
+                    crate::jobs_ui::tick(&mut app, &ctx);
+                    if !app.session.has_jobs() {
+                        break;
+                    }
+                    assert!(std::time::Instant::now() < deadline, "monitor apply did not finish");
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+                assert_eq!(app.ui.status, status, "close={close}, invalid={invalid}");
+                assert_eq!(app.ui.status_error, status_error);
+                assert!(app.monitor_profiles.refresh.is_none());
+                assert!(!busy(&app));
+                assert_eq!(app.session.color.settings.monitor_profile, if invalid { "auto" } else { "display-p3" });
+                assert_eq!(app.ui.dialog_mut(id).is_none(), close && !invalid);
+                // Consuming the old event also allows the requested replacement refresh to run.
+                poll(&mut app, &ctx);
+                assert!(app.monitor_profiles.refresh.is_some());
+                assert_ne!(app.monitor_profiles.refresh, Some(refresh));
+            }
         }
     }
 
