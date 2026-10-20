@@ -1945,7 +1945,7 @@ impl eframe::App for PhotocraftApp {
         work_area::fit_window(ctx);
         discard_ui::guard_window_close(self, ctx);
         // Background jobs: apply finished ones, keep frames coming, Esc cancels (before the
-        // shortcuts see Esc).
+        // shortcuts see Esc; cancellation on Esc is blocked while splash is active).
         let splash_active = self.splash.as_ref().is_some_and(|s| s.is_active(now));
         if !screen_picker::tick(self, ctx) {
             jobs_ui::tick(self, ctx);

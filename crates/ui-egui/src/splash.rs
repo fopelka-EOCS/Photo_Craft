@@ -41,7 +41,10 @@ impl SplashState {
         if self.start_time <= 0.0 {
             return true;
         }
-        (now - self.start_time) < self.duration
+        let elapsed = now - self.start_time;
+        // Keep active for standard duration, and until CJK fallback font preloading completes
+        // (capped at a 10.0s safety timeout to avoid indefinite stalls on slow font discovery).
+        elapsed < self.duration || (!self.fonts_preloaded && elapsed < 10.0)
     }
 
     /// Dismisses the splash screen immediately, transitioning to the main workspace.
@@ -76,10 +79,15 @@ impl SplashState {
         }
 
         let elapsed = (now - self.start_time).max(0.0);
-        let progress = (elapsed / (self.duration * 0.85)).clamp(0.0, 1.0) as f32;
+        let progress = if !self.fonts_preloaded {
+            (elapsed / (self.duration * 0.85)).clamp(0.0, 0.85) as f32
+        } else {
+            (elapsed / (self.duration * 0.85)).clamp(0.0, 1.0) as f32
+        };
 
-        // Any explicit user click or keypress after 0.4s dismisses the splash screen
-        let dismissed_by_user = ctx.input(|i| i.pointer.any_click() || i.events.iter().any(|e| matches!(e, egui::Event::Key { pressed: true, .. })));
+        // Any explicit user click or keypress after 0.4s dismisses the splash screen once fonts are ready
+        let dismissed_by_user = self.fonts_preloaded
+            && ctx.input(|i| i.pointer.any_click() || i.events.iter().any(|e| matches!(e, egui::Event::Key { pressed: true, .. })));
         if dismissed_by_user && elapsed > 0.4 {
             self.dismiss();
             ctx.request_repaint();
@@ -202,10 +210,31 @@ mod tests {
         splash.start_time = 1.0;
         assert!(splash.is_active(1.5));
         assert!(splash.is_active(2.5));
+
+        // Once fonts are preloaded, the splash finishes after its standard duration.
+        splash.fonts_preloaded = true;
         assert!(!splash.is_active(3.5));
 
         splash.dismiss();
         assert!(!splash.is_active(1.5));
+    }
+
+    /// Verifies that splash screen stays active until CJK fonts are ready, with a safety timeout.
+    #[test]
+    fn splash_remains_active_until_cjk_fonts_ready() {
+        let mut splash = SplashState::new();
+        splash.start_time = 1.0;
+
+        // While font preload is still pending, splash stays active past its 2.2s duration
+        assert!(splash.is_active(3.5));
+        assert!(splash.is_active(8.0));
+
+        // Capped by the 10.0s safety ceiling to prevent indefinite hang
+        assert!(!splash.is_active(12.0));
+
+        // Marking fonts preloaded allows natural expiration
+        splash.fonts_preloaded = true;
+        assert!(!splash.is_active(3.5));
     }
 
     /// Verifies that [`SplashState::default`] initializes state identically to [`SplashState::new`].
