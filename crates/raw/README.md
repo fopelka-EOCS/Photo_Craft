@@ -107,7 +107,7 @@ limit checks peak live development buffers instead of summing disjoint phases. A
 simultaneous scratch bands only when required; normal load balancing and pixels are preserved.
 The default 2 GiB limit is unchanged and excludes caller-owned sensor/document storage.
 
-Files without colour calibration (CR2, NEF, ARW, RW2, ORF, RAF…) have no camera matrix. Every one of
+Files without colour calibration (CR2, NEF, ARW, RW2, ORF, RAF…) carry no camera matrix. Every one of
 them carries a JPEG the camera rendered from the same sensor data, so `fit_look` estimates the
 camera's rendering per file: both the sensor data (white-balanced as `develop` does) and the
 decoded JPEG are reduced to a common grid of at most 256 cells on the long edge, and a 3×3
@@ -120,6 +120,20 @@ the matrix is plausible and the held-out mean CIE76 ΔE drops to at most 85 % of
 Pass it as `DevelopOptions::camera_look`; `develop` then notes "colour fitted to the camera's
 embedded JPEG (mean ΔE …)". The crate cannot decode JPEG itself: `photocraft-io` decodes the
 smallest preview at least 512 pixels long, fits and develops in one go.
+
+Measured camera matrices (`spectral`): for 52 camera models (22 Canon, 11 Nikon, 11 Sony, 3
+Fujifilm, 5 others) plus their aliases and same-sensor bodies (the X-T30, X-T30 II, X-Pro3, X100V,
+X-S10 and X-E4 take the X-T3's), DNG ColorMatrix1/2 and ForwardMatrix1/2 for Standard Illuminant A
+and D65, fitted by LightCraft to the cameras' measured spectral sensitivities from rawtoaces-data
+(Academy Software Foundation, Apache-2.0; the table is copied from LightCraft, see `ATTRIBUTION.md`).
+When no fitted look is used (the fit was rejected) and the file carries no calibration of its own
+(a DNG's, or a measured profile in `cameras.rs`, which always win), `develop` uses them through the
+DNG colour model instead of the neutral fallback and notes "colour from the measured spectral
+sensitivities of …".
+When the camera's JPEG is black and white (a film simulation such as Acros, a monochrome picture
+style), `fit_look` keeps the matrices' colour and fits only the tone curve, from the lightness of
+the same cells; it is used when it lowers the held-out mean L\* error to at most 85 % of the
+matrices' without a curve.
 Camera Raw's tuned import fits at the default exposure and as-shot white balance first,
 then applies the user's Exposure, Temperature and Tint to that same rendering.
 The D5100's measured image area is 4928 × 3264 at (8, 8) in a 4992 × 3280
@@ -131,10 +145,13 @@ For a slightly tighter camera JPEG, fitting can align the reference proxy using 
 90–100% centred search on training cells. It requires a strong correlation improvement and
 retains the held-out colour gates; the developed crop and camera calibration are unchanged.
 
-Without a usable fit (no preview, an unrelated, monochrome or differently shaped one, or a fit that
-does not clearly help) the documented neutral fallback stays: the white-balanced camera channels are
-treated as linear sRGB primaries, with no tone curve (plausible but flat, greyish colours; converting
-to DNG gives calibrated colour), and `develop` says so.
+Without a usable fit (no preview, an unrelated or differently shaped one, or a fit that does not
+clearly help), a camera with measured spectral matrices (see above) develops through them, with no
+tone curve; with a black-and-white preview it keeps them and fits only the tone curve. Only when
+there is no usable look, no calibration in the file and no spectral matrix does the documented
+neutral fallback apply: the white-balanced camera channels are treated as linear sRGB primaries,
+with no tone curve (plausible but flat, greyish colours; converting to DNG gives calibrated
+colour), and `develop` says so.
 
 Measured on 8 Nikon D3200 NEFs (12-bit lossy compressed, indoor scenes) against each file's
 embedded JPEG (mean CIE76 ΔE, 300-pixel grid, full develop output in sRGB): fallback 11.6–26.0,

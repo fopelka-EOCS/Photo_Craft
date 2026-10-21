@@ -40,6 +40,12 @@
 //! estimate of the camera's rendering, not a measured calibration: picture
 //! styles, local tone mapping (Active D-Lighting and the like) and
 //! hue-dependent rendering are approximated by one matrix and one curve.
+//!
+//! A black-and-white reference (a film simulation such as Fujifilm's Acros, a monochrome
+//! picture style) has no colour to fit. When the camera has measured spectral matrices
+//! ([`crate::spectral`]) the look keeps their colour and fits only the tone curve, from the
+//! lightness of the same cells, the way LightCraft does; it is accepted when it lowers the
+//! held-out mean L* error to at most 85 % of the matrices' without a curve.
 
 use std::fmt;
 
@@ -147,6 +153,9 @@ pub struct CameraLook {
     pub delta_e: f64,
     /// The same with the neutral fallback (no calibration, no tone curve).
     pub delta_e_fallback: f64,
+    /// Only the tone curve was fitted (the camera JPEG is black and white): `to_xyz` is the
+    /// camera's measured spectral matrices, and the two errors are L* differences.
+    pub tone_only: bool,
 }
 
 impl CameraLook {
@@ -158,6 +167,12 @@ impl CameraLook {
 
     /// The note `develop` reports.
     pub(crate) fn note(&self) -> String {
+        if self.tone_only {
+            return format!(
+                "tone curve fitted to the camera's black-and-white embedded JPEG (mean L* error {:.1} against it; {:.1} with the neutral fallback); colour from the camera's measured spectral sensitivities",
+                self.delta_e, self.delta_e_fallback
+            );
+        }
         format!("colour fitted to the camera's embedded JPEG (mean ΔE {:.1} against it; {:.1} with the neutral fallback)", self.delta_e, self.delta_e_fallback)
     }
 }
@@ -200,7 +215,12 @@ struct Cell {
 pub fn fit_look(s: &Sensor, opts: &DevelopOptions, reference: &Reference) -> Result<CameraLook, LookRejected> {
     let (gw, mut cells) = grid(s, opts, reference)?;
     align_preview(&mut cells, gw, s.baseline_exposure);
-    fit_cells(&cells, gw, s.baseline_exposure)
+    // Measured matrices, for a black-and-white reference.
+    let spectral = crate::spectral::for_sensor(s).and_then(|c| {
+        let neutral = resolve_neutral(s, opts, &Scale::new(s), &mut Vec::new()).ok()?;
+        c.color_info().balanced_to_xyz_d50(neutral)
+    });
+    fit_cells(&cells, gw, s.baseline_exposure, spectral)
 }
 
 /// Camera JPEGs can show a slightly tighter frame (lens correction, for example).
@@ -503,7 +523,9 @@ fn perceptual(lum: f64) -> f64 {
     (116.0 / 3.0) * (lum.max(0.0) + 0.008).powf(-2.0 / 3.0)
 }
 
-fn fit_cells(cells: &[Cell], gw: usize, baseline_exposure: f64) -> Result<CameraLook, LookRejected> {
+/// `spectral`: the camera's measured balanced camera → XYZ D50 matrix, which a black-and-white
+/// reference keeps while its tone curve is fitted ([`fit_tone_only`]).
+fn fit_cells(cells: &[Cell], gw: usize, baseline_exposure: f64, spectral: Option<Mat3>) -> Result<CameraLook, LookRejected> {
     let gain = 2f64.powf(if baseline_exposure.is_finite() { baseline_exposure.clamp(-10.0, 10.0) } else { 0.0 });
     let fallback = color::scale(&color::mul(&color::xyz_d50_to_prophoto(), &color::srgb_to_xyz_d50()), gain);
     let lab = Lab::new();
@@ -541,7 +563,10 @@ fn fit_cells(cells: &[Cell], gw: usize, baseline_exposure: f64) -> Result<Camera
         l[1].hypot(l[2]) > 4.0
     });
     if coloured.count() * 50 < usable.len() {
-        return reject("the reference is (nearly) colourless");
+        return match spectral {
+            Some(to_xyz) => fit_tone_only(&train, &test, &all, &to_xyz, &fallback, gain),
+            None => reject("the reference is (nearly) colourless"),
+        };
     }
 
     // Weakest ridge first; a stronger pull toward the fallback when the matrix comes out
@@ -571,11 +596,57 @@ fn fit_cells(cells: &[Cell], gw: usize, baseline_exposure: f64) -> Result<Camera
     let delta_e_fallback = mean_delta_e(&lab, &all_refs, &fallback, None);
 
     let to_xyz = color::mul(&color::rgb_to_xyz(color::ROMM, color::D50_XY), &rel);
-    let look = CameraLook { to_xyz, tone: Some(tone), delta_e, delta_e_fallback };
+    let look = CameraLook { to_xyz, tone: Some(tone), delta_e, delta_e_fallback, tone_only: false };
     if !look.is_usable() {
         return reject("the fitted matrix is not usable");
     }
     Ok(look)
+}
+
+/// The tone curve alone for a black-and-white reference, with the colour of `to_xyz` (balanced
+/// camera → XYZ D50, white at Y = 1). Each sample is replaced by the grey that renders
+/// through the matrix at its own luminance, paired with the reference's luminance, so the
+/// curve maps the matrix's lightness to the camera's.
+fn fit_tone_only(train: &[Sample], test: &[Sample], all: &[Sample], to_xyz: &Mat3, fallback: &Mat3, gain: f64) -> Result<CameraLook, LookRejected> {
+    let m = color::scale(&color::mul(&color::xyz_d50_to_prophoto(), to_xyz), gain);
+    let Some(inv) = color::invert(&m) else { return reject("the camera's spectral matrix is singular") };
+    let grey = |s: &Sample| {
+        let l = color::apply(&PRO_TO_XYZ_Y_ROW, color::apply(&m, s.cam))[0];
+        Sample { cam: color::apply(&inv, [l; 3]), rgb: [s.lum; 3], ..*s }
+    };
+    let train: Vec<Sample> = train.iter().map(grey).collect();
+    let no_curve = || LookRejected("no tone curve could be fitted".into());
+    let mut robust = vec![1.0f64; train.len()];
+    let mut tone = fit_curve(&train, &robust, &m).ok_or_else(no_curve)?;
+    for _ in 0..3 {
+        update_robust(&train, &mut robust, &m, &tone);
+        tone = fit_curve(&train, &robust, &m).ok_or_else(no_curve)?;
+    }
+    let held_fit = mean_lightness_error(test, &m, Some(&tone));
+    let held_plain = mean_lightness_error(test, &m, None);
+    if held_fit.is_nan() || held_fit > 0.85 * held_plain {
+        return reject(format!("the tone curve does not improve enough on the spectral matrices alone (held-out L* error {held_fit:.1} vs {held_plain:.1})"));
+    }
+    let delta_e = mean_lightness_error(all, &m, Some(&tone));
+    let delta_e_fallback = mean_lightness_error(all, fallback, None);
+    let look = CameraLook { to_xyz: *to_xyz, tone: Some(tone), delta_e, delta_e_fallback, tone_only: true };
+    if !look.is_usable() {
+        return reject("the spectral matrix is not usable");
+    }
+    Ok(look)
+}
+
+/// Mean |ΔL*| between rendering `cam` through `m` and `tone` and the reference luminance.
+fn mean_lightness_error(samples: &[Sample], m: &Mat3, tone: Option<&ToneCurve>) -> f64 {
+    let lstar = |y: f64| {
+        let f = if y > 216.0 / 24389.0 { y.cbrt() } else { (24389.0 / 27.0 * y + 16.0) / 116.0 };
+        116.0 * f - 16.0
+    };
+    if samples.is_empty() {
+        return f64::INFINITY;
+    }
+    let sum: f64 = samples.iter().map(|s| (lstar(color::apply(&PRO_TO_XYZ_Y_ROW, render(m, tone, s.cam))[0]) - lstar(s.lum)).abs()).sum();
+    sum / samples.len() as f64
 }
 
 /// Ridge strengths tried in turn (see [`fit_matrix`]).
@@ -909,6 +980,66 @@ mod tests {
     }
 
     #[test]
+    fn black_and_white_reference_keeps_spectral_colour_and_fits_only_the_curve() {
+        let (w, h) = (480, 320);
+        let (mut s, rgb) = shot(w, h, &true_matrix());
+        // The camera's JPEG in black and white (its sRGB luminance, re-encoded).
+        let dec = |b: u8| {
+            let v = f64::from(b) / 255.0;
+            if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+        };
+        let enc = |v: f64| ((if v <= 0.0031308 { 12.92 * v } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 }) * 255.0).round() as u8;
+        let grey: Vec<u8> = rgb.chunks(3).flat_map(|p| [enc(0.2126 * dec(p[0]) + 0.7152 * dec(p[1]) + 0.0722 * dec(p[2])); 3]).collect();
+        let reference = Reference { width: w as u32, height: h as u32, rgb: &grey };
+
+        // A camera without measured matrices: nothing to fit.
+        let err = fit_look(&s, &wb_opts(), &reference).unwrap_err();
+        assert!(err.0.contains("colourless"), "{err}");
+
+        // An X-T30 (the X-T3's matrices): the colour is the matrices', the curve is fitted.
+        s.make = Some("FUJIFILM".into());
+        s.model = Some("X-T30".into());
+        let look = fit_look(&s, &wb_opts(), &reference).unwrap();
+        assert!(look.tone_only, "{look:?}");
+        let neutral = WB.map(|v| 1.0 / v);
+        let neutral = neutral.map(|v| v / neutral.iter().cloned().fold(f64::MIN, f64::max));
+        let want = crate::spectral::find(Some("FUJIFILM"), "X-T3").unwrap().color_info().balanced_to_xyz_d50(neutral).unwrap();
+        assert!(look.to_xyz.iter().flatten().zip(want.iter().flatten()).all(|(a, b)| (a - b).abs() < 1e-9), "{look:?}");
+        let tone = look.tone.as_ref().unwrap();
+        assert!(tone.eval(0.1) > 0.12, "the camera's curve lifts the midtones: f(0.1) = {}", tone.eval(0.1));
+        assert!(look.delta_e < look.delta_e_fallback, "{look:?}");
+        let d = crate::develop_sensor(&s, &DevelopOptions { camera_look: Some(look), ..wb_opts() }).unwrap();
+        assert!(d.warnings.iter().any(|w| w.contains("black-and-white")), "{:?}", d.warnings);
+        assert!(!d.warnings.iter().any(|w| w.contains("sRGB primaries")), "{:?}", d.warnings);
+    }
+
+    #[test]
+    fn black_and_white_reference_that_a_curve_cannot_improve_is_rejected() {
+        let (w, h) = (480, 320);
+        let (mut s, _) = shot(w, h, &true_matrix());
+        s.make = Some("FUJIFILM".into());
+        s.model = Some("X-T30".into());
+        // The reference's lightness is the spectral rendering's, scaled up for bluish and down
+        // for reddish patches (zero on average): a hue-dependent difference no tone curve can
+        // follow, so the curve cannot lower the held-out error by 15 %.
+        let d = crate::develop_sensor(&s, &wb_opts()).unwrap();
+        assert_eq!((d.width as usize, d.height as usize), (w, h));
+        let enc = |v: f64| ((if v <= 0.0031308 { 12.92 * v } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 }) * 255.0).round() as u8;
+        let grey: Vec<u8> = d
+            .rgb
+            .chunks(3)
+            .flat_map(|p| {
+                let pro = [0, 1, 2].map(|k| (f64::from(p[k]) / 65535.0).powf(1.8));
+                let sum = pro.iter().sum::<f64>().max(1e-6);
+                let y = color::apply(&PRO_TO_XYZ_Y_ROW, pro)[0] * (1.0 + 1.2 * (pro[2] - pro[0]) / sum);
+                [enc(y.clamp(0.0, 1.0)); 3]
+            })
+            .collect();
+        let err = fit_look(&s, &wb_opts(), &Reference { width: w as u32, height: h as u32, rgb: &grey }).unwrap_err();
+        assert!(err.0.contains("does not improve enough on the spectral matrices"), "{err}");
+    }
+
+    #[test]
     fn tighter_camera_preview_aligns_for_color_without_changing_the_raw_crop() {
         let (w, h) = (480, 320);
         let (s, rgb) = shot(w, h, &true_matrix());
@@ -919,7 +1050,7 @@ mod tests {
         }
         let reference = Reference { width: cw as u32, height: ch as u32, rgb: &tight };
         let (gw, plain) = grid(&s, &wb_opts(), &reference).unwrap();
-        let before = fit_cells(&plain, gw, s.baseline_exposure);
+        let before = fit_cells(&plain, gw, s.baseline_exposure, None);
         let look = fit_look(&s, &wb_opts(), &reference).unwrap();
         assert!(look.delta_e < 3.0, "{look:?}");
         if let Ok(before) = before {
@@ -988,7 +1119,7 @@ mod tests {
     fn develop_ignores_an_unusable_look() {
         let (s, _) = shot(64, 48, &true_matrix());
         for to_xyz in [[[f64::NAN; 3]; 3], [[0.0; 3]; 3], [[1e9, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]] {
-            let look = CameraLook { to_xyz, tone: None, delta_e: 1.0, delta_e_fallback: 2.0 };
+            let look = CameraLook { to_xyz, tone: None, delta_e: 1.0, delta_e_fallback: 2.0, tone_only: false };
             let d = crate::develop_sensor(&s, &DevelopOptions { camera_look: Some(look), ..wb_opts() }).unwrap();
             assert!(d.warnings.iter().any(|w| w.contains("not usable")), "{:?}", d.warnings);
             assert!(d.warnings.iter().any(|w| w.contains("sRGB primaries")), "{:?}", d.warnings);
