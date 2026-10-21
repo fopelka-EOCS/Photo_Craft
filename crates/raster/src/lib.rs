@@ -1059,6 +1059,7 @@ impl Surface {
         if dx % TILE_SIZE == 0 && dy % TILE_SIZE == 0 {
             let (tx, ty) = (dx / TILE_SIZE, dy / TILE_SIZE);
             out.ready = sources().map(|(c, t)| (TileCoord::new(c.tx.saturating_add(tx), c.ty.saturating_add(ty)), t.clone())).collect();
+            out.decode_error = self.lazy_error().map(Arc::from);
             return out;
         }
         let bpp = self.format.bytes_per_pixel();
@@ -1520,7 +1521,9 @@ mod tests {
         let mut edited = failed.clone();
         edited.write_pixel(300, 10, &[1.0, 1.0, 1.0, 1.0]);
         assert_eq!(edited.lazy_error(), Some("gone"));
-        assert_eq!(failed.translated(5, 0, r).lazy_error(), Some("gone"));
+        for (dx, dy) in [(5, 0), (0, 0), (256, 0), (-256, 512)] {
+            assert_eq!(failed.translated(dx, dy, r).lazy_error(), Some("gone"), "{dx},{dy}");
+        }
         assert_eq!(failed.convert(PixelFormat::new(ColorMode::Grayscale, SampleType::U8, true)).lazy_error(), Some("gone"));
     }
 

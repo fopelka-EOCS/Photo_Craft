@@ -163,5 +163,12 @@ fn hidden_layers_decode_when_first_used() {
         std::fs::write(&path, b"replaced in place").unwrap();
         assert!(again.decode_lazy_layers().is_err(), "{c:?}");
         assert!(photocraft_io::export(&again, "x.psd", &Default::default()).is_err(), "{c:?}");
+        assert!(photocraft_io::export(&again, "x.ora", &Default::default()).is_err(), "{c:?}");
+        // A flat export is the composite, which skips hidden layers: it neither needs nor
+        // decodes them.
+        assert!(photocraft_io::export(&again, "x.png", &Default::default()).is_ok(), "{c:?}");
+        let fresh = open("lazy.psd", &dir.write("lazy.psd", &bytes)).unwrap().document;
+        photocraft_io::export(&fresh, "x.png", &Default::default()).unwrap();
+        assert!(fresh.walk().iter().any(|(_, _, l)| l.surface().is_some_and(|s| s.is_pending())), "{c:?}: a flat export decoded the hidden layers");
     }
 }

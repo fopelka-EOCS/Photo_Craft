@@ -550,6 +550,9 @@ fn export_stages(doc: &Document, name_or_ext: &str, opts: &ExportOptions, ctl: &
         ));
     }
     if ext == "ora" {
+        // ORA writes every layer: hidden ones still in the opened file are read first (one that
+        // can't be is an error, not an empty layer).
+        doc.decode_lazy_layers().map_err(IoError::Read)?;
         return ora::export(doc);
     }
     if ext == "pdf" {
