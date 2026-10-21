@@ -112,9 +112,13 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
     if let Some(result) = crate::panel_docking::command(app, id, &params) {
         return result;
     }
-    // Help › Discord, website, GitHub, Report an Issue.
+    // Help › Discord, website, GitHub.
     if let Some(url) = crate::links::url_for(id) {
         return Ok(crate::links::open(app, ctx, url));
+    }
+    // Help › Report an Issue… › Bug report / Compatibility issue / Feature request.
+    if let Some(template) = crate::links::issue_template(id) {
+        return Ok(crate::links::report_issue(app, ctx, template));
     }
     if id == "view.proofSetup.custom" {
         return Ok(json!({"dialog": crate::filter_dialog::open(app, "view.proofSetup")}));
@@ -707,7 +711,7 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
         "file.open" | "file.exit" | "file.clearRecent" | "file.removeRecent" | "help.about" | "help.systemInfo" | "edit.search" => true,
         i if i.starts_with("file.openRecent.") => true,
         i if i.starts_with(DOCUMENT_ITEM) => true,
-        i if crate::links::url_for(i).is_some() => true,
+        i if crate::links::url_for(i).is_some() || crate::links::issue_template(i).is_some() => true,
         i if i.starts_with("window.theme.") => true,
         // Interface brightness works with or without a document, as in Photoshop.
         "view.darkenInterface" | "view.lightenInterface" => true,
