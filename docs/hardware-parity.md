@@ -51,7 +51,7 @@ HDR display to verify.
 
 | Feature | Photoshop | PhotoCraft | Status |
 |---|---|---|---|
-| Trackpad pinch zoom, two-finger pan | yes | yes; pinch scrolls instead in 0.6.0 (#2463) | partial |
+| Trackpad pinch zoom, two-finger pan | yes | macOS yes; Wayland never emitted pinch events at all — root cause was winit 0.30, backport open upstream (rust-windowing/winit#4778, human-tested on GNOME Wayland); pinch scrolled instead in 0.6.0 (#2463) | partial |
 | Trackpad rotate (Rotate View) | yes | yes (`rotate_view.rs`) | done |
 | Touch Bar | yes (Intel Macs) | no | missing (low value) |
 | Touch screens (Windows) | yes | basic pointer only | partial |
@@ -62,5 +62,6 @@ HDR display to verify.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-19 | minor | Trackpad pinch on Wayland root-caused to winit 0.30 (no gesture protocol binding); backport PR open upstream (rust-windowing/winit#4778), human-tested with a raw-event probe on GNOME Wayland |
 | 2026-10-10 | major | First version |
 | 2026-10-19 | minor | Graphics Adapter choice on Linux (#1885) |

@@ -185,7 +185,8 @@ what an agent can't finish alone.
 ### G5. Transform, handles and modifiers
 - **Missing:** the full interpolation list; blend mode/opacity edits during
   a transform (#1384); path-point nudge; autoscroll at the edge while selecting (#2231);
-  wheel and pinch behaviour (#2485, #2463, #1989);
+  wheel and pinch behaviour (#2485, #2463, #1989; the Wayland side of pinch had no events
+  at all — that was winit, fixed upstream pending release in rust-windowing/winit#4778);
   toolbar press-and-hold flyouts (#2301).
 - **Done since the re-measure (2026-10-10 to 12):** right-click menu during Free Transform
   (TOOL-214-5); commit/cancel buttons in the options bar (#2442); transform keeps the layer's

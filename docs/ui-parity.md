@@ -173,7 +173,7 @@ Triangle and Curvature Pen (minus legacy Rounded Rectangle and Targeted Adjustme
 | Animated zoom | missing | unread pref; #566 |
 | Double-click Zoom tool = 100%, double-click Hand = fit | partial | Zoom missing (#2508) |
 | ⌥-wheel zoom in gentle steps | missing | UI-217-18 |
-| Wheel, smooth scrolling and pinch as in Photoshop | partial | #2485, #2463, #1989 |
+| Wheel, smooth scrolling and pinch as in Photoshop | partial | #2485, #2463, #1989; Wayland pinch had no events at the winit layer, fixed upstream pending release (rust-windowing/winit#4778) |
 | Trackpad rotate drives Rotate View | done | `rotate_view.rs:136` |
 | Zoom levels to 3200% and beyond | partial | #1813 |
 | Physical 100% at any display scale | done | #1943 |
