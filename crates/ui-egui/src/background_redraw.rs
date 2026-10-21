@@ -158,6 +158,12 @@ pub(crate) fn poll(app: &mut PhotocraftApp, gpu: &GpuCanvas, doc: DocId) {
     }
     let ms = crate::gpu_canvas::now_ms() - r.started_ms;
     app.perf.record("background", r.drawn, ms, 0.0);
+    if app.session.active().is_some_and(|st| st.doc.id == doc) {
+        app.perf.record_compositor_refresh(
+            doc.0,
+            &crate::gpu_canvas::Refresh { kind: "background", px: r.drawn, fallback: r.fallback.clone(), ..Default::default() },
+        );
+    }
     crate::notices::slow_cpu_refresh(app, doc.0, ms, r.fallback.as_deref());
 }
 

@@ -1606,6 +1606,10 @@ fn ensure_gpu(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize, visible:
     else {
         return false;
     };
+    let active = app.session.active().is_some_and(|st| st.doc.id == id);
+    if active {
+        app.perf.select_compositor_doc(id.0);
+    }
     let (doc, raw_key) = display_doc(app, idx);
     let (display, _) = canvas_display(app, &doc, None);
     // Repeated pattern tiles sample the same texture, including pixels outside the unwrapped
@@ -1672,10 +1676,16 @@ fn ensure_gpu(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize, visible:
         if let Some(r) = crate::adjust_preview::uncovered(app, id, raw_key, visible) {
             let r = gpu.refresh(id.0, &doc, Some(r), display.as_deref());
             app.perf.record_refresh(&r);
+            if active {
+                app.perf.record_compositor_refresh(id.0, &r);
+            }
         }
         if let Some(r) = crate::adjust_preview::live_uncovered(app, id, raw_key, visible) {
             let r = gpu.refresh(id.0, &doc, Some(r), display.as_deref());
             app.perf.record_refresh(&r);
+            if active {
+                app.perf.record_compositor_refresh(id.0, &r);
+            }
         }
         // Blend previews keep offscreen pixels untouched until the view reaches them.
         // Use the normal refresh path so CPU fallback and pending redraws stay synchronized.
@@ -1687,6 +1697,9 @@ fn ensure_gpu(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize, visible:
     // Display textures for a canvas this large would not fit the GPU: the reduced CPU canvas
     // draws it (checked before the memory budget, which walks the history, every frame).
     if !gpu.fits_canvas(&doc) {
+        if active {
+            app.perf.compositor_unavailable(id.0, crate::gpu_canvas::OVER_CANVAS_BUDGET);
+        }
         crate::background_redraw::cancel(app, id);
         // Drawn on the CPU canvas: no layer budget applies to it.
         if app.perf.gpu_layer_fit.is_some_and(|f| f.doc == id.0) {
@@ -1698,6 +1711,9 @@ fn ensure_gpu(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize, visible:
     gpu_budget(app, &gpu, idx, partial, visible);
     let defer = crate::background_redraw::enabled(app);
     let r = gpu.refresh_with(id.0, &doc, if partial { damage } else { None }, display.as_deref(), defer);
+    if active {
+        app.perf.record_compositor_refresh(id.0, &r);
+    }
     app.perf.gpu_layer_fit = gpu.layer_fit();
     if r.kind == "lost" || r.kind == crate::gpu_canvas::REFRESH_OVER_BUDGET {
         // The device is gone (`gpu_status` then drops the GPU canvas) or the canvas is over the
