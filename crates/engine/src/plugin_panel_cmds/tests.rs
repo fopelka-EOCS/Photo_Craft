@@ -147,6 +147,24 @@ fn panel_manifest(id: &str) -> String {
     )
 }
 
+/// A panel that asks for no document capability at all: it may keep a store and nothing else.
+fn closed_manifest(id: &str) -> String {
+    format!(
+        r#"{{"id":"{id}","name":"Panel {id}","version":"2.0","kind":"panel",
+            "panel":{{"title":"{id}","minWidth":200}},
+            "capabilities":{{"storage":true}}}}"#
+    )
+}
+
+/// A fixture that echoes **every** event back into its store, `doc.changed` included — unlike
+/// [`panel`], whose script answers a tick with its view so a test can read the events it sent.
+/// A test using one holds [`ticking`], so no other test's tick writes into the same store.
+fn echoing_panel(manifest: &str) -> Vec<u8> {
+    let mut data = format!("(data (i32.const {ECHO_AT}) \"{}\")\n", escape(ECHO_PREFIX));
+    data.push_str(&format!("(data (i32.const {SUFFIX_AT}) \"{}\")\n", escape(ECHO_SUFFIX)));
+    module_with(manifest, &echo_body(), &data)
+}
+
 /// A panel that answers every event with the same reply, forever.
 fn panel_always(id: &str, reply: &str) -> Vec<u8> {
     let (body, data) = if reply == TRAP {
@@ -367,6 +385,38 @@ fn another_sessions_tick_does_not_eat_a_panels_answers() {
     assert_eq!(answer["id"], "d1");
     assert_eq!(answer["ok"], true, "{answer}");
     assert_eq!(answer["width"], 40, "and `doc.info` read the panel's own session's document: {answer}");
+    cleanup(&mut s, id);
+}
+
+#[test]
+fn a_panel_without_read_is_told_the_document_changed_without_its_contents() {
+    let _tick = ticking();
+    let id = "test.panel.docchanged.noread";
+    let mut s = app(id, &echoing_panel(&closed_manifest(id)));
+    open(&mut s, id);
+    // A second document is a new active one, which the tick announces. The panel asked for no
+    // `read` grant, and `doc.changed` must not hand it what `doc.info` would refuse.
+    s.execute("file.new", json!({"width": 40, "height": 28})).unwrap();
+    s.execute("plugin.panel.tick", json!({"id": id})).unwrap();
+    let event = last_event(&mut s, id);
+    assert_eq!(event["type"], "doc.changed", "{event}");
+    assert!(event["doc"].is_null(), "no read grant, no document contents: {event}");
+    assert!(event["revision"].as_u64().is_some_and(|r| r > 0), "the change *is* announced: {event}");
+    cleanup(&mut s, id);
+}
+
+#[test]
+fn a_panel_with_read_is_told_the_document_changed_with_its_contents() {
+    let _tick = ticking();
+    let id = "test.panel.docchanged.read";
+    let mut s = app(id, &echoing_panel(&panel_manifest(id)));
+    open(&mut s, id);
+    s.execute("file.new", json!({"width": 40, "height": 28})).unwrap();
+    s.execute("plugin.panel.tick", json!({"id": id})).unwrap();
+    let event = last_event(&mut s, id);
+    assert_eq!(event["type"], "doc.changed", "{event}");
+    assert_eq!(event["doc"]["width"], 40, "a granted read gets the document, as `doc.info` does: {event}");
+    assert_eq!(event["doc"]["height"], 28);
     cleanup(&mut s, id);
 }
 

@@ -658,7 +658,15 @@ fn tick(s: &mut Session, p: &Value) -> Result<Value> {
             let seen = doc_id.map(|d| (d, revision));
             if seen != panel.seen {
                 panel.seen = seen;
-                let event = ops::doc_changed(ctx.now, doc.as_ref().unwrap_or(&Value::Null), revision);
+                // Reading the document is a capability, and `doc.info` refuses without it: the change
+                // signal must not hand one panel what the other is denied. A panel without `read` is
+                // still told *that* the document changed (and to which revision) — it just gets no
+                // contents, exactly as if it asked `doc.info` itself.
+                let body = match panel.granted(DocumentCap::Read) {
+                    Ok(()) => doc.as_ref().unwrap_or(&Value::Null),
+                    Err(_) => &Value::Null,
+                };
+                let event = ops::doc_changed(ctx.now, body, revision);
                 if let Err(e) = drive(panel, event, &ctx) {
                     errors.push(json!({"id": id, "error": e.to_string()}));
                 }
