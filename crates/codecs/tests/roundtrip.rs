@@ -214,6 +214,20 @@ fn tiff_all_compressions_lossless() {
 }
 
 #[test]
+fn compressed_tiff_does_not_keep_the_uncompressed_reservation() {
+    // The encoder reserves the uncompressed size up front (#6607). A smooth image compresses
+    // to a fraction of it, and the returned file must not hold the rest.
+    let (w, h) = (512u32, 512u32);
+    let px: Vec<u8> = (0..h).flat_map(|y| (0..w).flat_map(move |x| [(x / 2) as u8, (y / 2) as u8, 128])).collect();
+    let img = Image::from_u8(w, h, ChannelLayout::Rgb, px).unwrap();
+    for comp in [TiffCompression::Lzw, TiffCompression::Deflate] {
+        let v = encode(&img, Format::Tiff, &EncodeOptions { tiff_compression: comp, ..Default::default() }).unwrap();
+        assert!(v.len() < img.data().len() / 2, "{comp:?}: the image should compress well ({} bytes)", v.len());
+        assert!(v.capacity() - v.len() <= v.len() / 8, "{comp:?}: {} bytes kept for a {} byte file", v.capacity(), v.len());
+    }
+}
+
+#[test]
 fn png_all_compressions_lossless() {
     let img = test_image(ChannelLayout::Rgba, SampleType::U16);
     for comp in [PngCompression::None, PngCompression::Fast, PngCompression::Default, PngCompression::Best] {

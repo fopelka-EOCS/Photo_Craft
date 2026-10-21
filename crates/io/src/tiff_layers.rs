@@ -232,7 +232,10 @@ pub(crate) fn export_layered(doc: &Document, opts: &ExportOptions, ctl: &photocr
     ctl.check().map_err(|_| IoError::Cancelled)?;
     warnings.extend(w);
     let order = if codecs::tiff_writes_little_endian() { ByteOrder::Little } else { ByteOrder::Big };
-    let (layers, w) = match ImageSourceData::from_psd(&file).to_bytes(order) {
+    let mut has_alpha = file.layer_info.as_ref().is_some_and(|l| l.merged_alpha);
+    // The layers move out of the model rather than being copied, and are freed once written
+    // (#6607).
+    let (layers, w) = match ImageSourceData::take_from_psd(&mut file).into_bytes(order) {
         Err(photocraft_psd::PsdError::LimitExceeded(_)) if !force_psb => {
             let psb_opts = PsdExportOptions { force_psb: true, ..psd_opts };
             let (psb, w) = crate::with_span(ctl, 0.0, TIFF_MODEL_DONE, |ctl| crate::psd_export::document_to_psd_interruptible(doc, &psb_opts, ctl));
@@ -240,7 +243,8 @@ pub(crate) fn export_layered(doc: &Document, opts: &ExportOptions, ctl: &photocr
             warnings.extend(w);
             warnings.push("layer data exceeds 4 GB; written with PSB-sized lengths, which some readers do not open".into());
             file = psb;
-            ImageSourceData::from_psd(&file).to_bytes(order)?
+            has_alpha = file.layer_info.as_ref().is_some_and(|l| l.merged_alpha);
+            ImageSourceData::take_from_psd(&mut file).into_bytes(order)?
         }
         r => r?,
     };
@@ -255,7 +259,6 @@ pub(crate) fn export_layered(doc: &Document, opts: &ExportOptions, ctl: &photocr
 
     let fmt = doc.pixel_format();
     let cc = fmt.mode.color_channels();
-    let has_alpha = file.layer_info.as_ref().is_some_and(|l| l.merged_alpha);
     let channels = cc + usize::from(has_alpha);
     let extra = usize::from(file.header.channels).saturating_sub(channels);
     if extra > 0 {
@@ -265,6 +268,8 @@ pub(crate) fn export_layered(doc: &Document, opts: &ExportOptions, ctl: &photocr
     let (w, h) = (doc.size.width, doc.size.height);
     let cmyk = fmt.mode == ColorMode::Cmyk;
     let data = interleave(&file.image_data.data, w, h, channels, cc, sample, cmyk)?;
+    // Likewise the planar composite, now interleaved.
+    drop(file);
     ctl.check().map_err(|_| IoError::Cancelled)?;
     ctl.progress(TIFF_COMPOSITE_DONE);
     let layout = layout_for(fmt.mode, has_alpha);
