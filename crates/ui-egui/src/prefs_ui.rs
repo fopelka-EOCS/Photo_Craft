@@ -1355,14 +1355,25 @@ fn gpu_status_rows(ui: &mut egui::Ui, info: Option<&Value>, adapters: Option<&Va
     if !cfg!(target_arch = "wasm32") {
         ui.horizontal(|ui| {
             ui.label(tl!("GPU Backend"));
-            let options = graphics_backend_choices(egui::os::OperatingSystem::from_target_os());
+            let mut options = graphics_backend_choices(egui::os::OperatingSystem::from_target_os()).to_vec();
             let saved = obj.get("gpuBackend").and_then(Value::as_str).unwrap_or("auto");
-            // Unsupported and legacy CPU preferences resolve to Auto when a GPU mode is
-            // selected. Display that choice without silently rewriting a legacy profile.
-            let mut current = if options.contains(&saved) { saved } else { "auto" }.to_string();
-            let labels: Vec<String> = options.iter().map(|o| choice_label(o)).collect();
+            // Keep an unavailable or legacy saved value visible, like an unplugged
+            // adapter below. Merely opening Preferences must not rewrite the profile.
+            let unavailable = !options.contains(&saved);
+            if unavailable {
+                options.push(saved);
+            }
+            let mut current = saved.to_string();
+            let labels: Vec<String> = options
+                .iter()
+                .map(|o| {
+                    let label = choice_label(o);
+                    let label = tl!(&label);
+                    if unavailable && *o == saved { format!("⚠ {label}") } else { label.to_string() }
+                })
+                .collect();
             let pairs: Vec<(String, &str)> = options.iter().map(|o| o.to_string()).zip(labels.iter().map(String::as_str)).collect();
-            if crate::widgets::dropdown(ui, "graphics-backend", &mut current, &pairs, 220.0) {
+            if crate::widgets::dropdown_literal(ui, "graphics-backend", &mut current, &pairs, 220.0) {
                 set_graphics_backend(obj, &current);
             }
         });
@@ -2649,6 +2660,43 @@ mod tests {
         assert_eq!(graphics_backend_choices(Nix), &["auto", "vulkan", "gl"]);
         for os in [Mac, Nix, Windows] {
             assert!(!graphics_backend_choices(os).contains(&"cpu"));
+        }
+    }
+
+    #[test]
+    fn opening_graphics_controls_preserves_and_marks_unavailable_saved_backends() {
+        use egui::accesskit::Role;
+        use egui_kittest::{Harness, kittest::Queryable};
+        let foreign_backend = if cfg!(target_os = "macos") { "vulkan" } else { "metal" };
+        for backend in ["cpu", foreign_backend, "future-backend"] {
+            let values = json!({"gpuBackend":backend, "useGpu":true, "memoryUsageMb":2048}).as_object().unwrap().clone();
+            let original = values.clone();
+            let mut fonts_installed = false;
+            let mut h = Harness::builder().with_size(vec2(680.0, 350.0)).build_ui_state(
+                move |ui, values| {
+                    if !fonts_installed {
+                        crate::theme::install_fonts(ui.ctx());
+                        fonts_installed = true;
+                        return;
+                    }
+                    gpu_status_rows(ui, None, None, values);
+                },
+                values,
+            );
+            h.run();
+            let label = format!("⚠ {}", choice_label(backend));
+            assert_eq!(h.get_by_role(Role::ComboBox).value().as_deref(), Some(label.as_str()));
+            assert_eq!(*h.state(), original, "opening controls must preserve the entire profile");
+            h.get_by_role(Role::ComboBox).click();
+            h.run();
+            h.get_by_label(&label);
+            assert_eq!(*h.state(), original, "opening the dropdown must preserve the entire profile");
+            h.key_press(egui::Key::Escape);
+            h.run();
+            h.get_by_label("Reset GPU Backend").click();
+            h.run();
+            assert_eq!(h.state()["gpuBackend"], "auto");
+            assert_eq!(h.state()["renderingMode"], if backend == "cpu" { "cpu" } else { "auto" });
         }
     }
 

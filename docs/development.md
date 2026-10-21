@@ -105,7 +105,9 @@ precedence over the saved backend outside CPU mode.
 The backend list follows the desktop platform: Windows offers Automatic, Vulkan, DirectX 12 and
 OpenGL; macOS offers Automatic and Metal; Linux offers Automatic, Vulkan and OpenGL. CPU rendering
 is selected through Rendering Mode. Changing or resetting the backend preserves that mode,
-including profiles that used the older `gpuBackend: cpu` setting. The browser selects its own
+including profiles that used the older `gpuBackend: cpu` setting. A saved legacy or unavailable
+backend stays visible with a ⚠ marker until you choose or reset it; opening Preferences preserves it.
+The browser selects its own
 backend and does not show this desktop-only control.
 
 On Windows, Automatic keeps GL hardware ahead of WARP (the DirectX software rasterizer), so an
