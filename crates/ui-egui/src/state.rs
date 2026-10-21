@@ -378,6 +378,9 @@ impl Tool {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Panels {
+    /// Visibility of the local AI Studio; hiding it preserves work in progress.
+    #[serde(default = "yes")]
+    pub ai_studio: bool,
     pub layers: bool,
     pub history: bool,
     pub properties: bool,
@@ -421,6 +424,7 @@ pub struct Panels {
 impl Default for Panels {
     fn default() -> Self {
         Self {
+            ai_studio: true,
             layers: true,
             history: false,
             properties: true,

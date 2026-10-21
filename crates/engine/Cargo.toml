@@ -12,6 +12,7 @@ workspace = true
 corpus = []
 
 [dependencies]
+base64 = "0.22"
 photocraft-geom = { workspace = true }
 photocraft-color = { workspace = true }
 photocraft-cms = { workspace = true }
