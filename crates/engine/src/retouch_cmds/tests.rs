@@ -586,6 +586,30 @@ fn history_brush_errors_when_layer_is_new() {
 }
 
 #[test]
+fn art_history_brush_paints_stylized_marks_from_history() {
+    let mut s = session(40, 40, 8, "rgb");
+    s.execute("edit.fill", json!({"color": "#ffffff"})).unwrap();
+    s.execute("paint.stroke", json!({"points": [[15, 20], [25, 20]], "size": 10, "hardness": 1.0, "color": "#ff0000"})).unwrap();
+    s.execute("edit.fill", json!({"color": "#000000"})).unwrap();
+    assert!(rgba(&s, 20, 20)[0] < 0.05);
+
+    let r = s.execute(
+        "paint.artHistoryBrush",
+        json!({"points": [[20, 20]], "size": 8, "style": "tightMedium", "area": 10, "state": 1}),
+    );
+    assert!(r.is_ok(), "{r:?}");
+    let p = rgba(&s, 20, 20);
+    assert!(p[0] > 0.4, "art history brush restored red: {p:?}");
+
+    for style in ["tightShort", "tightMedium", "tightLong", "looseMedium", "looseLong", "dab", "tightCurl", "looseCurl"] {
+        let res = s.execute("paint.artHistoryBrush", json!({"points": [[20, 20]], "size": 6, "style": style, "area": 5, "state": 1}));
+        assert!(res.is_ok(), "style {style} failed: {res:?}");
+    }
+
+    assert!(s.execute("paint.artHistoryBrush", json!({"points": [[20, 20]], "style": "invalid"})).is_err());
+}
+
+#[test]
 fn retouch_commands_are_registered_and_need_a_pixel_layer() {
     let ids = [
         "paint.cloneStamp",
@@ -599,6 +623,7 @@ fn retouch_commands_are_registered_and_need_a_pixel_layer() {
         "paint.sharpen",
         "paint.smudge",
         "paint.historyBrush",
+        "paint.artHistoryBrush",
         "paint.remove",
     ];
     for id in ids {
@@ -616,7 +641,7 @@ fn retouch_commands_are_registered_and_need_a_pixel_layer() {
 // Paint target (#207): mask, alpha channel, Quick Mask
 // ---------------------------------------------------------------------------------------------
 
-const RETOUCH_IDS: [&str; 12] = [
+const RETOUCH_IDS: [&str; 13] = [
     "paint.cloneStamp",
     "paint.patternStamp",
     "paint.healingBrush",
@@ -628,6 +653,7 @@ const RETOUCH_IDS: [&str; 12] = [
     "paint.sharpen",
     "paint.smudge",
     "paint.historyBrush",
+    "paint.artHistoryBrush",
     "paint.remove",
 ];
 
@@ -678,7 +704,7 @@ fn retouch_params(id: &str, history_state: usize, target: Value) -> Value {
     let mut p = json!({"points": [[20, 20], [40, 20]], "size": 12, "hardness": 100, "strength": 100, "exposure": 100, "target": target});
     match id {
         "paint.cloneStamp" | "paint.healingBrush" => p["offset"] = json!([-13, 3]),
-        "paint.historyBrush" => p["state"] = json!(history_state),
+        "paint.historyBrush" | "paint.artHistoryBrush" => p["state"] = json!(history_state),
         "paint.sponge" => p["mode"] = json!("saturate"),
         _ => {}
     }
@@ -1616,6 +1642,7 @@ fn retouch_strokes_refuse_absurd_point_coordinates() {
         "paint.healingBrush",
         "paint.spotHealing",
         "paint.historyBrush",
+        "paint.artHistoryBrush",
         "paint.patternStamp",
         "paint.remove",
     ];

@@ -36,7 +36,7 @@ Triangle and Curvature Pen (minus legacy Rounded Rectangle and Targeted Adjustme
 | Retouch | Remove, Spot Healing, Healing, Patch, Content-Aware Move, Red Eye | |
 | Brush | Brush, Pencil, Mixer Brush | |
 | Stamp | Clone Stamp, Pattern Stamp | |
-| History | History Brush | Art History Brush |
+| History | History Brush, Art History Brush | |
 | Eraser | Eraser, Background Eraser, Magic Eraser | |
 | Fill | Gradient, Paint Bucket | |
 | Focus, toning | Blur, Sharpen, Smudge, Dodge, Burn, Sponge | |

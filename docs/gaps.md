@@ -58,11 +58,11 @@ what an agent can't finish alone.
   scripted check there) is the only real oracle.
 
 ### G6. Missing tools
-- **Missing (1 of 68):** Art History Brush. Convert Point landed (#3204). Freeform
+- **Missing (0 of 68):** Art History Brush landed (`paint.artHistoryBrush`, Y group flyout). Convert Point landed (#3204). Freeform
   Pen and Curvature Pen landed (#1054); Color Sampler landed (#1046, `view.colorSamplers.*`); Horizontal and Vertical Type Mask landed (#1055,
   `type.createSelection`); Perspective Crop landed (#1043, `image.perspectiveCrop`); Frame landed
   (#2914).
-- **Evidence:** `Tool` enum (`crates/ui-egui/src/state.rs`) against the 67 `<tool>` entries of
+- **Evidence:** `Tool` enum (`crates/ui-egui/src/state.rs`) covers all 68 entries of
   Photoshop's `Default Keyboard Shortcuts.kys` plus Remove, Triangle and Curvature Pen.
 - **Impact:** users look for them by name and shortcut; several are daily tools for designers.
 - **Estimate:** 60–100 h (2–9 h each, per the calibration).
