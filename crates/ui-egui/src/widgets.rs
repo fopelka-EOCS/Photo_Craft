@@ -1758,13 +1758,23 @@ fn checker_tile(ctx: &egui::Context) -> egui::TextureHandle {
     tile
 }
 
+const CHECKBOX_SIZE: f32 = 14.0;
+const CHECKBOX_LABEL_GAP: f32 = 6.0;
+
+/// Measure before truncation so alignment follows the active font and translation.
+pub(crate) fn checkbox_width(ui: &Ui, label: &str) -> f32 {
+    let text = egui::WidgetText::from(tl!(label));
+    let galley = text.into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::TextStyle::Body);
+    CHECKBOX_SIZE + CHECKBOX_LABEL_GAP + galley.size().x
+}
+
 /// Spectrum-style checkbox (blue when checked).
 pub fn checkbox(ui: &mut Ui, on: &mut bool, label: &str) -> Response {
     let t = Tokens::get(ui.ctx());
     let mut resp = ui
         .horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 6.0;
-            let (rect, resp) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::click());
+            ui.spacing_mut().item_spacing.x = CHECKBOX_LABEL_GAP;
+            let (rect, resp) = ui.allocate_exact_size(vec2(CHECKBOX_SIZE, CHECKBOX_SIZE), Sense::click());
             let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
             let l = ui
                 .add(egui::Label::new(egui::RichText::new(tl!(label)).color(t.text_dim)).selectable(false).sense(Sense::click()))

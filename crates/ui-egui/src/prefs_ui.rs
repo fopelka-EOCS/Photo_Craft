@@ -2123,6 +2123,7 @@ fn shortcuts_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String
             let extra_width = if tab == 0 { 150.0 } else { 90.0 };
             let name_width = (ui.available_width() - control_width - extra_width - 24.0).max(0.0);
             let row_height = ui.spacing().interact_size.y;
+            let visibility_padding = (control_width - crate::widgets::checkbox_width(ui, tl!("Visible"))).max(0.0);
             let mut last_top = String::new();
             egui::Grid::new(("shortcut-grid", tab)).num_columns(3).spacing([12.0, 3.0]).striped(true).show(ui, |ui| {
                 for (id, label, path, def) in &items {
@@ -2229,8 +2230,10 @@ fn shortcuts_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String
                         // Edit › Menus, Keyboard Shortcuts, Preferences, Save and Exit always stay (#5096).
                         let hideable = photocraft_engine::prefs::MenuCustomization::hideable(id);
                         let mut visible = !hideable || !hidden.contains(id);
-                        ui.allocate_ui(vec2(control_width, row_height), |ui| {
+                        ui.allocate_ui_with_layout(vec2(control_width, row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                            // Keep the checkbox beside its color selector without moving the grid columns.
+                            ui.add_space(visibility_padding);
                             ui.add_enabled_ui(hideable, |ui| crate::widgets::checkbox(ui, &mut visible, tl!("Visible")));
                         });
                         if visible {

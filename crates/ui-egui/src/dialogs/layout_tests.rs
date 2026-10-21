@@ -107,19 +107,29 @@ fn eight_alternate_bindings_do_not_expand_the_shortcuts_dialog() {
 
 #[test]
 fn menu_columns_do_not_shift_after_switching_from_shortcuts() {
-    let mut h = harness(egui::vec2(1440.0, 900.0), false);
-    let pos = h.get_by_label("Menus").rect().center();
-    h.event(egui::Event::PointerMoved(pos));
-    h.step();
-    for pressed in [true, false] {
-        h.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+    for (size, scale, large, language) in
+        [(egui::vec2(1440.0, 900.0), 1.0, false, "en"), (egui::vec2(800.0, 600.0), 1.5, true, "ru"), (egui::vec2(800.0, 600.0), 2.0, true, "de")]
+    {
+        let mut h = configured_harness(size, false, Default::default(), scale, large, language);
+        let width = frame(&h).width();
+        let lang = crate::i18n::Lang::from_pref(language);
+        let pos = h.get_by_label(crate::i18n::tr(lang, "Menus")).rect().center();
+        h.event(egui::Event::PointerMoved(pos));
         h.step();
-    }
-    let first = h.query_all_by_role(egui::accesskit::Role::ComboBox).next().unwrap().rect();
-    for step in 0..5 {
-        h.step();
-        let current = h.query_all_by_role(egui::accesskit::Role::ComboBox).next().unwrap().rect();
-        assert!((current.left() - first.left()).abs() < 0.5, "Menus column shifted at {step}: first {first:?}, now {current:?}");
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+            h.step();
+        }
+        let first = h.query_all_by_role(egui::accesskit::Role::ComboBox).next().unwrap().rect();
+        for step in 0..5 {
+            let current = h.query_all_by_role(egui::accesskit::Role::ComboBox).next().unwrap().rect();
+            let visible = h.query_all_by_label(crate::i18n::tr(lang, "Visible")).next().unwrap().rect();
+            let gap = current.left() - visible.right();
+            assert!((gap - 12.0).abs() < 1.1, "{language}: checkbox is too far from its color selector: {gap}");
+            assert!((current.left() - first.left()).abs() < 0.5, "Menus column shifted at {step}: first {first:?}, now {current:?}");
+            assert!((frame(&h).width() - width).abs() < 0.5, "{language}: Menus changed the dialog width");
+            h.step();
+        }
     }
 }
 
