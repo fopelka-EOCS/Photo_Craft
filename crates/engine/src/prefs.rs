@@ -1755,8 +1755,9 @@ impl Session {
         }
         photocraft_compose::set_effect_cache_budget(budget << 20);
         let perf = &self.prefs().performance;
-        crate::smart_cmds::set_source_cache_budget((perf.smart_source_cache_mb as usize) << 20);
-        crate::smart_cmds::set_stage_cache_budget((perf.smart_stage_cache_mb as usize) << 20);
+        // Saturating: a `usize` is 32 bits on wasm32, where 4096 MB would shift out to 0.
+        crate::smart_cmds::set_source_cache_budget((perf.smart_source_cache_mb as usize).saturating_mul(1 << 20));
+        crate::smart_cmds::set_stage_cache_budget((perf.smart_stage_cache_mb as usize).saturating_mul(1 << 20));
         // Without waiting for the system font scan: this runs on the UI thread at launch.
         photocraft_text::set_shared_missing_glyph_protection(self.prefs().type_.missing_glyph_protection());
         crate::plugin_cmds::sync_prefs(self);
