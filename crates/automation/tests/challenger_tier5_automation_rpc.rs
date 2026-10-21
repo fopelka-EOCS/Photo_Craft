@@ -63,9 +63,18 @@ async fn call_err(client: &Conn, name: &str, args: Value) -> String {
     }
 }
 
+struct DirCleanupGuard(std::path::PathBuf);
+
+impl Drop for DirCleanupGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 struct TestHarness {
     client: Arc<Conn>,
     dir: std::path::PathBuf,
+    _cleanup: DirCleanupGuard,
 }
 
 impl TestHarness {
@@ -78,7 +87,7 @@ impl TestHarness {
         let server = PhotocraftMcp::headless_with_workspace(workspace);
         let client = Arc::new(connect(server).await);
 
-        Self { client, dir }
+        Self { client, _cleanup: DirCleanupGuard(dir.clone()), dir }
     }
 
     async fn shutdown(self) {

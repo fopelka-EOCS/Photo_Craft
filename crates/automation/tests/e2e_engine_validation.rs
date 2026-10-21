@@ -35,10 +35,19 @@ impl ClientHandler for TestClient {
 type Conn = RunningService<RoleClient, TestClient>;
 type ServerHandle = tokio::task::JoinHandle<()>;
 
+struct DirCleanupGuard(PathBuf);
+
+impl Drop for DirCleanupGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 struct Harness {
     client: Conn,
     server: ServerHandle,
     dir: PathBuf,
+    _cleanup: DirCleanupGuard,
 }
 
 impl Harness {
@@ -60,7 +69,7 @@ impl Harness {
             }
         });
         let client = TestClient.serve(client_stream).await.expect("client init");
-        Self { client, server, dir }
+        Self { client, server, _cleanup: DirCleanupGuard(dir.clone()), dir }
     }
 
     async fn shutdown(self) {
@@ -75,7 +84,9 @@ impl Harness {
         }
         let _ = std::fs::remove_dir_all(&self.dir);
     }
+}
 
+impl Harness {
     async fn tool_raw(&self, name: &str, args: Value) -> CallToolResult {
         let mut p = CallToolRequestParams::new(name.to_owned());
         if let Value::Object(m) = args {

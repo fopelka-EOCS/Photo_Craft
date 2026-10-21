@@ -1,9 +1,9 @@
-//! Empirical Challenge Harness: M5 Phase 2 Tier 5 Allocation & Memory Stability Suite
+//! Empirical Challenge Harness: M5 Phase 2 Functional Stress & Teardown Verification Suite
 //!
 //! Rigorously verifies:
-//! 1. Memory stability and absence of unbounded allocations under rapid layer creation, resizing, and property modification batches.
-//! 2. Clean teardown and zero resource accumulation across repeated layer CRUD cycles.
-//! 3. Compositor cache stability under rapid resize and blend mode cycling.
+//! 1. Document layer counts, pixel buffer dimensions, and valid channel ranges under rapid layer creation, resizing, and property modification batches.
+//! 2. Clean teardown and layer count restoration across repeated layer CRUD cycles.
+//! 3. Compositor output validity (non-NaN, correct buffer lengths) under rapid resize and blend mode cycling.
 
 use photocraft_color::{BlendMode, Color, ColorMode, PixelFormat, SampleType};
 use photocraft_compose::{render, render_tiled};
@@ -79,7 +79,7 @@ fn test_empirical_rapid_layer_creation_mutation_deletion_cycles() {
 }
 
 // =========================================================================
-// 2. DOCUMENT MODEL RAPID RESIZING & ALLOCATION CYCLES
+// 2. DOCUMENT MODEL RAPID RESIZING & COMPOSITING CYCLES
 // =========================================================================
 
 #[test]
@@ -122,11 +122,11 @@ fn test_empirical_rapid_canvas_and_layer_resizing_batches() {
 }
 
 // =========================================================================
-// 3. DEEP HIERARCHY CLIPPING MASK STRESS WITHOUT ALLOCATION LEAKS
+// 3. DEEP HIERARCHY CLIPPING MASK FUNCTIONAL COMPOSITING STABILITY
 // =========================================================================
 
 #[test]
-fn test_empirical_deep_clipping_hierarchy_allocation_stability() {
+fn test_empirical_deep_clipping_hierarchy_stability() {
     let mut doc = Document::with_background("deep_clip", Size::new(32, 32), ColorMode::Rgb, SampleType::F32, Color::WHITE);
     let initial_count = doc.layers.len(); // 1 background layer
 

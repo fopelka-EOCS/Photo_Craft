@@ -192,10 +192,112 @@ fn craft_blitter_slice_adversarial_values_never_panic() {
             }
         }
     }
+
+    // Finite fixture validation with hand-derived expected pixels
+    let mut finite_dst = vec![[0.2f32, 0.4, 0.6, 1.0]; 4];
+    let finite_src = vec![[0.8f32, 0.2, 0.4, 1.0]; 4];
+
+    // Normal at 50% opacity: 0.2*0.5 + 0.8*0.5 = 0.5; 0.4*0.5 + 0.2*0.5 = 0.3; 0.6*0.5 + 0.4*0.5 = 0.5
+    craft_blitter::blit_rgba32f_opts(
+        &mut finite_dst,
+        &finite_src,
+        craft_blitter::BlendMode::Normal,
+        0.5,
+        1.0,
+        1.0,
+        false,
+        craft_blitter::AlphaMode::Straight,
+        false,
+    );
+    for p in &finite_dst {
+        assert!((p[0] - 0.5).abs() < 1e-5);
+        assert!((p[1] - 0.3).abs() < 1e-5);
+        assert!((p[2] - 0.5).abs() < 1e-5);
+        assert!((p[3] - 1.0).abs() < 1e-5);
+    }
+
+    // Multiply at 100% opacity on 0.5 grey: 0.5 * 0.8 = 0.40, 0.3 * 0.2 = 0.06, 0.5 * 0.4 = 0.20
+    craft_blitter::blit_rgba32f_opts(
+        &mut finite_dst,
+        &finite_src,
+        craft_blitter::BlendMode::Multiply,
+        1.0,
+        1.0,
+        1.0,
+        false,
+        craft_blitter::AlphaMode::Straight,
+        false,
+    );
+    for p in &finite_dst {
+        assert!((p[0] - 0.5 * 0.8).abs() < 1e-5);
+        assert!((p[1] - 0.3 * 0.2).abs() < 1e-5);
+        assert!((p[2] - 0.5 * 0.4).abs() < 1e-5);
+    }
+
+    // Clipping isolation: destination alpha must be preserved exactly
+    let mut clipped_dst = vec![[0.5f32, 0.5, 0.5, 0.35]; 4];
+    craft_blitter::blit_rgba32f_opts(
+        &mut clipped_dst,
+        &finite_src,
+        craft_blitter::BlendMode::Normal,
+        1.0,
+        1.0,
+        1.0,
+        false,
+        craft_blitter::AlphaMode::Straight,
+        true,
+    );
+    for p in &clipped_dst {
+        assert!((p[3] - 0.35).abs() < 1e-6, "Clipping mask failed to preserve base alpha");
+    }
+
+    // Premultiplied alpha mode: Normal mode blending
+    let mut pm_dst = vec![[0.2f32, 0.2, 0.2, 0.5]; 4];
+    let pm_src = vec![[0.4f32, 0.4, 0.4, 0.5]; 4];
+    craft_blitter::blit_rgba32f_opts(
+        &mut pm_dst,
+        &pm_src,
+        craft_blitter::BlendMode::Normal,
+        1.0,
+        1.0,
+        1.0,
+        false,
+        craft_blitter::AlphaMode::Premultiplied,
+        false,
+    );
+    for p in &pm_dst {
+        // Co = Cs + Cb*(1 - As) = 0.4 + 0.2*0.5 = 0.5
+        // Ao = As + Ab*(1 - As) = 0.5 + 0.5*0.5 = 0.75
+        assert!((p[0] - 0.5).abs() < 1e-5);
+        assert!((p[3] - 0.75).abs() < 1e-5);
+    }
 }
 
 #[test]
 fn document_render_with_adversarial_layer_properties_never_panics() {
+    // 1. Finite fixture verification with hand-derived expected pixels and full render vs render_tiled equivalence
+    {
+        let mut doc = empty_doc(8, 8);
+        doc.layers.push(solid_layer("base", Rect::new(0, 0, 8, 8), [0.2, 0.4, 0.6, 1.0], BlendMode::Normal, 1.0, 1.0));
+        doc.layers.push(solid_layer("top", Rect::new(0, 0, 8, 8), [0.8, 0.2, 0.4, 1.0], BlendMode::Normal, 0.5, 1.0));
+
+        let buf = render(&doc, doc.bounds());
+        let tiled = render_tiled(&doc, doc.bounds(), 4);
+
+        assert_eq!(buf.px.len(), 64);
+        assert_eq!(tiled.px.len(), 64);
+
+        // Expected: 0.2 * 0.5 + 0.8 * 0.5 = 0.5, 0.4 * 0.5 + 0.2 * 0.5 = 0.3, 0.6 * 0.5 + 0.4 * 0.5 = 0.5, alpha = 1.0
+        let expected = [0.5f32, 0.3, 0.5, 1.0];
+        for (i, (&b_px, &t_px)) in buf.px.iter().zip(&tiled.px).enumerate() {
+            for c in 0..4 {
+                assert!((b_px[c] - expected[c]).abs() < 1e-5, "pixel {i} channel {c} mismatch in render: {} != {}", b_px[c], expected[c]);
+                assert!((t_px[c] - expected[c]).abs() < 1e-5, "pixel {i} channel {c} mismatch in render_tiled: {} != {}", t_px[c], expected[c]);
+            }
+        }
+    }
+
+    // 2. Adversarial non-finite property sweep: compare render and render_tiled with NaN-aware comparison
     let adversarial_props = [
         (-1.0f32, 1.0f32),
         (2.5, 0.5),
@@ -215,10 +317,20 @@ fn document_render_with_adversarial_layer_properties_never_panics() {
             doc.layers.push(solid_layer("top", Rect::new(0, 0, 8, 8), [0.9, 0.1, 0.3, 0.7], mode, op, fill));
 
             let buf = render(&doc, doc.bounds());
-            assert_eq!(buf.px.len(), 64);
-
             let tiled = render_tiled(&doc, doc.bounds(), 4);
+            assert_eq!(buf.px.len(), 64);
             assert_eq!(tiled.px.len(), 64);
+
+            for (&b_px, &t_px) in buf.px.iter().zip(&tiled.px) {
+                for c in 0..4 {
+                    let bc = b_px[c];
+                    let tc = t_px[c];
+                    assert!(
+                        (bc.is_nan() && tc.is_nan()) || (bc - tc).abs() < 1e-5,
+                        "render vs render_tiled mismatch for mode {mode:?}, op {op}, fill {fill}: {bc} vs {tc}"
+                    );
+                }
+            }
         }
     }
 }
