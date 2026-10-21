@@ -409,7 +409,7 @@ pub const F_ADD_DIFF: u32 = 16384;
 pub const F_BLEND_IF: u32 = 524288;
 /// Effect paint: a Normal inside or center stroke replaces the layer beneath it by its coverage
 /// (`effects.rs`): `A × (1 − coverage) + paint × opacity × coverage`, in any colour mode.
-pub const F_REPLACE: u32 = 1048576;
+pub const F_REPLACE: u32 = 2_097_152;
 /// Blend / Atop / FxMerge of a type layer: coverage mixed at `psblend::TEXT_GAMMA`.
 pub const F_TEXT_GAMMA: u32 = 8192;
 /// `FxMerge`: B is the layer's shape (its content); the layer is its colour at fill opacity
