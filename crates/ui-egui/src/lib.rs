@@ -960,7 +960,7 @@ impl PhotocraftApp {
             custom_titlebar: false,
             last_window_title: String::new(),
             fonts_ready: false,
-            splash: Some(splash::SplashState::new()),
+            splash: None,
             last_canvas_rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0)),
             arrange_start: 0,
             ppp: 1.0,
@@ -1054,6 +1054,11 @@ impl PhotocraftApp {
         // File › Scripts › Script Events Manager: "Start Application".
         photocraft_engine::automate_cmds::fire_event(&mut app.session, "startApplication");
         app
+    }
+
+    /// Enables the startup splash screen overlay and font preloading for application launches.
+    pub fn enable_splash(&mut self) {
+        self.splash = Some(splash::SplashState::new());
     }
 
     /// Draw the document canvas on the GPU (custom WGSL shader) instead of via egui textures.
@@ -2095,7 +2100,7 @@ impl eframe::App for PhotocraftApp {
             return;
         }
         let now = ctx.input(|i| i.time);
-        if (cfg!(test) || !self.synthetic.is_empty())
+        if !self.synthetic.is_empty()
             && let Some(s) = &mut self.splash
         {
             s.dismiss();
