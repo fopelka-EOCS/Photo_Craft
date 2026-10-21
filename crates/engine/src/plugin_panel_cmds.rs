@@ -27,8 +27,9 @@
 //! handling they will run under are already here.
 //!
 //! Instances are driven on the calling thread, under one process-wide lock. A hostile panel is
-//! bounded by the 2 s wall-clock budget of a single event and is then stopped for good, so it can
-//! delay other panels by at most that; giving each instance its own worker thread is the next step.
+//! bounded by one 2 s wall-clock budget per host call — shared by every event that call pumps, not
+//! granted afresh to each — and is then stopped for good, so it can delay other panels by at most
+//! that; giving each instance its own worker thread is the next step.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -385,21 +386,81 @@ fn note_failure(id: &str, now: u64) -> bool {
     all.entry(id.to_string()).or_default().record(now)
 }
 
+/// The wall-clock budget of one host call that drives a panel, shared by every event that call pumps.
+///
+/// Each `pc_event` has its own deadline (`Limits::panel_wall_time_ms`), and a panel that answers each
+/// event just inside it could otherwise hold the process-wide panel lock for a minute or more: the
+/// queue is pumped up to [`MAX_PUMP_STEPS`] times, and `run_asked` repeats that up to
+/// [`MAX_PUMP_STEPS`] times again. One budget per host call bounds the whole of it.
+///
+/// Native builds only: the web build has no monotonic clock in `std` (see the module docs), so there
+/// [`Budget::expired`] is always false and fuel is the only bound.
+struct Budget {
+    #[cfg(not(target_arch = "wasm32"))]
+    at: std::time::Instant,
+}
+
+impl Budget {
+    fn after_ms(ms: u64) -> Budget {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = ms;
+            Budget {}
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Budget { at: std::time::Instant::now() + std::time::Duration::from_millis(ms) }
+        }
+    }
+
+    /// The budget of one host call driving `panel`.
+    fn of(panel: &Panel) -> Budget {
+        Budget::after_ms(panel.instance.plugin().limits().panel_wall_time_ms)
+    }
+
+    fn expired(&self) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        {
+            false
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            std::time::Instant::now() >= self.at
+        }
+    }
+}
+
+/// The budget of one host call driving `id`: the panel's own limit, or the default while it has no
+/// instance yet (a panel being opened).
+fn budget_for(id: &str) -> Budget {
+    match panels().get(id) {
+        Some(panel) => Budget::of(panel),
+        None => Budget::after_ms(photocraft_plugins::Limits::default().panel_wall_time_ms),
+    }
+}
+
 /// Sends one event and carries out everything the panel answers with, until it settles.
-fn drive(panel: &mut Panel, event: Value, ctx: &HostCtx) -> Result<()> {
+fn drive(panel: &mut Panel, event: Value, ctx: &HostCtx, budget: &Budget) -> Result<()> {
     panel.instance.queue_mut().push(event);
-    drain(panel, ctx)
+    drain(panel, ctx, budget)
 }
 
 /// Carries out what the panel has queued: send each event, apply the operations it answers with,
 /// and keep going while those operations queue events of their own.
-fn drain(panel: &mut Panel, ctx: &HostCtx) -> Result<()> {
+fn drain(panel: &mut Panel, ctx: &HostCtx, budget: &Budget) -> Result<()> {
     let mut pumped = 0usize;
     while let Some(event) = panel.instance.queue_mut().pop() {
         pumped += 1;
         if pumped > MAX_PUMP_STEPS {
             let error = PluginError::Failed(format!("the panel queued more than {MAX_PUMP_STEPS} events without settling"));
             panel.instance.stop(error.clone());
+            note_failure(panel.instance.plugin().id(), ctx.now);
+            return Err(err(error));
+        }
+        if budget.expired() {
+            let error = PluginError::Limit("time budget".into());
+            panel.instance.stop(error.clone());
+            note_failure(panel.instance.plugin().id(), ctx.now);
             return Err(err(error));
         }
         let ops = match panel.instance.send(&event) {
@@ -429,7 +490,7 @@ fn drain(panel: &mut Panel, ctx: &HostCtx) -> Result<()> {
 /// Called with the panel lock **not** held. A granted command is ordinary engine code: it may be
 /// slow, it may ask the panel something in turn, and it must never run underneath the panel lock —
 /// a command that touched a panel would otherwise wait for itself.
-fn run_asked(s: &mut Session, id: &str, ctx: &HostCtx) -> Result<()> {
+fn run_asked(s: &mut Session, id: &str, ctx: &HostCtx, budget: &Budget) -> Result<()> {
     for _ in 0..MAX_PUMP_STEPS {
         let asked = {
             let mut all = panels();
@@ -455,7 +516,7 @@ fn run_asked(s: &mut Session, id: &str, ctx: &HostCtx) -> Result<()> {
         for (op_id, outcome) in answers {
             queue_result(panel, ctx, &op_id, outcome);
         }
-        drain(panel, ctx)?;
+        drain(panel, ctx, budget)?;
     }
     // Asking for a command on every answer never settles: stop the panel, as a runaway event loop is
     // stopped, rather than run engine commands for it forever.
@@ -523,6 +584,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     let plugin = panel_plugin(CMD, &id)?;
     let doc = active_doc(s, p);
     let ctx = HostCtx { now: now_ms(), doc: doc.as_ref() };
+    let budget = budget_for(&id);
     let caps = plugin.manifest().capabilities.clone();
     // The whole map work happens under the lock, and the panel is driven inside it; whatever it
     // asked for is run afterwards, with the lock down (see [`run_asked`]).
@@ -537,7 +599,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
             // `init` carries what this plug-in stored in an earlier session, so a panel opens where it
             // left off rather than empty. The instance is seeded from the same map (see [`Panel::new`]).
             let init = ops::init(ctx.now, host_info(), LOCALE, &panel.storage, &entropy(), &grants(&caps));
-            drive(&mut panel, init, &ctx)?;
+            drive(&mut panel, init, &ctx, &budget)?;
             // A panel is told about a document only once it has changed, so the one it opened against is
             // not announced as news.
             panel.seen = s.active().map(|d| (d.doc.id.0, d.revision));
@@ -548,10 +610,10 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
             }
             panel.visible = true;
             let event = ops::panel_visible(ctx.now, true);
-            drive(panel, event, &ctx)?;
+            drive(panel, event, &ctx, &budget)?;
         }
     }
-    run_asked(s, &id, &ctx)?;
+    run_asked(s, &id, &ctx, &budget)?;
     let all = panels();
     Ok(all.get(&id).map(inspect_panel).unwrap_or(Value::Null))
 }
@@ -567,6 +629,7 @@ fn close(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let doc = active_doc(s, p);
     let ctx = HostCtx { now: now_ms(), doc: doc.as_ref() };
+    let budget = budget_for(&id);
     {
         let mut all = panels();
         let Some(panel) = all.get_mut(&id) else {
@@ -575,10 +638,10 @@ fn close(s: &mut Session, p: &Value) -> Result<Value> {
         panel.visible = false;
         if panel.stopped().is_none() {
             let event = ops::panel_visible(ctx.now, false);
-            drive(panel, event, &ctx)?;
+            drive(panel, event, &ctx, &budget)?;
         }
     }
-    run_asked(s, &id, &ctx)?;
+    run_asked(s, &id, &ctx, &budget)?;
     Ok(json!({"id": id, "visible": false, "open": true}))
 }
 
@@ -601,6 +664,7 @@ fn event(s: &mut Session, p: &Value) -> Result<Value> {
     let widget = |kind: &str| event.get("id").and_then(Value::as_str).ok_or_else(|| bad(CMD, format!("`{kind}` needs a widget `id`")));
     let doc = active_doc(s, p);
     let ctx = HostCtx { now: now_ms(), doc: doc.as_ref() };
+    let budget = budget_for(&id);
     {
         let mut all = panels();
         let panel = all.get_mut(&id).ok_or_else(|| EngineError::Other(format!("plug-in {id:?} has no open panel (see plugin.panel.open)")))?;
@@ -614,9 +678,9 @@ fn event(s: &mut Session, p: &Value) -> Result<Value> {
             "cancel" => ops::cancel(ctx.now),
             other => return Err(bad(CMD, format!("`{other}` is not a panel event (`ui.click`, `ui.change` or `cancel`)"))),
         };
-        drive(panel, event, &ctx)?;
+        drive(panel, event, &ctx, &budget)?;
     }
-    run_asked(s, &id, &ctx)?;
+    run_asked(s, &id, &ctx, &budget)?;
     let all = panels();
     let panel = all.get(&id).ok_or_else(|| EngineError::Other(format!("plug-in {id:?} has no open panel (see plugin.panel.open)")))?;
     Ok(inspect_panel(panel))
@@ -650,11 +714,13 @@ fn tick(s: &mut Session, p: &Value) -> Result<Value> {
             if only.is_some_and(|want| want != id) || panel.stopped().is_some() {
                 continue;
             }
+            // One budget for this panel's whole turn: its timers and the change notice together.
+            let budget = Budget::of(panel);
             for timer in panel.instance.timers_mut().take_due(ctx.now) {
                 fired += 1;
                 // A timer fires as the `result` of the operation that armed it.
                 let event = ops::result(ctx.now, &OpId::Text(timer), true, json!({}));
-                if let Err(e) = drive(panel, event, &ctx) {
+                if let Err(e) = drive(panel, event, &ctx, &budget) {
                     errors.push(json!({"id": id, "error": e.to_string()}));
                     break;
                 }
@@ -674,7 +740,7 @@ fn tick(s: &mut Session, p: &Value) -> Result<Value> {
                     Err(_) => &Value::Null,
                 };
                 let event = ops::doc_changed(ctx.now, body, revision);
-                if let Err(e) = drive(panel, event, &ctx) {
+                if let Err(e) = drive(panel, event, &ctx, &budget) {
                     errors.push(json!({"id": id, "error": e.to_string()}));
                 }
             }
@@ -685,7 +751,8 @@ fn tick(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // A command a panel asked for while being ticked runs with the lock down, as everywhere else.
     for id in asked_ids {
-        if let Err(e) = run_asked(s, &id, &ctx) {
+        let budget = budget_for(&id);
+        if let Err(e) = run_asked(s, &id, &ctx, &budget) {
             errors.push(json!({"id": id, "error": e.to_string()}));
         }
     }
@@ -704,13 +771,14 @@ fn restart(s: &mut Session, p: &Value) -> Result<Value> {
     failures().remove(&id);
     let mut panel = Panel::new(plugin)?;
     panel.visible = true;
+    let budget = Budget::of(&panel);
     // A restart is the same plug-in starting again, so it gets its storage back — which for a panel
     // that failed mid-edit is the difference between picking up and starting over.
     let init = ops::init(ctx.now, host_info(), LOCALE, &panel.storage, &entropy(), &grants(&caps));
-    drive(&mut panel, init, &ctx)?;
+    drive(&mut panel, init, &ctx, &budget)?;
     panel.seen = s.active().map(|d| (d.doc.id.0, d.revision));
     panels().insert(id.clone(), panel);
-    run_asked(s, &id, &ctx)?;
+    run_asked(s, &id, &ctx, &budget)?;
     let all = panels();
     Ok(all.get(&id).map(inspect_panel).unwrap_or(Value::Null))
 }

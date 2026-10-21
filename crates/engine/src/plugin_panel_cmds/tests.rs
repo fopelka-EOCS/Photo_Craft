@@ -494,8 +494,7 @@ fn a_bad_operation_stops_the_panel_instead_of_leaving_half_the_batch_applied() {
     let id = "test.panel.badop";
     // The 33rd `timer.set` is one past the limit: the operations before it are carried out, this one
     // is not. The ABI says the batch is rejected and the panel stopped, so nothing it armed survives.
-    let ops: Vec<String> =
-        (0..=photocraft_plugins::instance::MAX_TIMERS).map(|i| format!(r#"{{"op": "timer.set", "id": "t{i}", "ms": 100}}"#)).collect();
+    let ops: Vec<String> = (0..=photocraft_plugins::instance::MAX_TIMERS).map(|i| format!(r#"{{"op": "timer.set", "id": "t{i}", "ms": 100}}"#)).collect();
     let reply = format!("[{}]", ops.join(","));
     let mut s = app(id, &panel(id, &[VIEW, &reply]));
     open(&mut s, id);
@@ -507,6 +506,27 @@ fn a_bad_operation_stops_the_panel_instead_of_leaving_half_the_batch_applied() {
     assert_eq!(st["timers"], 0, "the timers the earlier operations armed went with the instance: {st}");
     // And it stays stopped, as for any other failure.
     assert!(click(&mut s, id, "go").is_err());
+    cleanup(&mut s, id);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn one_host_call_gets_one_wall_clock_budget_not_one_per_event() {
+    // The web build has no monotonic clock in `std`, so there is nothing to expire; fuel bounds it.
+    let id = "test.panel.budget";
+    let mut s = app(id, &panel(id, &[VIEW]));
+    open(&mut s, id);
+    // A budget that has already run out stops the panel instead of pumping it event by event, each
+    // with a fresh 2 s deadline of its own.
+    {
+        let mut all = panels();
+        let panel = all.get_mut(id).expect("the panel was just opened");
+        let ctx = HostCtx { now: now_ms(), doc: None };
+        let error = drive(panel, ops::panel_visible(ctx.now, true), &ctx, &Budget::after_ms(0)).expect_err("an expired budget must stop the panel");
+        assert!(error.to_string().contains("time budget"), "{error}");
+        assert!(panel.stopped().is_some());
+    }
+    assert_eq!(inspect(&mut s, id)["state"], "stopped");
     cleanup(&mut s, id);
 }
 
