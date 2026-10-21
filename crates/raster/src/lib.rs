@@ -241,7 +241,12 @@ impl LazyTiles {
                     if s.format != self.format || s.default_pixel.iter().any(|&b| b != 0) {
                         return Err(format!("the decode gave {:?} pixels with a non-zero default or of the wrong format ({:?} expected)", s.format, self.format));
                     }
-                    Ok(std::mem::take(s.map_mut()))
+                    let tiles = std::mem::take(s.map_mut());
+                    // A decode that gave a lazy surface of its own which failed has failed too.
+                    match s.lazy_error() {
+                        Some(e) => Err(e.to_string()),
+                        None => Ok(tiles),
+                    }
                 }),
                 None => Err("the decode was already taken".into()),
             }
@@ -1529,6 +1534,16 @@ mod tests {
         let white = Surface::lazy(PixelFormat::RGBA8, r, None, Box::new(|| Ok(Surface::with_default(PixelFormat::RGBA8, &[1.0; 4]))));
         assert_eq!(white.pixel(0, 0), vec![0.0; 4]);
         assert!(white.lazy_error().is_some());
+
+        // A decode giving a lazy surface that fails has failed too.
+        let nested = Surface::lazy(
+            PixelFormat::RGBA8,
+            r,
+            None,
+            Box::new(move || Ok(Surface::lazy(PixelFormat::RGBA8, r, None, Box::new(|| Err("inner".into()))))),
+        );
+        assert_eq!(nested.tile_count(), 0);
+        assert_eq!(nested.lazy_error(), Some("inner"));
 
         let failed = Surface::lazy(PixelFormat::RGBA8, r, None, Box::new(|| Err("gone".into())));
         assert_eq!(failed.lazy_error(), None);

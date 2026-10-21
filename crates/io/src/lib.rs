@@ -444,7 +444,7 @@ fn import_stages(name: &str, bytes: &[u8], ctl: &photocraft_raster::Interrupt, m
     // A `.psd`/`.psb`/`.psdt` with no raster signature keeps the PSD error instead of
     // `codec: unrecognized image format` (#5258). Magic already returned above.
     if is_psd_input(name, bytes) {
-        return import_psd(name, ctl, |want, recover| PsdFile::from_bytes_and_merged_recovering(bytes, want, recover));
+        return import_psd(name, ctl, false, |want, recover| PsdFile::from_bytes_and_merged_recovering(bytes, want, recover));
     }
     flat::import_flat(name, bytes)
 }
