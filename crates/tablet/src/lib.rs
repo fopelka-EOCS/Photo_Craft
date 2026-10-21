@@ -4,9 +4,13 @@
 //! - **macOS** ([`macos::Monitor`]): an AppKit local event monitor reads the tablet fields of
 //!   each `NSEvent` (`pressure`, `tilt`, `rotation`, `subtype`, and `pointingDeviceType` from
 //!   proximity events) before winit sees the event, so every pointer event the UI handles already
-//!   has its pen sample. AppKit's block-based monitor API needs Objective-C interop, so
-//!   `macos.rs` — like `wintab.rs` — allows `unsafe` (craftrules never-crash: an isolated, tested
-//!   helper crate).
+//!   has its pen sample.
+//! - **Windows** ([`windows::Monitor`]): a thread-local message hook inspects `WM_POINTER*`
+//!   messages on the UI thread's message queue to read `PEN_FLAG_BARREL` (`GetPointerPenInfo`),
+//!   which winit 0.30 drops by mapping pen inputs to touch events.
+//!   AppKit's monitor API and Windows' thread hook and Wintab reader need OS interop, so
+//!   `macos.rs`, `windows.rs` and `wintab.rs` allow `unsafe` (craftrules never-crash: an
+//!   isolated, tested helper crate with `SAFETY:` comments on every block).
 //! - **Linux X11** ([`x11::spawn`]): a second, pure-Rust X connection (x11rb) selects XInput2
 //!   raw events on the root window and maps the tablet device's valuators ("Abs Pressure",
 //!   "Abs Tilt X/Y", "Abs Rotary Z") to samples. Raw events reach every client that asks, also
@@ -25,8 +29,8 @@
 //!   through Xwayland when a pen is attached, and the X11 reader applies.
 //!
 //! The platform glue only reads raw values and hands them to the pure mapping in [`appkit`],
-//! [`xi`] and [`wintab`] (whose Windows-only glue is gated inside the module), which normalise,
-//! clamp and track pen state and are tested on every platform.
+//! [`xi`], [`windows`] and [`wintab`] (whose Windows-only glue is gated inside the module),
+//! which normalise, clamp and track pen state and are tested on every platform.
 //!
 //! A sample is reported through a callback: `Some(sample)` while a pen is in use (hovering or
 //! touching), `None` when the pointer is a mouse again.
@@ -40,6 +44,7 @@ pub mod xi;
 pub mod macos;
 #[cfg(target_os = "windows")]
 pub mod wacom;
+pub mod windows;
 // Pure mapping (tested everywhere); only the Windows glue inside is gated.
 pub mod wintab;
 #[cfg(target_os = "linux")]
