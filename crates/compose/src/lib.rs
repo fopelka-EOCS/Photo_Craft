@@ -1652,15 +1652,17 @@ fn composite_pixel_layer(layer: &Layer, surf: &Surface, backdrop: &mut Buffer, c
     }
     let mv = mask_vals(layer, rect, cx);
     let gamma = text_gamma(layer);
-    let mut content = scratch_buffer(rect);
-    surf.read_rgba_into(rect, &mut content.px);
-    if let Some(m) = &mv {
-        for (p, &k) in content.px.iter_mut().zip(m) {
-            p[3] *= k;
+    let mut row = vec![[0.0f32; 4]; w];
+    for (ry, dst) in backdrop.px.chunks_exact_mut(w).enumerate() {
+        let y = rect.y0 + ry as i32;
+        surf.read_rgba_into(Rect::new(rect.x0, y, rect.x1, y + 1), &mut row);
+        if let Some(m) = mv.as_ref().and_then(|m| m.get(ry * w..(ry + 1) * w)) {
+            for (p, k) in row.iter_mut().zip(m) {
+                p[3] *= k;
+            }
         }
+        blend_span_fill(dst, &row, rect.x0, y, layer.blend, layer.opacity, layer.fill_opacity, gamma);
     }
-    blend_into_fill(backdrop, &content, layer.blend, layer.opacity, layer.fill_opacity, gamma);
-    recycle_buffer(content);
 }
 
 fn composite_layer_plain(layer: &Layer, clipped: &[Layer], backdrop: &mut Buffer, cx: &Ctx, scope: advanced::Scope) {
@@ -2154,8 +2156,36 @@ fn composite_atop_any(layer: &Layer, base: &mut Buffer, cx: &Ctx) {
             *p = [r[0], r[1], r[2], alpha];
         }
     } else {
-        craft_blitter::blit_rgba32f_opts(&mut base.px, &content.px, bmode, opacity, 1.0, gamma, hdr, craft_blitter::AlphaMode::Straight, true);
+        let sanitized = if content.px.iter().any(|p| p[3].is_nan()) {
+            let mut copy = content.px.clone();
+            for pixel in &mut copy {
+                if pixel[3].is_nan() {
+                    pixel[3] = 0.0;
+                }
+            }
+            Some(copy)
+        } else {
+            None
+        };
+        let src = sanitized.as_deref().unwrap_or(&content.px);
+        craft_blitter::blit_rgba32f_opts(&mut base.px, src, bmode, opacity, 1.0, gamma, hdr, craft_blitter::AlphaMode::Straight, true);
     }
+}
+
+fn blit_rgba32f_gamma_sanitized(dst: &mut [[f32; 4]], src: &[[f32; 4]], mode: BlendMode, opacity: f32, fill: f32, gamma: f32) {
+    let sanitized = if src.iter().any(|p| p[3].is_nan()) {
+        let mut copy = src.to_vec();
+        for pixel in &mut copy {
+            if pixel[3].is_nan() {
+                pixel[3] = 0.0;
+            }
+        }
+        Some(copy)
+    } else {
+        None
+    };
+    let src = sanitized.as_deref().unwrap_or(src);
+    craft_blitter::blit_rgba32f_gamma(dst, src, to_blitter_blend_mode(mode), opacity, fill, gamma, psblend::HDR.with(|h| h.get()));
 }
 
 /// Blend an isolated layer buffer into the backdrop.
@@ -2167,7 +2197,7 @@ fn blend_into(backdrop: &mut Buffer, src: &Buffer, mode: BlendMode, opacity: f32
 /// Photoshop's special eight ([`psblend::composite_fill`]), plain coverage otherwise.
 fn blend_into_fill(backdrop: &mut Buffer, src: &Buffer, mode: BlendMode, opacity: f32, fill: f32, gamma: f32) {
     if mode != BlendMode::Dissolve && !psblend::LAB_MIX.with(|m| m.get()) {
-        craft_blitter::blit_rgba32f_gamma(&mut backdrop.px, &src.px, to_blitter_blend_mode(mode), opacity, fill, gamma, psblend::HDR.with(|h| h.get()));
+        blit_rgba32f_gamma_sanitized(&mut backdrop.px, &src.px, mode, opacity, fill, gamma);
         return;
     }
     for_rows(backdrop, src, |dst, s, x0, y| blend_span_fill(dst, s, x0, y, mode, opacity, fill, gamma));
@@ -2190,10 +2220,14 @@ fn for_rows(backdrop: &mut Buffer, src: &Buffer, mut f: impl FnMut(&mut [[f32; 4
 /// [`blend_into_fill`] of one row: `dst` and `src` start at pixel (`x0`, `y`).
 #[allow(clippy::too_many_arguments)]
 fn blend_span_fill(dst: &mut [[f32; 4]], src: &[[f32; 4]], x0: i32, y: i32, mode: BlendMode, opacity: f32, fill: f32, gamma: f32) {
+    if mode != BlendMode::Dissolve && !psblend::LAB_MIX.with(|m| m.get()) {
+        blit_rgba32f_gamma_sanitized(dst, src, mode, opacity, fill, gamma);
+        return;
+    }
     if fill >= 1.0 || !psblend::fill_is_special(mode) {
         return blend_span_g(dst, src, x0, y, mode, opacity * fill, gamma);
     }
-    craft_blitter::blit_rgba32f_gamma(dst, src, psblend::to_blitter_blend_mode(mode), opacity, fill, gamma, psblend::HDR.with(|h| h.get()));
+    blit_rgba32f_gamma_sanitized(dst, src, mode, opacity, fill, gamma);
 }
 
 /// [`blend_into_g`] of one row: `dst` and `src` start at pixel (`x0`, `y`).
