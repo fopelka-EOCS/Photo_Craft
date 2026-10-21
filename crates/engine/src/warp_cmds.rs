@@ -300,11 +300,15 @@ fn target(s: &Session, cmd: &str, p: &Value) -> Result<(LayerId, Rect)> {
 /// Warp on a type layer keeps it editable: a style (or none) is its Warp Text, as in Photoshop
 /// (#3004); a custom mesh is kept on the type as a free warp ("Better Than PS",
 /// [`crate::type_distort`]). One history step.
-fn warp_type_layer(s: &mut Session, id: LayerId, w: &Warp) -> Result<Value> {
+fn warp_type_layer(s: &mut Session, cmd: &str, id: LayerId, w: &Warp) -> Result<Value> {
+    let free = s.prefs().type_.free_transforms_on_type;
     let st = s.active().ok_or(EngineError::NoDocument)?;
     let Some(LayerContent::Text(t)) = st.doc.layer(id).map(|l| &l.content) else { return Err(EngineError::Other("not a type layer".into())) };
     let mut next = t.clone();
     next.cache = None;
+    if !free && !w.is_identity() && (w.style == WarpStyle::Custom || !next.distortions.is_empty()) {
+        return Err(bad(cmd, "as in Photoshop, type takes only a warp style (arc, flag, …); turn on Preferences › Type › Free Transforms on Type, or rasterize the type"));
+    }
     if !crate::type_distort::set_warp(&mut next, w)? {
         return Ok(json!({"layer": id.0, "changed": false}));
     }
@@ -329,7 +333,7 @@ fn apply(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     let (id, rect) = target(s, cmd, p)?;
     let w = warp_from_params(cmd, p, rect_f(rect))?;
     if matches!(s.active().and_then(|d| d.doc.layer(id)).map(|l| &l.content), Some(LayerContent::Text(_))) {
-        return warp_type_layer(s, id, &w);
+        return warp_type_layer(s, cmd, id, &w);
     }
     let is_smart = matches!(s.active().and_then(|d| d.doc.layer(id)).map(|l| &l.content), Some(LayerContent::Smart(_)));
     if w.is_identity() && !is_smart {
@@ -536,7 +540,7 @@ fn grid(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 pub fn specs() -> Vec<CommandSpec> {
-    const P: &str = r##"{"layer":id?,"rect":[x0,y0,x1,y1]? (warp box; default = layer content ∩ selection),"style":"custom|none|arc|arcLower|arcUpper|arch|bulge|shellLower|shellUpper|flag|wave|fish|rise|fisheye|inflate|squeeze|twist","bend":%=50,"hDistort":%,"vDistort":%,"vertical":bool,"mesh":{"us":[0,…,1],"vs":[0,…,1],"points":[[x,y]…]} ((3c+1)×(3r+1) control points, row-major, document px; on a smart object `us`/`vs` span the source contents, so points equal to the placement are an identity warp even when it is skewed),"grid":[cols,rows]?,"warp":{full warp object}?,"interpolation":"bicubic|bilinear|nearest"} — on a type layer the type stays editable: with no free transform yet a style (or none) is its Warp Text and a custom mesh replaces it; else the warp replaces its last free warp (none removes it) or goes on top of a Distort"##;
+    const P: &str = r##"{"layer":id?,"rect":[x0,y0,x1,y1]? (warp box; default = layer content ∩ selection),"style":"custom|none|arc|arcLower|arcUpper|arch|bulge|shellLower|shellUpper|flag|wave|fish|rise|fisheye|inflate|squeeze|twist","bend":%=50,"hDistort":%,"vDistort":%,"vertical":bool,"mesh":{"us":[0,…,1],"vs":[0,…,1],"points":[[x,y]…]} ((3c+1)×(3r+1) control points, row-major, document px; on a smart object `us`/`vs` span the source contents, so points equal to the placement are an identity warp even when it is skewed),"grid":[cols,rows]?,"warp":{full warp object}?,"interpolation":"bicubic|bilinear|nearest"} — on a type layer the type stays editable: a style (or none) is its Warp Text (a custom mesh is refused unless Preferences › Type › Free Transforms on Type is on, then: with no free transform yet a style (or none) is its Warp Text and a custom mesh replaces it; else the warp replaces its last free warp (none removes it) or goes on top of a Distort)"##;
     const S: &str = r##"{"warp":{…}? (the warp being edited; returned split),"rect":[x0,y0,x1,y1]?,"at":[x,y]? (document point; default = middle of the patch)} — without `warp`, edits the active smart object's warp. A 1×1 custom mesh is divided at the thirds first (the guides drawn on the default grid), so splitWarpCrosswise on an identity custom warp returns a 4×4 mesh (knots at 0, 1/3, 1/2, 2/3 and 1), not a 2×2. A preset is fitted as one patch and split without that step."##;
     const G: &str = r##"{"warp":{…}? (the warp being edited; returned with the new mesh),"rect":[x0,y0,x1,y1]?,"size":n|"default"|"3"|"4"|"5" (square patches, 1..=64; 1 and "default" are the single-patch grid)} — without `warp`/`style`/`mesh`, edits the active smart object's warp. The surface is kept and the new lines are real splits at i/n."##;
     vec![
@@ -690,6 +694,16 @@ mod tests {
         s.execute("file.new", json!({"width": 300, "height": 160})).unwrap();
         s.execute("type.create", json!({"x": 20, "y": 90, "text": "Warp", "size": 48})).unwrap();
         let plain = text_of(&s).cache.unwrap().content_bounds();
+        // Default (as in Photoshop): a custom mesh is refused on live type, and nothing changes.
+        let r0 = [f64::from(plain.x0), f64::from(plain.y0), f64::from(plain.x1), f64::from(plain.y1)];
+        let mut m0 = BezierMesh::identity(r0, 1, 1);
+        m0.points[3][1] += 30.0;
+        let n0 = s.active().unwrap().history.past_len();
+        assert!(s.execute("edit.transform.warp", json!({"warp": Warp::custom(m0, r0)})).is_err());
+        assert!(text_of(&s).distortions.is_empty());
+        assert_eq!(s.active().unwrap().history.past_len(), n0);
+        // Opted in: Preferences › Type › Free Transforms on Type.
+        s.execute("prefs.set", json!({"path": "type.freeTransformsOnType", "value": true})).unwrap();
         let r = [f64::from(plain.x0), f64::from(plain.y0), f64::from(plain.x1), f64::from(plain.y1)];
         // Drag the bottom-right corner 30 px down.
         let mut mesh = BezierMesh::identity(r, 1, 1);

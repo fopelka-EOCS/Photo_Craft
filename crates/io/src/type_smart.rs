@@ -30,7 +30,7 @@ fn convert(doc: &Document, layers: &mut [Layer], warnings: &mut Vec<String>, dep
                     l.content = LayerContent::Smart(sm);
                     l.psd_blocks.retain(|(k, _)| k != b"TySh");
                     warnings.push(format!(
-                        "layer \"{}\": type with a free warp or distort was written as a Smart Object holding the editable type (Photoshop keeps neither on type)",
+                        "layer \"{}\": type with a free warp or distort (beyond Photoshop) was written as a Smart Object holding the editable type; it opens in Photoshop and PhotoCraft as a Smart Object, not a type layer (edit the text with Edit Contents). Remove its free warps and distorts to export a plain type layer",
                         l.name
                     ));
                 }
@@ -135,7 +135,8 @@ mod tests {
         doc.layers.push(Layer::new("Plain", LayerContent::Text(plain)));
         doc.layers.push(Layer::new("Bent", LayerContent::Text(t)));
         let (file, warnings) = crate::document_to_psd_with(&doc, &Default::default());
-        assert!(warnings.iter().any(|w| w.contains("Smart Object")), "{warnings:?}");
+        assert!(warnings.iter().any(|w| w.contains("\"Bent\"") && w.contains("not a type layer")), "{warnings:?}");
+        assert!(!warnings.iter().any(|w| w.contains("\"Plain\"")), "plain type is exported untouched: {warnings:?}");
         let bytes = file.to_bytes().unwrap();
         let back = crate::import("t.psd", &bytes).unwrap().document;
         assert!(matches!(back.layers[0].content, LayerContent::Text(_)), "plain type stays type");
@@ -148,5 +149,44 @@ mod tests {
         assert!(file.file_name.ends_with(".psb"), "{}", file.file_name);
         let inner = crate::import(&file.file_name, &file.bytes).unwrap().document;
         assert!(matches!(&inner.layers[0].content, LayerContent::Text(t) if t.text == "Hello" && t.distortions.is_empty()), "Edit Contents opens the type");
+    }
+
+    /// The default contract: type without free warps or distorts (all that Photoshop-compatible
+    /// editing makes, Warp Text included) exports as a type layer, with no warning, and re-imports
+    /// as type; removing the free transforms of a distorted layer gets it back to that.
+    #[test]
+    fn ordinary_type_stays_type_through_psd_and_so_does_type_without_its_free_transforms() {
+        let mut doc = Document::new("t", photocraft_geom::Size::new(300, 120), photocraft_color::ColorMode::Rgb, photocraft_color::SampleType::U8);
+        let fmt = doc.pixel_format();
+        let mut t = TextLayer {
+            text: "Hello".into(),
+            size_pt: 40.0,
+            transform: Affine::translate(20.0, 80.0),
+            warp: Some(photocraft_doc::text::TextWarp { style: "warpArc".into(), value: 30.0, horizontal: true, ..Default::default() }),
+            ..Default::default()
+        };
+        let mut eng = photocraft_text::shared().lock().unwrap();
+        crate::text_import::render_bounded(&mut eng, &mut t, 72.0, fmt);
+        drop(eng);
+        let b = t.cache.as_ref().unwrap().content_bounds();
+        let r = [f64::from(b.x0), f64::from(b.y0), f64::from(b.x1), f64::from(b.y1)];
+        let mut distorted = t.clone();
+        distorted.distortions.push(TypeDistortion { frame: t.transform, kind: TypeDistortionKind::Warp(Warp::custom(BezierMesh::identity(r, 1, 1), r)) });
+        doc.layers.push(Layer::new("Ordinary", LayerContent::Text(t)));
+        let (file, warnings) = crate::document_to_psd_with(&doc, &Default::default());
+        assert!(!warnings.iter().any(|w| w.contains("Smart Object")), "{warnings:?}");
+        let back = crate::import("t.psd", &file.to_bytes().unwrap()).unwrap().document;
+        assert!(matches!(&back.layers[0].content, LayerContent::Text(t) if t.text == "Hello" && t.warp.is_some()), "ordinary type, Warp Text kept, stays type");
+        // The same layer with a free transform becomes a Smart Object; without it, type again.
+        doc.layers[0].content = LayerContent::Text(distorted.clone());
+        let (file, _) = crate::document_to_psd_with(&doc, &Default::default());
+        let back = crate::import("t.psd", &file.to_bytes().unwrap()).unwrap().document;
+        assert!(matches!(back.layers[0].content, LayerContent::Smart(_)));
+        distorted.distortions.clear();
+        doc.layers[0].content = LayerContent::Text(distorted);
+        let (file, warnings) = crate::document_to_psd_with(&doc, &Default::default());
+        assert!(!warnings.iter().any(|w| w.contains("Smart Object")), "{warnings:?}");
+        let back = crate::import("t.psd", &file.to_bytes().unwrap()).unwrap().document;
+        assert!(matches!(back.layers[0].content, LayerContent::Text(_)));
     }
 }

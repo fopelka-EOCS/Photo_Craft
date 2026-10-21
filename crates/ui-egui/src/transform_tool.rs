@@ -703,6 +703,17 @@ pub fn warps_type(app: &PhotocraftApp) -> bool {
     app.session.active().and_then(|st| st.doc.layer(LayerId(t.layer))).is_some_and(|l| matches!(l.content, LayerContent::Text(_)))
 }
 
+/// Preferences › Type › Free Transforms on Type: beyond Photoshop, off by default.
+fn free_type(app: &PhotocraftApp) -> bool {
+    app.session.prefs().type_.free_transforms_on_type
+}
+
+/// The open Warp moves editable type and the free transforms are off: as in Photoshop only the
+/// warp styles (Warp Text) apply, with no mesh to drag or split (#3004).
+fn type_styles_only(app: &PhotocraftApp) -> bool {
+    warps_type(app) && !free_type(app)
+}
+
 /// Warp on editable type: no rasterizing. As in Photoshop the options bar's warp styles are the
 /// type's Warp Text; beyond Photoshop the mesh can be dragged and split too, and the result stays
 /// on the live type as a free warp (`type_distort::set_warp`). It starts from what it will
@@ -725,12 +736,13 @@ fn enter_type_warp(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let (id, session) = (LayerId(t.layer), t.session);
     let doc = st.doc.clone();
     let Some(LayerContent::Text(text)) = doc.layer(id).map(|l| &l.content) else { return };
-    let target = warp_target(text);
+    // Free transforms off: the style is the Warp Text, whatever free warps the type carries.
+    let target = if free_type(app) { warp_target(text) } else { WarpTarget::Style };
     let mut plain = (*doc).clone();
     if let Some(LayerContent::Text(tt)) = plain.layer_mut(id).map(|l| &mut l.content)
         && target != WarpTarget::Append
     {
-        *tt = without_warp_target(text);
+        *tt = if free_type(app) { without_warp_target(text) } else { photocraft_doc::TextLayer { warp: None, ..text.clone() } };
         photocraft_engine::type_cmds::refresh(&doc, tt);
     }
     let Some(b) = plain.layer(id).map(|l| photocraft_engine::transform_cmds::transform_bounds(&plain, l)).filter(|b| !b.is_empty()) else { return };
@@ -1287,8 +1299,19 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> Option<bool> {
         SAVE_FOR_WEB => Some(false),
         // Rotate and Flip turn the box (not while warping, where the mesh is the box).
         _ if box_preset(id).is_some() => Some(t.warp.is_none()),
+        // Editable type can't be distorted (#2630, as #2701 rules for the menus outside a box),
+        // unless Preferences › Type › Free Transforms on Type is on.
+        "edit.transform.distort" | "edit.transform.perspective" if moves_type(app, t) && !free_type(app) => Some(false),
         _ => None,
     }
+}
+
+/// Does the box move an editable type layer (not its selection outline, a lone mask or a path)?
+fn moves_type(app: &PhotocraftApp, t: &TransformSession) -> bool {
+    !t.selection
+        && t.target.is_none()
+        && t.path.is_none()
+        && app.session.active().and_then(|st| st.doc.layer(LayerId(t.layer))).is_some_and(|l| matches!(l.content, LayerContent::Text(_)))
 }
 
 /// Edit › Transform's Rotate and Flip presets while a box is open: what they do to the box, as
@@ -1451,6 +1474,7 @@ pub fn pointer(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers) ->
                 commit(app);
                 return true;
             }
+            let type_layer = distort_refused(app, &t);
             let adjusted = g.map(|g| drag_mods(app, &t, g.hit, mods));
             if let (Some(g), Some((mode, mods)), Some(s)) = (g, adjusted, app.ui.transform.as_mut())
                 && mode_allows(t.mode, g.hit)
@@ -1462,8 +1486,7 @@ pub fn pointer(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers) ->
                     mods.command = false;
                     apply_drag(s, g, [x, y], mods);
                 } else {
-                    // Type is distorted freely too, so Skew moves a lone corner as on pixels.
-                    apply_mode_drag(s, g, [x, y], mode, false, mods);
+                    apply_mode_drag(s, g, [x, y], mode, type_layer, mods);
                 }
                 round_to_pixel_grid(app);
             }
@@ -1508,9 +1531,9 @@ fn upright(q: &[[f64; 2]; 4]) -> bool {
 }
 
 /// The same effective modifiers drive the geometry and decide whether Ctrl is a distortion
-/// gesture rather than the ordinary snap override. Editable type distorts like pixels (#3342).
+/// gesture rather than the ordinary snap override. Keep type and Content-Aware Scale refusals.
 fn drag_mods(app: &PhotocraftApp, t: &TransformSession, hit: Hit, mods: egui::Modifiers) -> (TransformMode, egui::Modifiers) {
-    let mode = t.mode;
+    let (mode, mods) = if distort_refused(app, t) { scale_not_distort(t.mode, hit, mods) } else { (t.mode, mods) };
     let legacy = app.session.prefs().general.use_legacy_free_transform;
     (mode, legacy_mods(legacy, hit, unlinked_mods(app.ui.transform_unlinked, legacy, hit, mods)))
 }
@@ -1525,6 +1548,25 @@ pub(crate) fn corner_distorts(app: &PhotocraftApp, index: usize, mods: egui::Mod
     let (mode, mods) = drag_mods(app, t, Hit::Corner(index), mods);
     let mods = mode_mods(mode, Hit::Corner(index), mods);
     mods.command && !(mods.alt && mods.shift)
+}
+
+/// Editable type can be scaled, rotated and skewed but not distorted (#2630): the rule that greys
+/// Distort and Perspective in `enable_rules::disabled`, for the box's own layer. A box on a path,
+/// on the selection outline or on a lone mask or channel moves no type. Preferences › Type › Free
+/// Transforms on Type (beyond Photoshop, off by default) lifts the rule.
+fn distort_refused(app: &PhotocraftApp, t: &TransformSession) -> bool {
+    !free_type(app) && moves_type(app, t)
+}
+
+/// Where Distort and Perspective are refused ([`distort_refused`]), ⌘-drag and ⌘⌥⇧-drag of a
+/// corner scale like a plain corner drag (with ⌥ and ⇧ keeping their meaning), so the box never
+/// takes a shape the commit would refuse (#3010).
+fn scale_not_distort(mode: TransformMode, hit: Hit, mut mods: egui::Modifiers) -> (TransformMode, egui::Modifiers) {
+    if matches!(hit, Hit::Corner(_)) {
+        mods.command = false;
+    }
+    let mode = if matches!(mode, TransformMode::Distort | TransformMode::Perspective) { TransformMode::Free } else { mode };
+    (mode, mods)
 }
 
 /// Preferences › General › Use Legacy Free Transform, Photoshop's scaling before CC 2019: corner
@@ -1946,6 +1988,10 @@ fn split_gesture(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers) 
 /// Preset warps turn into a custom mesh when the press grabs something. An armed split tool, or
 /// Ctrl / Option held, places a split where the pointer is released instead.
 fn warp_pointer(app: &mut PhotocraftApp, ev: ToolEvent, tol: f64, mods: egui::Modifiers) {
+    // Type takes only the warp styles unless free transforms are on: nothing to drag or split (#3004).
+    if type_styles_only(app) {
+        return;
+    }
     if split_gesture(app, ev, mods) {
         return;
     }
@@ -1980,6 +2026,9 @@ fn warp_pointer(app: &mut PhotocraftApp, ev: ToolEvent, tol: f64, mods: egui::Mo
 /// Runs a warp-edit command against the mesh in the open Warp session and writes the mesh back.
 pub fn edit_session_warp(app: &mut PhotocraftApp, id: &str, params: &serde_json::Value) -> Result<(), String> {
     let Some(w) = app.ui.transform.as_ref().and_then(|t| t.warp.clone()) else { return Err("not warping".into()) };
+    if type_styles_only(app) {
+        return Err("Warp on type takes only the warp styles".into());
+    }
     let mut p = if params.is_object() { params.clone() } else { json!({}) };
     if p.get("warp").is_none() {
         p["warp"] = serde_json::to_value(&w).map_err(|e| e.to_string())?;
@@ -2065,6 +2114,9 @@ pub fn cursor(app: &PhotocraftApp, xf: &ViewXform, p: [f64; 2], quick_split: boo
     let t = app.ui.transform.as_ref()?;
     let tol = handle_tolerance(app);
     if let Some(w) = &t.warp {
+        if type_styles_only(app) {
+            return Some(CursorIcon::Default);
+        }
         let armed = app.transform_preview.as_ref().and_then(|pv| pv.split_tool);
         if armed.is_some() || quick_split {
             // One search for the grid position under the pointer, for both the kind and the arrow.
@@ -2178,7 +2230,7 @@ pub fn draw_overlay(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform
         let over_canvas = painter.ctx().input(|i| i.pointer.hover_pos()).filter(|p| xf.rect.contains(*p)).map(|p| xf.to_doc(p));
         let at = pv.split_pointer.or(over_canvas);
         let alt = painter.ctx().input(|i| i.modifiers.alt || i.modifiers.command);
-        let guide = at.and_then(|p| {
+        let guide = at.filter(|_| !type_styles_only(app)).and_then(|p| {
             let tool = pv.split_tool.or_else(|| {
                 (alt || pv.split_quick).then(|| {
                     let m = w.to_mesh(1, 1);
@@ -2892,13 +2944,13 @@ fn warp_fields(app: &mut PhotocraftApp, ui: &mut egui::Ui, w: &Warp) {
         ui.label(egui::RichText::new(s).color(tk.text_dim).size(12.0));
     };
     // A type layer's style with no free warp yet is its Warp Text: None takes it off.
-    let on_type = warps_type(app);
+    let on_type = type_styles_only(app);
     // Split, Grid, then the warp style with its bend fields.
-    warp_mesh_fields(app, ui, w);
+    ui.add_enabled_ui(!on_type, |ui| warp_mesh_fields(app, ui, w));
     crate::widgets::vline(ui, 22.0);
     lbl(ui, tl!("Warp:"));
     let mut style = w.style;
-    let opts: Vec<(WarpStyle, &str)> = WarpStyle::all().map(|s| (s, s.label())).collect();
+    let opts: Vec<(WarpStyle, &str)> = WarpStyle::all().filter(|s| !(on_type && *s == WarpStyle::Custom)).map(|s| (s, s.label())).collect();
     if crate::widgets::dropdown(ui, "warp-style", &mut style, &opts, 120.0)
         && let Some(t) = app.ui.transform.as_mut()
     {
@@ -5523,6 +5575,16 @@ mod tests {
                 _ => panic!("still type"),
             }
         };
+        // Default, as in Photoshop: only the styles; a drag on the grid changes nothing.
+        crate::menus::invoke(&mut app, &ctx, "edit.transform.warp", json!({})).unwrap();
+        let w = app.ui.transform.as_ref().and_then(|t| t.warp.clone()).expect("Warp mode");
+        warp_pointer(&mut app, ToolEvent::Down { x: w.bounds[2], y: w.bounds[3], pressure: 1.0 }, 4.0, egui::Modifiers::NONE);
+        warp_pointer(&mut app, ToolEvent::Up { x: w.bounds[2] + 20.0, y: w.bounds[3] + 15.0 }, 4.0, egui::Modifiers::NONE);
+        assert_eq!(app.ui.transform.as_ref().unwrap().warp.as_ref(), Some(&w));
+        assert!(split(&mut app, "edit.transform.splitWarpCrosswise", None).is_err());
+        cancel(&mut app);
+        // Opted in (Preferences › Type › Free Transforms on Type).
+        app.run("prefs.set", json!({"path": "type.freeTransformsOnType", "value": true})).unwrap();
         let before = past(&app);
         crate::menus::invoke(&mut app, &ctx, "edit.transform.warp", json!({})).unwrap();
         assert!(app.ui.dialogs.is_empty(), "no prompt");
