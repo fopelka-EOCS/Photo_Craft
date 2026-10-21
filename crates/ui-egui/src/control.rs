@@ -326,12 +326,15 @@ fn run_waiting(app: &mut PhotocraftApp, wait: bool, run: impl FnOnce(&mut Photoc
     }
 }
 
-/// The top dialog samples the image itself (Color Picker, Levels/Curves Set Point, Replace Color,
-/// Color Range): `ui.pointer` gives it the gesture, as the canvas does under it.
-fn dialog_takes_pointer(app: &PhotocraftApp, secondary: bool) -> bool {
+/// The top dialog takes the gesture on the image itself, as the canvas does under it: its
+/// eyedropper (Color Picker, Levels/Curves Set Point, Replace Color, Color Range), or a ⌘/Ctrl-click
+/// with Curves (#7325). `free` is a primary press without Space or the middle button, as
+/// `dialogs::free_press` reads one.
+fn dialog_takes_pointer(app: &PhotocraftApp, secondary: bool, free: bool, mods: egui::Modifiers) -> bool {
     crate::color_picker_ui::top(app).is_some()
         || (!secondary && (crate::adjust_dialog::picker_armed(app) || crate::filter_dialog::color_eyedropper_armed(app)))
         || app.ui.dialogs.last().is_some_and(|d| crate::color_range_ui::owns(&d.fields))
+        || (free && mods.command && crate::adjust_dialog::curves_on_top(app))
 }
 
 /// Screen position of document point (x, y) on the main canvas, where a `ui.pointer` right-click
@@ -1027,20 +1030,21 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
             };
             let secondary = matches!(button.as_str(), "secondary" | "right");
             let mods = modifiers_from(&m);
-            // Under a modal the canvas starts no gesture but the dialog's eyedroppers' (`canvas_view`):
+            // Space held: the Crop tool moves the frame being drawn, a marquee, lasso or shape
+            // being drawn moves instead of growing (hold_keys.rs). Like a modifier flag, it may be
+            // top-level or grouped under "modifiers".
+            let space = p.get("modifiers").unwrap_or(p).get("space").and_then(Value::as_bool).unwrap_or(false);
+            let free = !secondary && !space && button != "middle";
+            // Under a modal the canvas starts no gesture but the dialog's own (`canvas_view`):
             // refused before anything changes, unless a press already reached the tool before the
             // dialog opened and this request carries it on.
             let carries_press = app.control_press && !matches!(events.first(), Some((ToolEvent::Down { .. }, ..)));
-            if crate::menus::modal_open(app) && !dialog_takes_pointer(app, secondary) && !carries_press {
+            if crate::menus::modal_open(app) && !dialog_takes_pointer(app, secondary, free, mods) && !carries_press {
                 return err("pointer gestures are unavailable while a modal dialog is open (only a dialog's own eyedropper takes them)");
             }
             if let Some(t) = tool {
                 crate::tool_memory::select(app, t);
             }
-            // Space held: the Crop tool moves the frame being drawn, a marquee, lasso or shape
-            // being drawn moves instead of growing (hold_keys.rs). Like a modifier flag, it may be
-            // top-level or grouped under "modifiers".
-            let space = p.get("modifiers").unwrap_or(p).get("space").and_then(Value::as_bool).unwrap_or(false);
             crate::crop_ui::set_space(app, space);
             for (ev, x, y, pr, pen) in events {
                 // With the Color Picker on top the image is its eyedropper, as for the mouse.
@@ -1059,7 +1063,7 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                     continue;
                 }
                 // ⌘/Ctrl-click with Curves open adds a point at the pixel's tone, on press only (#7325).
-                if !secondary && !space && button != "middle" && mods.command && crate::adjust_dialog::curves_on_top(app) {
+                if free && mods.command && crate::adjust_dialog::curves_on_top(app) {
                     if matches!(ev, ToolEvent::Down { .. }) {
                         crate::adjust_dialog::add_point_at(app, ctx, x, y, mods.shift);
                     }
@@ -3158,6 +3162,23 @@ mod tests {
         let fields = &app.ui.dialogs.last().unwrap().fields;
         assert_eq!((fields.get("color"), fields.get("points")), (Some(&json!("#00ff00")), Some(&json!([[4.0, 4.0]]))));
         assert_eq!(app.session.active().unwrap().revision, revision, "the Brush did not paint");
+    }
+
+    /// #7325 under the dialog: a ⌘/Ctrl-click on the image with Curves open adds a point there,
+    /// while a plain click is still refused.
+    #[test]
+    fn ui_pointer_command_click_reaches_curves_under_its_dialog() {
+        let (mut app, ctx) = pointer_app(16);
+        assert_eq!(call(&mut app, &ctx, "ui.menu.invoke", json!({"id": "image.adjustments.curves"}))["ok"], true);
+        let steps = past_len(&app);
+        let points = |app: &PhotocraftApp| app.ui.dialogs.last().unwrap().fields["points"].clone();
+        assert_eq!(points(&app).as_array().map(Vec::len), Some(2), "{}", points(&app));
+        let click = json!([{"kind": "down", "x": 4, "y": 4}, {"kind": "up", "x": 4, "y": 4}]);
+        rejected(&mut app, &ctx, "ui.pointer", json!({"events": click}), "modal dialog");
+        let r = call(&mut app, &ctx, "ui.pointer", json!({"command": true, "events": click}));
+        assert_eq!(r["ok"], true, "{r}");
+        assert_eq!(points(&app).as_array().map(Vec::len), Some(3), "a point at the green's tone: {}", points(&app));
+        assert_eq!(past_len(&app), steps, "the Brush did not paint");
     }
 
     /// A Properties Levels/Curves eyedropper isn't modal, but the save prompt over it is.
