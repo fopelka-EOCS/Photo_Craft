@@ -2777,6 +2777,9 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             if menu.item(ui, tl!("Gradient…")) {
                 actions.push(("layer.newFillLayer.gradient".into(), json!({})));
             }
+            if menu.item(ui, tl!("Pattern…")) {
+                actions.push(("layer.newFillLayer.pattern".into(), json!({})));
+            }
         });
         // Like Photoshop the button never replaces a mask (#2075): with a layer mask it adds a
         // vector mask, and with both it is greyed.
@@ -2843,9 +2846,10 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             app.ui.dock.collapsed.retain(|g| *g != crate::dock::Group::Properties);
             continue;
         }
-        if p.is_null() || id == "layer.newFillLayer.solidColor" {
-            // Context-menu items and the Layers footer's Solid Color… action behave like
-            // their menu-bar twins. In particular, a new Solid Color fill opens its picker.
+        if p.is_null() || id == "layer.newFillLayer.solidColor" || id == photocraft_engine::pattern_fill_cmds::CREATE {
+            // Context-menu items and the Layers footer's Solid Color… and Pattern… actions behave
+            // like their menu-bar twins: a new Solid Color fill opens its picker, a new Pattern
+            // fill the Pattern Fill dialog.
             let ctx = ui.ctx().clone();
             let params = if p.is_null() { json!({}) } else { p };
             if let Err(e) = crate::menus::invoke(app, &ctx, &id, params) {

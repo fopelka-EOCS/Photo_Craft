@@ -83,7 +83,7 @@ fn stamp_visible(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// A plain, unlocked pixel layer with no pixels, mask or clipping: safe to stamp into.
-fn is_empty_pixel_layer(doc: &Document, id: LayerId) -> bool {
+pub(crate) fn is_empty_pixel_layer(doc: &Document, id: LayerId) -> bool {
     let Some(l) = doc.layer(id) else { return false };
     let locks = doc.effective_locks(id);
     matches!(&l.content, LayerContent::Raster(s) if s.content_bounds().is_empty())
