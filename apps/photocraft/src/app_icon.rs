@@ -26,11 +26,21 @@ pub fn window_icon() -> egui::IconData {
     }
 }
 
+/// The icon to give the main viewport: [`window_icon`], or inside a macOS app bundle an *empty*
+/// icon. Leaving the viewport's icon unset there is not enough: eframe then substitutes its own
+/// default (the black egui logo) and pushes it to the Dock with `setApplicationIconImage` on the
+/// first frame, so the Dock icon flipped from PhotoCraft to egui on launch. eframe skips that call
+/// only for an icon equal to `IconData::default()`, and egui-winit sets no window icon for an
+/// empty one, which leaves the bundle's `.icns` in place.
+pub fn viewport_icon(exe: Option<&std::path::Path>) -> egui::IconData {
+    if sets_runtime_icon(exe) { window_icon() } else { egui::IconData::default() }
+}
+
 /// Whether the window gets [`window_icon`] at runtime: everywhere except inside a macOS app
 /// bundle. There the Dock shows the bundle's `PhotoCraft.icns` (`CFBundleIconFile`), which macOS
 /// renders in its own style (Liquid Glass and its tinted and dark variants); a runtime PNG
 /// replaced it with a flat picture (#5849). `exe` is the running executable.
-pub fn sets_runtime_icon(exe: Option<&std::path::Path>) -> bool {
+fn sets_runtime_icon(exe: Option<&std::path::Path>) -> bool {
     !(cfg!(target_os = "macos") && exe.is_some_and(in_app_bundle))
 }
 
@@ -78,6 +88,21 @@ mod tests {
         assert!(sets_runtime_icon(None));
         assert!(sets_runtime_icon(Some(Path::new("/usr/bin/photocraft"))));
         assert_eq!(sets_runtime_icon(Some(Path::new("/Applications/PhotoCraft.app/Contents/MacOS/photocraft"))), !cfg!(target_os = "macos"));
+    }
+
+    /// Inside a macOS bundle the viewport gets an empty icon, never none: with none, eframe put its
+    /// own egui logo in the Dock over the bundle's .icns.
+    #[test]
+    fn a_macos_bundle_gets_an_empty_icon_not_eframes_default() {
+        use std::path::Path;
+        let bundled = viewport_icon(Some(Path::new("/Applications/PhotoCraft.app/Contents/MacOS/photocraft")));
+        if cfg!(target_os = "macos") {
+            assert_eq!(bundled, egui::IconData::default(), "eframe only skips the Dock icon for IconData::default()");
+        } else {
+            assert_eq!(bundled, window_icon());
+        }
+        assert_eq!(viewport_icon(Some(Path::new("/usr/bin/photocraft"))), window_icon());
+        assert_eq!(viewport_icon(None), window_icon());
     }
 
     #[test]
