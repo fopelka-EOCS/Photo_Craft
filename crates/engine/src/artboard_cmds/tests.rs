@@ -673,3 +673,23 @@ fn new_artboard_adopts_clip_groups_whole() {
     assert!(top.contains(&base_out) && top.contains(&clipped_in), "the outside clip group stays whole");
     assert!(doc(&s).layer(clipped_in).unwrap().clipped);
 }
+
+/// A group is measured by its contents (it offers no snap rect, so it was never taken in), and
+/// a layer by all of it, whatever the selection holds.
+#[test]
+fn new_artboard_adopts_groups_and_ignores_the_selection() {
+    let mut s = session(8);
+    let inner = add_square(&mut s, Rect::new(10, 10, 30, 30), [1.0, 0.0, 0.0, 1.0]);
+    let group = LayerId(s.execute("layer.groupLayers", json!({})).unwrap()["layer"].as_u64().unwrap());
+    let clipped = add_square(&mut s, Rect::new(15, 15, 25, 25), [0.0, 1.0, 0.0, 1.0]);
+    s.execute("layer.setProps", json!({"layer": clipped.0, "clipped": true})).unwrap();
+    // Mostly inside the board; the selection holds only its part outside.
+    let loose = add_square(&mut s, Rect::new(25, 35, 65, 45), [0.0, 0.0, 1.0, 1.0]);
+    s.execute("select.rect", json!({"x": 55, "y": 30, "width": 25, "height": 20})).unwrap();
+    let r = s.execute("layer.new.artboard", json!({"rect": [0, 0, 50, 50], "adopt": true})).unwrap();
+    let board = doc(&s).layer(LayerId(r["layer"].as_u64().unwrap())).unwrap();
+    let kids: Vec<LayerId> = board.children().unwrap().iter().map(|l| l.id).collect();
+    assert_eq!(kids, vec![group, clipped, loose], "the group, its clipped layer and the loose layer");
+    assert_eq!(doc(&s).layer(group).unwrap().children().unwrap()[0].id, inner);
+    assert!(doc(&s).layer(clipped).unwrap().clipped);
+}

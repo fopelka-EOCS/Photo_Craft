@@ -232,19 +232,19 @@ fn set_artboard(l: &mut Layer, a: Artboard) {
 /// half inside it, in their stacking order, removed from the document. Other artboards, the
 /// Background and layers with nothing in them stay where they are. A clip group moves or stays
 /// whole, as its base decides: splitting one would leave clipped layers clipping to another base.
+/// A layer is measured whole, as it moves: a group by its contents, whatever the selection holds.
 fn adopt_layers(doc: &mut Document, rect: Rect) -> Result<Vec<Layer>> {
-    let inside = |r: [f64; 4]| {
-        let area = (r[2] - r[0]).max(0.0) * (r[3] - r[1]).max(0.0);
-        let ix = (r[2].min(f64::from(rect.x1)) - r[0].max(f64::from(rect.x0))).max(0.0);
-        let iy = (r[3].min(f64::from(rect.y1)) - r[1].max(f64::from(rect.y0))).max(0.0);
-        area > 0.0 && ix * iy >= area * 0.5
+    let area = |r: Rect| f64::from(r.width()) * f64::from(r.height());
+    let inside = |l: &Layer| {
+        let b = crate::transform_cmds::whole_layer_bounds(l);
+        area(b) > 0.0 && area(b.intersect(&rect)) >= area(b) * 0.5
     };
     let mut ids = Vec::new();
     // Bottom to top, a clipped layer follows the nearest unclipped layer below it (its base).
     let mut base_in = false;
     for l in &doc.layers {
         if !l.clipped {
-            base_in = l.artboard().is_none() && !doc.is_background(l.id) && crate::snap::layer_rect(doc, l.id).is_some_and(inside);
+            base_in = l.artboard().is_none() && !doc.is_background(l.id) && inside(l);
         }
         if base_in {
             ids.push(l.id);
