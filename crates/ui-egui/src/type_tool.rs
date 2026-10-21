@@ -778,6 +778,64 @@ fn line_edge(app: &mut PhotocraftApp, id: LayerId, caret: usize, end: bool) -> u
     photocraft_text::line_edge(&l, &text, caret, end)
 }
 
+/// Screen rect of the caret's vertical stroke of the active type edit session over the canvas
+/// transform `xf`, for caret following. `None` when nothing is being edited or the layer can't
+/// be laid out. The stroke spans the caret's line, on the empty-text fallback line as in
+/// [`draw_overlay`]; one point wide (a hairline), so following works on its centre or edge as
+/// the caller pleases.
+pub(crate) fn caret_screen(app: &mut PhotocraftApp, xf: &ViewXform) -> Option<egui::Rect> {
+    let ed = app.ui.text_edit.as_ref()?.clone();
+    let (l, aff, text) = layout(app, LayerId(ed.layer))?;
+    let (x, top, bot) = if l.lines.is_empty() { (0.0, -(12.0 * l.px_per_pt.max(1.0)), 3.0) } else { l.caret(byte_of(&text, ed.caret)) };
+    let scr_y = |v: f32| {
+        let (tx, ty) = l.to_text(x, v);
+        let p = aff.apply(Point::new(f64::from(tx), f64::from(ty)));
+        xf.to_screen(p.x as f32, p.y as f32).y
+    };
+    let (tx, ty) = l.to_text(x, (top + bot) / 2.0);
+    let m = aff.apply(Point::new(f64::from(tx), f64::from(ty)));
+    let cx = xf.to_screen(m.x as f32, m.y as f32).x;
+    Some(egui::Rect::from_two_pos(egui::pos2(cx, scr_y(top)), egui::pos2(cx, scr_y(bot))))
+}
+
+/// Where to scroll this frame so a caret stroke at screen rect `caret` comes back into the
+/// canvas `rect`: only toward the caret, never back, with its whole stroke at least 20 pt
+/// inside the edges. A stroke taller than a margin box can't fully fit — a huge caret then
+/// follows by its centre, which puts the part that matters (the writing point) in view. The
+/// scroll limits (an image that fits never scrolls, Overscroll views aren't pulled back) live
+/// in [`crate::canvas_autoscroll::scroll`], which takes this step.
+pub(crate) fn caret_follow_step(caret: egui::Rect, rect: egui::Rect) -> egui::Vec2 {
+    let margin = 20.0;
+    if !caret.is_finite() || !rect.is_finite() || rect.width() <= 0.0 || rect.height() <= 0.0 || 2.0 * margin >= rect.width().min(rect.height()) {
+        return egui::Vec2::ZERO;
+    }
+    let past = |c: f32, lo: f32, hi: f32| {
+        if c < lo {
+            c - lo
+        } else if c > hi {
+            c - hi
+        } else {
+            0.0
+        }
+    };
+    // Horizontally the stroke is a hairline: follow its centre as before.
+    let dx = past(caret.center().x, rect.left() + margin, rect.right() - margin);
+    let dy = if caret.height() <= rect.height() - 2.0 * margin {
+        // Bring the whole stroke in: whichever edge is out drives the step (at most one can be —
+        // the stroke fits the margin box).
+        if caret.bottom() > rect.bottom() - margin {
+            caret.bottom() - (rect.bottom() - margin)
+        } else if caret.top() < rect.top() + margin {
+            caret.top() - (rect.top() + margin)
+        } else {
+            0.0
+        }
+    } else {
+        past(caret.center().y, rect.top() + margin, rect.bottom() - margin)
+    };
+    egui::vec2(dx, dy)
+}
+
 /// Keyboard input while editing. Returns true when a type edit session is active (single-key
 /// tool shortcuts must then be skipped). Handled events are removed from the frame's input.
 pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
@@ -785,6 +843,7 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
     if !ctx.input(|i| i.focused) {
         crate::type_transform::cancel_drag(app);
     }
+    let prev_caret = app.ui.text_edit.as_ref().map(|ed| ed.caret);
     let Some(ed) = app.ui.text_edit.clone() else { return false };
     // The font picker (and other focused fields) owns keyboard input while it is open.
     if ctx.text_edit_focused() || ctx.egui_wants_keyboard_input() {
@@ -876,6 +935,7 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
                                 (false, _, true) => line_edge(app, id, a, false),
                                 (false, true, _) => word_boundary(&text, a, false),
                                 (false, _, _) => a.saturating_sub(1),
+                                (true, false, true) => line_edge(app, id, a, true),
                                 (true, true, _) => word_boundary(&text, a, true),
                                 (true, _, _) => (a + 1).min(n),
                             };
@@ -919,7 +979,13 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
                         set(app, to, m.shift);
                     }
                     Key::Home | Key::End => {
-                        let to = line_edge(app, id, ed.caret, *key == Key::End);
+                        // ⌘Home / ⌘End is the first / last character of the whole text (Photoshop's
+                        // Ctrl+Home / Ctrl+End); bare Home / End stop at the line's edges.
+                        let to = if m.command {
+                            if *key == Key::Home { 0 } else { n }
+                        } else {
+                            line_edge(app, id, ed.caret, *key == Key::End)
+                        };
                         set(app, to, m.shift);
                     }
                     Key::Enter if m.command => commit_with(app, *m),
@@ -968,6 +1034,12 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
                 keep
             })
         });
+    }
+    // A keyboard step moved the caret: let the canvas scroll it back into view (#QoL keys).
+    if let Some(ed) = app.ui.text_edit.as_ref()
+        && prev_caret.is_some_and(|c| c != ed.caret)
+    {
+        app.ui.type_caret_moved = true;
     }
     app.ui.text_edit.is_some()
 }
