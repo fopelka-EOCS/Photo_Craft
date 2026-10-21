@@ -720,11 +720,24 @@ fn turned_crop_source(old: Size, new: Size, angle: f64, target: Rect) -> Rect {
     Rect::new((x0 - KERNEL_REACH).floor() as i32, (y0 - KERNEL_REACH).floor() as i32, (x1 + KERNEL_REACH).ceil() as i32, (y1 + KERNEL_REACH).ceil() as i32)
 }
 
+/// Flatten the document only if its dimensions are within the compositor's render limit.
+fn flatten_within_render_limit(doc: &Document, op: &str) -> Result<photocraft_compose::Buffer> {
+    let bounds = doc.bounds();
+    if !bounds.is_empty() && u64::from(bounds.width()) * u64::from(bounds.height()) > photocraft_compose::MAX_RENDER_PIXELS {
+        return Err(EngineError::Other(format!("the document is too large to {op}")));
+    }
+    let buf = photocraft_compose::flatten(doc);
+    if buf.px.is_empty() && !bounds.is_empty() {
+        return Err(EngineError::Other(format!("the document is too large to {op}")));
+    }
+    Ok(buf)
+}
+
 /// Image → Trim.
 fn trim(s: &mut Session, p: &Value) -> Result<Value> {
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let canvas = d.doc.bounds();
-    let buf = photocraft_compose::flatten(&d.doc);
+    let buf = flatten_within_render_limit(&d.doc, "trim")?;
     let based = p.get("basedOn").and_then(Value::as_str).unwrap_or("transparent");
     let w = canvas.width() as usize;
     let reference = match based {
@@ -803,7 +816,7 @@ fn duplicate(s: &mut Session, p: &Value) -> Result<Value> {
     doc.id = photocraft_doc::DocId::fresh();
     doc.name = p.get("name").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| format!("{} copy", d.doc.name));
     if p.get("mergedOnly").and_then(Value::as_bool).unwrap_or(false) {
-        let buf = photocraft_compose::flatten(&doc);
+        let buf = flatten_within_render_limit(&doc, "duplicate merged")?;
         let fmt = doc.pixel_format();
         let mut surf = Surface::new(fmt);
         let vals: Vec<f32> = buf.px.iter().flat_map(|q| photocraft_raster::from_rgba(&fmt, *q)).collect();
@@ -1686,5 +1699,32 @@ mod tests {
         assert_eq!(s.documents().len(), 2);
         assert_eq!(doc(&s).layers.len(), 1);
         assert!(doc(&s).name.ends_with("copy"));
+    }
+
+    #[test]
+    fn trim_and_duplicate_merged_on_too_large_document_fail_gracefully_without_panic() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 40000, "height": 30000, "background": "transparent"})).unwrap();
+        let initial_layers = doc(&s).layers.len();
+        let initial_bounds = doc(&s).bounds();
+        let initial_rev = s.active().unwrap().revision;
+        let initial_docs = s.documents().len();
+
+        let trim_res = s.execute("image.trim", json!({"basedOn": "topLeft"}));
+        assert!(trim_res.is_err(), "trim on too-large document must return error");
+        let err = trim_res.unwrap_err().to_string();
+        assert!(err.contains("too large to trim"), "error should explain document is too large: {err}");
+        assert_eq!(doc(&s).layers.len(), initial_layers, "layer count unchanged after failed trim");
+        assert_eq!(doc(&s).bounds(), initial_bounds, "canvas size unchanged after failed trim");
+        assert_eq!(s.active().unwrap().revision, initial_rev, "revision unchanged after failed trim");
+
+        let dup_res = s.execute("image.duplicate", json!({"mergedOnly": true}));
+        assert!(dup_res.is_err(), "duplicate merged on too-large document must return error");
+        let dup_err = dup_res.unwrap_err().to_string();
+        assert!(dup_err.contains("too large to duplicate merged"), "error should explain document is too large: {dup_err}");
+        assert_eq!(s.documents().len(), initial_docs, "document count unchanged after failed duplicate");
+        assert_eq!(doc(&s).layers.len(), initial_layers, "layer count unchanged after failed duplicate");
+        assert_eq!(doc(&s).bounds(), initial_bounds, "canvas size unchanged after failed duplicate");
+        assert_eq!(s.active().unwrap().revision, initial_rev, "revision unchanged after failed duplicate");
     }
 }
