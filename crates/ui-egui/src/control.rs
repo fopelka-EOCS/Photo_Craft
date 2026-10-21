@@ -330,8 +330,11 @@ fn run_waiting(app: &mut PhotocraftApp, wait: bool, run: impl FnOnce(&mut Photoc
 /// eyedropper (Color Picker, Levels/Curves Set Point, Replace Color, Color Range), a ⌘/Ctrl-click
 /// with Curves (#7325), Select and Mask's Refine Edge Brush, the Blur Gallery's pins, or Layer
 /// Style's shadow drag (#5701). `free` is a primary press without Space or the middle button, as
-/// `dialogs::free_press` reads one.
+/// `dialogs::free_press` reads one. Never under a prompt drawn over the dialogs.
 fn dialog_takes_pointer(app: &PhotocraftApp, secondary: bool, free: bool, mods: egui::Modifiers) -> bool {
+    if crate::menus::prompt_open(app) {
+        return false;
+    }
     crate::color_picker_ui::top(app).is_some()
         || (!secondary && (crate::adjust_dialog::picker_armed(app) || crate::filter_dialog::color_eyedropper_armed(app)))
         || app.ui.dialogs.last().is_some_and(|d| crate::color_range_ui::owns(&d.fields))
@@ -1061,8 +1064,9 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
             for (ev, x, y, pr, pen) in events {
                 let (down, up) = (matches!(ev, ToolEvent::Down { .. }), matches!(ev, ToolEvent::Up { .. }));
                 // A press that reached the tool before a dialog opened keeps its moves and release
-                // there, whichever dialog opened since: only a new press goes to the dialog.
-                let to_dialog = !app.control_press || down;
+                // there, whichever dialog opened since: only a new press goes to the dialog, and not
+                // under a prompt drawn over it.
+                let to_dialog = (!app.control_press || down) && !crate::menus::prompt_open(app);
                 // With the Color Picker on top the image is its eyedropper, as for the mouse.
                 if to_dialog && crate::color_picker_ui::top(app).is_some() {
                     if !matches!(ev, ToolEvent::Up { .. }) {
@@ -3328,6 +3332,28 @@ mod tests {
         assert_eq!(sampled["ok"], true, "{sampled}");
         assert_ne!(app.ui.dialogs.last().unwrap().fields, picker, "a new press samples the green");
         assert_eq!(past_len(&app), steps + 1);
+    }
+
+    /// The save prompt is drawn over every dialog: a Color Picker opened under it doesn't sample.
+    #[test]
+    fn ui_pointer_refuses_a_color_picker_under_the_save_prompt() {
+        let (mut app, ctx) = pointer_app(64);
+        app.run("layer.new.layer", json!({})).unwrap();
+        crate::menus::invoke(&mut app, &ctx, "file.close", json!({})).unwrap();
+        assert!(app.discard.is_some());
+        assert_eq!(call(&mut app, &ctx, "ui.dialog.open", json!({"kind": "colorPicker"}))["ok"], true);
+        let picker = app.ui.dialogs.last().unwrap().fields.clone();
+        rejected(&mut app, &ctx, "ui.pointer", json!({"events": [{"kind": "down", "x": 60, "y": 4}, {"kind": "up", "x": 60, "y": 4}]}), "modal dialog");
+        assert_eq!(app.ui.dialogs.last().unwrap().fields, picker, "nothing sampled");
+    }
+
+    /// TIFF Options (as Targa and DDS Options) is modal: no gesture reaches the image under it.
+    #[test]
+    fn ui_pointer_is_refused_under_tiff_options() {
+        let (mut app, ctx) = pointer_app(64);
+        crate::tiff_options_ui::park(&mut app, "out.tif".into()).unwrap();
+        assert!(app.ui.dialogs.is_empty() && app.discard.is_none() && app.camera_raw.is_none());
+        rejected(&mut app, &ctx, "ui.pointer", json!({"events": pointer_stroke()}), "modal dialog");
     }
 
     /// A Properties Levels/Curves eyedropper isn't modal, but the save prompt over it is.
