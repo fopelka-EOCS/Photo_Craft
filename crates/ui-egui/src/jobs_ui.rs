@@ -427,16 +427,18 @@ pub fn cancel(app: &mut PhotocraftApp, id: JobId) -> bool {
 }
 
 fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
+    // Monitor Apply includes persistence and may roll back a successful worker result.
+    // Its handler also distinguishes a user Apply from a silent internal refresh.
+    let monitor = crate::monitor_profiles_ui::on_event(app, &e);
     // Preferences ▸ General ▸ Beep When Done (off by default): a finished operation beeps, like
     // Photoshop's cue. Cancelling is the user's own action and stays silent.
     if matches!(e.outcome, JobOutcome::Done(_))
+        && matches!(&monitor, None | Some(Ok(true)))
         && app.session.prefs().general.beep_when_done
         && let Some(beep) = app.services.beep
     {
         beep();
     }
-    // Monitor Apply includes persistence and may roll back a successful worker result.
-    let monitor = crate::monitor_profiles_ui::on_event(app, &e);
     // Control requests waiting on this job.
     let reply = match (&e.outcome, &monitor) {
         (_, Some(Err(err))) => json!({"ok": false, "error": err}),

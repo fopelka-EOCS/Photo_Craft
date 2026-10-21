@@ -269,26 +269,27 @@ fn finish(app: &mut PhotocraftApp, id: u64, close: bool, before: Snapshot) -> Re
     Ok(())
 }
 /// Complete a monitor job before its control waiters receive a reply. A successful worker
-/// is not a successful Apply until preferences have also been saved.
-pub fn on_event(app: &mut PhotocraftApp, e: &JobEvent) -> Option<Result<(), String>> {
+/// is not a successful Apply until preferences have also been saved. The success value allows
+/// a completion beep only for a persisted Apply; internal refreshes stay silent.
+pub fn on_event(app: &mut PhotocraftApp, e: &JobEvent) -> Option<Result<bool, String>> {
     if app.monitor_profiles.refresh == Some(e.id) {
         app.monitor_profiles.refresh = None;
         if let JobOutcome::Done(v) = &e.outcome {
             app.monitor_profiles.refresh_again |= v["stale"] == true;
         }
-        return Some(Ok(()));
+        return Some(Ok(false));
     }
     if app.monitor_profiles.apply.as_ref().is_some_and(|p| p.job == e.id) {
         if let Some(p) = app.monitor_profiles.apply.take() {
             match &e.outcome {
                 JobOutcome::Done(_) => {
-                    return Some(finish(app, p.dialog, p.close, p.before));
+                    return Some(finish(app, p.dialog, p.close, p.before).map(|()| true));
                 }
                 JobOutcome::Failed(e) => error(app, p.dialog, e),
                 JobOutcome::Cancelled => {}
             }
         }
-        return Some(Ok(()));
+        return Some(Ok(false));
     }
     None
 }
@@ -487,13 +488,22 @@ mod tests {
     }
     #[test]
     fn waiting_control_reply_includes_monitor_preference_save_result() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static BEEPS: AtomicUsize = AtomicUsize::new(0);
+        fn count_beep() {
+            BEEPS.fetch_add(1, Ordering::SeqCst);
+        }
         for method in ["ui.dialog.apply", "ui.dialog.confirm"] {
             for fail_save in [true, false] {
+                BEEPS.store(0, Ordering::SeqCst);
                 let mut app = app();
                 app.background_jobs = true;
+                app.services.beep = Some(count_beep);
+                app.session.edit_prefs(|p| p.general.beep_when_done = true);
                 let writes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
                 let count = Arc::clone(&writes);
                 app.services.save_prefs = Some(Box::new(move |_| {
+                    assert_eq!(BEEPS.load(Ordering::SeqCst), 0, "do not signal success before preferences are saved");
                     count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     if fail_save { Err("disk full".into()) } else { Ok(()) }
                 }));
@@ -515,6 +525,7 @@ mod tests {
                     std::thread::sleep(std::time::Duration::from_millis(1));
                 };
                 assert_eq!(writes.load(std::sync::atomic::Ordering::SeqCst), 1);
+                assert_eq!(BEEPS.load(Ordering::SeqCst), usize::from(!fail_save), "only a persisted Apply should beep");
                 assert_eq!(reply["ok"], !fail_save, "{method}: {reply}");
                 assert!(!busy(&app));
                 if fail_save {
@@ -534,9 +545,17 @@ mod tests {
 
     #[test]
     fn background_monitor_refresh_preserves_unread_status() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static BEEPS: AtomicUsize = AtomicUsize::new(0);
+        fn count_beep() {
+            BEEPS.fetch_add(1, Ordering::SeqCst);
+        }
         for background in [false, true] {
+            BEEPS.store(0, Ordering::SeqCst);
             let mut app = app();
             app.background_jobs = background;
+            app.services.beep = Some(count_beep);
+            app.session.edit_prefs(|p| p.general.beep_when_done = true);
             app.ui.status = "Previous export failed".into();
             app.ui.status_error = true;
             let ctx = egui::Context::default();
@@ -548,6 +567,7 @@ mod tests {
                 assert!(std::time::Instant::now() < deadline, "monitor refresh did not finish");
                 std::thread::sleep(std::time::Duration::from_millis(1));
             }
+            assert_eq!(BEEPS.load(Ordering::SeqCst), 0, "automatic monitor refresh must stay silent");
             assert_eq!(app.ui.status, "Previous export failed");
             assert!(app.ui.status_error);
             assert!(app.monitor_profiles.refresh.is_none());
