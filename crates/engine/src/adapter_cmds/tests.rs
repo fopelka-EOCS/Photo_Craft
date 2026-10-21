@@ -368,7 +368,7 @@ fn unlocked_selection_mixes_associated_colour_and_preserves_coverage_endpoints()
             SampleType::U16 => 1.0 / 65535.0 + 1e-6,
             SampleType::F32 => 1e-6,
         };
-        for (pixel, (actual, expected)) in after.chunks_exact(4).zip(expected).enumerate() {
+        for (pixel, (actual, expected)) in after.as_chunks::<4>().0.iter().zip(expected).enumerate() {
             for (channel, (actual, expected)) in actual.iter().zip(expected).enumerate() {
                 assert!((actual - expected).abs() <= tolerance, "{depth:?} pixel {pixel} channel {channel}: {actual} != {expected}");
             }
@@ -391,7 +391,7 @@ fn unlocked_selection_retains_extreme_hdr_and_subnormal_alpha_without_overflow()
     let expected = [[0.6 * h, -0.6 * h, 0.6 * h, 0.625], [0.5 * h, -0.5 * h, 0.5 * h, tiny], [0.0, 0.0, 0.0, 0.0], old[3], candidate[4], [h, -h, h, 1.0]];
     let (mut s, layer) = candidate_session(SampleType::F32, &old, &candidate, &[0.5, 0.5, 0.5, 0.0, 1.0, 0.5]);
     s.execute(RUN, params("image", "pixels")).unwrap();
-    for (pixel, (actual, expected)) in samples(&s, layer).chunks_exact(4).zip(expected).enumerate() {
+    for (pixel, (actual, expected)) in samples(&s, layer).as_chunks::<4>().0.iter().zip(expected).enumerate() {
         for (channel, (actual, expected)) in actual.iter().zip(expected).enumerate() {
             assert!(actual.is_finite(), "pixel {pixel} channel {channel}");
             if expected == 0.0 || expected.abs() <= 1.0 {

@@ -598,7 +598,7 @@ mod tests {
         app.adapter_ui.available = Some(true);
         let ctx = egui::Context::default();
         for _ in 0..3 {
-            let _ = ctx.run(egui::RawInput::default(), |ctx| show(&mut app, ctx));
+            ctx.run_ui(egui::RawInput::default(), |ui| show(&mut app, ui.ctx())).textures_delta.clear();
         }
         assert_eq!(calls.get(), 0);
     }
