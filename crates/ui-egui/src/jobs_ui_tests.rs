@@ -441,28 +441,214 @@ fn saves_run_in_the_background_and_are_recorded_when_they_end() {
     assert_eq!(r["job"].as_u64(), h.state().jobs.saves.first().map(|s| s.job.0), "control clients get the job to wait on");
     assert!(h.state().saving());
 
-    // The window keeps drawing; the document stays unsaved and can't be edited meanwhile.
+    // The window keeps drawing and the document stays editable: no progress dialog takes over,
+    // only the status bar's "Saving 0%" (until the encoder reports progress, #3389).
     let (frames, _) = frames_for_at_least(&mut h, 400, 4);
     assert!(frames >= 4, "only {frames} frames while saving");
     let st = h.state().session.active().unwrap();
     assert!(st.is_dirty() && st.path.is_none());
-    assert!(h.state_mut().run("layer.new.layer", json!({})).is_err(), "the saving document is locked");
-    // The progress dialog names the save and shows its stage; the status bar reads "Saving 0%"
-    // until the encoder reports progress (#3389).
-    assert_eq!(h.query_all_by_label("Saving big.psd").count(), 1);
-    h.get_by_label("Encoding");
+    assert_eq!(h.query_all_by_label("Saving big.psd").count(), 0, "no modal progress dialog");
+    assert_eq!(h.query_all_by_label("Encoding").count(), 0);
     h.get_by_label("Saving 0%");
+    let layers = h.state().session.active().unwrap().doc.layer_count();
+    assert!(h.state_mut().run("layer.new.layer", json!({})).is_ok(), "the saving document can still be edited");
 
     gates.encode.store(true, Ordering::Relaxed);
     step_until(&mut h, |a| !a.saving());
     assert_eq!(gates.written(), ["/tmp/photocraft-test/big.psd"]);
     let st = h.state().session.active().unwrap();
-    assert!(!st.is_dirty());
+    assert_eq!(st.doc.layer_count(), layers + 1, "the edit made while saving is kept");
+    assert!(st.is_dirty(), "the file holds the state from when the save started, so the later edit is unsaved");
     assert_eq!(st.path.as_deref(), Some("/tmp/photocraft-test/big.psd"));
     assert_eq!(st.doc.name, "big.psd", "the document takes the saved file's name, as a synchronous Save As does");
     assert_eq!(h.state().ui.status, "Saved big.psd: a warning");
     assert!(noticed(h.state(), "a warning"), "the export warnings are shown");
-    assert!(h.state_mut().run("layer.new.layer", json!({})).is_ok(), "unlocked again");
+}
+
+/// Saving again while a save to the same file is still writing waits for it, then saves the
+/// newest state once (several presses meanwhile make one more save, not an error).
+#[test]
+fn saving_again_while_a_save_runs_queues_one_more_save() {
+    let mut h = app_harness();
+    let gates = Gates { write: Arc::new(AtomicBool::new(true)), ..Gates::default() };
+    h.state_mut().services.save_file = Some(gates.save(None));
+    let path = "/tmp/photocraft-test/again.psd";
+    h.state_mut().save_as(Some(path.into())).unwrap();
+    assert!(h.state_mut().run("layer.new.layer", json!({})).is_ok());
+    h.state_mut().save_as(Some(path.into())).expect("queued, not refused");
+    h.state_mut().save_as(Some(path.into())).expect("queued, not refused");
+    assert_eq!(h.state().jobs.saves.len(), 1, "one writer per file at a time");
+    gates.encode.store(true, Ordering::Relaxed);
+    step_until(&mut h, |a| !a.saving() && a.jobs.queued_saves.is_empty());
+    assert_eq!(gates.written(), [path, path], "the running save, then one save of the newest state");
+    assert!(!h.state().session.active().unwrap().is_dirty(), "the edit made during the first save is saved too");
+}
+
+/// Save, then Save As to another file while the first save still writes: the second waits, so
+/// the document ends up with the newer file's path and revision whichever would finish first.
+#[test]
+fn a_second_save_of_a_document_to_another_file_waits_for_the_first() {
+    let mut h = app_harness();
+    let gates = Gates { write: Arc::new(AtomicBool::new(true)), ..Gates::default() };
+    h.state_mut().services.save_file = Some(gates.save(None));
+    let (a, b) = ("/tmp/photocraft-test/first.psd", "/tmp/photocraft-test/second.psd");
+    h.state_mut().save_as(Some(a.into())).unwrap();
+    assert!(h.state_mut().run("layer.new.layer", json!({})).is_ok());
+    h.state_mut().save_as(Some(b.into())).expect("queued, not refused");
+    assert_eq!(h.state().jobs.saves.len(), 1, "one save of a document at a time");
+    gates.encode.store(true, Ordering::Relaxed);
+    step_until(&mut h, |a| !a.saving() && a.jobs.queued_saves.is_empty());
+    assert_eq!(gates.written(), [a, b], "in the order asked");
+    let st = h.state().session.active().unwrap();
+    assert_eq!(st.path.as_deref(), Some(b), "the later Save As is the document's file");
+    assert!(!st.is_dirty(), "and holds the edit made during the first save");
+}
+
+/// Esc while a save runs in the background goes to the tool (here: deselect) and leaves the save
+/// running.
+#[test]
+fn esc_during_a_background_save_deselects_and_keeps_the_save() {
+    let mut h = app_harness();
+    let gates = Gates { write: Arc::new(AtomicBool::new(true)), ..Gates::default() };
+    h.state_mut().services.save_file = Some(gates.save(None));
+    assert!(h.state_mut().run("select.all", json!({})).is_ok());
+    h.state_mut().save_as(Some("/tmp/photocraft-test/esc.psd".into())).unwrap();
+    h.run_steps(2);
+    h.key_press(egui::Key::Escape);
+    h.run_steps(2);
+    let selected = h.state().session.active().unwrap().doc.selection.is_some();
+    gates.encode.store(true, Ordering::Relaxed);
+    step_until(&mut h, |a| !a.saving());
+    assert_eq!(gates.written(), ["/tmp/photocraft-test/esc.psd"], "the save went on");
+    assert!(!selected, "Esc deselected");
+}
+
+/// Save, then Save As to another file (queued), then close: the close waits for the queued save
+/// too, so the second file is written before the document closes.
+#[test]
+fn closing_waits_for_a_queued_save() {
+    let mut h = app_harness();
+    let gates = Gates { write: Arc::new(AtomicBool::new(true)), ..Gates::default() };
+    h.state_mut().services.save_file = Some(gates.save(None));
+    let (a, b) = ("/tmp/photocraft-test/close-a.psd", "/tmp/photocraft-test/close-b.psd");
+    h.state_mut().save_as(Some(a.into())).unwrap();
+    h.state_mut().save_as(Some(b.into())).expect("queued");
+    let ctx = h.ctx.clone();
+    crate::menus::invoke(h.state_mut(), &ctx, "file.close", json!({})).unwrap();
+    gates.encode.store(true, Ordering::Relaxed);
+    step_until(&mut h, |a| !a.saving() && a.jobs.queued_saves.is_empty() && a.session.documents().is_empty());
+    assert_eq!(gates.written(), [a, b], "both files written");
+    assert!(h.state().session.documents().is_empty(), "then the document closed");
+    assert!(!noticed(h.state(), "Save failed"), "no lost save");
+}
+
+/// Another document's save to a file refuses a save to it before anything is queued, also
+/// while the asking document has a save of its own running.
+#[test]
+fn a_queued_save_still_refuses_a_file_another_document_is_saving() {
+    let mut h = app_harness();
+    let gates = Gates { write: Arc::new(AtomicBool::new(true)), ..Gates::default() };
+    h.state_mut().services.save_file = Some(gates.save(None));
+    let shared = "/tmp/photocraft-test/shared.psd";
+    // Document 2 saves to the shared file.
+    h.state_mut().run("file.new", json!({"width": 32, "height": 32})).unwrap();
+    h.state_mut().save_as(Some(shared.into())).unwrap();
+    // Document 1 has a save of its own running, then asks for the shared file.
+    let ctx = h.ctx.clone();
+    crate::menus::invoke(h.state_mut(), &ctx, "window.document.0", json!({})).unwrap();
+    h.state_mut().save_as(Some("/tmp/photocraft-test/own.psd".into())).unwrap();
+    let err = h.state_mut().save_as(Some(shared.into())).unwrap_err();
+    assert!(err.contains("still running"), "{err}");
+    assert!(h.state().jobs.queued_saves.is_empty(), "nothing queued");
+    gates.encode.store(true, Ordering::Relaxed);
+    step_until(&mut h, |a| !a.saving());
+}
+
+/// A control request that queued a save waits for that save, not the one running before it.
+#[test]
+fn a_control_request_waits_for_its_queued_save() {
+    let mut h = app_harness();
+    let gates = Gates { write: Arc::new(AtomicBool::new(true)), ..Gates::default() };
+    h.state_mut().services.save_file = Some(gates.save(None));
+    let (a, b) = ("/tmp/photocraft-test/ctl-a.psd", "/tmp/photocraft-test/ctl-b.psd");
+    h.state_mut().save_as(Some(a.into())).unwrap();
+    h.state_mut().save_as(Some(b.into())).expect("queued");
+    let (tx, rx) = std::sync::mpsc::channel();
+    assert!(crate::jobs_ui::claim_queued_save(h.state_mut(), tx).is_ok(), "the request joins the queued save");
+    gates.encode.store(true, Ordering::Relaxed);
+    let t = Instant::now();
+    while gates.written().len() < 2 && t.elapsed() < Duration::from_secs(30) {
+        assert!(rx.try_recv().is_err() || gates.written().len() == 2, "no reply before the queued save is written");
+        h.step();
+    }
+    step_until(&mut h, |a| !a.saving());
+    let reply = rx.try_recv().expect("answered once the queued save ended");
+    assert_eq!(reply["result"]["path"], b, "{reply}");
+}
+
+/// A filter started while a save runs locks the document, so the save queued behind that save
+/// can't start when it ends: it waits for the filter instead of being dropped, and quitting or
+/// closing waits for it meanwhile.
+#[test]
+fn a_queued_save_waits_for_a_filter_started_during_the_save() {
+    let mut h = app_harness();
+    let gates = Gates { write: Arc::new(AtomicBool::new(true)), ..Gates::default() };
+    h.state_mut().services.save_file = Some(gates.save(None));
+    let (a, b) = ("/tmp/photocraft-test/filter-a.psd", "/tmp/photocraft-test/filter-b.psd");
+    h.state_mut().save_as(Some(a.into())).unwrap();
+    h.state_mut().save_as(Some(b.into())).expect("queued");
+    let filter = Arc::new(AtomicBool::new(false));
+    slow_job(h.state_mut(), &filter);
+    gates.encode.store(true, Ordering::Relaxed);
+    step_until(&mut h, |app| app.jobs.saves.is_empty());
+    assert_eq!(gates.written(), [a], "the first save ended");
+    assert_eq!(h.state().jobs.queued_saves.len(), 1, "the queued save is kept while the filter runs");
+    assert!(h.state().saving(), "and counts as a save in progress (closing and quitting wait for it)");
+    assert!(!noticed(h.state(), "Save failed"), "not dropped with an error");
+    filter.store(true, Ordering::Relaxed);
+    step_until(&mut h, |app| !app.saving());
+    assert_eq!(gates.written(), [a, b], "it ran once the filter ended");
+    assert_eq!(h.state().session.active().unwrap().path.as_deref(), Some(b));
+}
+
+/// File › Revert waits while a save of the document runs, also when the document is clean (no
+/// unsaved-changes prompt stands in the way): it would read the file being written.
+#[test]
+fn revert_waits_for_a_background_save() {
+    let mut h = app_harness();
+    let gates = Gates::open();
+    h.state_mut().services.save_file = Some(gates.save(None));
+    let path = "/tmp/photocraft-test/revert.psd";
+    h.state_mut().save_as(Some(path.into())).unwrap();
+    step_until(&mut h, |a| !a.saving());
+    assert!(!h.state().session.active().unwrap().is_dirty());
+    gates.encode.store(false, Ordering::Relaxed);
+    h.state_mut().save_as(Some(path.into())).unwrap();
+    let ctx = h.ctx.clone();
+    let err = crate::menus::invoke(h.state_mut(), &ctx, "file.revert", json!({})).unwrap_err();
+    assert!(err.contains("still running"), "{err}");
+    assert!(h.state().discard.is_none(), "no prompt either");
+    gates.encode.store(true, Ordering::Relaxed);
+    step_until(&mut h, |a| !a.saving());
+    assert!(crate::jobs_ui::revert_waits_for_save(h.state(), &json!({})).is_ok(), "Revert is allowed again once the save ended");
+}
+
+/// A save of the same file with other export settings, asked for while the first save writes,
+/// still runs once the first has made the document clean.
+#[test]
+fn a_queued_save_with_other_settings_still_runs_when_the_document_is_clean() {
+    let mut h = app_harness();
+    let gates = Gates { write: Arc::new(AtomicBool::new(true)), ..Gates::default() };
+    h.state_mut().services.save_file = Some(gates.save(None));
+    let path = "/tmp/photocraft-test/settings.psd";
+    let first = crate::ExportSettings::default();
+    let other = crate::ExportSettings { tiff_layers: !first.tiff_layers, ..first.clone() };
+    h.state_mut().write_document(path.into(), &first, false).unwrap();
+    h.state_mut().write_document(path.into(), &other, false).expect("queued, not refused");
+    h.state_mut().write_document(path.into(), &other, false).expect("the same request again replaces it");
+    gates.encode.store(true, Ordering::Relaxed);
+    step_until(&mut h, |a| !a.saving() && a.jobs.queued_saves.is_empty());
+    assert_eq!(gates.written(), [path, path], "the second save, with the other settings, still ran (once)");
 }
 
 #[test]
@@ -480,7 +666,9 @@ fn a_failed_save_or_one_cancelled_while_encoding_leaves_the_document_unsaved() {
     h.state_mut().services.save_file = Some(gates.save(None));
     h.state_mut().save_as(Some("/tmp/photocraft-test/b.psd".into())).unwrap();
     h.run_steps(2);
-    h.key_press(egui::Key::Escape);
+    // The status bar's × (Esc goes to the tool while a save runs in the background).
+    let job = h.state().jobs.saves[0].job;
+    crate::jobs_ui::cancel(h.state_mut(), job);
     step_until(&mut h, |a| !a.saving());
     assert!(gates.written().is_empty(), "nothing written");
     let st = h.state().session.active().unwrap();

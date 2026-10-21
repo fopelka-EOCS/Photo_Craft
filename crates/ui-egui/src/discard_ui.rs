@@ -235,7 +235,11 @@ fn save(app: &mut PhotocraftApp, ctx: &egui::Context, doc: DocId) -> bool {
 /// Copies and failed writes leave the doc dirty; so does any write when it is unconfirmed.
 pub(crate) fn saved_document(app: &mut PhotocraftApp, ctx: &egui::Context, doc: DocId) {
     // Still the prompt that asked (quitting may have replaced it meanwhile).
+    // A save of it still running or waiting (one that waited for the save that just ended, or is
+    // held back by another job on the document) comes first.
+    let saving = app.jobs.saves.iter().any(|s| s.doc == doc && !s.ended) || app.jobs.queued_saves.iter().any(|q| q.doc == doc);
     if !app.save_options_open()
+        && !saving
         && app.discard.as_ref().and_then(|p| p.docs.first()) == Some(&doc)
         && index_of(app, doc).is_some_and(|i| app.services.write_unconfirmed || !app.session.documents()[i].is_dirty())
     {

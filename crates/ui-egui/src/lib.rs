@@ -1848,9 +1848,9 @@ impl PhotocraftApp {
         self.session.jobs().iter().any(|j| matches!(j.command.as_str(), "file.print" | "file.printOneCopy"))
     }
 
-    /// A save is running in the background.
+    /// A save is running in the background, or waiting to (queued behind another).
     pub(crate) fn saving(&self) -> bool {
-        !self.jobs.saves.is_empty()
+        !self.jobs.saves.is_empty() || !self.jobs.queued_saves.is_empty()
     }
 
     /// Save through the control session's capability-scoped writer. No file
@@ -1908,7 +1908,12 @@ impl PhotocraftApp {
                     let _ = reply.send(v);
                 }
                 control::Outcome::AfterInput => self.input_waiters.push(reply),
-                control::Outcome::AfterJob(job) => self.jobs.waiters.push((job, reply)),
+                // A save queued behind a running one: the request waits for that save.
+                control::Outcome::AfterJob(job) => {
+                    if let Err(reply) = jobs_ui::claim_queued_save(self, reply) {
+                        self.jobs.waiters.push((job, reply));
+                    }
+                }
                 control::Outcome::Screenshot { token, path } => {
                     // Wait out egui's fade animations (~83 ms) and a few rendered frames first.
                     let settle = ctx.global_style().animation_time as f64 * 2000.0 + 60.0;

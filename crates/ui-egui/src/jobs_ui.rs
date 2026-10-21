@@ -10,8 +10,14 @@
 //!   shown after a short delay so quick jobs don't flash it. Esc cancels.
 //! - Files opening in the background get a document tab at once ([`OpenTab`]); its canvas area
 //!   shows the progress, and closing the tab cancels the open.
-//! - Saves encode and write on a worker ([`start_save`], #2017) under the modal progress dialog;
-//!   the document is locked meanwhile, and the save is recorded when the job ends.
+//! - Saves encode and write on a worker ([`start_save`], #2017). A user's save runs in the
+//!   background without locking the document or showing the modal dialog: the worker writes a
+//!   snapshot, painting and editing go on, and the revision that was written is recorded when the
+//!   job ends (later edits stay unsaved). The status bar and tab title show "Saving NN%". Saving
+//!   a document again while one of its saves runs (to any file) queues the new save, and queued
+//!   saves start one at a time, so an older save can never finish after a newer one and leave the
+//!   document with the older file's path and revision.
+//!   Automation saves still lock the document, as the control protocol expects.
 //!
 //! The canvas keeps showing the pre-job state: workers never touch the session's documents.
 
@@ -136,9 +142,13 @@ const SAVE_CANCELLED: &str = "cancelled";
 pub struct SaveJob {
     pub job: JobId,
     pub doc: DocId,
-    /// The document's revision when the save started (the job locks it against edits).
+    /// The document's revision when the save started: what the file holds once it is written
+    /// (a user's save leaves the document editable meanwhile).
     pub revision: u64,
     pub path: String,
+    /// The export settings it writes with: a queued save of the same file with other settings
+    /// still runs once this one has made the document clean.
+    pub settings: ExportSettings,
     /// A copy leaves the document's path and unsaved state alone.
     pub copy: bool,
     /// An automation save records without firing user-configured hooks.
@@ -147,6 +157,18 @@ pub struct SaveJob {
     /// The job has ended (cancelled, say) but its worker may still be running: kept until it
     /// returns, so quitting and another save to the same file wait for it.
     pub ended: bool,
+}
+
+/// A save waiting for the running save of its document (see [`JobsUi::queued_saves`]).
+pub(crate) struct QueuedSave {
+    pub(crate) doc: DocId,
+    path: String,
+    settings: ExportSettings,
+    copy: bool,
+    save: SaveFileFn,
+    /// Control requests waiting for this save: they move to its job when it starts (and are
+    /// answered when it can't start, or turns out not to be needed).
+    waiters: Vec<Sender<ControlResponse>>,
 }
 
 /// The shell's job bookkeeping.
@@ -166,8 +188,14 @@ pub struct JobsUi {
     pub close_after_saves: bool,
     /// The open tab shown in the canvas area instead of the active document.
     pub focus: Option<JobId>,
+    /// Saves of a document asked for while one of its saves was still writing, oldest first: the
+    /// next one starts, with the document's state at that time, when the running one ends.
+    pub(crate) queued_saves: Vec<QueuedSave>,
     /// The job the latest [`run`] started (the control channel waits on it).
     pub(crate) last_started: Option<JobId>,
+    /// The save the latest [`start_save`] queued (document, path): a control request waiting on
+    /// it waits for that save, which has no job yet ([`claim_queued_save`]).
+    pub(crate) queued_claim: Option<(DocId, String)>,
 }
 
 /// Run command `id`: in the background when background jobs are on and the command is a job
@@ -267,21 +295,43 @@ pub fn start_save(
         return Err(format!("“{}” is still running on this document; wait for it to finish or cancel it (Esc)", j.label));
     }
     let name = crate::file_open::display_name(&path);
-    // One writer per file: an older snapshot must not land after a newer one.
-    if app.jobs.saves.iter().any(|s| s.path == path) {
+    let (snapshot, doc, revision) = (Arc::clone(&st.doc), st.doc.id, st.revision);
+    // One save of a document at a time: completions record the path and revision written, so an
+    // older save finishing after a newer one (Save, then Save As elsewhere) would leave the older
+    // state. A user's save waits for the running one, then saves the document as it is then; the
+    // same request queued again replaces the earlier one. (A cancelled save whose worker is still
+    // returning has ended, and nothing would start a save queued behind it.)
+    let running = app.jobs.saves.iter().find(|s| s.doc == doc && !s.ended).map(|s| s.job);
+    // One writer per file, too: another document's save to this file refuses, before anything
+    // is queued (an older snapshot must not land after a newer one).
+    let busy = |s: &SaveJob| s.path == path && (s.doc != doc || s.ended || automation);
+    if app.jobs.saves.iter().any(busy) || (automation && running.is_some()) {
         return Err(crate::i18n::fmt(tl!("A save to {name} is still running; try again when it finishes"), &[("name", &name)]));
     }
-    let (snapshot, doc, revision) = (Arc::clone(&st.doc), st.doc.id, st.revision);
+    if let Some(job) = running {
+        let mut waiters = Vec::new();
+        if let Some(i) = app.jobs.queued_saves.iter().position(|q| q.doc == doc && q.path == path && q.copy == copy) {
+            waiters = app.jobs.queued_saves.remove(i).waiters;
+        }
+        app.jobs.queued_saves.push(QueuedSave { doc, path: path.clone(), settings, copy, save, waiters });
+        // A control request waits for the queued save (`claim_queued_save`), not the running one.
+        app.jobs.last_started = Some(job);
+        app.jobs.queued_claim = Some((doc, path));
+        return Ok(None);
+    }
+    let written = settings.clone();
     let label = crate::i18n::fmt(tl!("Saving {name}"), &[("name", &name)]);
     let target = path.clone();
     let result_path = path.clone();
     let state = Arc::new(SaveState::default());
     let worker = Arc::clone(&state);
+    // A user's save doesn't lock the document: the worker has its own snapshot, so painting and
+    // editing carry on with no progress dialog. Automation saves keep the lock (control protocol).
     let started = app.session.start_job(
         SAVE_JOB,
         json!({"path": path}),
         &label,
-        true,
+        automation,
         move |ctx| {
             let _done = WorkerDone(Arc::clone(&worker));
             let ctl = SaveCtl { job: ctx.clone(), state: worker };
@@ -301,7 +351,7 @@ pub fn start_save(
             Ok(Some((path, warnings)))
         }
         Started::Job(job) => {
-            app.jobs.saves.push(SaveJob { job, doc, revision, path, copy, automation, state, ended: false });
+            app.jobs.saves.push(SaveJob { job, doc, revision, path, settings: written, copy, automation, state, ended: false });
             // Control and MCP requests wait on it, as for other jobs.
             app.jobs.last_started = Some(job);
             // The status bar's progress readout names the save; clear any old message.
@@ -326,6 +376,8 @@ fn finish_save(app: &mut PhotocraftApp, ctx: &egui::Context, save: SaveJob, labe
             } else {
                 app.saved(save.doc, save.revision, &save.path, &warnings_of(&v), save.copy);
             }
+            // The queued save starts first: a close waiting on this save must wait for it too.
+            start_queued_save(app, &save, &json!({"ok": true, "result": v}));
             if !save.copy {
                 crate::discard_ui::saved_document(app, ctx, save.doc);
             }
@@ -333,15 +385,129 @@ fn finish_save(app: &mut PhotocraftApp, ctx: &egui::Context, save: SaveJob, labe
         JobOutcome::Failed(err) => {
             // Don't close the window over the error.
             app.jobs.close_after_saves = false;
+            // A save to the file that failed is dropped with it; other queued saves still run.
+            drop_queued_saves_to(app, &save, &format!("the save before it failed: {err}"));
             notices::error(app, crate::i18n::fmt(tl!("Save failed: {error}"), &[("error", &err)]));
+            start_queued_save(app, &save, &Value::Null);
         }
         JobOutcome::Cancelled => {
             app.jobs.close_after_saves = false;
+            drop_queued_saves_to(app, &save, "the save before it was cancelled");
             app.ui.status = crate::i18n::fmt(tl!("Cancelled {label}"), &[("label", label)]);
             app.ui.status_error = false;
+            start_queued_save(app, &save, &Value::Null);
         }
     }
     close_after_saves(app, ctx);
+}
+
+/// A control request that the latest [`start_save`] queued waits for that save: `reply` joins
+/// its waiters. `Err(reply)` when it queued nothing: the request then waits for a job as usual.
+pub(crate) fn claim_queued_save(app: &mut PhotocraftApp, reply: Sender<ControlResponse>) -> Result<(), Sender<ControlResponse>> {
+    let Some((doc, path)) = app.jobs.queued_claim.take() else { return Err(reply) };
+    match app.jobs.queued_saves.iter_mut().find(|q| q.doc == doc && q.path == path) {
+        Some(q) => {
+            q.waiters.push(reply);
+            Ok(())
+        }
+        None => Err(reply),
+    }
+}
+
+/// File › Revert of a document (the `document` param, else the active one) waits while a save of
+/// it runs or is queued: it would read the file being written, and the save would then record
+/// its revision on the reverted document.
+pub(crate) fn revert_waits_for_save(app: &PhotocraftApp, params: &Value) -> Result<(), String> {
+    let docs = app.session.documents();
+    let target = params.get("document").and_then(Value::as_u64).map(|i| i as usize).or(app.session.active_index());
+    let Some(doc) = target.and_then(|i| docs.get(i)).map(|st| st.doc.id) else { return Ok(()) };
+    let running = app.jobs.saves.iter().find(|s| s.doc == doc && !s.ended).map(|s| &s.path);
+    match running.or_else(|| app.jobs.queued_saves.iter().find(|q| q.doc == doc).map(|q| &q.path)) {
+        Some(path) => {
+            let name = crate::file_open::display_name(path);
+            Err(crate::i18n::fmt(tl!("A save to {name} is still running; try again when it finishes"), &[("name", &name)]))
+        }
+        None => Ok(()),
+    }
+}
+
+/// Drop the saves to `ended`'s file that waited for it (it failed or was cancelled), answering
+/// their control requests with `why`.
+fn drop_queued_saves_to(app: &mut PhotocraftApp, ended: &SaveJob, why: &str) {
+    let (gone, kept) = std::mem::take(&mut app.jobs.queued_saves).into_iter().partition(|q| q.doc == ended.doc && q.path == ended.path);
+    app.jobs.queued_saves = kept;
+    for q in gone {
+        answer(q.waiters, json!({"ok": false, "error": why}));
+    }
+}
+
+fn answer(waiters: Vec<Sender<ControlResponse>>, reply: Value) {
+    for tx in waiters {
+        let _ = tx.send(reply.clone());
+    }
+}
+
+/// The next save of `ended`'s document that waited for it: started with the document's current
+/// state. One that would write exactly what `ended` just wrote (the same file and settings, and
+/// the document unchanged since) is skipped, and the one after it is considered instead.
+/// `ended_reply` is what `ended`'s control requests got: a skipped save's requests get it too.
+fn start_queued_save(app: &mut PhotocraftApp, ended: &SaveJob, ended_reply: &Value) {
+    start_queued_saves_of(app, ended.doc, Some((ended, ended_reply)));
+}
+
+/// Start the queued saves that were held back because another job (a filter started while the
+/// save before them ran) had the document locked, once nothing runs on it any more.
+fn resume_queued_saves(app: &mut PhotocraftApp) {
+    let mut docs: Vec<DocId> = app.jobs.queued_saves.iter().map(|q| q.doc).collect();
+    docs.dedup();
+    for doc in docs {
+        if !app.jobs.saves.iter().any(|s| s.doc == doc && !s.ended) {
+            start_queued_saves_of(app, doc, None);
+        }
+    }
+}
+
+/// [`start_queued_save`] for `doc`, after `ended` (with its reply) when a save of it just ended.
+/// While another job has the document locked the saves stay queued: [`resume_queued_saves`]
+/// starts them when it ends.
+fn start_queued_saves_of(app: &mut PhotocraftApp, doc: DocId, ended: Option<(&SaveJob, &Value)>) {
+    while let Some(i) = app.jobs.queued_saves.iter().position(|q| q.doc == doc) {
+        if app.session.job_on(doc).is_some() {
+            return;
+        }
+        let q = app.jobs.queued_saves.remove(i);
+        let clean = app.session.documents().iter().find(|st| st.doc.id == q.doc).is_none_or(|st| !st.is_dirty());
+        if let Some((ended, ended_reply)) = ended
+            && !q.copy
+            && !ended.copy
+            && clean
+            && q.path == ended.path
+            && q.settings == ended.settings
+        {
+            answer(q.waiters, ended_reply.clone());
+            continue;
+        }
+        app.jobs.last_started = None;
+        let r = app.with_document(q.doc, |app| start_save(app, q.path.clone(), q.settings.clone(), q.copy, q.save.clone(), false));
+        match r {
+            Ok(None) => {
+                // In the background: its control requests wait for its job.
+                match app.jobs.last_started {
+                    Some(job) => app.jobs.waiters.extend(q.waiters.into_iter().map(|tx| (job, tx))),
+                    None => answer(q.waiters, json!({"ok": false, "error": "the queued save did not start"})),
+                }
+                return;
+            }
+            Ok(Some((path, warnings))) => {
+                answer(q.waiters, json!({"ok": true, "result": {"path": path, "warnings": warnings}}));
+                return;
+            }
+            Err(e) => {
+                answer(q.waiters, json!({"ok": false, "error": e}));
+                notices::error(app, crate::i18n::fmt(tl!("Save failed: {error}"), &[("error", &e)]));
+            }
+        }
+    }
 }
 
 /// Forget saves whose job ended and whose worker has returned; repeat a held window close once
@@ -359,6 +525,9 @@ pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
     for e in app.session.poll_jobs() {
         on_event(app, ctx, e);
     }
+    if !app.jobs.queued_saves.is_empty() {
+        resume_queued_saves(app);
+    }
     // A focused open tab that ended (or was cancelled elsewhere) gives way to the documents.
     if app.jobs.focus.is_some_and(|j| !app.jobs.opens.iter().any(|o| o.job == j)) {
         app.jobs.focus = app.jobs.opens.last().map(|o| o.job);
@@ -371,12 +540,19 @@ pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if !keep_polling(app, ctx) {
         return;
     }
-    if let Some(job) = job_in_view(app)
+    if let Some(job) = esc_job(app)
         && !ctx.text_edit_focused()
         && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
     {
         cancel(app, job.id);
     }
+}
+
+/// The job Esc cancels: the one in view ([`job_in_view`]), unless it is a user's background save.
+/// Such a save shows no dialog and leaves the document editable, so Esc belongs to the tool,
+/// the selection or the transform being worked on; the status bar's × cancels the save.
+fn esc_job(app: &PhotocraftApp) -> Option<JobInfo> {
+    job_in_view(app).filter(|j| !app.jobs.saves.iter().any(|s| s.job == j.id && !s.automation))
 }
 
 /// Keep the event loop awake while a background document job exists.
