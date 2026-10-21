@@ -102,9 +102,10 @@ fn custom_titlebar(prefs_file: Option<&std::path::Path>) -> bool {
 /// different offset every launch (#419). A later launch restores the saved position instead
 /// (`main` turns `centered` off, #4826). Wayland compositors place windows themselves.
 fn native_options(custom_titlebar: bool) -> eframe::NativeOptions {
-    let viewport = egui::ViewportBuilder::default();
-    // Not inside a macOS app bundle: its Dock icon is the bundle's .icns (`app_icon`, #5849).
-    let viewport = if app_icon::sets_runtime_icon(std::env::current_exe().ok().as_deref()) { viewport.with_icon(app_icon::window_icon()) } else { viewport };
+    // Inside a macOS app bundle the Dock icon is the bundle's .icns (`app_icon`, #5849). An empty
+    // icon, not none: eframe swaps a missing one for its default egui icon and sets that on the Dock.
+    let runtime = app_icon::sets_runtime_icon(std::env::current_exe().ok().as_deref());
+    let viewport = egui::ViewportBuilder::default().with_icon(if runtime { app_icon::window_icon() } else { egui::IconData::default() });
     eframe::NativeOptions {
         viewport: viewport
             .with_app_id(APP_ID)
