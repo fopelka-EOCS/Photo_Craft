@@ -4387,6 +4387,13 @@ shape	Appearance	Aspetto
 	Use	Usa
 	In Front	Davanti
 	Behind	Dietro
+# First launch setup and Home template search
+	Welcome to PhotoCraft	Benvenuto in PhotoCraft
+	Let's start something new.	Iniziamo qualcosa di nuovo.
+	Choose a theme and a language. Both can be changed later in Settings.	Scegli un tema e una lingua. Entrambi possono essere modificati in seguito nelle Impostazioni.
+	Could not apply the setup: {error}	Impossibile applicare la configurazione: {error}
+	Search templates…	Cerca modelli…
+	Start	Inizia
 
 # DDS Options (#1327)
 	DDS Options	Opzioni DDS

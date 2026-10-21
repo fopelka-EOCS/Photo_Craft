@@ -6095,6 +6095,9 @@ mod embedding_tests {
         let mut h = egui_kittest::Harness::builder().with_size(vec2(1280.0, 800.0)).with_max_steps(64).build_eframe(move |cc| {
             PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
             let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+            // The embedding flags belong to the editor: the Home screen deliberately hides the
+            // editing chrome, so open a document before checking what the flags draw.
+            app.run("file.new", json!({"width": 64, "height": 64})).unwrap();
             app.ui.panels.rail = rail;
             app.ui.panels.menu_bar = menu_bar;
             app

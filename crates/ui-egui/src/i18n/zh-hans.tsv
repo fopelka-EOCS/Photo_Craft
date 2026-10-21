@@ -2900,6 +2900,17 @@ curves	Smooth	平滑
 	In Front	前面
 	Behind	后面
 	Blend	混合
+# First launch setup and Home template search
+	Welcome to PhotoCraft	欢迎使用 PhotoCraft
+	Let's start something new.	开始创作新作品吧。
+	Choose a theme and a language. Both can be changed later in Settings.	选择主题和语言。两者之后都可以在“设置”中更改。
+	Could not apply the setup: {error}	无法应用设置：{error}
+	Preferences…	首选项…
+	Search templates…	搜索模板…
+	Skip	跳过
+	Start	开始
+# Home settings label
+	Settings	设置
 
 # DDS Options (#1327)
 	DDS Options	DDS 选项

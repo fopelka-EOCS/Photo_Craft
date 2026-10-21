@@ -3947,6 +3947,15 @@ curves	Smooth	スムーズ
 	Use	使用
 	In Front	前面
 	Behind	背面
+# First launch setup and Home template search
+	Welcome to PhotoCraft	PhotoCraft へようこそ
+	Let's start something new.	新しいことを始めましょう。
+	Choose a theme and a language. Both can be changed later in Settings.	テーマと言語を選択してください。どちらも後で設定から変更できます。
+	Could not apply the setup: {error}	セットアップを適用できませんでした: {error}
+	Preferences…	環境設定…
+	Search templates…	テンプレートを検索…
+	Skip	スキップ
+	Start	開始
 
 # DDS Options (#1327)
 	DDS Options	DDS オプション

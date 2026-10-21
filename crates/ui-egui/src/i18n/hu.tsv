@@ -4186,6 +4186,13 @@ cameraRaw	Yellow	Sárga
 	Use	Használat
 	In Front	Elöl
 	Behind	Mögött
+# First launch setup and Home template search
+	Welcome to PhotoCraft	Üdvözöljük a PhotoCraftban
+	Let's start something new.	Kezdjünk valami újat.
+	Choose a theme and a language. Both can be changed later in Settings.	Válasszon témát és nyelvet. Mindkettő később módosítható a Beállításokban.
+	Could not apply the setup: {error}	A beállítás nem alkalmazható: {error}
+	Search templates…	Sablonok keresése…
+	Start	Indítás
 
 # DDS Options (#1327)
 	DDS Options	DDS-beállítások

@@ -3758,6 +3758,15 @@ curves	Smooth	Làm mượt
 	Use	Dùng
 	In Front	Phía trước
 	Behind	Phía sau
+# First launch setup and Home template search
+	Welcome to PhotoCraft	Chào mừng bạn đến với PhotoCraft
+	Let's start something new.	Hãy bắt đầu một điều mới.
+	Choose a theme and a language. Both can be changed later in Settings.	Chọn giao diện và ngôn ngữ. Cả hai đều có thể thay đổi sau trong Cài đặt.
+	Could not apply the setup: {error}	Không thể áp dụng thiết lập: {error}
+	Preferences…	Tùy chọn…
+	Search templates…	Tìm kiếm mẫu…
+	Skip	Bỏ qua
+	Start	Bắt đầu
 
 # DDS Options (#1327)
 	DDS Options	Tùy chọn DDS

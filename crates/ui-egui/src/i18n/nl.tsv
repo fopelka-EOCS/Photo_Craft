@@ -4030,6 +4030,13 @@ curves	Smooth	Vloeiend maken
 	Use	Gebruiken
 	In Front	Voor
 	Behind	Achter
+# First launch setup and Home template search
+	Welcome to PhotoCraft	Welkom bij PhotoCraft
+	Let's start something new.	Laten we iets nieuws beginnen.
+	Choose a theme and a language. Both can be changed later in Settings.	Kies een thema en een taal. Beide kun je later wijzigen in Instellingen.
+	Could not apply the setup: {error}	De instelling kon niet worden toegepast: {error}
+	Search templates…	Sjablonen zoeken…
+	Start	Starten
 
 # DDS Options (#1327)
 	DDS Options	DDS-opties

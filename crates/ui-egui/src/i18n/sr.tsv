@@ -4340,6 +4340,13 @@ shape	Appearance	Izgled
 	Use	Koristi
 	In Front	Ispred
 	Behind	Iza
+# First launch setup and Home template search
+	Welcome to PhotoCraft	Dobro došli u PhotoCraft
+	Let's start something new.	Započnimo nešto novo.
+	Choose a theme and a language. Both can be changed later in Settings.	Izaberite temu i jezik. Oba se mogu promeniti kasnije u podešavanjima.
+	Could not apply the setup: {error}	Nije moguće primeniti podešavanje: {error}
+	Search templates…	Pretraži šablone…
+	Start	Započni
 
 # DDS Options (#1327)
 	DDS Options	DDS opcije

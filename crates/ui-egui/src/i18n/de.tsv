@@ -3275,6 +3275,17 @@ curves	Smooth	Glätten
 	In Front	Davor
 	Behind	Dahinter
 	Blend	Mischen
+# First launch setup and Home template search
+	Welcome to PhotoCraft	Willkommen bei PhotoCraft
+	Let's start something new.	Fangen wir etwas Neues an.
+	Choose a theme and a language. Both can be changed later in Settings.	Wähle ein Design und eine Sprache. Beides lässt sich später in den Einstellungen ändern.
+	Could not apply the setup: {error}	Die Einrichtung konnte nicht angewendet werden: {error}
+	Preferences…	Voreinstellungen…
+	Search templates…	Vorlagen suchen…
+	Skip	Überspringen
+	Start	Starten
+# Home settings label
+	Settings	Einstellungen
 
 # DDS Options (#1327)
 	DDS Options	DDS-Optionen

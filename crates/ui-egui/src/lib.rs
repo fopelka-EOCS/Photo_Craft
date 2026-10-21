@@ -98,6 +98,7 @@ pub mod filter_dialog;
 mod filter_preview_ui;
 #[cfg(not(target_arch = "wasm32"))]
 mod filter_preview_worker;
+pub mod first_launch;
 pub mod flick_pan;
 mod font_preview;
 pub mod frame_tool;
@@ -109,6 +110,7 @@ pub mod guide_layout_ui;
 pub mod guide_select;
 pub mod history_menu_ui;
 pub mod hold_keys;
+pub mod home_screen;
 pub mod i18n;
 mod icon_data;
 pub mod icons;
@@ -1061,6 +1063,10 @@ impl PhotocraftApp {
         prefs_ui::load(&mut app);
         // After the saved preferences, which say whether the set was already offered.
         kys_import::offer_import(&mut app);
+        // Tests construct the app and drive its pointer; a first-run window would sit over the
+        // controls they click. The real app reaches this through `new` with preference storage.
+        #[cfg(not(test))]
+        first_launch::offer(&mut app);
         notices::wayland_file_drop_guidance(&mut app);
         // File › Scripts › Script Events Manager: "Start Application".
         photocraft_engine::automate_cmds::fire_event(&mut app.session, "startApplication");
@@ -2159,19 +2165,27 @@ impl eframe::App for PhotocraftApp {
         // system title bar this is where the document name lives, as the in-app title is hidden.
         panels::sync_window_title(self, &ctx);
         let chrome = !self.ui.view.hides_chrome();
+        // The Home screen draws no document, so the editing chrome — the tool options, the tool
+        // strip and the panels dock — would be a strip of dead controls: no tool acts without a
+        // document to act on and every panel reads "No document". The menu bar and the status bar
+        // stay, because they still open documents and report the zoom and window state. Photoshop
+        // hides the same three on its Home screen.
+        // `shows_home` clears a stale overlay as a side effect, so it runs here too; the canvas asks it
+        // again when it draws, which is idempotent once the stale count is cleared.
+        let home = self.jobs.opens.is_empty() && self.ui.chrome.shows_home(self.session.documents().len(), self.session.prefs().general.auto_show_home_screen);
         if chrome && self.ui.panels.menu_bar {
             panels::title_bar(self, ui);
         }
-        if chrome && self.ui.panels.options_bar {
+        if chrome && !home && self.ui.panels.options_bar {
             panels::options_bar(self, ui);
         }
         if chrome && self.ui.panels.status_bar {
             panels::status_bar(self, ui);
         }
-        if chrome && self.ui.panels.toolbar {
+        if chrome && !home && self.ui.panels.toolbar {
             panels::toolbar(self, ui);
         }
-        if chrome && self.ui.panels.dock {
+        if chrome && !home && self.ui.panels.dock {
             panels::right_dock(self, ui);
         }
         let t = theme::Tokens::get(&ctx);
@@ -2202,6 +2216,8 @@ impl eframe::App for PhotocraftApp {
         notices::show(self, &ctx);
         gpu_status::show_fallback(self, &ctx);
         kys_import::show_offer(self, &ctx);
+        // The first-launch setup: once, on a machine that has never answered it.
+        first_launch::show(self, &ctx);
         if self.titlebar_modal_drag(chrome) {
             titlebar::modal_drag_overlay(&ctx);
         }
@@ -2991,6 +3007,9 @@ mod guide_cursor_tests;
 
 #[cfg(test)]
 mod canvas_menu_tests;
+
+#[cfg(test)]
+mod home_screen_tests;
 
 #[cfg(test)]
 mod nudge_bundle_tests;

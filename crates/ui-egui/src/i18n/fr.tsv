@@ -3279,6 +3279,15 @@ curves	Smooth	Lisser
 	Use	Utiliser
 	In Front	Devant
 	Behind	Derrière
+# First launch setup and Home template search
+	Welcome to PhotoCraft	Bienvenue dans PhotoCraft
+	Let's start something new.	Commençons quelque chose de nouveau.
+	Choose a theme and a language. Both can be changed later in Settings.	Choisissez un th?me et une langue. Les deux peuvent ?tre modifi?s plus tard dans les Param?tres.
+	Could not apply the setup: {error}	Impossible d’appliquer la configuration : {error}
+	Preferences…	Préférences…
+	Search templates…	Rechercher des modèles…
+	Skip	Ignorer
+	Start	Commencer
 
 # DDS Options (#1327)
 	DDS Options	Options DDS

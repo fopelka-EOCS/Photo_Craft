@@ -3266,6 +3266,15 @@ curves	Smooth	Haluskan
 	Use	Gunakan
 	In Front	Di Depan
 	Behind	Di Belakang
+# First launch setup and Home template search
+	Welcome to PhotoCraft	Selamat datang di PhotoCraft
+	Let's start something new.	Mari mulai sesuatu yang baru.
+	Choose a theme and a language. Both can be changed later in Settings.	Pilih tema dan bahasa. Keduanya dapat diubah nanti di Pengaturan.
+	Could not apply the setup: {error}	Tidak dapat menerapkan pengaturan: {error}
+	Preferences…	Preferensi…
+	Search templates…	Cari templat…
+	Skip	Lewati
+	Start	Mulai
 
 # DDS Options (#1327)
 	DDS Options	Opsi DDS

@@ -3997,6 +3997,13 @@ cameraData	Lens	Lens
 	Use	Kullan
 	In Front	Önde
 	Behind	Arkada
+# First launch setup and Home template search
+	Welcome to PhotoCraft	PhotoCraft'a hoş geldiniz
+	Let's start something new.	Yeni bir şeye başlayalım.
+	Choose a theme and a language. Both can be changed later in Settings.	Bir tema ve dil seçin. İkisi de daha sonra Ayarlar'dan değiştirilebilir.
+	Could not apply the setup: {error}	Kurulum uygulanamadı: {error}
+	Search templates…	Şablonlarda ara…
+	Start	Başla
 
 # DDS Options (#1327)
 	DDS Options	DDS Seçenekleri

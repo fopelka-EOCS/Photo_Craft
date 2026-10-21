@@ -3970,6 +3970,13 @@ curves	Smooth	Εξομάλυνση
 	Use	Χρήση
 	In Front	Μπροστά
 	Behind	Πίσω
+# First launch setup and Home template search
+	Welcome to PhotoCraft	Καλώς ορίσατε στο PhotoCraft
+	Let's start something new.	Ας ξεκινήσουμε κάτι νέο.
+	Choose a theme and a language. Both can be changed later in Settings.	Επιλέξτε θέμα και γλώσσα. Και τα δύο μπορούν να αλλάξουν αργότερα στις Ρυθμίσεις.
+	Could not apply the setup: {error}	Δεν ήταν δυνατή η εφαρμογή της ρύθμισης: {error}
+	Search templates…	Αναζήτηση προτύπων…
+	Start	Έναρξη
 
 # DDS Options (#1327)
 	DDS Options	Επιλογές DDS

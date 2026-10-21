@@ -4060,6 +4060,13 @@ layerLabel	No Color	Sem cor
 	Use	Usar
 	In Front	Na frente
 	Behind	Atrás
+# First launch setup and Home template search
+	Welcome to PhotoCraft	Boas-vindas ao PhotoCraft
+	Let's start something new.	Vamos começar algo novo.
+	Choose a theme and a language. Both can be changed later in Settings.	Escolha um tema e um idioma. Ambos podem ser alterados depois em Configurações.
+	Could not apply the setup: {error}	Não foi possível aplicar a configuração: {error}
+	Search templates…	Pesquisar modelos…
+	Start	Começar
 
 # DDS Options (#1327)
 	DDS Options	Opções de DDS

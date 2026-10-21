@@ -3246,6 +3246,15 @@ curves	Smooth	Сгладить
 	Use	Использовать
 	In Front	Спереди
 	Behind	Сзади
+# First launch setup and Home template search
+	Welcome to PhotoCraft	Добро пожаловать в PhotoCraft
+	Let's start something new.	Давайте начнём что-то новое.
+	Choose a theme and a language. Both can be changed later in Settings.	Выберите тему и язык. Оба можно изменить позже в настройках.
+	Could not apply the setup: {error}	Не удалось применить настройку: {error}
+	Preferences…	Настройки…
+	Search templates…	Поиск шаблонов…
+	Skip	Пропустить
+	Start	Начать
 
 # DDS Options (#1327)
 	DDS Options	Параметры DDS
