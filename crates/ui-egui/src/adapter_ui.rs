@@ -313,12 +313,12 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         let mut open = true;
         let mut action = None;
         let mut browse = false;
-        egui::Window::new(tl!(MENU_LABEL)).id(egui::Id::new(MENU_ID)).open(&mut open).default_width(660.0).min_width(300.0).vscroll(true).show(ctx, |ui| {
+        egui::Window::new(MENU_LABEL).id(egui::Id::new(MENU_ID)).open(&mut open).default_width(660.0).min_width(300.0).vscroll(true).show(ctx, |ui| {
             if cfg!(target_arch = "wasm32") {
-                ui.label(tl!(
-                    "Native compatibility adapters are unsupported in the browser. Use the native PhotoCraft application to install and enable an adapter."
-                ));
-                ui.label(tl!("Install Plug-in… remains the separate sandboxed WebAssembly plug-in installer."));
+                ui.label(
+                    "Native compatibility adapters are unsupported in the browser. Use the native PhotoCraft application to install and enable an adapter.",
+                );
+                ui.label("Install Plug-in… remains the separate sandboxed WebAssembly plug-in installer.");
                 return;
             }
             body(&mut state, ui, app.services.file_dialog.is_some() && !app.file_dialog_open(), &mut action, &mut browse);
@@ -342,9 +342,9 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
 
 fn body(state: &mut State, ui: &mut Ui, can_browse: bool, action: &mut Option<Action>, browse: &mut bool) {
     let t = Tokens::get(ui.ctx());
-    ui.label(tl!("Install → Enable → Check availability → Select › Subject"));
-    ui.label(RichText::new(tl!(NATIVE_WARNING)).color(t.warning));
-    ui.label(RichText::new(tl!(DEVICE_WARNING)).color(t.text_dim));
+    ui.label("Install → Enable → Check availability → Select › Subject");
+    ui.label(RichText::new(NATIVE_WARNING).color(t.warning));
+    ui.label(RichText::new(DEVICE_WARNING).color(t.text_dim));
     ui.horizontal_wrapped(|ui| {
         ui.add_enabled_ui(state.pending.is_none(), |ui| {
             if widgets::secondary_button(ui, "Refresh packages", 0.0).clicked() {
@@ -353,7 +353,7 @@ fn body(state: &mut State, ui: &mut Ui, can_browse: bool, action: &mut Option<Ac
         });
         if state.pending.is_some() {
             ui.spinner();
-            ui.label(tl!("Adapter operation running…"));
+            ui.label("Adapter operation running…");
         }
     });
     if let Some(error) = &state.error {
@@ -366,16 +366,16 @@ fn body(state: &mut State, ui: &mut Ui, can_browse: bool, action: &mut Option<Ac
         ui.label(RichText::new(warning).color(t.warning));
     }
     if state.available != Some(true) {
-        ui.label(tl!("Native adapter package storage is unavailable in this application. No adapter programs have been started."));
+        ui.label("Native adapter package storage is unavailable in this application. No adapter programs have been started.");
         return;
     }
     widgets::hairline(ui);
-    widgets::section_label(ui, tl!("Install native adapter package"));
-    ui.label(tl!("Choose the package manifest (.json), not a .wasm filter or an arbitrary executable."));
+    widgets::section_label(ui, "Install native adapter package");
+    ui.label("Choose the package manifest (.json), not a .wasm filter or an arbitrary executable.");
     ui.add_enabled_ui(state.pending.is_none(), |ui| {
         ui.horizontal(|ui| {
             let width = (ui.available_width() - 92.0).max(80.0);
-            if ui.add_sized([width, 24.0], egui::TextEdit::singleline(&mut state.install_path).hint_text(tl!("Adapter package manifest path"))).changed() {
+            if ui.add_sized([width, 24.0], egui::TextEdit::singleline(&mut state.install_path).hint_text("Adapter package manifest path")).changed() {
                 state.invalidate_inspection();
             }
             ui.add_enabled_ui(can_browse, |ui| {
@@ -399,9 +399,9 @@ fn body(state: &mut State, ui: &mut Ui, can_browse: bool, action: &mut Option<Ac
         });
     });
     widgets::hairline(ui);
-    widgets::section_label(ui, tl!("Installed adapters"));
+    widgets::section_label(ui, "Installed adapters");
     if state.packages.is_empty() {
-        ui.label(tl!("No native adapter packages are installed."));
+        ui.label("No native adapter packages are installed.");
     }
     for package in &state.packages {
         ui.push_id(&package.id, |ui| {
@@ -413,7 +413,7 @@ fn body(state: &mut State, ui: &mut Ui, can_browse: bool, action: &mut Option<Ac
                     _ => t.text_dim,
                 };
                 ui.label(RichText::new(format!("{}: {}", status_label(package.status.state), package.status.message)).color(color));
-                egui::CollapsingHeader::new(tl!("Package details")).show(ui, |ui| descriptor(ui, &package.descriptor, &package.launch));
+                egui::CollapsingHeader::new("Package details").show(ui, |ui| descriptor(ui, &package.descriptor, &package.launch));
                 ui.add_enabled_ui(state.pending.is_none(), |ui| {
                     let mut enabled = package.enabled;
                     if widgets::checkbox(ui, &mut enabled, "Enabled").changed() {
@@ -427,7 +427,7 @@ fn body(state: &mut State, ui: &mut Ui, can_browse: bool, action: &mut Option<Ac
                             state.remove_confirmation = Some(package.id.clone());
                         }
                     });
-                    ui.label(RichText::new(tl!(DOWNLOAD_WARNING)).color(t.text_dim));
+                    ui.label(RichText::new(DOWNLOAD_WARNING).color(t.text_dim));
                     let mut consent = state.prepare_consent.contains(&package.id);
                     if widgets::checkbox(ui, &mut consent, "I consent to preparing this model, including possible system downloads").changed() {
                         if consent {
@@ -443,7 +443,7 @@ fn body(state: &mut State, ui: &mut Ui, can_browse: bool, action: &mut Option<Ac
                     });
                     if state.remove_confirmation.as_deref() == Some(package.id.as_str()) {
                         ui.label(
-                            RichText::new(tl!("Remove this adapter package? This disables it and removes its managed package files, not OS-managed models."))
+                            RichText::new("Remove this adapter package? This disables it and removes its managed package files, not OS-managed models.")
                                 .color(t.warning),
                         );
                         ui.horizontal_wrapped(|ui| {
@@ -460,30 +460,30 @@ fn body(state: &mut State, ui: &mut Ui, can_browse: bool, action: &mut Option<Ac
         });
         ui.add_space(6.0);
     }
-    ui.label(tl!("When an enabled adapter reports Ready, open an image and use Select › Subject. If it needs a model, explicitly consent above and choose Prepare model first."));
+    ui.label("When an enabled adapter reports Ready, open an image and use Select › Subject. If it needs a model, explicitly consent above and choose Prepare model first.");
 }
 
 fn status_label(status: Availability) -> &'static str {
     match status {
-        Availability::NotChecked => tl!("Not checked"),
-        Availability::Ready => tl!("Ready"),
-        Availability::NeedsModel => tl!("Needs model"),
-        Availability::Unavailable => tl!("Unavailable"),
-        Availability::Error => tl!("Error"),
+        Availability::NotChecked => "Not checked",
+        Availability::Ready => "Ready",
+        Availability::NeedsModel => "Needs model",
+        Availability::Unavailable => "Unavailable",
+        Availability::Error => "Error",
     }
 }
 
 fn descriptor(ui: &mut Ui, descriptor: &Descriptor, launch: &str) {
     ui.label(format!("{} {} ({})", descriptor.name, descriptor.version, descriptor.id));
-    ui.label(format!("{}: {launch}", tl!("Launch")));
-    ui.label(format!("{}: {}", tl!("Operations"), descriptor.operations.iter().map(|o| o.id.as_str()).collect::<Vec<_>>().join(", ")));
+    ui.label(format!("Launch: {launch}"));
+    ui.label(format!("Operations: {}", descriptor.operations.iter().map(|o| o.id.as_str()).collect::<Vec<_>>().join(", ")));
     for device in &descriptor.devices {
         let kind = match device.kind {
             DeviceKind::Cpu => "CPU",
             DeviceKind::Gpu => "GPU",
             DeviceKind::Npu => "NPU",
         };
-        ui.label(format!("{}: {} ({kind}, {}, {})", tl!("Reported device"), device.name, device.id, device.backend));
+        ui.label(format!("Reported device: {} ({kind}, {}, {})", device.name, device.id, device.backend));
     }
 }
 
