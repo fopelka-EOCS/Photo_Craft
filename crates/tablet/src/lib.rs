@@ -44,6 +44,7 @@ pub mod xi;
 pub mod macos;
 #[cfg(target_os = "windows")]
 pub mod wacom;
+#[cfg(target_os = "windows")]
 pub mod windows;
 // Pure mapping (tested everywhere); only the Windows glue inside is gated.
 pub mod wintab;
