@@ -24,6 +24,7 @@ Baseline: 2026-10-05, commit `f5d2bcb54a`, Apple M4 Pro (48 GB), GPU Apple M4 Pr
 
 | Id | Scenario | Target | p50 ms | p95 ms | max ms | Peak RSS | GPU | Status | Issue |
 |---|---|---|---:|---:|---:|---:|---:|---|---|
+| P62 | Photomerge multi-band blend, synthetic | track timing and peak RSS; no calibrated performance budget | – | – | – | – | – | not run | [#7758](https://github.com/storytold/photocraft/issues/7758) |
 | P1 | Move a layer with layer styles (per drag update) | ≤ 25 ms p95 | 321 | 535 | 535 | 825 MB | 409 MB | over budget (target not met yet) | [#209](https://github.com/storytold/photocraft/issues/209) |
 | P2 | Change layer opacity | ≤ 20 ms p95 | 276 | 443 | 443 | 639 MB | 409 MB | over budget (target not met yet) | [#209](https://github.com/storytold/photocraft/issues/209) |
 | P3 | Change layer fill | ≤ 20 ms p95 | 279 | 467 | 467 | 506 MB | 409 MB | over budget (target not met yet) | [#209](https://github.com/storytold/photocraft/issues/209) |
