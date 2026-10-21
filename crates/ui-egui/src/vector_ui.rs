@@ -33,6 +33,18 @@ pub struct PenPath {
     /// Curvature Pen: the anchor being dragged.
     #[serde(skip)]
     pub moving: Option<usize>,
+    /// The open subpath of a Paths-panel path this Pen path carries on (#8071): committing
+    /// replaces that subpath instead of adding a new one.
+    #[serde(default)]
+    pub continues: Option<PenContinue>,
+}
+
+/// Where a continued Pen path came from: the path's name ("work" or a saved path) and the index
+/// of its open subpath.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PenContinue {
+    pub path: String,
+    pub subpath: usize,
 }
 
 impl PenPath {
@@ -223,6 +235,9 @@ pub fn closes_path_at(app: &PhotocraftApp, tool: Tool, x: f64, y: f64) -> bool {
 /// lands on the nearest 45° ray from the previous one, at the pointer's projection onto it.
 pub fn pen_down(app: &mut PhotocraftApp, x: f64, y: f64, shift: bool) {
     let tol = 6.0 / app.point_zoom().max(0.01) as f64;
+    if app.ui.pen.as_ref().is_none_or(|p| p.knots.is_empty()) && continue_open_path(app, x, y, tol) {
+        return;
+    }
     let pen = app.ui.pen.get_or_insert_with(PenPath::default);
     if let Some(first) = pen.knots.first().map(|k| k[0])
         && on_closing_anchor(pen, x, y, tol)
@@ -255,6 +270,54 @@ pub fn pen_down(app: &mut PhotocraftApp, x: f64, y: f64, shift: bool) {
     pen.knots.push([p; 3]);
     pen.dragging = true;
     pen.adjusting_last = false;
+}
+
+/// The open subpath end under `(x, y)` in the work or saved path selected in the Paths panel, as
+/// (path name, subpath index, the end is the first anchor).
+fn open_end_at(app: &PhotocraftApp, x: f64, y: f64, tol: f64) -> Option<(String, usize, bool)> {
+    let name = selected_document_path(app)?;
+    let st = app.session.active()?;
+    let path = if name == "work" { st.doc.work_path.as_ref()? } else { &st.doc.paths.iter().find(|p| p.name == name)?.path };
+    let near = |k: &photocraft_doc::Knot| (k.anchor.x - x).hypot(k.anchor.y - y) < tol;
+    path.subpaths.iter().enumerate().find_map(|(i, sp)| {
+        if sp.closed || sp.knots.len() < 2 {
+            return None;
+        }
+        // The last anchor wins when a short path has both ends under the pointer.
+        if sp.knots.last().is_some_and(near) {
+            Some((name.clone(), i, false))
+        } else if sp.knots.first().is_some_and(near) {
+            Some((name.clone(), i, true))
+        } else {
+            None
+        }
+    })
+}
+
+/// Does a Pen click at `(x, y)` pick up the open path under it (#8071)? As in Photoshop, clicking
+/// an end anchor of the selected open path carries it on: the path becomes the one being drawn
+/// (turned round when the first anchor was clicked) and the next clicks extend it. Committing
+/// replaces the subpath. Only in Path mode, and not while a vector mask is targeted.
+fn continue_open_path(app: &mut PhotocraftApp, x: f64, y: f64, tol: f64) -> bool {
+    if app.ui.tool != Tool::Pen || app.ui.tool_options.vector_mode == "shape" || targeted_vector_mask(app).is_some() {
+        return false;
+    }
+    let Some((name, index, first)) = open_end_at(app, x, y, tol) else { return false };
+    let Some(st) = app.session.active() else { return false };
+    let path = if name == "work" { st.doc.work_path.as_ref() } else { st.doc.paths.iter().find(|p| p.name == name).map(|p| &p.path) };
+    let Some(sub) = path.and_then(|p| p.subpaths.get(index)) else { return false };
+    let mut knots: Vec<[[f64; 2]; 3]> = sub.knots.iter().map(knot_points).collect();
+    let mut cusps: Vec<usize> = sub.knots.iter().enumerate().filter(|(_, k)| !k.smooth).map(|(i, _)| i).collect();
+    if first {
+        let n = knots.len();
+        knots.reverse();
+        for k in &mut knots {
+            k.swap(1, 2);
+        }
+        cusps = cusps.into_iter().map(|i| n - 1 - i).collect();
+    }
+    app.ui.pen = Some(PenPath { knots, unlinked: cusps, continues: Some(PenContinue { path: name, subpath: index }), ..Default::default() });
+    true
 }
 
 /// Pen drag: pull out the handles of the anchor just placed. ⇧ (read live, as it is held)
@@ -436,10 +499,42 @@ pub fn pen_commit(app: &mut PhotocraftApp, closed: bool) {
     commit_path(app, &pen, closed);
 }
 
+/// Replace the subpath a continued Pen path came from with the extended one, as one History
+/// step. `false` when that path or subpath is gone, so the caller commits it as a new subpath.
+fn commit_continued(app: &mut PhotocraftApp, pen: &PenPath, closed: bool) -> bool {
+    let Some(from) = pen.continues.as_ref() else { return false };
+    let Some(st) = app.session.active() else { return false };
+    let existing = if from.path == "work" { st.doc.work_path.as_ref() } else { st.doc.paths.iter().find(|p| p.name == from.path).map(|p| &p.path) };
+    let Some(existing) = existing.filter(|p| p.subpaths.get(from.subpath).is_some_and(|s| !s.closed)) else { return false };
+    let mut json = photocraft_engine::vector_cmds::path_json(existing);
+    let new = pen_to_json(pen, closed);
+    let (Some(subs), Some(new_sub)) = (json.get_mut("subpaths").and_then(Value::as_array_mut), new.get("subpaths").and_then(|s| s.get(0))) else {
+        return false;
+    };
+    let op = subs.get(from.subpath).and_then(|s| s.get("op")).cloned();
+    let Some(slot) = subs.get_mut(from.subpath) else { return false };
+    let mut replacement = new_sub.clone();
+    if let (Some(m), Some(op)) = (replacement.as_object_mut(), op) {
+        m.insert("op".into(), op);
+    }
+    *slot = replacement;
+    match app.run("path.set", json!({"name": from.path, "path": json})) {
+        Ok(_) => app.ui.selected_path = Some(from.path.clone()),
+        Err(e) => {
+            app.ui.status = e;
+            app.ui.status_error = true;
+        }
+    }
+    true
+}
+
 /// Commit a finished Pen, Freeform Pen or Curvature Pen path, as one History step: a new shape
 /// layer (Shape mode), else a subpath of the targeted vector mask, else the work path.
 fn commit_path(app: &mut PhotocraftApp, pen: &PenPath, closed: bool) {
     if pen.knots.len() < 2 {
+        return;
+    }
+    if commit_continued(app, pen, closed) {
         return;
     }
     let path = pen_to_json(pen, closed);
@@ -2444,6 +2539,76 @@ mod tests {
         assert_eq!(wp.subpaths.len(), 1);
         assert_eq!(wp.subpaths[0].knots[0].anchor.x, 320.0);
         assert_eq!(app.ui.selected_path.as_deref(), Some("work"));
+    }
+
+    /// #8071: clicking an end anchor of the selected open path with the Pen carries that path on:
+    /// the next clicks extend it (one subpath, one History step) and Enter replaces the subpath.
+    #[test]
+    fn pen_continues_an_open_path_from_either_end() {
+        let anchors = |app: &PhotocraftApp, name: &str| -> Vec<Vec<[f64; 2]>> {
+            let doc = &app.session.active().unwrap().doc;
+            let path = if name == "work" { doc.work_path.clone().unwrap() } else { doc.paths.iter().find(|p| p.name == name).unwrap().path.clone() };
+            path.subpaths.iter().map(|s| s.knots.iter().map(|k| [k.anchor.x, k.anchor.y]).collect()).collect()
+        };
+        let click = |app: &mut PhotocraftApp, x: f64, y: f64| {
+            pen_down(app, x, y, false);
+            pen_up(app);
+        };
+        for name in ["work", "Saved"] {
+            for from_start in [false, true] {
+                let mut app = app();
+                app.ui.tool = Tool::Pen;
+                if name == "work" {
+                    for (x, y) in [(20.0, 20.0), (60.0, 20.0), (60.0, 60.0)] {
+                        click(&mut app, x, y);
+                    }
+                    pen_commit(&mut app, false);
+                } else {
+                    app.run("path.set", json!({"name": "Saved", "path": {"subpaths": [{"closed": false, "knots": [[20, 20], [60, 20], [60, 60]]}]}})).unwrap();
+                }
+                app.ui.selected_path = Some(name.into());
+                assert!(app.ui.pen.is_none());
+                let steps = app.session.active().unwrap().history.entries().len();
+                let (sx, sy) = if from_start { (20.0, 20.0) } else { (60.0, 60.0) };
+                click(&mut app, sx, sy);
+                assert_eq!(app.ui.pen.as_ref().map(|p| p.knots.len()), Some(3), "{name} {from_start}: the path is picked up, no anchor added");
+                click(&mut app, 100.0, 100.0);
+                click(&mut app, 140.0, 100.0);
+                pen_commit(&mut app, false);
+                let got = anchors(&app, name);
+                assert_eq!(got.len(), 1, "{name} {from_start}: still one subpath");
+                let want: Vec<[f64; 2]> = if from_start {
+                    vec![[60.0, 60.0], [60.0, 20.0], [20.0, 20.0], [100.0, 100.0], [140.0, 100.0]]
+                } else {
+                    vec![[20.0, 20.0], [60.0, 20.0], [60.0, 60.0], [100.0, 100.0], [140.0, 100.0]]
+                };
+                assert_eq!(got[0], want, "{name} {from_start}");
+                assert_eq!(app.session.active().unwrap().history.entries().len(), steps + 1, "{name} {from_start}: one History step");
+            }
+        }
+        // Away from the ends, or on a closed path, a click starts a new path as before.
+        let mut app = app();
+        app.ui.tool = Tool::Pen;
+        for (x, y) in [(20.0, 20.0), (60.0, 20.0), (60.0, 60.0)] {
+            click(&mut app, x, y);
+        }
+        pen_commit(&mut app, false);
+        app.ui.selected_path = Some("work".into());
+        click(&mut app, 40.0, 20.0);
+        assert_eq!(app.ui.pen.as_ref().map(|p| p.knots.len()), Some(1), "a click on a segment starts a new path");
+        assert_eq!(app.ui.pen.as_ref().and_then(|p| p.continues.clone()), None);
+        // A closed path has no end to carry on.
+        app.ui.pen = None;
+        app.run("path.set", json!({"name": "Ring", "path": {"subpaths": [{"closed": true, "knots": [[200, 20], [240, 20], [240, 60]]}]}})).unwrap();
+        app.ui.selected_path = Some("Ring".into());
+        click(&mut app, 240.0, 60.0);
+        assert_eq!(app.ui.pen.as_ref().map(|p| p.knots.len()), Some(1));
+        assert_eq!(app.ui.pen.as_ref().and_then(|p| p.continues.clone()), None);
+        // A path that is not selected in the Paths panel is not continued.
+        app.ui.pen = None;
+        app.ui.selected_path = None;
+        click(&mut app, 60.0, 60.0);
+        assert_eq!(app.ui.pen.as_ref().map(|p| p.knots.len()), Some(1));
     }
 
     /// #4596: the close-path pointer shows where a click would close the path, and only there:
