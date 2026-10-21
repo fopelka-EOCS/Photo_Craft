@@ -343,7 +343,7 @@ pub mod protocol {
     #[derive(Deserialize)]
     #[serde(untagged)]
     enum RequestHeader {
-        Run(RunHeader),
+        Run(Box<RunHeader>),
         Control(ControlHeader),
     }
     #[derive(Clone, Copy, Serialize)]
@@ -505,6 +505,7 @@ pub mod protocol {
                 Ok(None)
             }
             RequestHeader::Run(header) => {
+                let header = *header;
                 check_version(header.protocol)?;
                 check_request_fields(&header.operation, &header.resource, &header.params, &header.device)?;
                 let count = check_image_info(header.image.info())?;
@@ -689,7 +690,7 @@ pub mod protocol {
             budget.check()?;
             let length = chunk.len().checked_mul(4).ok_or_else(|| Error::Limit("worker sample bytes".into()))?;
             let target = bytes.get_mut(..length).ok_or_else(|| Error::Limit("worker copy buffer".into()))?;
-            for (value, target) in chunk.iter().zip(target.chunks_exact_mut(4)) {
+            for (value, target) in chunk.iter().zip(target.as_chunks_mut::<4>().0) {
                 check_sample(image, index, *value, normalized)?;
                 target.copy_from_slice(&value.to_le_bytes());
                 index = index.checked_add(1).ok_or_else(|| Error::Limit("worker sample index".into()))?;
@@ -709,9 +710,8 @@ pub mod protocol {
             let length = count.saturating_sub(samples.len()).min(COPY_SAMPLES).checked_mul(4).ok_or_else(|| Error::Limit("worker sample bytes".into()))?;
             let source = bytes.get_mut(..length).ok_or_else(|| Error::Limit("worker copy buffer".into()))?;
             reader.read_exact(source).map_err(|error| io_error("read worker samples", error))?;
-            for source in source.chunks_exact(4) {
-                let word: [u8; 4] = source.try_into().map_err(|_| Error::InvalidResponse("incomplete worker sample".into()))?;
-                let value = f32::from_le_bytes(word);
+            for source in source.as_chunks::<4>().0 {
+                let value = f32::from_le_bytes(*source);
                 check_sample(image, samples.len(), value, normalized)?;
                 samples.push(value);
             }

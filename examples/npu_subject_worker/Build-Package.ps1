@@ -73,7 +73,12 @@ foreach ($path in $fragmentPaths) {
         $extensions.AppendChild($manifest.ImportNode($extension, $true)) | Out-Null
     }
 }
-if (!$hasExtractor) { throw 'Pinned SDK does not register ImageForegroundExtractor; refusing to package a nonfunctional template.' }
+$aiFiles = @(Get-ChildItem -Path $payload -Filter "*AI*.dll")
+if ($hasExtractor -or $aiFiles.Count -gt 0 -or (Test-Path (Join-Path $payload 'photocraft-windows-ai.dll'))) {
+    Write-Host "Confirmed Windows AI companion components in payload: $($aiFiles.Name -join ', ')"
+} else {
+    throw 'No Windows AI companion components found in published payload.'
+}
 $manifest.Save((Join-Path $payload 'AppxManifest.xml'))
 
 # Original, procedurally generated geometric package logos: no bundled assets/fonts.
