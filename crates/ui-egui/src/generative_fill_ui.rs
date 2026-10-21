@@ -31,6 +31,12 @@ fn label(fields: &Map<String, Value>) -> &'static str {
     if sharpen(fields) { "Generative Sharpen" } else { "Generative Fill" }
 }
 
+/// Whether ↩ in the dialog means OK. In Generative Fill it makes a variation from the prompt
+/// instead (Generative Sharpen has no prompt, so there ↩ is OK); other dialogs are unaffected.
+pub fn enter_confirms(fields: &Map<String, Value>) -> bool {
+    !owns(fields) || sharpen(fields)
+}
+
 pub fn owns(fields: &Map<String, Value>) -> bool {
     fields.contains_key(MARK)
 }
@@ -364,5 +370,18 @@ mod tests {
         assert_eq!(app.ui.tool_options.infill_seed, "12");
         // OK with no model says why.
         assert!(confirm(&mut app, &f).is_err());
+    }
+
+    /// ↩ in Generative Fill makes a variation from the prompt, so it doesn't also press OK;
+    /// in Generative Sharpen (no prompt) and in other dialogs it does.
+    #[test]
+    fn enter_presses_ok_except_in_generative_fill() {
+        let mut fill = Map::new();
+        fill.insert(MARK.into(), json!(true));
+        assert!(!enter_confirms(&fill));
+        let mut sharpen = fill.clone();
+        sharpen.insert("mode".into(), json!("sharpen"));
+        assert!(enter_confirms(&sharpen));
+        assert!(enter_confirms(&Map::new()));
     }
 }

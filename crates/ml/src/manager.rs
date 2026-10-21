@@ -450,13 +450,27 @@ impl Manager {
     }
 
     /// The staging folder for a new model, and its future id.
+    ///
+    /// The id is reserved by creating its staging folder while the store is locked, so two
+    /// imports of models with the same name (running at once) never share a folder or an id.
     fn stage(&self, name: &str) -> Result<(String, PathBuf)> {
         let inner = self.lock();
-        let id = inner.store.free_id(name);
-        let staging = inner.store.staging_dir().join(&id);
-        drop(inner);
-        std::fs::create_dir_all(&staging).map_err(|e| Error::io("Couldn't create a folder for the model", e))?;
-        Ok((id, staging))
+        let root = inner.store.staging_dir();
+        std::fs::create_dir_all(&root).map_err(|e| Error::io("Couldn't create a folder for the model", e))?;
+        let base = inner.store.free_id(name);
+        for id in std::iter::once(base.clone()).chain((2..10_000).map(|n| format!("{base}-{n}"))) {
+            if inner.store.get(&id).is_some() || inner.store.model_dir(&id).exists() {
+                continue;
+            }
+            let staging = root.join(&id);
+            match std::fs::create_dir(&staging) {
+                Ok(()) => return Ok((id, staging)),
+                // Another import is staging under this id.
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(Error::io("Couldn't create a folder for the model", e)),
+            }
+        }
+        Err(Error::Invalid(format!("Couldn't find a free name for {name} in the models folder.")))
     }
 
     /// Moves a complete staging folder into place and records the model.
@@ -755,6 +769,19 @@ mod tests {
         assert!(m.import_link("Acly/MobileSAM", &[], None).is_err(), "an import needs a use");
         assert!(m.download("no-such-model").is_err());
         assert!(!dir.join(crate::store::STAGING).exists() || std::fs::read_dir(dir.join(crate::store::STAGING)).unwrap().next().is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Two imports of models with the same name, staged at once, get different ids and folders.
+    #[test]
+    fn staging_reserves_a_distinct_id_for_each_import() {
+        let dir = temp("stage");
+        let m = Manager::open(&dir).unwrap();
+        let (a, pa) = m.stage("Same Name").unwrap();
+        let (b, pb) = m.stage("Same Name").unwrap();
+        assert_ne!(a, b);
+        assert_ne!(pa, pb);
+        assert!(pa.is_dir() && pb.is_dir());
         let _ = std::fs::remove_dir_all(dir);
     }
 

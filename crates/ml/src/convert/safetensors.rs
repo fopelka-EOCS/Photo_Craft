@@ -47,7 +47,7 @@ impl SafeTensors {
         let mut len = [0u8; 8];
         file.read_exact(&mut len).map_err(|_| bad())?;
         let n = u64::from_le_bytes(len);
-        if n == 0 || n > MAX_HEADER || n + 8 > size {
+        if n == 0 || n > MAX_HEADER || n.saturating_add(8) > size {
             return Err(bad());
         }
         let mut header = vec![0u8; n as usize];
@@ -71,9 +71,16 @@ impl SafeTensors {
                 .ok_or_else(bad)?;
             let offs = v.get("data_offsets").and_then(Value::as_array).ok_or_else(bad)?;
             let (Some(start), Some(end)) = (offs.first().and_then(Value::as_u64), offs.get(1).and_then(Value::as_u64)) else { return Err(bad()) };
-            let elem = elem_size(&dtype);
-            let count: usize = shape.iter().product();
-            if end < start || data_start + end > size || elem.is_some_and(|e| (end - start) as usize != count * e) {
+            // Every size from the header is checked before use: a crafted one mustn't overflow.
+            let count = shape.iter().try_fold(1usize, |a, d| a.checked_mul(*d)).ok_or_else(bad)?;
+            let past_end = data_start.checked_add(end).ok_or_else(bad)?;
+            if end < start || past_end > size {
+                return Err(bad());
+            }
+            let bytes = usize::try_from(end - start).map_err(|_| bad())?;
+            if let Some(e) = elem_size(&dtype)
+                && count.checked_mul(e) != Some(bytes)
+            {
                 return Err(bad());
             }
             tensors.insert(name.clone(), Info { dtype, shape, start, end });
@@ -148,6 +155,18 @@ mod tests {
         assert!(SafeTensors::open(&p).is_err());
         std::fs::write(&p, b"not a checkpoint at all").unwrap();
         assert!(SafeTensors::open(&p).is_err());
+        // Header sizes that overflow are errors too, not panics or wrapped checks.
+        for header in [
+            r#"{"a":{"dtype":"F32","shape":[4294967296,4294967296,16],"data_offsets":[0,4]}}"#,
+            r#"{"a":{"dtype":"F32","shape":[1],"data_offsets":[0,18446744073709551615]}}"#,
+            r#"{"a":{"dtype":"F32","shape":[4611686018427387904],"data_offsets":[0,0]}}"#,
+        ] {
+            let mut bytes = (header.len() as u64).to_le_bytes().to_vec();
+            bytes.extend_from_slice(header.as_bytes());
+            bytes.extend_from_slice(&[0; 8]);
+            std::fs::write(&p, &bytes).unwrap();
+            assert!(SafeTensors::open(&p).is_err(), "{header}");
+        }
         let _ = std::fs::remove_dir_all(dir);
     }
 }

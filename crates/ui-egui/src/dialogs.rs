@@ -471,6 +471,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                             Some(_) => outcome = Some(true),
                             None if interactive
                                 && can_ok
+                                && crate::generative_fill_ui::enter_confirms(&fields)
                                 && (!web || (!web_popup_open && !egui::Popup::is_any_open(ui.ctx())))
                                 && ui.input(|i| i.key_pressed(egui::Key::Enter)) =>
                             {

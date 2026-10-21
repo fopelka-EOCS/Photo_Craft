@@ -110,7 +110,7 @@ fn not_a_pipeline(model: &Model) -> Error {
     let checkpoint = model.files.iter().any(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("safetensors") || e.eq_ignore_ascii_case("ckpt")));
     Error::Unsupported(if checkpoint {
         format!(
-            "{} is a single-file Stable Diffusion checkpoint, which PhotoCraft can't run yet. Download one of the recommended Generative Fill models, or import a Hugging Face repository of an ONNX pipeline (model_index.json with unet, text_encoder, vae_encoder and vae_decoder folders).",
+            "{} is a single-file Stable Diffusion checkpoint that hasn't been prepared to run. Single-file checkpoints are converted when they're imported: import it again in Edit › Preferences › AI Models so PhotoCraft can convert it. Or download one of the recommended Generative Fill models, or import a Hugging Face repository of an ONNX pipeline (model_index.json with unet, text_encoder, vae_encoder and vae_decoder folders).",
             model.name
         )
     } else {
@@ -267,8 +267,30 @@ fn find_port<'a>(ports: &'a [Port], names: &[&str], dims: usize) -> Option<&'a P
     names.iter().find_map(|n| ports.iter().find(|p| p.name == *n)).or_else(|| ports.iter().find(|p| p.shape.len() == dims))
 }
 
+/// The text states a pipeline conditions on: an output named `hidden_states` (what PhotoCraft's
+/// converter and most exports give: the right layer already), else with `penultimate` (SDXL,
+/// whose encoders are read one layer before the end) the next-to-last of numbered
+/// `hidden_states.N` outputs (as Optimum exports them), else `last_hidden_state`, else any
+/// three-dimensional output.
+fn text_states(out: &[(String, Tensor)], penultimate: bool) -> Option<&Tensor> {
+    if let Some((_, t)) = out.iter().find(|(n, _)| n == "hidden_states") {
+        return Some(t);
+    }
+    if penultimate {
+        let mut numbered: Vec<(usize, &Tensor)> =
+            out.iter().filter_map(|(n, t)| n.strip_prefix("hidden_states.").and_then(|i| i.parse::<usize>().ok()).map(|i| (i, t))).collect();
+        numbered.sort_by_key(|(i, _)| *i);
+        if numbered.len() >= 2
+            && let Some((_, t)) = numbered.get(numbered.len() - 2)
+        {
+            return Some(t);
+        }
+    }
+    out.iter().find(|(n, _)| n == "last_hidden_state").or_else(|| out.iter().find(|(_, t)| t.shape.len() == 3)).map(|(_, t)| t)
+}
+
 /// The prompt's embedding and, from an encoder that gives one (SDXL's second), its pooled one.
-fn embed_pooled(text_encoder: &Arc<dyn Network>, tokenizer: &ClipTokenizer, text: &str) -> Result<(Tensor, Option<Tensor>)> {
+fn embed_pooled(text_encoder: &Arc<dyn Network>, tokenizer: &ClipTokenizer, text: &str, penultimate: bool) -> Result<(Tensor, Option<Tensor>)> {
     let ins = text_encoder.inputs();
     let input = ins
         .iter()
@@ -278,11 +300,8 @@ fn embed_pooled(text_encoder: &Arc<dyn Network>, tokenizer: &ClipTokenizer, text
         .ok_or_else(|| Error::Invalid("The text encoder has no inputs.".into()))?;
     let ids = tokenizer.encode(text);
     let out = text_encoder.run(vec![(input.name.clone(), Tensor::i64(&[1, LENGTH as i64], ids))])?;
-    let t = out
-        .iter()
-        .find(|(n, _)| n == "hidden_states" || n == "last_hidden_state")
-        .or_else(|| out.iter().find(|(_, t)| t.shape.len() == 3))
-        .map(|(_, t)| Tensor::f32(&t.shape, t.to_f32()))
+    let t = text_states(&out, penultimate)
+        .map(|t| Tensor::f32(&t.shape, t.to_f32()))
         .ok_or_else(|| Error::Invalid("The text encoder gave no text embeddings.".into()))?;
     let pooled = out.iter().find(|(n, t)| n == "text_embeds" || t.shape.len() == 2).map(|(_, t)| Tensor::f32(&t.shape, t.to_f32()));
     Ok((t, pooled))
@@ -290,8 +309,8 @@ fn embed_pooled(text_encoder: &Arc<dyn Network>, tokenizer: &ClipTokenizer, text
 
 /// SDXL's two encoders' states side by side (per token), and the second one's pooled text.
 fn embed_xl(enc: (&Arc<dyn Network>, &ClipTokenizer), enc2: (&Arc<dyn Network>, &ClipTokenizer), text: &str) -> Result<(Tensor, Tensor)> {
-    let (a, _) = embed_pooled(enc.0, enc.1, text)?;
-    let (b, pooled) = embed_pooled(enc2.0, enc2.1, text)?;
+    let (a, _) = embed_pooled(enc.0, enc.1, text, true)?;
+    let (b, pooled) = embed_pooled(enc2.0, enc2.1, text, true)?;
     let pooled = pooled.ok_or_else(|| Error::Invalid("SDXL's second text encoder gave no pooled text.".into()))?;
     let (da, db) = (a.shape.get(2).copied().unwrap_or(0).max(0) as usize, b.shape.get(2).copied().unwrap_or(0).max(0) as usize);
     let (va, vb) = (a.to_f32(), b.to_f32());

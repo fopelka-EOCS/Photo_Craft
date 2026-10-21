@@ -368,3 +368,24 @@ fn pipeline_parts_are_found_in_folders_or_flat() {
 }
 
 use std::collections::HashMap;
+
+/// SDXL reads its encoders one layer before the end: a `hidden_states` output is that layer
+/// already; Optimum's numbered `hidden_states.N` give the next-to-last, before `last_hidden_state`.
+/// Other pipelines read `last_hidden_state`.
+#[test]
+fn sdxl_text_states_come_from_the_next_to_last_layer() {
+    let t = |v: f32| Tensor::f32(&[1, 1, 1], vec![v]);
+    let numbered = vec![
+        ("last_hidden_state".to_string(), t(9.0)),
+        ("hidden_states.10".to_string(), t(10.0)),
+        ("hidden_states.2".to_string(), t(2.0)),
+        ("hidden_states.11".to_string(), t(11.0)),
+        ("pooler_output".to_string(), Tensor::f32(&[1, 1], vec![0.0])),
+    ];
+    assert_eq!(text_states(&numbered, true).map(|t| t.to_f32()), Some(vec![10.0]), "hidden_states.10 of 0..=11");
+    assert_eq!(text_states(&numbered, false).map(|t| t.to_f32()), Some(vec![9.0]));
+    let direct = vec![("last_hidden_state".to_string(), t(9.0)), ("hidden_states".to_string(), t(5.0))];
+    assert_eq!(text_states(&direct, true).map(|t| t.to_f32()), Some(vec![5.0]));
+    let plain = vec![("out".to_string(), t(1.0))];
+    assert_eq!(text_states(&plain, true).map(|t| t.to_f32()), Some(vec![1.0]));
+}

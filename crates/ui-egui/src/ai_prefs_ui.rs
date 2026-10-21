@@ -543,8 +543,10 @@ fn accounts(ui: &mut Ui, st: &mut Map<String, Value>, m: &Manager, error: &mut O
         ];
         for (key, site, page, hint) in rows {
             let stored = if key == "hf" { &saved.hugging_face } else { &saved.civitai };
-            let field = format!("token.{key}");
-            let mut text = st.get(&field).and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| stored.clone());
+            // An unsaved token is kept in egui's temporary memory, never in the dialog's fields:
+            // those are what the control channel reads and sets, and a token mustn't show there.
+            let draft = ui.id().with(("ai-token-draft", key));
+            let mut text = ui.data(|d| d.get_temp::<String>(draft)).unwrap_or_else(|| stored.clone());
             ui.horizontal(|ui| {
                 ui.add_sized(vec2(96.0, 22.0), egui::Label::new(RichText::new(site).color(t.text_dim)).selectable(false));
                 let w = (ui.available_width() - 150.0).clamp(120.0, 360.0);
@@ -555,7 +557,7 @@ fn accounts(ui: &mut Ui, st: &mut Map<String, Value>, m: &Manager, error: &mut O
                     password_field(ui, ui.id().with(("ai-token-hidden", key)), &mut text, tl!(hint), w)
                 };
                 if resp.changed() {
-                    st.insert(field.clone(), json!(text));
+                    ui.data_mut(|d| d.insert_temp(draft, text.clone()));
                 }
                 let eye = if show { "eye-off" } else { "eye" };
                 if crate::icons::button(ui, eye, 24.0, false, if show { tl!("Hide the token") } else { tl!("Show the token") }).clicked() {
@@ -570,9 +572,7 @@ fn accounts(ui: &mut Ui, st: &mut Map<String, Value>, m: &Manager, error: &mut O
                         tokens.civitai = text.clone();
                     }
                     match m.set_tokens(&tokens) {
-                        Ok(()) => {
-                            st.remove(&field);
-                        }
+                        Ok(()) => ui.data_mut(|d| d.remove::<String>(draft)),
                         Err(e) => *error = Some(e.to_string()),
                     }
                 }
