@@ -307,7 +307,10 @@ fn warp_type_layer(s: &mut Session, cmd: &str, id: LayerId, w: &Warp) -> Result<
     let mut next = t.clone();
     next.cache = None;
     if !free && !w.is_identity() && (w.style == WarpStyle::Custom || !next.distortions.is_empty()) {
-        return Err(bad(cmd, "as in Photoshop, type takes only a warp style (arc, flag, …); turn on Preferences › Type › Free Transforms on Type, or rasterize the type"));
+        return Err(bad(
+            cmd,
+            "as in Photoshop, type takes only a warp style (arc, flag, …); turn on Preferences › Type › Free Transforms on Type, or rasterize the type",
+        ));
     }
     if !crate::type_distort::set_warp(&mut next, w)? {
         return Ok(json!({"layer": id.0, "changed": false}));
