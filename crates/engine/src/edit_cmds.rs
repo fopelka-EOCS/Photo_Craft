@@ -422,20 +422,27 @@ fn paste_layers(s: &mut Session, layers: &Document, dx: i32, dy: i32) -> Result<
     let patterns: Vec<_> = copies.patterns.iter().filter(|pat| !d.doc.patterns.iter().any(|q| q.id == pat.id)).cloned().collect();
     // A copied smart object may name a PSD-embedded linked file; land its `lnk` block too (#3584).
     let mut linked = Vec::new();
+    // Destination blocks by key, read once (one left in the opened file is read whole).
+    let mut dest_by_key: std::collections::HashMap<[u8; 4], Vec<std::sync::Arc<Vec<u8>>>> = std::collections::HashMap::new();
     for (signature, key, data) in copies.metadata.psd_global_blocks.iter().filter(|(_, k, _)| matches!(k, b"lnk2" | b"lnk3" | b"lnkD" | b"lnkE")) {
         if d.doc.metadata.psd_global_blocks.iter().any(|(_, dk, dd)| dk == key && dd.ptr_eq(data)) {
             continue;
         }
         let failed = |e: photocraft_doc::BlobError| EngineError::Other(format!("Could not paste smart-object contents: {e}; the document was not changed"));
         let bytes = data.bytes().map_err(failed)?;
-        // Destination blocks left in the opened file are read to compare against.
-        let mut dest = Vec::new();
-        for (_, dk, dd) in d.doc.metadata.psd_global_blocks.iter().filter(|(_, dk, _)| dk == key) {
-            dest.push((*dk, dd.bytes().map_err(failed)?));
-        }
+        let dest = match dest_by_key.entry(*key) {
+            std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+            std::collections::hash_map::Entry::Vacant(e) => {
+                let mut dest = Vec::new();
+                for (_, _, dd) in d.doc.metadata.psd_global_blocks.iter().filter(|(_, dk, _)| dk == key) {
+                    dest.push(dd.bytes().map_err(failed)?);
+                }
+                e.insert(dest)
+            }
+        };
         // The clipboard may contain a subset of a destination block. Compare complete records,
         // so copying one layer in the same document does not duplicate large embedded files.
-        let missing = photocraft_io::linked::select_items(&bytes, &|_, raw| !dest.iter().any(|(_, dd)| photocraft_io::linked::contains_item(dd, raw)))
+        let missing = photocraft_io::linked::select_items(&bytes, &|_, raw| !dest.iter().any(|dd| photocraft_io::linked::contains_item(dd, raw)))
             .map_err(|e| EngineError::Other(format!("Could not paste smart-object contents: {e}; the document was not changed")))?;
         let missing = missing.map(photocraft_doc::Blob::new).unwrap_or_else(|| data.clone());
         if !missing.is_empty() {

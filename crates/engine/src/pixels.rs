@@ -75,27 +75,29 @@ pub fn adjust_surface(s: &mut Surface, adj: &Adjustment, selection: Option<&Surf
     // across coordinates (a filled background) is adjusted once and its result stays shared.
     let shared_once = selection.is_none();
     let mut first: std::collections::HashMap<*const photocraft_raster::Tile, usize> = std::collections::HashMap::new();
+    // The work items own their tiles, so a tile held by this surface alone is adjusted in place
+    // (no copy-on-write duplicate kept alive beside it).
     let mut work = Vec::with_capacity(tiles.len());
     let mut copies = Vec::new();
-    for (i, (tc, tile)) in tiles.iter().enumerate() {
+    for (i, (tc, tile)) in tiles.into_iter().enumerate() {
         let whole = tc.rect().intersect(&r) == tc.rect();
-        match first.get(&std::sync::Arc::as_ptr(tile)) {
-            Some(&j) if shared_once && whole => copies.push((*tc, j)),
+        let ptr = std::sync::Arc::as_ptr(&tile);
+        match first.get(&ptr) {
+            Some(&j) if shared_once && whole => copies.push((tc, j)),
             _ => {
                 if whole {
-                    first.insert(std::sync::Arc::as_ptr(tile), i);
+                    first.insert(ptr, i);
                 }
-                work.push(i);
+                work.push((i, tc, tile));
             }
         }
     }
     let done: Vec<(usize, Vec<PlacedTile>)> = work
         .into_par_iter()
-        .map(|i| {
-            let (tc, tile) = &tiles[i];
+        .map(|(i, tc, tile)| {
             // A one-tile surface, so `adjusted` reads and writes this tile only.
             let mut one = Surface::new(fmt);
-            one.put_tiles([(*tc, tile.clone())]);
+            one.put_tiles([(tc, tile)]);
             let tr = tc.rect().intersect(&r);
             let out = adjusted(&one, tr, adj, selection, mode);
             one.write_region(tr, &out);
@@ -104,7 +106,6 @@ pub fn adjust_surface(s: &mut Surface, adj: &Adjustment, selection: Option<&Surf
         .collect();
     let by_index: std::collections::HashMap<usize, std::sync::Arc<photocraft_raster::Tile>> =
         done.iter().filter_map(|(i, t)| t.first().map(|(_, t)| (*i, t.clone()))).collect();
-    drop(tiles);
     s.put_tiles(done.into_iter().flat_map(|(_, t)| t));
     s.put_tiles(copies.into_iter().filter_map(|(tc, j)| by_index.get(&j).map(|t| (tc, t.clone()))));
 }
@@ -129,6 +130,11 @@ fn adjusted_tiles(
         .collect::<Vec<_>>()
         .into_par_iter()
         .flat_map_iter(|tc| {
+            // Without a selection a tile `src` doesn't hold is all default pixels, so its result
+            // is all `default`: the output's missing tile already reads so.
+            if selection.is_none() && src.tile(tc).is_none() {
+                return Vec::new();
+            }
             let tr = tc.rect().intersect(&r);
             let out = adjusted(src, tr, adj, selection, mode);
             let mut one = Surface::with_default(fmt, default);

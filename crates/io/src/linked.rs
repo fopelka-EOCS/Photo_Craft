@@ -107,6 +107,12 @@ fn blob_item(b: &Blob, uuid: &str) -> Option<(String, String, u64, u64)> {
         let len = u64::from_be_bytes(b.read_part(p, 8).ok()?.as_ref().try_into().ok()?);
         let start = p + 8;
         let end = start.checked_add(len).filter(|&e| e <= total)?;
+        // Only an embedded (`liFD`) item can match: skip the others on their kind alone, rather
+        // than reading their whole record looking for a header that will never parse.
+        if len < 4 || b.read_part(start, 4).ok()?.as_ref() != b"liFD" {
+            p = end.next_multiple_of(4);
+            continue;
+        }
         let mut window = len.min(HEADER_WINDOW);
         loop {
             let head = b.read_part(start, window).ok()?;
@@ -134,8 +140,9 @@ pub fn find_in_globals(globals: &[photocraft_doc::PsdGlobalBlock], uuid: &str) -
     })
 }
 
-/// The size of embedded file `uuid` among the given global blocks (see [`source_size_in_blocks`]).
-/// From a deferred block only the file's first bytes are read when its header gives the size.
+/// The size of embedded file `uuid` among the given global blocks, when it is there and readable
+/// with a non-empty size (the source size a `PlLd` record leaves out). From a deferred block only
+/// the file's first bytes are read when its header gives the size.
 pub(crate) fn source_size_in_globals(globals: &[photocraft_doc::PsdGlobalBlock], uuid: &str, ctl: &photocraft_raster::Interrupt) -> Option<(f64, f64)> {
     const PREFIX: u64 = 1 << 20;
     globals.iter().filter(|(_, k, _)| matches!(k, b"lnk2" | b"lnk3" | b"lnkD")).find_map(|(_, _, d)| {
@@ -200,20 +207,6 @@ fn find_slice_in_blocks<'a>(blocks: impl IntoIterator<Item = (&'a [u8; 4], &'a [
         }
         None
     })
-}
-
-/// The size of embedded file `uuid` among PSD global blocks given as (key, data), when it is there
-/// and readable with a non-empty size (the source size a `PlLd` record leaves out).
-pub(crate) fn source_size_in_blocks<'a>(
-    blocks: impl IntoIterator<Item = (&'a [u8; 4], &'a [u8])>,
-    uuid: &str,
-    ctl: &photocraft_raster::Interrupt,
-) -> Option<(f64, f64)> {
-    let (_, _, bytes) = find_slice_in_blocks(blocks, uuid)?;
-    if ctl.cancelled() {
-        return None;
-    }
-    source_size_probe(bytes).filter(|(w, h)| *w > 0.0 && *h > 0.0)
 }
 
 /// Pixel size of an embedded source file from its header: PSD/PSB, TIFF (the default page's

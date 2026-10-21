@@ -478,19 +478,22 @@ pub fn export_with(doc: &Document, name_or_ext: &str, opts: &ExportOptions, ctl:
     ctl.check().map_err(|_| IoError::Cancelled)?;
     // Smart-object files left in the file the document was opened from are read for the save
     // (the writers work on bytes in memory); a failed read fails the save, never writes them empty.
-    let loaded;
-    let doc = if doc.metadata.has_deferred_blocks() {
-        let mut d = doc.clone();
-        d.metadata.load_deferred_blocks().map_err(|e| IoError::Read(format!("a smart object's embedded file could not be read: {e}")))?;
-        loaded = d;
-        &loaded
-    } else {
-        doc
-    };
+    let doc = &*with_blocks_loaded(doc)?;
     let r = export_stages(doc, name_or_ext, opts, ctl)?;
     ctl.check().map_err(|_| IoError::Cancelled)?;
     ctl.progress(1.0);
     Ok(r)
+}
+
+/// `doc` with its global blocks in memory: a copy with those left in the opened file read
+/// (`Blob::Deferred`), or `doc` itself when none is. A block that can't be read is an error.
+pub(crate) fn with_blocks_loaded(doc: &Document) -> Result<std::borrow::Cow<'_, Document>, IoError> {
+    if !doc.metadata.has_deferred_blocks() {
+        return Ok(std::borrow::Cow::Borrowed(doc));
+    }
+    let mut d = doc.clone();
+    d.metadata.load_deferred_blocks().map_err(|e| IoError::Read(format!("a smart object's embedded file could not be read: {e}")))?;
+    Ok(std::borrow::Cow::Owned(d))
 }
 
 /// Run `f` with an interrupt whose progress `0..=1` fills `lo..=hi` of `ctl`'s (same cancellation).

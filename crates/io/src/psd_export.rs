@@ -897,7 +897,7 @@ impl Ex {
         }
         // Placed as the importer places it (the same source size, from the same file, and the
         // same frame: a custom warp's control-point box, #3677).
-        let size = crate::linked::source_size_in_blocks(self.smart.globals.iter().map(|(_, k, d)| (k, d.resident())), &id, &photocraft_raster::Interrupt::NONE);
+        let size = crate::linked::source_size_in_globals(&self.smart.globals, &id, &photocraft_raster::Interrupt::NONE);
         blocks::plld_transform(&corners, size, warp.as_ref()) != (sm.transform, sm.perspective)
     }
 
@@ -1405,15 +1405,19 @@ fn placeholder_planes(doc: &Document, fmt: &PixelFormat) -> Vec<u8> {
 }
 
 /// Converts a document to a PSD file model (see [`document_to_psd_with`]).
-pub fn document_to_psd(doc: &Document) -> PsdFile {
-    document_to_psd_with(doc, &PsdExportOptions::default()).0
+pub fn document_to_psd(doc: &Document) -> Result<PsdFile, crate::IoError> {
+    document_to_psd_with(doc, &PsdExportOptions::default()).map(|(file, _)| file)
 }
 
 /// Converts a document to a PSD/PSB file model, returning warnings about
 /// anything that could not be represented. The merged composite is rendered
 /// with `photocraft_compose::flatten`.
-pub fn document_to_psd_with(doc: &Document, opts: &PsdExportOptions) -> (PsdFile, Vec<String>) {
-    document_to_psd_nested(doc, opts, 0, &Interrupt::NONE)
+///
+/// Smart-object files still in the file the document was opened from are read first; one that
+/// can't be read is an error (writing it empty would lose it).
+pub fn document_to_psd_with(doc: &Document, opts: &PsdExportOptions) -> Result<(PsdFile, Vec<String>), crate::IoError> {
+    let doc = crate::with_blocks_loaded(doc)?;
+    Ok(document_to_psd_nested(&doc, opts, 0, &Interrupt::NONE))
 }
 
 /// [`document_to_psd_with`] for a background save (#3389): reports progress through `ctl` after
@@ -1905,6 +1909,28 @@ fn mask_parameters(user: Option<(f32, f32)>, vector: Option<(f32, f32)>) -> Opti
 
 #[cfg(test)]
 mod tests {
+    /// A smart object's file left in the opened file that can no longer be read fails the
+    /// conversion: it is never written as an empty block.
+    #[test]
+    fn unreadable_deferred_blocks_fail_the_conversion() {
+        struct Gone;
+        impl photocraft_doc::DeferredBytes for Gone {
+            fn len(&self) -> u64 {
+                16
+            }
+            fn read(&self, _: u64, _: u64) -> Result<Vec<u8>, photocraft_doc::BlobError> {
+                Err(photocraft_doc::BlobError("the file changed".into()))
+            }
+            fn origin(&self) -> String {
+                "test".into()
+            }
+        }
+        let mut doc = document(4, 4);
+        doc.metadata.psd_global_blocks.push((*b"8BIM", *b"lnk2", photocraft_doc::Blob::deferred(std::sync::Arc::new(Gone))));
+        assert!(document_to_psd_with(&doc, &PsdExportOptions::default()).is_err());
+        assert!(crate::export(&doc, "x.psd", &Default::default()).is_err());
+    }
+
     use super::*;
 
     fn document(width: u32, height: u32) -> Document {
@@ -1920,7 +1946,7 @@ mod tests {
         let size = photocraft_geom::Size::new(8, 6);
         let mut doc = Document::with_background("bg", size, ColorMode::Rgb, SampleType::U8, Color::rgb(0.2, 0.4, 0.6));
         doc.layers.push(Layer::raster("Layer 1", doc.pixel_format()));
-        let file = document_to_psd(&doc);
+        let file = document_to_psd(&doc).unwrap();
         let layers = &file.layer_info.as_ref().unwrap().layers;
         let ids = |i: usize| layers[i].channels.iter().map(|c| c.id).collect::<Vec<_>>();
         assert_eq!(ids(0), vec![0, 1, 2], "the Background has no -1 channel");
@@ -1934,10 +1960,10 @@ mod tests {
         // A bottom layer with transparency (or unlocked) is not a Background.
         let mut holey = doc.clone();
         holey.layers[0].surface_mut().unwrap().write_pixel(2, 2, &[0.0, 0.0, 0.0, 0.0]);
-        assert!(document_to_psd(&holey).layer_info.unwrap().layers[0].channels.iter().any(|c| c.id == -1));
+        assert!(document_to_psd(&holey).unwrap().layer_info.unwrap().layers[0].channels.iter().any(|c| c.id == -1));
         let mut unlocked = doc.clone();
         unlocked.layers[0].locks.position = false;
-        assert!(document_to_psd(&unlocked).layer_info.unwrap().layers[0].channels.iter().any(|c| c.id == -1));
+        assert!(document_to_psd(&unlocked).unwrap().layer_info.unwrap().layers[0].channels.iter().any(|c| c.id == -1));
     }
 
     /// A flat 1-bit Bitmap file (no layers) opens in Photoshop as its Background; so does it in
@@ -1950,7 +1976,7 @@ mod tests {
         assert!(bg.name == "Background" && bg.locks.transparency && bg.locks.position, "{:?}", bg.locks);
         // Bitmap has no layers in Photoshop (#4814): the file is saved flat in Bitmap mode, without
         // a layer section, and opens as a Background again.
-        let out = document_to_psd(&doc);
+        let out = document_to_psd(&doc).unwrap();
         assert_eq!(out.header.color_mode, PsdMode::Bitmap);
         assert!(out.layer_info.as_ref().is_none_or(|li| li.layers.is_empty()));
         let back = crate::import("flat.psd", &out.to_bytes().unwrap()).unwrap().document;
@@ -1965,7 +1991,7 @@ mod tests {
         group.psd_id = Some(u32::MAX);
         doc.layers.push(group);
 
-        let file = document_to_psd(&doc);
+        let file = document_to_psd(&doc).unwrap();
         let ids: Vec<u32> = file.layers().iter().filter_map(|layer| layer.layer_id()).collect();
         let unique: std::collections::HashSet<u32> = ids.iter().copied().collect();
         assert_eq!(ids.len(), 3, "group, child and closing divider");
@@ -1990,7 +2016,7 @@ mod tests {
             s.fill_rect(photocraft_geom::Rect::new(1, 1, 5, 4), &[0.5, 0.2, 0.9, 1.0]);
             doc.layers.push(Layer::new("Layer 1", LayerContent::Raster(s)));
             doc.metadata.psd_global_blocks = vec![(*b"8BIM", *b"Patt", photocraft_doc::Blob::new(Vec::new())), (*b"8BIM", marker, photocraft_doc::Blob::new(Vec::new()))];
-            let saved = PsdFile::from_bytes(&document_to_psd(&doc).to_bytes().unwrap()).unwrap();
+            let saved = PsdFile::from_bytes(&document_to_psd(&doc).unwrap().to_bytes().unwrap()).unwrap();
             let LayerInfoPlacement::GlobalBlock { index, key: written, .. } = saved.layer_info_placement else { panic!("{depth:?}: a global layer block") };
             assert_eq!(written, key);
             let at = saved.global_blocks.iter().position(|b| b.key == marker).expect("the marker is kept");
@@ -2000,7 +2026,7 @@ mod tests {
         let mut doc = Document::new("t", photocraft_geom::Size::new(8, 6), ColorMode::Rgb, SampleType::F32);
         doc.layers.push(Layer::new("Layer 1", LayerContent::Raster(Surface::new(doc.pixel_format()))));
         doc.metadata.psd_global_blocks = vec![(*b"8BIM", *b"Patt", photocraft_doc::Blob::new(Vec::new()))];
-        let saved = PsdFile::from_bytes(&document_to_psd(&doc).to_bytes().unwrap()).unwrap();
+        let saved = PsdFile::from_bytes(&document_to_psd(&doc).unwrap().to_bytes().unwrap()).unwrap();
         assert!(matches!(saved.layer_info_placement, LayerInfoPlacement::GlobalBlock { index: 0, .. }));
     }
 
@@ -2013,7 +2039,7 @@ mod tests {
         let imported = crate::import("broken.psd", &file.to_bytes().unwrap()).unwrap();
         assert!(imported.warnings.iter().any(|w| w.contains("Lr16") && w.contains("could not be read")), "{:?}", imported.warnings);
 
-        let saved = PsdFile::from_bytes(&document_to_psd(&imported.document).to_bytes().unwrap()).unwrap();
+        let saved = PsdFile::from_bytes(&document_to_psd(&imported.document).unwrap().to_bytes().unwrap()).unwrap();
         let ours = matches!(saved.layer_info_placement, LayerInfoPlacement::GlobalBlock { key, .. } if key == *b"Lr16");
         let kept = saved.global_blocks.iter().filter(|b| b.key == *b"Lr16").count();
         assert_eq!((ours, kept), (true, 0), "exactly one Lr16 block: the document's own layers");
@@ -2038,7 +2064,7 @@ mod tests {
             assert_eq!(&data[17..], &[0, 0, 0], "three padding bytes after the 17-byte payload");
         };
 
-        let exported = document_to_psd(&doc);
+        let exported = document_to_psd(&doc).unwrap();
         assert_phfl(&exported);
         let encoded = exported.to_bytes().unwrap();
         let parsed = PsdFile::from_bytes(&encoded).unwrap();
@@ -2053,7 +2079,7 @@ mod tests {
         layer.psd_blocks = vec![(*b"phfl", std::sync::Arc::new(legacy))];
         doc.layers.pop();
         doc.layers.push(layer);
-        let repaired = document_to_psd(&doc);
+        let repaired = document_to_psd(&doc).unwrap();
         assert_phfl(&repaired);
         let repaired_bytes = repaired.to_bytes().unwrap();
         assert_phfl(&PsdFile::from_bytes(&repaired_bytes).unwrap());
@@ -2071,7 +2097,7 @@ mod tests {
         layer.psd_blocks = vec![(*b"phfl", std::sync::Arc::new(v3.clone()))];
         doc.layers.push(layer);
         let phfl = |doc: &Document| {
-            let file = PsdFile::from_bytes(&document_to_psd(doc).to_bytes().unwrap()).unwrap();
+            let file = PsdFile::from_bytes(&document_to_psd(doc).unwrap().to_bytes().unwrap()).unwrap();
             let records = &file.layer_info.as_ref().unwrap().layers;
             records.iter().flat_map(|r| r.blocks.iter()).find(|b| b.key == *b"phfl").map(|b| b.data.clone()).expect("Photo Filter adjustment data")
         };
@@ -2127,7 +2153,7 @@ mod tests {
         ];
         let signatures = |force_psb| {
             let opts = PsdExportOptions { force_psb, ..PsdExportOptions::default() };
-            let bytes = document_to_psd_with(&doc, &opts).0.to_bytes().unwrap();
+            let bytes = document_to_psd_with(&doc, &opts).unwrap().0.to_bytes().unwrap();
             let file = PsdFile::from_bytes(&bytes).unwrap();
             file.global_blocks.iter().map(|b| (b.signature, b.key)).collect::<Vec<_>>()
         };
@@ -2149,7 +2175,7 @@ mod tests {
         ];
         let written = |force_psb| {
             let opts = PsdExportOptions { force_psb, ..PsdExportOptions::default() };
-            let bytes = document_to_psd_with(&doc, &opts).0.to_bytes().unwrap();
+            let bytes = document_to_psd_with(&doc, &opts).unwrap().0.to_bytes().unwrap();
             let file = PsdFile::from_bytes(&bytes).unwrap();
             let blocks = file.global_blocks.iter().map(|b| (b.signature, b.key, b.data.len())).collect::<Vec<_>>();
             (bytes, blocks)
@@ -2178,7 +2204,7 @@ mod tests {
         let mut a = photocraft_doc::AlphaChannel::new("Alpha 1", photocraft_raster::Surface::new(PixelFormat::GRAY8));
         a.opacity = 0.5;
         doc.channels.push(a);
-        let file = document_to_psd(&doc);
+        let file = document_to_psd(&doc).unwrap();
         let header_extra = usize::from(file.header.channels) - 3;
         let names = |id| file.resources.iter().find(|r| r.id == id).map(|r| r.data.clone()).unwrap();
         let pascal = names(1006);
