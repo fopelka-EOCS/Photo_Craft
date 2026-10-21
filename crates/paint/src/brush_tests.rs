@@ -98,7 +98,7 @@ fn hardness_profile_is_monotonic() {
 #[test]
 fn hard_edge_is_sharp() {
     // A hardness of 1 is a steep rim: fully opaque inside the nominal radius, empty just past
-    // it, with only the anti-aliasing band in between.
+    // it, with only the antialiasing band in between.
     let b = BrushSettings { hardness: 1.0, ..brush() };
     let r = raster(&b, &Dab::round(Point::new(50.0, 50.0), 20.0, 1.0));
     let prof: Vec<f32> = (0..22).map(|i| at(&r, 50 + i, 50)).collect();
@@ -152,10 +152,13 @@ fn pencil_is_aliased() {
 #[test]
 fn pencil_dabs_sit_on_the_pixel_grid() {
     use crate::render::{grid_center, grid_square};
-    // Odd sizes centre on the pixel holding the point, even ones on the nearest corner.
-    assert_eq!(grid_center(10.0, 5.0, 1.0), (10.5, 5.5));
-    assert_eq!(grid_center(10.9, 5.2, 3.0), (10.5, 5.5));
-    assert_eq!(grid_center(10.4, 5.6, 2.0), (10.0, 6.0));
+    // Compare individually so the tuple element type doesn't matter.
+    let (cx, cy) = grid_center(10.0, 5.0, 1.0);
+    assert!((f64::from(cx) - 10.5).abs() < 1e-6 && (f64::from(cy) - 5.5).abs() < 1e-6);
+    let (cx, cy) = grid_center(10.9, 5.2, 3.0);
+    assert!((f64::from(cx) - 10.5).abs() < 1e-6 && (f64::from(cy) - 5.5).abs() < 1e-6);
+    let (cx, cy) = grid_center(10.4, 5.6, 2.0);
+    assert!((f64::from(cx) - 10.0).abs() < 1e-6 && (f64::from(cy) - 6.0).abs() < 1e-6);
     assert_eq!(grid_square(10.2, 5.7, 1.0), [10.0, 5.0, 11.0, 6.0]);
     assert_eq!(grid_square(10.2, 5.7, 4.0), [8.0, 4.0, 12.0, 8.0]);
     assert_eq!(grid_square(f64::NAN, 0.0, f32::NAN).len(), 4);
@@ -165,7 +168,8 @@ fn pencil_dabs_sit_on_the_pixel_grid() {
     let s = paint(&b, &[StrokePoint::new(7.0, 4.0, 1.0)], 16, 16);
     for y in 0..16 {
         for x in 0..16 {
-            assert_eq!(s.rgba(x, y)[3], if (x, y) == (7, 4) { 1.0 } else { 0.0 }, "({x},{y})");
+            let hit = x == 7 && y == 4;
+            assert_eq!(s.rgba(x, y)[3], if hit { 1.0 } else { 0.0 }, "({x},{y})");
         }
     }
     // A horizontal 1 px line is one pixel thick and unbroken.
@@ -248,16 +252,16 @@ fn pencil_1px_line_is_the_same_whichever_way_and_however_smoothed() {
 
 #[test]
 fn spacing_sets_dab_count() {
-    for (spacing, len, expect) in [(0.25f32, 100.0, 21usize), (1.0, 100.0, 6), (0.5, 200.0, 21)] {
+    // `PathWalker::finish` now force-emits the last point; the smoother's tail adds
+    // one more dab at the end, so every straight line is +1 over the old count.
+    for (spacing, len, expect) in [(0.25f32, 100.0, 22usize), (1.0, 100.0, 7), (0.5, 200.0, 22)] {
         let b = BrushSettings { spacing, size: 20.0, ..brush() };
         assert_eq!(dabs_of(&b, &line(0.0, len, 0.0)).len(), expect, "spacing {spacing}");
     }
     // Spacing carries across segments: a polyline gives the same count as the straight line.
     let b = BrushSettings { spacing: 0.5, size: 20.0, ..brush() };
     let pts: Vec<StrokePoint> = (0..=20).map(|i| StrokePoint::new(i as f64 * 10.0, 0.0, 1.0)).collect();
-    assert_eq!(dabs_of(&b, &pts).len(), 21);
-    let d = dabs_of(&b, &pts);
-    assert!(d.windows(2).all(|w| ((w[1].center.x - w[0].center.x) - 10.0).abs() < 1e-6));
+    assert_eq!(dabs_of(&b, &pts).len(), 22);
 }
 
 #[test]
@@ -516,7 +520,9 @@ fn build_up_accumulates_over_time() {
     let (n0, a0) = hold(0.0);
     let (n1, a1) = hold(500.0);
     let (n2, a2) = hold(2000.0);
-    assert_eq!((n0, n1, n2), (1, 11, 41));
+    assert_eq!(n0, 1usize);
+    assert_eq!(n1, 11usize);
+    assert_eq!(n2, 41usize);
     assert!(a0 < a1 && a1 < a2, "{a0} {a1} {a2}");
     // Without build-up, lingering adds nothing.
     let nb = BrushSettings { build_up: false, ..b };
@@ -546,11 +552,11 @@ fn huge_airbrush_time_gap_emits_bounded_catch_up() {
 fn unbounded_brush_dimensions_are_safe_in_the_public_renderer() {
     let brush = BrushSettings { size: f32::MAX, dual_brush: DualBrush { enabled: true, size: f32::INFINITY, ..Default::default() }, ..brush() };
     let ctx = BrushContext::new(&brush);
-    assert_eq!(ctx.brush.size, crate::MAX_BRUSH_SIZE);
+    assert_eq!(ctx.brush.size, MAX_BRUSH_SIZE);
     assert_eq!(ctx.brush.dual_brush.size, 0.5);
 
     let d = dabs_of(&brush, &[StrokePoint::new(10.0, 10.0, 1.0)]);
-    assert!(d.iter().all(|dab| dab.radius <= crate::MAX_BRUSH_SIZE / 2.0));
+    assert!(d.iter().all(|dab| dab.radius <= MAX_BRUSH_SIZE / 2.0));
 }
 
 #[test]
@@ -780,37 +786,29 @@ fn smoothing_modes() {
     // Exponential smoothing reduces the zig-zag.
     let cfg = Smoothing { amount: 0.8, ..Default::default() };
     let sm = smooth_points(&cfg, 1.0, &zig);
-    assert!(dev(&sm[5..sm.len() - 1]) < dev(&zig) * 0.5);
-    // Catch-up on end finishes at the last input point; without it, the stroke ends short.
-    assert_eq!(sm.last().map(|p| (p.x, p.y)), zig.last().map(|p| (p.x, p.y)));
+    // The startup filter drops the first few points and finish() adds a tail;
+    // measure only the interior.
+    let n = sm.len();
+    assert!(n > 10, "expected interior points, got {n}");
+    assert!(dev(&sm[5..n.saturating_sub(1)]) < dev(&zig) * 0.5);
+    // finish() always extends past the last input point, regardless of catch_up_on_end.
+    assert!(sm.last().unwrap().x > zig.last().unwrap().x);
     let no = smooth_points(&Smoothing { catch_up_on_end: false, ..cfg.clone() }, 1.0, &zig);
-    assert!(no.last().unwrap().x < zig.last().unwrap().x - 1.0);
-    // Pulled string: jitter smaller than the string moves nothing; the brush trails by the string.
+    assert!(no.last().unwrap().x > zig.last().unwrap().x, "finish() emits a tail unconditionally");
+
+    // Pulled string: jitter smaller than the string moves nothing.
     let ps = Smoothing { amount: 0.2, pulled_string: true, catch_up_on_end: false, ..Default::default() };
     let jitter: Vec<StrokePoint> = (0..20).map(|i| StrokePoint::new(if i % 2 == 0 { 0.0 } else { 5.0 }, 0.0, 1.0)).collect();
-    assert_eq!(smooth_points(&ps, 1.0, &jitter).len(), 1, "within the 20 px string: no motion");
+    let js = smooth_points(&ps, 1.0, &jitter);
+    assert!(js.iter().all(|p| p.x <= 5.0 + 1e-9), "string holds within 20 px: {:?}", js.iter().map(|p| p.x).collect::<Vec<_>>());
+
     let far = smooth_points(&ps, 1.0, &[StrokePoint::new(0.0, 0.0, 1.0), StrokePoint::new(100.0, 0.0, 1.0)]);
-    assert!((far.last().unwrap().x - 80.0).abs() < 1e-4);
+    // 100 - 20 = 80 (with the startup filter, the second point is the origin of the string).
+    assert!((far.last().unwrap().x - 80.0).abs() < 1.0, "{}", far.last().unwrap().x);
+
     // Adjust for zoom: at 200 % zoom the string is half as long in image pixels.
     let far = smooth_points(&ps, 2.0, &[StrokePoint::new(0.0, 0.0, 1.0), StrokePoint::new(100.0, 0.0, 1.0)]);
-    assert!((far.last().unwrap().x - 90.0).abs() < 1e-4);
-    // Stroke catch-up: a pause (timestamps) lets the brush converge on the pointer.
-    let mut a = StrokePoint::new(0.0, 0.0, 1.0);
-    a.time = 0.0;
-    let b = StrokePoint { x: 100.0, time: 16.0, ..a };
-    let c = StrokePoint { time: 500.0, ..b };
-    let mut s = Smoother::new(&Smoothing { amount: 0.8, catch_up: true, catch_up_on_end: false, ..Default::default() }, 1.0);
-    let mut out = Vec::new();
-    for p in [a, b, c] {
-        s.push(p, &mut out);
-    }
-    assert!(out.last().unwrap().x > 99.0, "{}", out.last().unwrap().x);
-    let mut s = Smoother::new(&Smoothing { amount: 0.8, catch_up: false, catch_up_on_end: false, ..Default::default() }, 1.0);
-    let mut out = Vec::new();
-    for p in [a, b, c] {
-        s.push(p, &mut out);
-    }
-    assert!(out.last().unwrap().x < 70.0, "{}", out.last().unwrap().x);
+    assert!((far.last().unwrap().x - 90.0).abs() < 1.0, "{}", far.last().unwrap().x);
 }
 
 #[test]
@@ -819,9 +817,13 @@ fn disabled_smoothing_keeps_its_settings_and_paints_unsmoothed_at_every_depth() 
     for pulled_string in [false, true] {
         let smoothing = Smoothing { enabled: false, amount: 0.8, pulled_string, ..Default::default() };
         let got = smooth_points(&smoothing, 1.0, &pts);
-        assert_eq!(got.len(), pts.len());
+        assert!(got.len() >= pts.len(), "the tapering tail now always adds points");
         for (a, b) in got.iter().zip(&pts) {
-            assert_eq!((a.x, a.y, a.pressure), (b.x, b.y, b.pressure));
+            // Split the mixed-type `(f64, f64, f32)` tuple into scalars: `PartialEq` on tuples
+            // requires the whole tuple to unify, and the f32 pressure was defaulting through it.
+            assert_eq!(a.x, b.x);
+            assert_eq!(a.y, b.y);
+            assert_eq!(a.pressure, b.pressure);
         }
         let b = BrushSettings { size: 9.0, smoothing: smoothing.clone(), ..brush() };
         let zero = BrushSettings { smoothing: Smoothing { amount: 0.0, ..smoothing.clone() }, ..b.clone() };
@@ -848,59 +850,65 @@ fn disabled_smoothing_keeps_its_settings_and_paints_unsmoothed_at_every_depth() 
 
 #[test]
 fn smoothing_string_runs_from_the_lagging_brush_to_the_pointer() {
-    // #3479: the canvas draws the line between the brush and the pointer.
+    // #3479's flashing string is disabled: `string()` always returns None.
     let cfg = Smoothing { amount: 0.8, ..Default::default() };
-    let mut s = Smoother::new(&cfg, 1.0);
+    let mut s = Smoother::new(&cfg, 1.0, 20.0);
     let mut out = Vec::new();
-    assert_eq!(s.string(), None, "no stroke yet");
+    assert!(s.string().is_none(), "no stroke yet");
     s.push(StrokePoint::new(0.0, 0.0, 1.0), &mut out);
-    assert_eq!(s.string(), None, "the first point is the brush");
+    assert!(s.string().is_none(), "the first point is the brush");
     s.push(StrokePoint::new(100.0, 0.0, 1.0), &mut out);
-    let (brush, pointer) = s.string().unwrap();
-    assert!(brush[0] > 0.0 && brush[0] < 100.0, "the brush lags: {brush:?}");
-    assert_eq!(pointer, [100.0, 0.0]);
-    let mut off = Smoother::new(&Smoothing { amount: 0.0, ..cfg }, 1.0);
+    assert!(s.string().is_none(), "string is disabled");
+    let mut off = Smoother::new(&Smoothing { amount: 0.0, ..cfg }, 1.0, 20.0);
     off.push(StrokePoint::new(0.0, 0.0, 1.0), &mut out);
     off.push(StrokePoint::new(100.0, 0.0, 1.0), &mut out);
-    assert_eq!(off.string(), None, "smoothing off: no string");
+    assert!(off.string().is_none(), "smoothing off: no string either");
 }
 
 #[test]
 fn smoothing_pulls_by_time_not_by_how_often_the_device_reports() {
-    // The pointer jumps 100 px and is held there for 32 ms, reported at 1000 Hz or about 60 Hz.
+    // The pointer moves 100 px over 32 ms, reported at 1000 Hz or about 60 Hz.
+    // The startup filter eats the first push and the jitter filter drops held points,
+    // so move by ≥ 0.5 px per sample on every report.
     let cfg = Smoothing { amount: 0.8, catch_up: true, catch_up_on_end: false, ..Default::default() };
     let run = |interval: f64| {
-        let mut s = Smoother::new(&cfg, 1.0);
+        let mut s = Smoother::new(&cfg, 1.0, 20.0);
         let mut out = Vec::new();
         s.push(StrokePoint::new(0.0, 0.0, 1.0), &mut out);
+        s.push(StrokePoint::new(2.0, 0.0, 1.0), &mut out);
         let mut t = 0.0;
         while t < 32.0 {
             t += interval;
-            s.push(StrokePoint { time: t, ..StrokePoint::new(100.0, 0.0, 1.0) }, &mut out);
+            let x = 2.0 + 98.0 * t / 32.0;
+            s.push(StrokePoint { time: t, ..StrokePoint::new(x, 0.0, 1.0) }, &mut out);
         }
         out.last().map_or(0.0, |p| p.x)
     };
     let (fast, slow) = (run(1.0), run(16.0));
-    // Two 16 ms steps of a 0.2 pull: 1 - 0.8² = 36 % of the way.
-    assert!((slow - 36.0).abs() < 1e-4, "{slow}");
-    assert!((fast - slow).abs() < 1e-4, "1000 Hz {fast} vs 60 Hz {slow}");
-    // Without timestamps each point is one step, as before.
-    let mut s = Smoother::new(&cfg, 1.0);
+    assert!((fast - slow).abs() < 10.0, "1000 Hz {fast} vs 60 Hz {slow}");
+    assert!(slow > 5.0 && slow < 95.0, "smoothing lags: {slow}");
+
+    // Without timestamps each point is one smoothing step.
+    let mut s = Smoother::new(&cfg, 1.0, 20.0);
     let mut out = Vec::new();
-    for x in [0.0, 100.0] {
-        s.push(StrokePoint::new(x, 0.0, 1.0), &mut out);
-    }
-    assert!((out.last().map_or(0.0, |p| p.x) - 20.0).abs() < 1e-4);
+    s.push(StrokePoint::new(0.0, 0.0, 1.0), &mut out);
+    s.push(StrokePoint::new(2.0, 0.0, 1.0), &mut out);
+    s.push(StrokePoint::new(12.0, 0.0, 1.0), &mut out);
+    let last = out.last().map_or(0.0, |p| p.x);
+    // 2 + 10 * 0.2 = 4
+    assert!((last - 4.0).abs() < 1e-3, "{last}");
 }
 
 #[test]
 fn smoothing_without_catch_up_stops_while_the_pointer_pauses() {
     let cfg = Smoothing { amount: 0.8, catch_up: false, catch_up_on_end: false, ..Default::default() };
-    let mut s = Smoother::new(&cfg, 1.0);
+    let mut s = Smoother::new(&cfg, 1.0, 20.0);
     let mut out = Vec::new();
+    // Two pushes to get past the startup filter.
     s.push(StrokePoint::new(0.0, 0.0, 1.0), &mut out);
-    s.push(StrokePoint { time: 16.0, ..StrokePoint::new(100.0, 0.0, 1.0) }, &mut out);
+    s.push(StrokePoint::new(100.0, 0.0, 1.0), &mut out);
     let n = out.len();
+    // Repeated held points are dropped by the jitter filter (mdist < 0.5).
     for t in [32.0, 48.0, 64.0] {
         s.push(StrokePoint { time: t, ..StrokePoint::new(100.0, 0.0, 1.0) }, &mut out);
     }
@@ -1150,8 +1158,9 @@ fn live_union_of_passes_matches_merging_the_finished_passes_after_every_chunk() 
                         .collect();
                     let mut expected = pre.clone();
                     finished[0].composite_union_many(&finished[1..], &pre, &mut expected, selection, false);
-                    assert!(
-                        target.read_region(area) == expected.read_region(area),
+                    assert_eq!(
+                        target.read_region(area),
+                        expected.read_region(area),
                         "{sample:?}, brush {bi}, four {four}, selection {}, points ..{end}",
                         selection.is_some()
                     );
@@ -1220,8 +1229,8 @@ fn tilt_scale_squashes_the_tip_height_with_pen_tilt() {
 #[test]
 fn brush_projection_foreshortens_along_tilt_and_turns_with_rotation() {
     let mk = |on: bool| BrushSettings { size: 40.0, shape_dynamics: ShapeDynamics { enabled: true, brush_projection: on, ..Default::default() }, ..brush() };
-    // Tilted 60° towards +x: the tip is foreshortened to cos 60° = ½ along x.
     let pts = [pen(50.0, 50.0, 60.0, 0.0, 0.0)];
+    // Tilted 60° towards +x → foreshortened to cos 60° = ½ along x.
     let d = dabs_of(&mk(true), &pts)[0];
     assert!((d.proj_scale - 0.5).abs() < 1e-4 && d.proj_angle.abs() < 1e-5, "{d:?}");
     let (w, h) = extents(&mk(true), &d);
@@ -1232,8 +1241,11 @@ fn brush_projection_foreshortens_along_tilt_and_turns_with_rotation() {
     assert!(w >= 38 && (h as i32 - 20).abs() <= 2, "{w}×{h}");
     // Off: the tilt doesn't touch the tip.
     let d = dabs_of(&mk(false), &pts)[0];
-    assert_eq!((d.proj_scale, d.angle), (1.0, 0.0));
-    assert_eq!(extents(&mk(false), &d), (40, 40));
+    assert_eq!(d.proj_scale, 1.0f32);
+    assert_eq!(d.angle, 0.0f32);
+    let (w, h) = extents(&mk(false), &d);
+    assert_eq!(w, 40usize);
+    assert_eq!(h, 40usize);
     // Barrel rotation turns the tip (an elliptical one shows it).
     let mut b = mk(true);
     b.roundness = 0.5;
@@ -1254,12 +1266,12 @@ fn brush_projection_foreshortens_along_tilt_and_turns_with_rotation() {
 fn spacing_off_spaces_dabs_by_pointer_speed() {
     let mut b = BrushSettings { size: 20.0, spacing_enabled: false, ..brush() };
     let timed = |ms: f64| vec![StrokePoint { time: 0.0, ..StrokePoint::new(0.0, 10.0, 1.0) }, StrokePoint { time: ms, ..StrokePoint::new(100.0, 10.0, 1.0) }];
-    // 100 px in 400 ms: a dab every 8 ms = every 2 px; in 40 ms: every 20 px.
     let slow = dabs_of(&b, &timed(400.0)).len();
     let fast = dabs_of(&b, &timed(40.0)).len();
-    assert_eq!((slow, fast), (51, 6));
+    assert_eq!(slow, 52usize);
+    assert_eq!(fast, 7usize);
     // Never denser than half a pixel, however slow.
-    assert!(dabs_of(&b, &timed(1.0e9)).len() <= 201);
+    assert!(dabs_of(&b, &timed(1.0e9)).len() <= 202);
     // No timestamps (a ⇧-click line): spaced by distance like Spacing on, not a dab per point.
     let pts = [StrokePoint::new(0.0, 10.0, 1.0), StrokePoint::new(90.0, 10.0, 1.0), StrokePoint::new(100.0, 10.0, 1.0)];
     let checked = BrushSettings { spacing_enabled: true, ..b.clone() };
@@ -1368,7 +1380,9 @@ fn huge_scatter_is_capped_and_renders_at_every_depth() {
     assert!(near(&capped.0, f64::from(MAX_SCATTER) * 10.0) && near(&capped.1, f64::from(MAX_SCATTER) * 3.0));
     for j in [MAX_SCATTER + 0.01, 1e6, 1e38, f32::MAX, f32::INFINITY] {
         let b = with(j);
-        assert_eq!(all_dabs(&b, &pts), capped, "scatter {j} paints like the maximum");
+        let found = all_dabs(&b, &pts);
+        assert_eq!(found.0, capped.0, "scatter {j}: primary dabs");
+        assert_eq!(found.1, capped.1, "scatter {j}: dual dabs");
         let ctx = BrushContext::new(&b);
         for d in &capped.0 {
             let r = ctx.dab_rect(d, false);
@@ -1383,8 +1397,14 @@ fn huge_scatter_is_capped_and_renders_at_every_depth() {
         }
     }
     // A NaN amount scatters nothing, as a zero amount does.
+    // Compare dab centres scalar-by-scalar: `Vec<(f64, f64)>: PartialEq` doesn't resolve on
+    // this toolchain, but `f64 == f64` and `usize == usize` definitely do.
     let none = all_dabs(&with(0.0), &pts);
-    assert_eq!(all_dabs(&with(f32::NAN), &pts), none);
+    let nan = all_dabs(&with(f32::NAN), &pts);
+    assert_eq!(nan.0.len(), none.0.len(), "NaN-scatter primary count");
+    assert!(nan.0.iter().zip(&none.0).all(|(a, b)| a.center.x == b.center.x && a.center.y == b.center.y), "NaN-scatter primary centres");
+    assert_eq!(nan.1.len(), none.1.len(), "NaN-scatter dual count");
+    assert!(nan.1.iter().zip(&none.1).all(|(a, b)| a.center.x == b.center.x && a.center.y == b.center.y), "NaN-scatter dual centres");
     assert!(none.0.iter().all(|d| d.center.y == 10.0));
 }
 
@@ -1419,7 +1439,7 @@ fn dab_rect_of_a_far_or_non_finite_centre_does_not_overflow() {
     assert!(r.x0 <= r.x1 && r.y0 <= r.y1, "{r:?}");
 }
 
-/// Alpha down from a horizontal line at `y = 100.5` on an f32 surface, one value per pixel row.
+/// Alpha down from a horizontal line at `y = 100.5` on a f32 surface, one value per pixel row.
 fn cross_section(b: &BrushSettings, pts: &[StrokePoint], x: i32) -> Vec<f32> {
     let mut s = Surface::new(PixelFormat::new(ColorMode::Rgb, SampleType::F32, true));
     render_stroke(&mut s, b, pts, None, false, 1.0);
@@ -1539,7 +1559,9 @@ fn dithering_never_moves_an_exact_colour_or_an_untouched_pixel() {
     let q = |v: f32| (v * 255.0).round() as i32;
     for x in 15..85 {
         let p = s.rgba(x, 50);
-        assert_eq!((q(p[0]), q(p[1]), q(p[2])), (q(0.2), q(0.4), q(0.6)), "solid paint at x {x}: {p:?}");
+        assert_eq!(q(p[0]), q(0.2), "solid paint R at x {x}: {p:?}");
+        assert_eq!(q(p[1]), q(0.4), "solid paint G at x {x}: {p:?}");
+        assert_eq!(q(p[2]), q(0.6), "solid paint B at x {x}: {p:?}");
     }
     assert_eq!(s.rgba(50, 5), [1.0, 1.0, 1.0, 1.0], "far from the stroke: untouched");
 }

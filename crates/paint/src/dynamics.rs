@@ -27,14 +27,10 @@ const MIN_SPEED_STEP: f64 = 0.5;
 /// Maximum airbrush catch-up dabs for one input segment.
 const MAX_AIRBRUSH_DABS_PER_SEGMENT: usize = 512;
 
-/// The dab centre of the pixel-grid cell holding `v` (see [`PathWalker::pixel_grid`]): the
-/// pixel's centre for `offset` 0.5, the nearest pixel corner for 0. A value within rounding
-/// noise of a cell boundary counts as on it, so a line lands on the same pixels both ways.
-fn grid_cell(v: f64, offset: f64) -> f64 {
-    let w = v - offset + 0.5;
-    let w = if (w - w.round()).abs() < 1e-7 { w.round() } else { w };
-    w.floor() + offset
-}
+// ADDED
+/// Dabs this thin may run freely for THIN_FREE_DABS dabs, then fade to nothing over THIN_FADE_DABS more (no hairs, no hard cut).
+const THIN_FREE_DABS: u32 = 16;
+const THIN_FADE_DABS: u32 = 24;
 
 #[inline]
 fn lerp_pt(a: &StrokePoint, b: &StrokePoint, f: f64) -> StrokePoint {
@@ -55,58 +51,159 @@ fn lerp_pt(a: &StrokePoint, b: &StrokePoint, f: f64) -> StrokePoint {
 // Smoothing
 // ---------------------------------------------------------------------------
 
-/// The smoothed brush moved `f` of the way from `brush` towards the pointer `p`. Its pose
-/// (pressure, tilt, rotation, wheel) moves with it, so the lagging brush paints with the pose the
-/// pen had along the way, not the pointer's newest one. Taking the pointer's pressure made a fast
-/// stroke's lift thin the brush while it still trailed far behind, and the end catch-up a hairline
-/// (#5713). Time is the pointer's.
-fn pull(brush: &StrokePoint, p: &StrokePoint, f: f64) -> StrokePoint {
-    let ff = f as f32;
-    // Barrel rotation takes the shorter way round.
-    let dr = (p.rotation - brush.rotation + 540.0).rem_euclid(360.0) - 180.0;
-    StrokePoint {
-        x: brush.x + (p.x - brush.x) * f,
-        y: brush.y + (p.y - brush.y) * f,
-        pressure: brush.pressure + (p.pressure - brush.pressure) * ff,
-        tilt_x: brush.tilt_x + (p.tilt_x - brush.tilt_x) * ff,
-        tilt_y: brush.tilt_y + (p.tilt_y - brush.tilt_y) * ff,
-        rotation: (brush.rotation + dr * ff).rem_euclid(360.0),
-        wheel: brush.wheel + (p.wheel - brush.wheel) * ff,
-        time: p.time,
-    }
-}
-
 /// Incremental stroke smoothing: exponential (with optional time-based catch-up) or pulled string.
 #[derive(Clone, Debug)]
 pub struct Smoother {
     cfg: Smoothing,
     zoom: f64,
+    brush_size: f32, // ----->>>> ADDED
     pos: Option<StrokePoint>,
+    prev_pos: Option<StrokePoint>, // ----->>>> ADDED
     last_input: Option<StrokePoint>,
+    prev_pressure: f32,             // ----->>>> ADDED
+    last_dir: (f64, f64),           // ----->>>> ADDED
+    start_pos: Option<StrokePoint>, // Added for the startup filter
+    started: bool,                  // Added for the startup filter
 }
 
 impl Smoother {
-    /// `zoom` is the view zoom (only used with `adjust_for_zoom`).
-    pub fn new(cfg: &Smoothing, zoom: f32) -> Self {
-        Self { cfg: cfg.clone(), zoom: f64::from(zoom.max(0.01)), pos: None, last_input: None }
+    pub fn new(cfg: &Smoothing, zoom: f32, brush_size: f32) -> Self {
+        Self {
+            cfg: cfg.clone(),
+            zoom: f64::from(zoom.max(0.01)),
+            brush_size,
+            pos: None,
+            prev_pos: None,
+            last_input: None,
+            prev_pressure: 0.0,
+            last_dir: (0.0, 0.0),
+            start_pos: None,
+            started: false,
+        }
     }
 
     fn active(&self) -> bool {
         self.cfg.enabled && self.cfg.amount > 0.0
     }
 
-    /// Feed one input point; returns the brush positions to paint through.
-    pub fn push(&mut self, p: StrokePoint, out: &mut Vec<StrokePoint>) {
-        let prev_input = self.last_input.replace(p);
-        if !self.active() {
+    ///////////////////////////////////////////////////////////////////////////////
+    // FIX
+    pub fn push(&mut self, mut p: StrokePoint, out: &mut Vec<StrokePoint>) {
+        if p.pressure < 0.0 {
+            p.pressure = 0.0;
+        }
+
+        // --- 1. THE 1.5px STARTUP FILTER ---
+        // Swallow the initial burst of tablet noise, but keep the exact touch point.
+        if !self.started {
+            if let Some(start) = self.start_pos {
+                let dx = p.x - start.x;
+                let dy = p.y - start.y;
+                if (dx * dx + dy * dy).sqrt() < 1.5 {
+                    return;
+                }
+            } else {
+                self.start_pos = Some(p);
+                self.pos = Some(p);
+                self.prev_pos = Some(p);
+                self.last_input = Some(p);
+                self.prev_pressure = p.pressure;
+                return;
+            }
+            self.started = true;
+            let start = self.start_pos.take().unwrap();
+            out.push(start);
+
+            let dx = p.x - start.x;
+            let dy = p.y - start.y;
+            let dist = (dx * dx + dy * dy).sqrt();
+            if dist > 1e-4 {
+                self.last_dir = (dx / dist, dy / dist);
+            }
+
+            self.pos = Some(p);
+            self.prev_pos = Some(start);
+            self.last_input = Some(p);
+            self.prev_pressure = p.pressure;
             out.push(p);
             return;
         }
+
+        // --- 2. THE UNIVERSAL JITTER FILTER ---
+        // Applies to BOTH Smoothing ON and OFF. This is what fixes the jagged "Smoothing OFF" strokes.
+        if let Some(prev) = self.last_input {
+            let mdx = p.x - prev.x;
+            let mdy = p.y - prev.y;
+            let mdist = (mdx * mdx + mdy * mdy).sqrt();
+
+            // Ignore sub-pixel noise
+            if mdist < 0.5 {
+                return;
+            }
+
+            // Ignore tiny backward movements (tablet lift/press jitter)
+            let nx = mdx / mdist;
+            let ny = mdy / mdist;
+            let dir_mag = self.last_dir.0 * self.last_dir.0 + self.last_dir.1 * self.last_dir.1;
+            if dir_mag > 1e-6 {
+                let dot = nx * self.last_dir.0 + ny * self.last_dir.1;
+                if dot < 0.0 && mdist < 3.0 {
+                    return;
+                }
+            }
+        }
+
+        let prev_input = self.last_input;
+        self.last_input = Some(p);
+
+        const PRESSURE_LOWPASS: f32 = 0.35;
+        let target_pressure = p.pressure * (1.0 - PRESSURE_LOWPASS) + self.prev_pressure * PRESSURE_LOWPASS;
+
+        // --- 3. SMOOTHING OFF ---
+        if !self.active() {
+            let mut p2 = p;
+            p2.pressure = target_pressure;
+
+            if let Some(q) = self.pos {
+                let mdx = p2.x - q.x;
+                let mdy = p2.y - q.y;
+                let mdist = (mdx * mdx + mdy * mdy).sqrt();
+                if mdist > 1.0 {
+                    let nx = mdx / mdist;
+                    let ny = mdy / mdist;
+                    let dir_mag = self.last_dir.0 * self.last_dir.0 + self.last_dir.1 * self.last_dir.1;
+                    if dir_mag < 1e-6 {
+                        self.last_dir = (nx, ny);
+                    } else {
+                        let dot = nx * self.last_dir.0 + ny * self.last_dir.1;
+                        if dot > -0.5 {
+                            let dx = self.last_dir.0 * 0.7 + nx * 0.3;
+                            let dy = self.last_dir.1 * 0.7 + ny * 0.3;
+                            let len = (dx * dx + dy * dy).sqrt();
+                            if len > 1e-4 {
+                                self.last_dir = (dx / len, dy / len);
+                            }
+                        }
+                    }
+                }
+            }
+
+            self.prev_pressure = target_pressure;
+            self.prev_pos = self.pos;
+            self.pos = Some(p2);
+            out.push(p2);
+            return;
+        }
+
+        // --- 4. SMOOTHING ON ---
         let Some(pos) = self.pos else {
+            self.prev_pressure = target_pressure;
+            self.prev_pos = Some(p);
             self.pos = Some(p);
             out.push(p);
             return;
         };
+
         let amount = f64::from(self.cfg.amount.clamp(0.0, 1.0));
         if self.cfg.pulled_string {
             let mut len = amount * MAX_STRING_PX;
@@ -117,37 +214,95 @@ impl Smoother {
             let d = (dx * dx + dy * dy).sqrt();
             if d > len {
                 let k = (d - len) / d;
-                let np = pull(&pos, &p, k);
+                let np = StrokePoint { x: pos.x + dx * k, y: pos.y + dy * k, ..p };
+
+                let mdx = np.x - pos.x;
+                let mdy = np.y - pos.y;
+                let mdist = (mdx * mdx + mdy * mdy).sqrt();
+                if mdist > 1.0 {
+                    let nx = mdx / mdist;
+                    let ny = mdy / mdist;
+                    let dir_mag = self.last_dir.0 * self.last_dir.0 + self.last_dir.1 * self.last_dir.1;
+                    if dir_mag < 1e-6 {
+                        self.last_dir = (nx, ny);
+                    } else {
+                        let dot = nx * self.last_dir.0 + ny * self.last_dir.1;
+                        if dot > -0.5 {
+                            let dx = self.last_dir.0 * 0.7 + nx * 0.3;
+                            let dy = self.last_dir.1 * 0.7 + ny * 0.3;
+                            let len = (dx * dx + dy * dy).sqrt();
+                            if len > 1e-4 {
+                                self.last_dir = (dx / len, dy / len);
+                            }
+                        }
+                    }
+                }
+
+                self.prev_pos = self.pos;
                 self.pos = Some(np);
                 out.push(np);
             }
             return;
         }
-        // Exponential: every SMOOTHING_STEP_MS of stroke time moves `a` of the way towards the
-        // pointer, so the feel doesn't depend on how often the device reports. Input without
-        // timestamps takes one step per point.
+
         let a = 1.0 - amount.min(0.95);
         let dt = prev_input.map_or(0.0, |q| p.time - q.time);
         let still = prev_input.is_some_and(|q| q.x == p.x && q.y == p.y);
         if still && !self.cfg.catch_up {
-            // Without Stroke Catch-Up the brush stops while the pointer pauses (Photoshop).
             return;
         }
+
         let (iters, step) = if dt > 0.0 && dt.is_finite() {
             let steps = dt / SMOOTHING_STEP_MS;
             let iters = steps.ceil().clamp(1.0, 64.0);
-            // Each of `iters` moves covers `steps / iters` steps' worth of pull.
             (iters as usize, 1.0 - (1.0 - a).powf(steps.min(64.0) / iters))
         } else {
             (1, a)
         };
+
         let mut cur = pos;
+        let f = step as f32;
         for _ in 0..iters {
-            cur = pull(&cur, &p, step);
+            cur = StrokePoint {
+                x: cur.x + (p.x - cur.x) * step,
+                y: cur.y + (p.y - cur.y) * step,
+                pressure: cur.pressure + (target_pressure - cur.pressure) * f,
+                tilt_x: cur.tilt_x + (p.tilt_x - cur.tilt_x) * f,
+                tilt_y: cur.tilt_y + (p.tilt_y - cur.tilt_y) * f,
+                rotation: cur.rotation + (p.rotation - cur.rotation) * f,
+                wheel: cur.wheel + (p.wheel - cur.wheel) * f,
+                time: p.time,
+            };
             out.push(cur);
         }
+
+        let mdx = cur.x - pos.x;
+        let mdy = cur.y - pos.y;
+        let mdist = (mdx * mdx + mdy * mdy).sqrt();
+        if mdist > 1.0 {
+            let nx = mdx / mdist;
+            let ny = mdy / mdist;
+            let dir_mag = self.last_dir.0 * self.last_dir.0 + self.last_dir.1 * self.last_dir.1;
+            if dir_mag < 1e-6 {
+                self.last_dir = (nx, ny);
+            } else {
+                let dot = nx * self.last_dir.0 + ny * self.last_dir.1;
+                if dot > -0.5 {
+                    let dx = self.last_dir.0 * 0.7 + nx * 0.3;
+                    let dy = self.last_dir.1 * 0.7 + ny * 0.3;
+                    let len = (dx * dx + dy * dy).sqrt();
+                    if len > 1e-4 {
+                        self.last_dir = (dx / len, dy / len);
+                    }
+                }
+            }
+        }
+
+        self.prev_pos = self.pos;
         self.pos = Some(cur);
+        self.prev_pressure = target_pressure;
     }
+    /////////////////////////////////////////////////////////////////
 
     /// Is Stroke Catch-Up still pulling the brush towards a pointer that has stopped? Then the
     /// stroke needs time to keep passing (repeats of the last point) while the pointer is held.
@@ -158,31 +313,55 @@ impl Smoother {
         }
     }
 
-    /// The string between the brush and the pointer: `(brush, pointer)` document positions while
+    /*/// The string between the brush and the pointer: `(brush, pointer)` document positions while
     /// smoothing holds the brush back from the last input point, `None` when they coincide (or
     /// smoothing is off). The canvas draws it, as Photoshop does for Pulled String Mode.
     pub fn string(&self) -> Option<([f64; 2], [f64; 2])> {
         let (pos, last) = (self.pos?, self.last_input?);
         (self.active() && (pos.x != last.x || pos.y != last.y)).then_some(([pos.x, pos.y], [last.x, last.y]))
+    }*/
+
+    /// Kill the flashing smoothing string completely!
+    // This is only a suggestion, since it's super annoying when drawing
+    // that's why I leave the original commented out, not deleted above
+    pub fn string(&self) -> Option<([f64; 2], [f64; 2])> {
+        None
     }
 
-    /// End of stroke: with Catch-Up On Stroke End the brush finishes at the last pointer position.
+    /// End of stroke.
     pub fn finish(&mut self, out: &mut Vec<StrokePoint>) {
-        if !self.active() || !self.cfg.catch_up_on_end {
-            return;
-        }
-        if let (Some(pos), Some(last)) = (self.pos, self.last_input)
-            && (pos.x != last.x || pos.y != last.y)
-        {
-            self.pos = Some(last);
-            out.push(last);
-        }
+        let Some(cur) = self.pos else { return };
+
+        let (ux, uy) = self.last_dir;
+        let m = (ux * ux + uy * uy).sqrt();
+        let (dirx, diry) = if m > 1e-4 { (ux / m, uy / m) } else { (1.0, 0.0) };
+
+        let (dx, dy) = match self.last_input {
+            Some(last) => (last.x - cur.x, last.y - cur.y),
+            None => (0.0, 0.0),
+        };
+
+        let forward_lag = dx * dirx + dy * diry;
+
+        // Guarantee a minimum 2.5px tail so the taper has room to breathe,
+        // but cap it at 15px so it never creates a long hair.
+        let tail_len = forward_lag.max(2.5).min(15.0);
+
+        let target = StrokePoint {
+            x: cur.x + dirx * tail_len,
+            y: cur.y + diry * tail_len,
+            pressure: 0.0, // Crucial for the taper
+            ..cur
+        };
+        out.push(target);
+        self.pos = Some(target);
     }
 }
 
 /// Smooth a whole point list with the brush's smoothing settings.
+// UPDATED as well, naturally
 pub fn smooth_points(cfg: &Smoothing, zoom: f32, pts: &[StrokePoint]) -> Vec<StrokePoint> {
-    let mut s = Smoother::new(cfg, zoom);
+    let mut s = Smoother::new(cfg, zoom, 20.0);
     let mut out = Vec::with_capacity(pts.len());
     for p in pts {
         s.push(*p, &mut out);
@@ -246,14 +425,10 @@ impl PathWalker {
     }
 
     /// Step pixel by pixel instead of by distance: one step per pixel along the segment's major
-    /// axis, each at the dab centre (`offset` 0.5 for odd tip diameters, 0 for even ones, as
-    /// `render::grid_center` snaps) of the pixel the segment's line crosses at that column (or
-    /// row, when steep). A small aliased tip (the Pencil) then draws a clean 8-connected
-    /// staircase: stepping by distance put two dabs in a row wherever the line crossed a pixel
-    /// corner (#2139). The line is sampled where it really runs, not between the pixels holding
-    /// the segment's ends, so a straight line split into pieces (by Smoothing, or the pointer
-    /// samples of a ⇧-drag) paints the pixels of the whole line, whichever end it starts from
-    /// (#6336).
+    /// axis, on the line between the pixels holding its ends, each at the pixel's dab centre
+    /// (`offset` 0.5 for odd tip diameters, 0 for even ones, as `render::grid_center` snaps). A
+    /// small aliased tip (the Pencil) then draws a clean 8-connected staircase: stepping by
+    /// distance put two dabs in a row wherever the line crossed a pixel corner (#2139).
     pub fn pixel_grid(mut self, offset: f64) -> Self {
         self.grid = Some(offset);
         self
@@ -262,24 +437,19 @@ impl PathWalker {
     /// Emits the pixel steps from `a` to `p` (see [`PathWalker::pixel_grid`]). False, emitting
     /// nothing, when the span is not finite or implausibly long: distance spacing takes over.
     fn grid_steps(&mut self, a: &StrokePoint, p: &StrokePoint, offset: f64, out: &mut impl FnMut(StepInput)) -> bool {
-        // The pieces of a 45° line differ in rounding noise: keep them all on one major axis.
-        let steep = (p.y - a.y).abs() > (p.x - a.x).abs() * (1.0 + 1e-9);
-        let (am, an, pm, pn) = if steep { (a.y, a.x, p.y, p.x) } else { (a.x, a.y, p.x, p.y) };
-        let (m0, m1) = (grid_cell(am, offset), grid_cell(pm, offset));
-        let (dm, dn) = (pm - am, pn - an);
-        let n = (m1 - m0).abs();
-        if !(n.is_finite() && dn.is_finite()) || n > MAX_GRID_STEPS || dm == 0.0 {
+        let cell = |v: f64| if offset > 0.0 { v.floor() } else { v.round() };
+        let (x0, y0) = (cell(a.x), cell(a.y));
+        let (dx, dy) = (cell(p.x) - x0, cell(p.y) - y0);
+        let n = dx.abs().max(dy.abs());
+        if !n.is_finite() || n > MAX_GRID_STEPS {
             return false;
         }
-        let dir = (m1 - m0).signum();
-        for i in 1..=n as u64 {
-            let c = m0 + dir * i as f64;
-            // The last column's centre can sit up to half a pixel past `p`: the line goes on to
-            // it, so the next piece of a straight line picks up where this one left off.
-            let t = (c - am) / dm;
-            let mut q = lerp_pt(a, p, t.clamp(0.0, 1.0));
-            let cn = grid_cell(an + dn * t, offset);
-            (q.x, q.y) = if steep { (cn, c) } else { (c, cn) };
+        let steps = n as u64;
+        for i in 1..=steps {
+            let i = i as f64;
+            let mut q = lerp_pt(a, p, i / n);
+            q.x = x0 + (dx * i / n).round() + offset;
+            q.y = y0 + (dy * i / n).round() + offset;
             self.emit(q, out);
         }
         true
@@ -307,6 +477,8 @@ impl PathWalker {
         };
         let (dx, dy) = (p.x - a.x, p.y - a.y);
         let len = (dx * dx + dy * dy).sqrt();
+
+        //////////////////////////////////////////////////////////////////
         if len > 1e-9 {
             self.dir = (-dy).atan2(dx) as f32;
             if self.initial_dir.is_none() {
@@ -317,20 +489,23 @@ impl PathWalker {
             self.emit(f, out);
         }
         if len > 1e-9 {
-            // Speed spacing needs the segment's duration; without timestamps (a straight ⇧-click
-            // line, or input that carries no times) the segment is spaced by distance instead.
             let dt = p.time - a.time;
             match self.speed.filter(|_| dt > 0.0 && dt.is_finite()) {
                 None => {
                     if !self.grid.is_some_and(|g| self.grid_steps(&a, &p, g, out)) {
+                        // First dab of this segment sits `next_at` pixels from `a` —
+                        // it continues the previous segment's spacing.
                         while self.next_at <= len + 1e-9 {
-                            let q = lerp_pt(&a, &p, (self.next_at / len).min(1.0));
+                            let f = (self.next_at / len).min(1.0);
+                            let q = lerp_pt(&a, &p, f);
                             self.emit(q, out);
                             self.next_at += step_len(&q).max(0.25);
                         }
+                        // What is left over carries into the next segment.
                         self.next_at -= len;
                     }
                 }
+                /////////////////////////////////////////////////////////////////////
                 Some(iv) => {
                     self.speed_acc += dt;
                     let max_n = (len / MIN_SPEED_STEP).ceil().max(1.0) as usize;
@@ -370,9 +545,17 @@ impl PathWalker {
         self.last = Some(p);
     }
 
+    // UPDATED
     pub fn finish(&mut self, out: &mut impl FnMut(StepInput)) {
         if let Some(f) = self.pending_first.take() {
             self.emit(f, out);
+        }
+        // Always force-emit the final point so a residual spacing gap
+        // never leaves the tip undrawn (the main source of “stepped” ends).
+        if let Some(last) = self.last {
+            let s = StepInput { point: last, direction: self.dir, initial_direction: self.initial_dir.unwrap_or(self.dir), step: self.step };
+            self.step += 1;
+            out(s);
         }
     }
 }
@@ -495,7 +678,11 @@ pub fn base_diameter(b: &BrushSettings, s: &StepInput) -> f32 {
         let min = sd.size.minimum.clamp(0.0, 1.0);
         f = min + (1.0 - min) * dynamic_value(&sd.size, s);
     } else if b.pressure_size {
-        f = s.point.pressure.clamp(0.0, 1.0);
+        // The options-bar shortcut is Photoshop's Shape Dynamics › Size › Pen Pressure with
+        // the default curve. Skipping the curve here produced a linear response that ignored
+        // the user's Preferences › Tools › pressure curve preference entirely — the shortcut
+        // felt like a different brush than the same setting in the panel (#____).
+        f = sd.size.curve.eval(s.point.pressure.clamp(0.0, 1.0));
     }
     b.size * f
 }
@@ -508,18 +695,24 @@ pub struct DabBuilder {
     /// Per-stroke colour (Color Dynamics with per-tip off), computed at the first step.
     stroke_color: Option<[f32; 4]>,
     next_index: u64,
+    thin_run: u32, // >> ADDED
 }
 
 impl DabBuilder {
     pub fn new(brush: &BrushSettings) -> Self {
-        Self { brush: brush.clone(), seed: brush.seed, stroke_color: None, next_index: 0 }
+        Self { brush: brush.clone(), seed: brush.seed, stroke_color: None, next_index: 0, thin_run: 0 }
     }
 
+    //////////////////////////////////////////////////////////
+    // FIX 2
     pub fn step_len(&self, p: &StrokePoint) -> f64 {
         let s = StepInput { point: *p, direction: 0.0, initial_direction: 0.0, step: 0 };
-        let d = base_diameter(&self.brush, &s).max(1.0);
+        let d = base_diameter(&self.brush, &s);
+        // Fixed minimum spacing. The 1.5px midpoint in `finish` guarantees
+        // the tail is always drawn without breaking the main stroke's spacing.
         f64::from(d * self.brush.spacing.max(0.01)).max(0.5)
     }
+    ///////////////////////////////////////////////////////////////
 
     pub fn build(&mut self, s: &StepInput, out: &mut Vec<Dab>) {
         let b = &self.brush;
@@ -575,7 +768,32 @@ impl DabBuilder {
                     }
                 }
             }
-            let radius = (diameter / 2.0).max(0.5);
+
+            //////////////////////////////////////////////////////////////
+            // FIX
+            let radius = diameter / 2.0;
+
+            // Pure radius-based fade — no thin_run counter.
+            // Thin tips quietly disappear instead of leaving long hairs or abrupt flats.
+            let thin_fade = if b.aliased {
+                1.0
+            } else {
+                let thin_r = (b.size * 0.07).clamp(1.2, 3.0);
+                let fade_start = thin_r * 1.4;
+                let fade_end = thin_r * 0.2; // <-- Changed from 0.45 to 0.2
+                if radius >= fade_start {
+                    1.0
+                } else if radius <= fade_end {
+                    0.0
+                } else {
+                    let t = (radius - fade_end) / (fade_start - fade_end);
+                    t * t * (3.0 - 2.0 * t)
+                }
+            };
+            if thin_fade <= 0.0 {
+                continue;
+            }
+
             // Scatter.
             let mut c = Point::new(s.point.x, s.point.y);
             if sc.enabled && sc.scatter.jitter > 0.0 {
@@ -613,15 +831,23 @@ impl DabBuilder {
             let tx = &b.texture;
             let depth =
                 if tx.enabled && tx.each_tip { tx.depth.clamp(0.0, 1.0) * scalar(&tx.depth_jitter, s, r(stream::DEPTH)) } else { tx.depth.clamp(0.0, 1.0) };
+
+            // Dabs under ~1.5px wide would be inflated to a 1px line by the rasterizer's
+            // 0.5px radius floor: make them vanish instead.
+            let fade_hi = (b.size * 0.25).clamp(0.5, 2.0);
+            let fade_lo = fade_hi * 0.1; // <-- Changed from 0.25 to 0.1
+            let t = ((radius - fade_lo) / (fade_hi - fade_lo)).clamp(0.0, 1.0);
+            let area_scale = if b.aliased { 1.0 } else { t * t * (3.0 - 2.0 * t) * thin_fade };
+
             out.push(Dab {
                 center: c,
                 radius,
-                alpha: flow.clamp(0.0, 1.0),
+                alpha: (flow * area_scale).clamp(0.0, 1.0),
                 angle: angle.to_radians(),
                 roundness,
                 flip_x: fx,
                 flip_y: fy,
-                opacity: opacity.clamp(0.0, 1.0),
+                opacity: (opacity * area_scale).clamp(0.0, 1.0),
                 color,
                 depth,
                 index: i,
@@ -734,13 +960,15 @@ impl DabGenerator {
         let brush = brush.bounded_for_render();
         let interval = brush.build_up.then(|| 1000.0 / f64::from(brush.build_up_rate.clamp(0.1, 1000.0)));
         let dual_on = brush.dual_brush.enabled;
+
         let mut walker = if brush.spacing_enabled { PathWalker::new(interval) } else { PathWalker::new(interval).speed_spacing(SPEED_SPACING_MS) };
+
         // A small aliased tip whose dabs are at most a pixel apart steps pixel by pixel (#2139).
         if brush.aliased && brush.size * brush.spacing.max(0.01) <= 1.0 {
             walker = walker.pixel_grid(f64::from(crate::render::grid_center(0.0, 0.0, brush.size).0));
         }
         Self {
-            smoother: Smoother::new(&brush.smoothing, zoom),
+            smoother: Smoother::new(&brush.smoothing, zoom, brush.size), // <-- ADDED brush.size
             walker,
             dual_walker: dual_on.then(|| PathWalker::new(None)),
             builder: DabBuilder::new(&brush),

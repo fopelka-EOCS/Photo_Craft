@@ -186,7 +186,7 @@ impl Session {
             tool_presets: take(&mut m, "tool_presets"),
             documents: take(&mut m, "documents"),
             recent_documents: take(&mut m, "recent_documents"),
-            export_presets: take(&mut m, "export_presets"),
+            export_presets: None,
             custom_shapes: take(&mut m, "custom_shapes"),
             layer_defaults: take(&mut m, "layer_defaults"),
             swatches: take(&mut m, "swatches"),
@@ -362,9 +362,6 @@ pub(crate) fn edit_groups<T: Named>(groups: &mut Vec<Group<T>>, action: &str, p:
             let g = req_str(p, "group", cmd)?;
             let to = req_str(p, "name", cmd)?.to_string();
             let i = groups.iter().position(|x| x.name == g).ok_or_else(|| bad(cmd, format!("no group \"{g}\"")))?;
-            if g != to && groups.iter().any(|x| x.name == to) {
-                return Err(bad(cmd, format!("a group named \"{to}\" already exists")));
-            }
             groups[i].name = to.clone();
             Ok(json!({"group": to}))
         }

@@ -15,7 +15,8 @@ fn presets_keep_the_tool_smoothing() {
     assert_eq!(s.tools.brush.smoothing.amount, 0.1);
     s.execute("tools.setBrush", json!({"brush": {"smoothing": {"amount": 0.6, "pulledString": true}}})).unwrap();
     s.execute("tools.setBrush", json!({"preset": smoothed})).unwrap();
-    assert_eq!((s.tools.brush.smoothing.amount, s.tools.brush.smoothing.pulled_string), (0.6, true));
+    assert_eq!(s.tools.brush.smoothing.amount, 0.6f32);
+    assert!(s.tools.brush.smoothing.pulled_string);
     // An explicit smoothing alongside the preset still applies.
     s.execute("tools.setBrush", json!({"preset": preset, "brush": {"smoothing": {"amount": 0.0}}})).unwrap();
     assert_eq!(s.tools.brush.smoothing.amount, 0.0);
