@@ -11,8 +11,10 @@ use std::fmt;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 
+use clap::error::ErrorKind;
+use clap::parser::ValueSource;
 use clap::{ArgAction, ArgGroup, ArgMatches, Args, CommandFactory, FromArgMatches, Parser, Subcommand};
-use photocraft_automation::args::{AutomationArgs, ControlArgs, control_port};
+use photocraft_automation::args::{AutomationArgs, ControlArgs, blank_env_is_unset, control_port, name_env_vars};
 use photocraft_codecs::{JpegFormat, TiffCompression};
 use photocraft_io::{DdsCompression, DpxBits, TgaBits};
 use serde_json::Value;
@@ -197,8 +199,11 @@ pub(crate) struct CommandsArgs {
 pub(crate) struct McpArgs {
     /// Bridge to the PhotoCraft app listening here instead of a headless engine; a bare port means
     /// 127.0.0.1:<PORT>
-    #[arg(long, value_name = "127.0.0.1:PORT", value_parser = bridge)]
+    #[arg(long, value_name = "127.0.0.1:PORT", env = "PHOTOCRAFT_CONTROL_PORT", value_parser = bridge)]
     pub(crate) bridge: Option<Bridge>,
+    /// `--bridge` came from PHOTOCRAFT_CONTROL_PORT, set by [`parse`].
+    #[arg(skip)]
+    pub(crate) bridge_from_env: bool,
     #[command(flatten)]
     pub(crate) control: ControlArgs,
     #[command(flatten)]
@@ -214,8 +219,11 @@ pub(crate) struct McpArgs {
 #[derive(Args)]
 pub(crate) struct ServeArgs {
     /// Listen on 127.0.0.1:<PORT> instead of stdio
-    #[arg(long, value_name = "PORT", value_parser = control_port)]
+    #[arg(long, value_name = "PORT", env = "PHOTOCRAFT_CONTROL_PORT", value_parser = control_port)]
     pub(crate) port: Option<u16>,
+    /// `--port` came from PHOTOCRAFT_CONTROL_PORT, set by [`parse`].
+    #[arg(skip)]
+    pub(crate) port_from_env: bool,
     #[command(flatten)]
     pub(crate) control: ControlArgs,
     #[command(flatten)]
@@ -235,7 +243,7 @@ enum ValueError {
     TiffCompression,
     #[error("expected baseline, optimized or progressive")]
     JpegFormat,
-    /// Why a `--bridge` value is refused.
+    /// Why a `--bridge` value, or a PHOTOCRAFT_CONTROL_PORT value for `mcp`, is refused.
     #[error("expected a port, 0-65535 (--bridge also takes 127.0.0.1:<PORT>)")]
     Bridge,
 }
@@ -283,7 +291,7 @@ impl fmt::Display for Bridge {
     }
 }
 
-/// `mcp --bridge`: a port, or `host:port`.
+/// `mcp --bridge`, or PHOTOCRAFT_CONTROL_PORT, which holds a port.
 fn bridge(s: &str) -> Result<Bridge, ValueError> {
     match control_port(s) {
         Ok(port) => Ok(Bridge::Port(port)),
@@ -313,12 +321,28 @@ fn steps(m: &ArgMatches) -> Vec<Step> {
 }
 
 /// Parse the arguments (without the binary name). clap reads them as `OsString`s: a path need not
-/// be valid Unicode (#1108), text must.
+/// be valid Unicode (#1108), text must. A flag left out falls back to its environment variable,
+/// unless that is empty, and a bad value from one is a usage error naming the variable (#2491).
 pub(crate) fn parse(args: &[OsString]) -> Result<Cli, clap::Error> {
-    let matches = Cli::command().try_get_matches_from(std::iter::once(OsString::from("photocraft-cli")).chain(args.iter().cloned()))?;
+    let mut cmd = Cli::command().mut_subcommands(|sub| sub.mut_args(blank_env_is_unset));
+    let argv = std::iter::once(OsString::from("photocraft-cli")).chain(args.iter().cloned());
+    let matches = cmd.try_get_matches_from_mut(argv).map_err(|e| name_env_vars(e, &cmd, args))?;
     let mut cli = Cli::from_arg_matches(&matches)?;
-    if let (Command::Run(r), Some(m)) = (&mut cli.command, matches.subcommand_matches("run")) {
-        r.steps = steps(m);
+    let from_env = |m: &ArgMatches, id: &str| m.value_source(id) == Some(ValueSource::EnvVariable);
+    match (&mut cli.command, matches.subcommand()) {
+        (Command::Run(r), Some((_, m))) => r.steps = steps(m),
+        (Command::Mcp(a), Some((_, m))) => {
+            a.bridge_from_env = from_env(m, "bridge");
+            // The variable holds a port, as for the desktop app's --control: only the flag takes
+            // host:port, which `bridge` lets through.
+            if a.bridge_from_env
+                && let Some(Bridge::Addr(v)) = &a.bridge
+            {
+                return Err(cmd.error(ErrorKind::ValueValidation, format!("invalid value '{v}' for 'PHOTOCRAFT_CONTROL_PORT': {}", ValueError::Bridge)));
+            }
+        }
+        (Command::Serve(a), Some((_, m))) => a.port_from_env = from_env(m, "port"),
+        _ => {}
     }
     Ok(cli)
 }
