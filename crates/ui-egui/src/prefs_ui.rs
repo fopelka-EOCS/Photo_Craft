@@ -1355,7 +1355,7 @@ fn gpu_status_rows(ui: &mut egui::Ui, info: Option<&Value>, adapters: Option<&Va
     if !cfg!(target_arch = "wasm32") {
         ui.horizontal(|ui| {
             ui.label(tl!("GPU Backend"));
-            let mut options = graphics_backend_choices(egui::os::OperatingSystem::from_target_os()).to_vec();
+            let mut options = graphics_backend_choices(prefs::GpuPlatform::current());
             let saved = obj.get("gpuBackend").and_then(Value::as_str).unwrap_or("auto");
             // Keep an unavailable or legacy saved value visible, like an unplugged
             // adapter below. Merely opening Preferences must not rewrite the profile.
@@ -1392,15 +1392,9 @@ fn gpu_status_rows(ui: &mut egui::Ui, info: Option<&Value>, adapters: Option<&Va
     }
 }
 
-/// Match desktop startup's `gpu_startup::sanitize` table. CPU is a rendering mode, not
-/// a second way to change it through the backend dropdown. The browser owns its backend.
-fn graphics_backend_choices(os: egui::os::OperatingSystem) -> &'static [&'static str] {
-    use egui::os::OperatingSystem;
-    match os {
-        OperatingSystem::Windows => &["auto", "vulkan", "dx12", "gl"],
-        OperatingSystem::Mac => &["auto", "metal"],
-        _ => &["auto", "vulkan", "gl"],
-    }
+/// Use startup's shared native backend policy. The browser owns its backend.
+fn graphics_backend_choices(platform: prefs::GpuPlatform) -> Vec<&'static str> {
+    platform.backends().iter().map(|b| b.name()).collect()
 }
 
 fn set_graphics_backend(obj: &mut Map<String, Value>, backend: &str) {
@@ -2654,11 +2648,11 @@ mod tests {
 
     #[test]
     fn graphics_backend_choices_match_the_desktop_platform() {
-        use egui::os::OperatingSystem::{Mac, Nix, Windows};
+        use prefs::GpuPlatform::{Mac, Other, Windows};
         assert_eq!(graphics_backend_choices(Windows), &["auto", "vulkan", "dx12", "gl"]);
         assert_eq!(graphics_backend_choices(Mac), &["auto", "metal"]);
-        assert_eq!(graphics_backend_choices(Nix), &["auto", "vulkan", "gl"]);
-        for os in [Mac, Nix, Windows] {
+        assert_eq!(graphics_backend_choices(Other), &["auto", "vulkan", "gl"]);
+        for os in [Mac, Other, Windows] {
             assert!(!graphics_backend_choices(os).contains(&"cpu"));
         }
     }

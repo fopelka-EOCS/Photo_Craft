@@ -115,8 +115,8 @@ older GPU without DX12 or Vulkan can still accelerate the window. The exception 
 renderer: SVGA3D rendered a black window in #1788, while WARP displayed correctly. Only VMware GL
 is ranked after WARP; working VMware DX12 adapters keep their normal rank. GL reports can carry
 Mesa's vendor id or zero, so the check uses the renderer name as well as VMware's PCI vendor id.
-System Info explains automatic hardware GL selection and when the VMware exception selects
-software graphics. An explicit OpenGL backend
+System Info shows the active hardware backend and explains when the VMware exception selects
+software graphics. Successful hardware GL selection is not labelled as a fallback. An explicit OpenGL backend
 bypasses it; that can restore the black-window problem on the affected VM. When it is the only
 adapter that can present, VMware GL remains a last resort. Intel's Windows Vulkan avoidance and
 the crash-startup fallback remain in effect.

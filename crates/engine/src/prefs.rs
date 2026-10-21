@@ -69,6 +69,44 @@ choice!(
     /// crashes inside the graphics driver moves this to the next safer choice.
     GpuBackend { Auto = "auto", Vulkan = "vulkan", Dx12 = "dx12", Metal = "metal", Gl = "gl", Cpu = "cpu" } default Auto
 );
+
+/// Desktop platform families with different graphics APIs and startup fallback chains.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GpuPlatform {
+    Windows,
+    Mac,
+    /// Linux, the BSDs and other native targets.
+    Other,
+}
+
+impl GpuPlatform {
+    pub fn current() -> Self {
+        if cfg!(windows) {
+            Self::Windows
+        } else if cfg!(target_os = "macos") {
+            Self::Mac
+        } else {
+            Self::Other
+        }
+    }
+
+    /// Native backend choices shared by Preferences and startup. CPU is a rendering mode;
+    /// it remains accepted by `sanitize` for legacy preferences and recovery.
+    pub fn backends(self) -> &'static [GpuBackend] {
+        use GpuBackend::*;
+        match self {
+            Self::Windows => &[Auto, Vulkan, Dx12, Gl],
+            Self::Mac => &[Auto, Metal],
+            Self::Other => &[Auto, Vulkan, Gl],
+        }
+    }
+
+    /// Resolve a saved backend this platform cannot use to Automatic.
+    pub fn sanitize(self, backend: GpuBackend) -> GpuBackend {
+        if backend == GpuBackend::Cpu || self.backends().contains(&backend) { backend } else { GpuBackend::Auto }
+    }
+}
+
 choice!(
     /// Rendering policy, independent of the advanced graphics backend selection.
     /// CPU disables image acceleration; the native window may still need hardware graphics.
