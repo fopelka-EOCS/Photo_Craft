@@ -204,6 +204,7 @@ pub fn option_keys(tool: Tool) -> &'static [&'static str] {
         Tool::Smudge => reset!(strength, finger_painting),
         Tool::Dodge | Tool::Burn => reset!(tone_range, exposure, protect_tones),
         Tool::Sponge => reset!(sponge_mode, vibrance),
+        Tool::ArtHistoryBrush => reset!(art_history_style, art_history_area, art_history_tolerance),
         Tool::Pen => reset!(vector_mode, pen_auto_add_delete),
         Tool::CurvaturePen => reset!(vector_mode),
         Tool::FreeformPen => reset!(vector_mode, curve_fit),

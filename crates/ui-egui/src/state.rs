@@ -108,6 +108,7 @@ pub enum Tool {
     CloneStamp,
     PatternStamp,
     HistoryBrush,
+    ArtHistoryBrush,
     Blur,
     Sharpen,
     Smudge,
@@ -138,7 +139,7 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Tool; 67] = [
+    pub const ALL: [Tool; 68] = [
         Tool::Move,
         Tool::Artboard,
         Tool::RectMarquee,
@@ -181,6 +182,7 @@ impl Tool {
         Tool::CloneStamp,
         Tool::PatternStamp,
         Tool::HistoryBrush,
+        Tool::ArtHistoryBrush,
         Tool::Blur,
         Tool::Sharpen,
         Tool::Smudge,
@@ -255,6 +257,7 @@ impl Tool {
             Tool::CloneStamp => "Clone Stamp Tool",
             Tool::PatternStamp => "Pattern Stamp Tool",
             Tool::HistoryBrush => "History Brush Tool",
+            Tool::ArtHistoryBrush => "Art History Brush Tool",
             Tool::Blur => "Blur Tool",
             Tool::Sharpen => "Sharpen Tool",
             Tool::Smudge => "Smudge Tool",
@@ -307,6 +310,7 @@ impl Tool {
                 | Tool::CloneStamp
                 | Tool::PatternStamp
                 | Tool::HistoryBrush
+                | Tool::ArtHistoryBrush
                 | Tool::Blur
                 | Tool::Sharpen
                 | Tool::Smudge
@@ -334,7 +338,7 @@ impl Tool {
             Tool::Zoom => 'Z',
             Tool::Remove | Tool::SpotHealing | Tool::Healing | Tool::Patch | Tool::ContentAwareMove | Tool::RedEye => 'J',
             Tool::CloneStamp | Tool::PatternStamp => 'S',
-            Tool::HistoryBrush => 'Y',
+            Tool::HistoryBrush | Tool::ArtHistoryBrush => 'Y',
             Tool::Blur | Tool::Sharpen | Tool::Smudge => '\0',
             // In the Marquee flyout, but M cycles only the Rectangular and Elliptical Marquee.
             Tool::SingleRowMarquee | Tool::SingleColumnMarquee => '\0',
@@ -551,6 +555,15 @@ pub struct ToolOptions {
     pub pattern_stamp_scale: f32,
     /// Pattern Stamp rotation in degrees (counter-clockwise).
     pub pattern_stamp_angle: f32,
+    /// Art History Brush: style (tightShort|tightMedium|tightLong|looseMedium|looseLong|dab|tightCurl|looseCurl).
+    #[serde(default = "default_art_history_style")]
+    pub art_history_style: String,
+    /// Art History Brush: area in pixels (1..500).
+    #[serde(default = "default_art_history_area")]
+    pub art_history_area: f32,
+    /// Art History Brush: tolerance % (0..100).
+    #[serde(default)]
+    pub art_history_tolerance: f32,
     /// current | currentAndBelow | all
     pub clone_sample: String,
     /// Spot Healing: contentAware | createTexture | proximityMatch
@@ -759,6 +772,14 @@ fn one_u32() -> u32 {
     1
 }
 
+fn default_art_history_style() -> String {
+    "tightMedium".into()
+}
+
+fn default_art_history_area() -> f32 {
+    50.0
+}
+
 fn default_eyedropper_sample() -> String {
     "all".into()
 }
@@ -813,6 +834,9 @@ impl SampleAllLayers {
 impl Default for ToolOptions {
     fn default() -> Self {
         Self {
+            art_history_style: default_art_history_style(),
+            art_history_area: default_art_history_area(),
+            art_history_tolerance: 0.0,
             tolerance: 32.0,
             contiguous: true,
             anti_alias: true,
@@ -1528,7 +1552,11 @@ mod tests {
         assert!(!Tool::RedEye.is_brushlike());
         assert_eq!(Tool::from_name("patternStamp"), Some(Tool::PatternStamp));
         assert_eq!(Tool::from_name("Pattern Stamp Tool"), Some(Tool::PatternStamp));
-        assert_eq!(Tool::ALL.len(), 67);
+        assert_eq!(Tool::from_name("artHistoryBrush"), Some(Tool::ArtHistoryBrush));
+        assert_eq!(Tool::from_name("Art History Brush Tool"), Some(Tool::ArtHistoryBrush));
+        assert_eq!(Tool::ArtHistoryBrush.key(), 'Y');
+        assert!(Tool::ArtHistoryBrush.is_brushlike());
+        assert_eq!(Tool::ALL.len(), 68);
         assert_eq!(Tool::from_name("Vertical Type Mask Tool"), Some(Tool::VerticalTypeMask));
         assert_eq!(Tool::from_name("addAnchorPoint"), Some(Tool::AddAnchorPoint));
         assert_eq!(Tool::from_name("Delete Anchor Point Tool"), Some(Tool::DeleteAnchorPoint));
