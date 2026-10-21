@@ -1401,3 +1401,39 @@ fn function_keys_keep_shift_and_command() {
     }
     assert_eq!(super::function_key_name(7, false, false), "F7");
 }
+
+/// A Pattern Fill step whose `Ptrn` names both an installed id and a display name shared by
+/// another pattern plays the pattern with that id; a foreign id falls back to the name.
+#[test]
+fn pattern_fill_prefers_an_installed_id_over_a_colliding_name() {
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 4, "height": 4, "mode": "rgb", "depth": 8})).unwrap();
+    let mut define = |color: &str| {
+        s.execute("edit.fill", json!({"contents": "color", "color": color})).unwrap();
+        s.execute("edit.definePattern", json!({"name": "Twin"})).unwrap()["pattern"].as_str().unwrap().to_string()
+    };
+    let red = define("#ff0000");
+    let blue = define("#0000ff");
+    assert_ne!(red, blue);
+    s.patterns.items.retain(|p| p.id == red || p.id == blue);
+    s.patterns.items.sort_by_key(|p| p.id != blue);
+    let fill_step = |id: &str| {
+        let t = desc("patternLayer").with("Ptrn", D::Descriptor(desc("Ptrn").with("Idnt", text(id)).with("Nm  ", text("Twin"))));
+        item(
+            "Mk  ",
+            "Make",
+            Some(desc("null").with("null", class_ref("contentLayer")).with("Usng", D::Descriptor(desc("contentLayer").with("Type", D::Descriptor(t))))),
+        )
+    };
+    let data = set_of("Pat", vec![("Installed", vec![fill_step(&red)]), ("Foreign", vec![fill_step("not-installed-id")])]);
+    let r = s.execute("actions.load", json!({"data": data})).unwrap();
+    assert!(r["unsupported"].as_array().is_none_or(|u| u.is_empty()), "{r}");
+    for (action, want) in [("Installed", [1.0, 0.0, 0.0, 1.0]), ("Foreign", [0.0, 0.0, 1.0, 1.0])] {
+        s.execute("file.new", json!({"width": 4, "height": 4, "mode": "rgb", "depth": 8})).unwrap();
+        let r = s.execute("actions.play", json!({"action": action})).unwrap();
+        assert!(r.get("failed").is_none(), "{r}");
+        let v = s.execute("document.pixel", json!({"x": 1, "y": 1})).unwrap();
+        let got: Vec<f64> = v.as_array().unwrap().iter().map(|c| c.as_f64().unwrap()).collect();
+        assert_eq!(got, want, "{action}");
+    }
+}

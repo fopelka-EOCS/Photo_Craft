@@ -127,7 +127,13 @@ pub fn resolve(s: &Session, key: &str) -> Option<Pattern> {
 
 pub(crate) fn resolve_param(s: &Session, cmd: &str, p: &Value) -> Result<Pattern> {
     let key = p.get("pattern").and_then(Value::as_str).unwrap_or("");
-    resolve(s, key).ok_or_else(|| bad(cmd, format!("no pattern \"{key}\" (see pattern.list)")))
+    resolve_or_named(s, key, p).ok_or_else(|| bad(cmd, format!("no pattern \"{key}\" (see pattern.list)")))
+}
+
+/// [`resolve`]s `key`, else the optional `patternName` of `p`: an imported action's pattern
+/// recorded with both an id and a name, whose id may not be installed here.
+pub(crate) fn resolve_or_named(s: &Session, key: &str, p: &Value) -> Option<Pattern> {
+    resolve(s, key).or_else(|| p.get("patternName").and_then(Value::as_str).filter(|n| !n.is_empty()).and_then(|n| resolve(s, n)))
 }
 
 /// Copies `pat` into the document's patterns unless it is already there (by id).
@@ -439,7 +445,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Pattern…",
             menu: &["Layer", "New Fill Layer"],
             shortcut: None,
-            params: r##"{"pattern":id|name?=first library pattern,"scale":1..1000=100,"angle":deg=0,"link":bool=true,"phase":[x,y]?,"path":"work"|saved path name|{…path}? (the active path: becomes the vector mask; else the selection is the layer mask)}"##,
+            params: r##"{"pattern":id|name?=first library pattern,"patternName":name? (used when `pattern` is not found),"scale":1..1000=100,"angle":deg=0,"link":bool=true,"phase":[x,y]?,"path":"work"|saved path name|{…path}? (the active path: becomes the vector mask; else the selection is the layer mask)}"##,
             enabled: has_doc,
             journal: true,
             run: new_fill_layer,
