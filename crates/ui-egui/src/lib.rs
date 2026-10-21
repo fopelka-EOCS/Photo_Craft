@@ -1455,7 +1455,15 @@ impl PhotocraftApp {
         }
         let import = self.services.import.as_ref().ok_or("no importer configured")?;
         let max_svg_group_depth = self.session.prefs().file_handling.rasterize_svg_groups_deeper_than as usize;
-        let (doc, warnings) = import(name, bytes, max_svg_group_depth)?;
+        let (doc, warnings, damaged) = if photocraft_io::is_psd(bytes) {
+            // Read PSD damage as structured information in the same decode, not by
+            // retrying an error or matching the text of a compatibility warning.
+            let (r, damaged) = photocraft_io::import_for_open(name, bytes, max_svg_group_depth).map_err(|e| e.to_string())?;
+            (r.document, r.warnings, damaged)
+        } else {
+            let (doc, warnings) = import(name, bytes, max_svg_group_depth)?;
+            (doc, warnings, false)
+        };
         // Edit › Color Settings policies apply on open; Ask When Opening holds the file back
         // until its prompt is answered, and later files wait behind it (`open_prompt`).
         // Missing fonts are read from the document itself: it may not be open yet (#4559).
@@ -1469,6 +1477,7 @@ impl PhotocraftApp {
             open_prompt::Held {
                 doc,
                 read_only: photocraft_io::affinity::is_affinity(bytes),
+                damage_pending: damaged,
                 name: name.to_string(),
                 path: path.map(str::to_string),
                 warnings: warnings.clone(),
@@ -2933,6 +2942,8 @@ mod transform_undo_tests;
 #[cfg(test)]
 mod transform_type_tests;
 
+#[cfg(test)]
+mod psd_open_tests;
 #[cfg(test)]
 mod save_identity_tests;
 

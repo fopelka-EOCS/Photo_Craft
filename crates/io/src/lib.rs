@@ -302,14 +302,32 @@ pub fn import_with_svg_group_depth_and_interrupt(
     max_group_depth: usize,
     ctl: &photocraft_raster::Interrupt,
 ) -> Result<ImportResult, IoError> {
-    ctl.check().map_err(|_| IoError::Cancelled)?;
-    let r = import_stages(name, bytes, ctl, max_group_depth)?;
-    ctl.check().map_err(|_| IoError::Cancelled)?;
-    ctl.progress(1.0);
-    Ok(r)
+    import_for_open_with(name, bytes, max_group_depth, ctl).map(|(result, _)| result)
 }
 
-fn import_stages(name: &str, bytes: &[u8], ctl: &photocraft_raster::Interrupt, max_group_depth: usize) -> Result<ImportResult, IoError> {
+/// The ordinary import result plus whether PSD/PSB decoding encountered damaged data.
+/// Interactive callers can ask whether to continue before adding the document. This is
+/// information, not a save policy: accepting it opens an ordinary, writable document.
+/// Non-interactive callers keep using [`import`], which still returns readable content
+/// and warnings without requiring confirmation.
+///
+/// The flag is independent of the wording of `warnings`. An ordinary compatibility
+/// warning does not set it. No file is decoded a second time to obtain this information.
+pub fn import_for_open(name: &str, bytes: &[u8], max_group_depth: usize) -> Result<(ImportResult, bool), IoError> {
+    import_for_open_with(name, bytes, max_group_depth, &photocraft_raster::Interrupt::NONE)
+}
+
+/// [`import_for_open`] with cancellation and progress, shared with [`import_with`].
+pub fn import_for_open_with(name: &str, bytes: &[u8], max_group_depth: usize, ctl: &photocraft_raster::Interrupt) -> Result<(ImportResult, bool), IoError> {
+    ctl.check().map_err(|_| IoError::Cancelled)?;
+    let mut damaged = false;
+    let result = import_stages(name, bytes, ctl, max_group_depth, &mut damaged)?;
+    ctl.check().map_err(|_| IoError::Cancelled)?;
+    ctl.progress(1.0);
+    Ok((result, damaged))
+}
+
+fn import_stages(name: &str, bytes: &[u8], ctl: &photocraft_raster::Interrupt, max_group_depth: usize, damaged: &mut bool) -> Result<ImportResult, IoError> {
     // A declared native extension must reach its loader so malformed bundles retain format errors.
     if has_extension(name, photocraft_format::EXTENSION) || photocraft_format::is_pcraft(bytes) {
         let document = photocraft_format::load_from_bytes(bytes)?;
@@ -327,7 +345,8 @@ fn import_stages(name: &str, bytes: &[u8], ctl: &photocraft_raster::Interrupt, m
         psd_import::check_group_depth(&file)?;
         ctl.check().map_err(|_| IoError::Cancelled)?;
         ctl.progress(0.05);
-        let (mut document, warnings) = psd_import::psd_to_document_decoded(&file, ctl, merged).ok_or(IoError::Cancelled)?;
+        let (mut document, warnings, psd_damaged) = psd_import::psd_to_document_decoded_integrity(&file, ctl, merged).ok_or(IoError::Cancelled)?;
+        *damaged = psd_damaged;
         document.name = name.to_string();
         text_import::prepare(&mut document);
         return Ok(ImportResult { document, warnings, source_read_only: false, preview_only: false });
@@ -585,7 +604,40 @@ pub fn merged_composite(file: &PsdFile) -> Result<Vec<[f32; 4]>, IoError> {
 
 #[cfg(test)]
 mod tests {
-    use super::is_svg_input;
+    use super::{import, import_for_open, is_svg_input};
+    use photocraft_psd::{Compression, Version, testgen};
+
+    #[test]
+    fn valid_psd_can_still_be_edited() {
+        let bytes = testgen::small(Version::Psd, Compression::Raw).to_bytes().unwrap();
+        let imported = import("valid.psd", &bytes).unwrap();
+        assert!(!imported.source_read_only);
+    }
+
+    #[test]
+    fn unreadable_psd_channel_keeps_best_effort_import_and_reports_damage() {
+        let mut file = testgen::small(Version::Psd, Compression::Raw);
+        let channel = file.layers_mut()[0].channels.iter_mut().find(|c| c.id == 0).unwrap();
+        channel.data.clear();
+        let bytes = file.to_bytes().unwrap();
+        let imported = import("damaged.psd", &bytes).unwrap();
+        assert!(!imported.source_read_only);
+        assert!(imported.warnings.iter().any(|w| w.contains("could not be decoded")));
+        let (opened, damaged) = import_for_open("damaged.psd", &bytes, photocraft_doc::MAX_GROUP_DEPTH).unwrap();
+        assert!(damaged);
+        assert!(!opened.source_read_only);
+        assert!(!opened.preview_only);
+        assert_eq!(opened.warnings, imported.warnings);
+        assert_eq!(opened.document.layers.len(), imported.document.layers.len());
+    }
+
+    #[test]
+    fn valid_psd_does_not_request_damage_confirmation() {
+        let bytes = testgen::small(Version::Psd, Compression::Raw).to_bytes().unwrap();
+        let (result, damaged) = import_for_open("valid.psd", &bytes, photocraft_doc::MAX_GROUP_DEPTH).unwrap();
+        assert!(!damaged);
+        assert!(!result.source_read_only);
+    }
 
     #[test]
     fn svg_extension_does_not_override_another_format_signature() {
