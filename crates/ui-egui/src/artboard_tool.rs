@@ -192,6 +192,17 @@ fn offset(start: [f64; 2], cur: [f64; 2]) -> [i64; 2] {
     [(cur[0] - start[0]).round() as i64, (cur[1] - start[1]).round() as i64]
 }
 
+/// How far a gesture's whole-pixel rounding moves its edges from the pointer, per axis.
+fn rounding(d: &ArtboardDrag) -> [f64; 2] {
+    match *d {
+        ArtboardDrag::New { cur, .. } => [cur[0].round() - cur[0], cur[1].round() - cur[1]],
+        ArtboardDrag::Move { start, cur, .. } | ArtboardDrag::Resize { start, cur, .. } => {
+            let o = offset(start, cur);
+            [o[0] as f64 - (cur[0] - start[0]), o[1] as f64 - (cur[1] - start[1])]
+        }
+    }
+}
+
 /// `r` with handle (`hx`, `hy`) dragged by `d`: an edge dragged past the opposite one flips the
 /// board, which never gets narrower than one pixel.
 fn resized(r: [i64; 4], hx: i8, hy: i8, d: [i64; 2]) -> [i64; 4] {
@@ -321,6 +332,12 @@ fn gesture(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers) {
         ToolEvent::Move { x, y, .. } => {
             if let Some(d) = &mut app.ui.artboard_tool.drag {
                 follow(d, [x, y], mods);
+                // Snapped to a guide at 22.5, the board lands on a whole pixel: the snap lines
+                // follow it there (by the drag's own rounding, so a centre on a half pixel stays).
+                let e = rounding(d);
+                for l in &mut app.prefs_rt.snap_lines {
+                    l.pos += e[usize::from(!l.vertical)];
+                }
             }
         }
         ToolEvent::Up { x, y } => {
@@ -573,6 +590,29 @@ mod tests {
         app.ui.extras.snap = false;
         drag(&mut app, [200.0, 70.0], [203.0, 70.0]);
         assert_eq!(boards(&app)[0].x0, 3);
+    }
+
+    /// A board snapped to a guide on a half pixel lands on a whole one, and the snap line shows
+    /// where it landed: 22.5 rounds up when drawing, and a 17.5 px move left rounds to 18.
+    #[test]
+    fn snap_lines_follow_the_board_onto_whole_pixels() {
+        let mut app = app();
+        app.ui.extras.snap = true;
+        app.run("view.newGuide", json!({"orientation": "vertical", "position": 22.5})).unwrap();
+        let m = egui::Modifiers::NONE;
+        let line_x = |app: &PhotocraftApp| app.prefs_rt.snap_lines.iter().find(|l| l.vertical).map(|l| l.pos);
+        tool_event(&mut app, ToolEvent::Down { x: 100.0, y: 30.0, pressure: 1.0 }, m);
+        tool_event(&mut app, ToolEvent::Move { x: 21.0, y: 110.0, pressure: 1.0 }, m);
+        assert_eq!(line_x(&app), Some(23.0));
+        tool_event(&mut app, ToolEvent::Up { x: 21.0, y: 110.0 }, m);
+        assert_eq!(boards(&app)[0].x0, 23);
+        app.run("edit.undo", json!({})).unwrap();
+        drag(&mut app, [40.0, 30.0], [140.0, 110.0]);
+        tool_event(&mut app, ToolEvent::Down { x: 90.0, y: 70.0, pressure: 1.0 }, m);
+        tool_event(&mut app, ToolEvent::Move { x: 73.0, y: 70.0, pressure: 1.0 }, m);
+        assert_eq!(line_x(&app), Some(22.0));
+        tool_event(&mut app, ToolEvent::Up { x: 73.0, y: 70.0 }, m);
+        assert_eq!(boards(&app)[0].x0, 22);
     }
 
     /// A board drawn around layers takes them in (the engine's `adopt`), in one undo step.
