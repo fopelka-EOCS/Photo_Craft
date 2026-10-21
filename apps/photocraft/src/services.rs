@@ -19,6 +19,8 @@ mod recovery_tests;
 /// Everything File › Open reads: PhotoCraft, Photoshop, OpenRaster, Krita and Affinity documents, flat images, and
 /// Photoshop brushes (.abr), gradients (.grd), swatches (.aco, .ase) and keyboard shortcut sets
 /// (.kys), which go to the preset libraries and Edit › Keyboard Shortcuts.
+/// Production All Formats uses `*` (#5126); this list is for case-glob tests only.
+#[cfg(test)]
 const OPEN_EXTS: &[&str] = &[
     "pcraft", "pdn", "ora", "kra", "krz", "psd", "psb", "psdt", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "ico", "qoi", "exr", "hdr",
     "pbm", "pgm", "ppm", "pam", "pfm", "pcx", "dds", "xpm", "fits", "fit", "fts", "dpx", "cin", "heic", "heif", "hif", "dng", "cr2", "cr3", "nef", "nrw",
@@ -37,9 +39,9 @@ fn open_filter_extensions(extensions: &[&str]) -> Vec<String> {
 }
 
 /// File › Open's file types after All Formats, as Photoshop lists them: one per format, so a folder
-/// of mixed files can be narrowed to one kind (#6337). Together they cover every extension of
-/// [`OPEN_EXTS`]. An explicit SVG filter also keeps vector artwork discoverable when a native
-/// picker defaults to another filter.
+/// of mixed files can be narrowed to one kind (#6337). Together they cover every openable extension.
+/// An explicit SVG filter also keeps vector artwork discoverable when a native picker defaults to
+/// another filter.
 const OPEN_FILTERS: &[(&str, &[&str])] = &[
     ("PhotoCraft", &["pcraft"]),
     ("Photoshop", &["psd", "psb", "psdt"]),
@@ -73,10 +75,17 @@ const OPEN_FILTERS: &[(&str, &[&str])] = &[
     ("Keyboard Shortcuts", &["kys"]),
 ];
 
+/// All Formats must not dump every openable extension into one COMDLG/rfd spec: the native
+/// dropdown then concatenates `*.pcraft;*.pdn;…` into the combo label and hangs on Windows (#5126).
+/// `*` shows every file; named filters above still narrow by type.
+fn all_formats_extensions() -> Vec<String> {
+    vec!["*".into()]
+}
+
 fn open_filters() -> Vec<(&'static str, Vec<String>)> {
-    std::iter::once(("All Formats", open_filter_extensions(OPEN_EXTS)))
-        .chain(OPEN_FILTERS.iter().map(|(name, exts)| (*name, open_filter_extensions(exts))))
-        .collect()
+    let mut filters = vec![("All Formats", all_formats_extensions())];
+    filters.extend(OPEN_FILTERS.iter().map(|(name, exts)| (*name, open_filter_extensions(exts))));
+    filters
 }
 
 /// File › Save As formats: (filter name, extensions). The filter matching the suggested name's
@@ -831,14 +840,33 @@ mod tests {
         let svg_filter = open_filters().into_iter().find(|(name, _)| *name == "SVG").map(|(_, exts)| exts).unwrap_or_default();
         assert_eq!(svg_filter, open_filter_extensions(SVG_EXTS));
         assert!(svg_filter.iter().any(|glob| matches(glob, "svg")) && svg_filter.iter().any(|glob| matches(glob, "svgz")));
+        assert_all_formats_filter_is_short();
+        let jpeg = open_filters().into_iter().find(|(name, _)| *name == "JPEG").map(|(_, exts)| exts).unwrap_or_default();
+        assert!(jpeg.iter().any(|glob| matches(glob, "jpg")) && jpeg.iter().any(|glob| matches(glob, "jpeg")));
     }
 
-    /// #6337: after All Formats, every format File › Open reads has its own filter, and no filter
-    /// offers an extension All Formats doesn't.
+    /// Combined All Formats must stay a short spec so native pickers (Windows IFileDialog via rfd)
+    /// can open the type dropdown without hanging (#5126).
+    #[test]
+    fn all_formats_filter_is_short_enough_for_native_pickers() {
+        assert_all_formats_filter_is_short();
+    }
+
+    fn assert_all_formats_filter_is_short() {
+        let (name, exts) = open_filters().into_iter().next().expect("All Formats first");
+        assert_eq!(name, "All Formats");
+        assert_eq!(exts, ["*"]);
+        let spec_len: usize = exts.iter().map(|e| e.len()).sum();
+        assert!(spec_len <= 4, "All Formats spec {exts:?} is too long for rfd/Windows");
+        assert!(open_filters().iter().any(|(n, e)| *n == "JPEG" && e.iter().any(|x| x.eq_ignore_ascii_case("jpg") || x.contains("jJ"))));
+    }
+
+    /// #6337: after All Formats, every format File › Open reads has its own filter.
+    /// All Formats itself is `*` so native pickers do not hang (#5126).
     #[test]
     fn every_open_format_has_its_own_filter() {
         let filters = open_filters();
-        assert_eq!(filters[0], ("All Formats", open_filter_extensions(OPEN_EXTS)), "All Formats comes first");
+        assert_eq!(filters[0], ("All Formats", vec!["*".into()]), "All Formats comes first");
         let mut named: Vec<&str> = OPEN_FILTERS.iter().flat_map(|(_, exts)| exts.iter().copied()).collect();
         let total = named.len();
         named.sort_unstable();
@@ -846,7 +874,7 @@ mod tests {
         assert_eq!(named.len(), total, "an extension is listed under two filters");
         let mut all = OPEN_EXTS.to_vec();
         all.sort_unstable();
-        assert_eq!(named, all, "the named filters cover All Formats exactly");
+        assert_eq!(named, all, "the named filters cover every openable extension exactly");
         let names: Vec<&str> = filters.iter().map(|(name, _)| *name).collect();
         for name in ["Photoshop", "Affinity", "HEIF", "PNG", "JPEG", "TIFF", "Portable Bitmap", "OpenEXR", "Radiance HDR", "Paint.NET"] {
             assert!(names.contains(&name), "{name}");
@@ -859,6 +887,7 @@ mod tests {
         assert_eq!(open_filter_extensions(OPEN_EXTS), OPEN_EXTS);
         assert_eq!(open_filter_extensions(&["pcraft"]), ["pcraft"]);
         assert_eq!(open_filters().into_iter().find(|(name, _)| *name == "SVG").map(|(_, exts)| exts), Some(vec!["svg".to_string(), "svgz".to_string()]));
+        assert_all_formats_filter_is_short();
     }
 
     #[test]
