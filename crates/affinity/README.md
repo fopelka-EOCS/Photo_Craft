@@ -6,6 +6,11 @@ the archive, the tagged object stream in `doc.dat` and the part of the document 
 and hands `photocraft-io` a document in pixels with every transform composed. It does not write
 Affinity files.
 
+Zstandard entries use the pure-Rust `ruzstd` decoder by default. The optional `native-zstd`
+feature selects the reference C decoder and needs a C compiler. Both readers keep the 64 MiB
+window limit, entry and import budgets, concatenated frames, predictors and CRC checks.
+`photocraft-io/native-zstd` enables the native backend for Affinity, TIFF and `.pcraft` together.
+
 ## What is imported
 
 `photocraft-io` maps the model to an 8-bit RGB document at the Affinity document's resolution:

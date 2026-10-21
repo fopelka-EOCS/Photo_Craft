@@ -129,6 +129,61 @@ fn planar_strips_at_every_depth() {
 }
 
 #[test]
+fn zstd_strips_and_tiles_at_every_depth() {
+    let t = truth(7 * 5 * 3, 23);
+    for (little, big) in ORDERS {
+        for (bits, format, file, want, sample) in depths(&t, little) {
+            for tiled in [false, true] {
+                let mut d = if tiled {
+                    Dir { entries: base(7, 5, bits, 3, 2), chunks: tile_split(&file, 7, 5, 3, bits as usize / 8, 16, 16, false), tiled: true }
+                        .tag(322, SHORT, &[16])
+                        .tag(323, SHORT, &[16])
+                } else {
+                    strips(7, 5, bits, 3, 2, 2, &file)
+                }
+                .tag(339, SHORT, &[u64::from(format)]);
+                d.entries.iter_mut().find(|e| e.0 == 259).unwrap().2 = vec![V::N(50000)];
+                for chunk in &mut d.chunks {
+                    // Independent Zstandard frame: single segment, 8-byte size, one raw block.
+                    let mut frame = b"\x28\xb5\x2f\xfd\xe0".to_vec();
+                    frame.extend((chunk.len() as u64).to_le_bytes());
+                    frame.extend_from_slice(&((chunk.len() as u32 * 8 + 1).to_le_bytes())[..3]);
+                    frame.append(chunk);
+                    *chunk = frame;
+                }
+                let bytes = build(little, big, &[d], &[0]).bytes;
+                if cfg!(feature = "native-zstd") {
+                    let img = decode_ok(&bytes);
+                    assert_eq!((img.dimensions(), img.sample_type()), ((7, 5), sample));
+                    assert_eq!(img.data(), want);
+                } else {
+                    assert!(matches!(decode(&bytes), Err(CodecError::Unsupported { .. })));
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "native-zstd")]
+#[test]
+fn zstd_high_ratio_keeps_pixel_limits() {
+    let raw = vec![37; 2048 * 2048];
+    let mut d = strips(2048, 2048, 8, 1, 1, 2048, &raw);
+    d.entries.iter_mut().find(|e| e.0 == 259).unwrap().2 = vec![V::N(50000)];
+    d.chunks = vec![ZstdEncoder::new().unwrap().compress(&raw).unwrap()];
+    let mut built = build(true, false, &[d], &[0]);
+    assert!((built.bytes.len() as u64) * 4096 + (1 << 20) < raw.len() as u64);
+    assert_eq!(decode_ok(&built.bytes).data(), raw);
+    let options = DecodeOptions { limits: Limits { max_alloc: 1024, ..Default::default() }, ..Default::default() };
+    assert!(matches!(decode_with(&built.bytes, &options), Err(CodecError::LimitExceeded(_))));
+    patch_value(&mut built, true, false, 0, 256, 0, 8192);
+    patch_value(&mut built, true, false, 0, 257, 0, 8192);
+    patch_value(&mut built, true, false, 0, 278, 0, 8192);
+    let error = decode(&built.bytes).unwrap_err().to_string();
+    assert!(error.contains("cannot hold"), "{error}");
+}
+
+#[test]
 fn extra_samples_that_are_not_alpha_are_dropped() {
     let (w, h) = (5usize, 3usize);
     let t = truth(w * h * 5, 4);

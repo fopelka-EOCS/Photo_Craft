@@ -10,14 +10,15 @@
 //! [`DecodeWarning::MorePages`], and [`decode_page`] opens any directory.
 //!
 //! **Pixels.** The `tiff` crate decompresses one strip or tile at a time (none, LZW, Deflate,
-//! PackBits, with the horizontal and floating-point predictors). The decoder sees the chosen
-//! directory through a byte view whose header points at it ([`Patched`]), so SubIFDs decode
+//! PackBits, or Zstandard with `native-zstd`) and applies horizontal and floating-point predictors.
+//! The decoder sees the chosen directory through a byte view whose header points at it
+//! ([`Patched`]), so SubIFDs decode
 //! like IFD0. Decoding is banded: the output image is allocated once, at its final size, and
 //! each band of rows (one strip, or one row of tiles, across every plane) is decoded and
 //! converted straight into it, in parallel on native targets. A strip that already has the
 //! output's layout is decoded in place; anything else goes through one strip- or tile-sized
-//! scratch buffer per worker, so no second full-size buffer exists. Image data cut off by the
-//! end of the file leaves the missing chunks empty and adds a [`DecodeWarning::Truncated`].
+//! scratch buffer per worker, avoiding a second full-image conversion buffer. Image data cut off
+//! by the end of the file leaves the missing chunks empty and adds a [`DecodeWarning::Truncated`].
 //!
 //! Photoshop's private tags are carried as opaque bytes in [`Metadata`]: 34377 (image
 //! resources) and 37724 (`ImageSourceData`, the layers of a layered TIFF). They are read with
@@ -451,12 +452,16 @@ fn is_eof(e: &tiff::TiffError) -> bool {
     matches!(e, tiff::TiffError::IoError(io) if io.kind() == io::ErrorKind::UnexpectedEof)
 }
 
-/// Decodes the pixels of one directory.
+/// Decodes one directory in bands under the caller's limits.
 fn decode_ifd(f: &File<'_>, dir: &Ifd, limits: &Limits) -> Result<Image, CodecError> {
     // The values the `tiff` crate reads must exist: a count past the end of the file is
     // neither allocated nor read.
     if let Some(e) = dir.entries.iter().find(|e| ifd::STRUCTURAL_TAGS.contains(&e.tag) && f.data(e).is_none()) {
         return Err(err(format!("tag {} points past the end of the file", e.tag)));
+    }
+    let compression = f.tag_uint(dir, ifd::TAG_COMPRESSION).unwrap_or(1);
+    if compression == 50000 && !cfg!(feature = "native-zstd") {
+        return Err(CodecError::unsupported(F, "Zstandard compression requires native-zstd"));
     }
     let need = |tag: u16, name: &str| f.tag_uint(dir, tag).ok_or_else(|| err(format!("missing or unreadable {name}")));
     let w = u32::try_from(need(ifd::TAG_WIDTH, "ImageWidth")?).map_err(|_| err("ImageWidth out of range"))?;
@@ -627,14 +632,14 @@ fn decode_ifd(f: &File<'_>, dir: &Ifd, limits: &Limits) -> Result<Image, CodecEr
         _ => src.out(),
     };
     limits.check(w, h, out_layout, out)?;
-    // Decompression-bomb guard: no compression method expands data by more than a few thousand
-    // times (Deflate at most ~1032:1, LZW ~2730:1, PackBits 128:1), so a file far too small for
-    // its declared size is refused before the image is allocated. Uncompressed data may be up
-    // to three quarters missing (that decodes with a `Truncated` warning).
+    // Reject a file far too small for its declared image before allocation. Uncompressed data
+    // may be up to three quarters missing (that decodes with a `Truncated` warning).
     let stored = u64::from(w).saturating_mul(u64::from(h)).saturating_mul(spp).saturating_mul(bits).div_ceil(8);
-    let ratio: u64 = match f.tag_uint(dir, ifd::TAG_COMPRESSION).unwrap_or(1) {
+    let ratio: u64 = match compression {
         1 => 4,
         32773 => 130,
+        // A Zstandard block emits at most 128 KiB per 3-byte header: 65536:1 is conservative.
+        50000 => 1 << 16,
         _ => 4096,
     };
     if stored > (f.b.len() as u64).saturating_mul(ratio).saturating_add(1 << 20) {

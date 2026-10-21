@@ -11,6 +11,29 @@ use photocraft_raster::Rgba8Image;
 
 const MODES: [ColorMode; 4] = [ColorMode::Rgb, ColorMode::Grayscale, ColorMode::Cmyk, ColorMode::Lab];
 
+/// Exchanges complete U8/U16/F32 documents between separately built backends.
+#[test]
+#[ignore = "run default, native-zstd, then default with PHOTOCRAFT_BACKEND_FIXTURES"]
+fn cross_backend_documents() {
+    let directory = std::path::PathBuf::from(std::env::var_os("PHOTOCRAFT_BACKEND_FIXTURES").expect("set the fixture directory"));
+    let read_other = std::env::var_os("PHOTOCRAFT_BACKEND_READ_OTHER").is_some();
+    let backend = if cfg!(feature = "native-zstd") { "native" } else { "rust" };
+    let other = if backend == "native" { "rust" } else { "native" };
+    std::fs::create_dir_all(&directory).unwrap();
+    // Fixture reads must not advance the IDs of documents that are still being built.
+    let docs: Vec<_> = [SampleType::U8, SampleType::U16, SampleType::F32].into_iter().map(|depth| rich_doc(ColorMode::Rgb, depth)).collect();
+    for doc in docs {
+        let depth = doc.depth;
+        let bytes = save_to_bytes(&doc, &SaveOptions::default()).unwrap();
+        assert!(load_from_bytes(&bytes).unwrap() == doc, "round trip: {depth:?}");
+        std::fs::write(directory.join(format!("{backend}-{depth:?}.pcraft")), bytes).unwrap();
+        if read_other {
+            let path = directory.join(format!("{other}-{depth:?}.pcraft"));
+            assert!(load_from_bytes(&std::fs::read(path).unwrap()).unwrap() == doc, "cross-backend: {depth:?}");
+        }
+    }
+}
+
 #[test]
 fn custom_shape_stroke_roundtrip_keeps_every_style_field() {
     for mode in MODES {

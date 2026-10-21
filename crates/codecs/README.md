@@ -116,6 +116,11 @@ embedded table (and a PNG's transparent entry) so `photocraft-io` can open them 
   with `CodecError::Unsupported`: they are sensor data, not flat images. `photocraft-raw` decodes
   and develops them, and `photocraft-io` routes them there.
 
+* **Zstandard TIFF (read-only, feature `native-zstd`).** The existing TIFF decoder reads
+  Zstandard-compressed strips and tiles in classic TIFF and BigTIFF. Default builds return
+  `CodecError::Unsupported`. The feature requires a C compiler. TIFF export keeps its existing
+  compression options; the upstream encoder does not support Zstandard.
+
 * **HEIF/HEIC (read-only, feature `heif`).** Decoding lives in the optional `photocraft-heif` crate
   behind the non-default `heif` feature (official PhotoCraft builds enable it; distributors choose).
   Without it, HEIF is still detected and decoding returns `CodecError::Unsupported` ("HEIC/HEIF

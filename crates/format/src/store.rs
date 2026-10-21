@@ -1,5 +1,6 @@
 //! Object storage (ZIP or directory), incremental writer and loader.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -26,24 +27,67 @@ fn blob_path(h: &str) -> String {
     format!("blobs/{h}.zst")
 }
 
-fn compress(data: &[u8]) -> Vec<u8> {
-    ruzstd::encoding::compress_to_vec(data, ruzstd::encoding::CompressionLevel::Fastest)
+#[cfg(not(feature = "native-zstd"))]
+type Compressor<'a> = std::marker::PhantomData<&'a ()>;
+#[cfg(feature = "native-zstd")]
+type Compressor<'a> = photocraft_codecs::ZstdEncoder<'a>;
+
+/// Creates the selected encoder for one compression worker or directory save.
+fn new_compressor<'a>() -> Result<Compressor<'a>> {
+    #[cfg(feature = "native-zstd")]
+    {
+        #[cfg(test)]
+        tests::COMPRESSORS.with(|n| n.set(n.get() + 1));
+        return Ok(Compressor::new()?);
+    }
+    #[cfg(not(feature = "native-zstd"))]
+    Ok(Default::default())
 }
 
-/// Decodes a zstd frame of at most `max` bytes (`LimitExceeded` beyond). With `exact`, the
-/// decoded length must be exactly that (`Corrupt` otherwise).
-fn decompress_bounded(data: &[u8], max: usize, exact: Option<usize>, what: &str) -> Result<Vec<u8>> {
-    let zstd = |e: &dyn std::fmt::Display| FormatError::corrupt(format!("{what}: zstd: {e}"));
-    let mut dec = ruzstd::decoding::StreamingDecoder::new(data).map_err(|e| zstd(&e))?;
-    let mut out = Vec::with_capacity(exact.unwrap_or(0).min(max).min(64 << 20));
-    // `max` may be `usize::MAX`: one byte past it must not overflow.
-    let limit = u64::try_from(max).unwrap_or(u64::MAX).saturating_add(1);
-    (&mut dec).take(limit).read_to_end(&mut out).map_err(|e| zstd(&e))?;
-    match exact {
-        Some(n) if out.len() != n => Err(FormatError::corrupt(format!("{what}: expected {n} bytes, got {}", out.len()))),
-        None if out.len() > max => Err(FormatError::LimitExceeded(format!("{what} exceeds {max} bytes"))),
-        _ => Ok(out),
+/// Decoder workspaces live for one document load, not across imports.
+#[derive(Default)]
+struct Decompressor {
+    #[cfg(feature = "native-zstd")]
+    native: Option<photocraft_codecs::ZstdDecoder>,
+    #[cfg(not(feature = "native-zstd"))]
+    rust: ruzstd::decoding::FrameDecoder,
+}
+
+impl Decompressor {
+    /// Decodes one frame, checking the output budget and optional exact length.
+    fn decode(&mut self, data: &[u8], max: usize, exact: Option<usize>, what: &str) -> Result<Vec<u8>> {
+        let zstd = |e: &dyn std::fmt::Display| FormatError::corrupt(format!("{what}: zstd: {e}"));
+        #[cfg(feature = "native-zstd")]
+        let out = {
+            let decoder = match &mut self.native {
+                Some(decoder) => decoder,
+                slot @ None => slot.insert(photocraft_codecs::ZstdDecoder::new()?),
+            };
+            let decoded = if exact.is_some() { decoder.decode(data, max) } else { decoder.decode_bounded(data, max) };
+            decoded.map_err(|e| {
+                if e.kind() == std::io::ErrorKind::FileTooLarge { FormatError::LimitExceeded(format!("{what} exceeds {max} bytes")) } else { zstd(&e) }
+            })?
+        };
+        #[cfg(not(feature = "native-zstd"))]
+        let out = {
+            let mut dec = ruzstd::decoding::StreamingDecoder::new_with_decoder(data, &mut self.rust).map_err(|e| zstd(&e))?;
+            let mut out = Vec::with_capacity(exact.unwrap_or(0).min(max).min(64 << 20));
+            // `max` may be `usize::MAX`: one byte past it must not overflow.
+            let limit = u64::try_from(max).unwrap_or(u64::MAX).saturating_add(1);
+            (&mut dec).take(limit).read_to_end(&mut out).map_err(|e| zstd(&e))?;
+            out
+        };
+        match exact {
+            Some(n) if out.len() != n => Err(FormatError::corrupt(format!("{what}: expected {n} bytes, got {}", out.len()))),
+            None if out.len() > max => Err(FormatError::LimitExceeded(format!("{what} exceeds {max} bytes"))),
+            _ => Ok(out),
+        }
     }
+}
+
+/// Decodes a standalone frame with an output budget and optional exact length.
+fn decompress_bounded(data: &[u8], max: usize, exact: Option<usize>, what: &str) -> Result<Vec<u8>> {
+    Decompressor::default().decode(data, max, exact, what)
 }
 
 fn decompress(data: &[u8], expected: usize, what: &str) -> Result<Vec<u8>> {
@@ -66,6 +110,12 @@ fn png(img: &Rgba8Image) -> Result<Vec<u8>> {
 
 pub trait ByteSource {
     fn get(&self, path: &str, max: usize) -> Result<Vec<u8>>;
+
+    /// Reads with the same limits as [`Self::get`], borrowing when the source permits it.
+    /// Sources that only implement `get` keep returning owned buffers.
+    fn get_cow(&self, path: &str, max: usize) -> Result<Cow<'_, [u8]>> {
+        self.get(path, max).map(Cow::Owned)
+    }
 }
 
 pub(crate) struct ZipSource<'a> {
@@ -82,6 +132,26 @@ impl ByteSource for ZipSource<'_> {
     fn get(&self, path: &str, max: usize) -> Result<Vec<u8>> {
         self.zip.read_by_name(path, max)
     }
+
+    fn get_cow(&self, path: &str, max: usize) -> Result<Cow<'_, [u8]>> {
+        let entry = self.zip.find(path).ok_or_else(|| FormatError::corrupt(format!("missing `{path}`")))?;
+        self.zip.read_cow(entry, max)
+    }
+}
+
+#[test]
+fn zip_source_borrows_checked_payloads() {
+    let mut zip = ZipWriter::new();
+    zip.add("tiles/test.zst", b"payload").unwrap();
+    let mut bytes = zip.finish().unwrap();
+    let offset = bytes.windows(7).position(|b| b == b"payload").unwrap();
+    let source = ZipSource::new(&bytes).unwrap();
+    assert!(matches!(source.get_cow("tiles/test.zst", 7).unwrap(), Cow::Borrowed(b"payload")));
+    assert_eq!(source.get_cow("tiles/test.zst", 7).unwrap().as_ptr(), bytes[offset..].as_ptr());
+    assert!(source.get_cow("tiles/test.zst", 6).is_err());
+    assert!(source.get_cow("missing", 7).is_err());
+    bytes[offset] ^= 1;
+    assert!(ZipSource::new(&bytes).unwrap().get_cow("tiles/test.zst", 7).is_err());
 }
 
 pub(crate) struct DirSource {
@@ -204,6 +274,7 @@ struct LoadFetch<'a> {
     opts: LoadOptions,
     total: u64,
     blobs: HashMap<String, Arc<Vec<u8>>>,
+    decompressor: Decompressor,
 }
 
 impl LoadFetch<'_> {
@@ -223,9 +294,9 @@ impl Fetch for LoadFetch<'_> {
         }
         self.account(len)?;
         let path = tile_path(hash);
-        let z = self.src.get(&path, len + len / 8 + 4096)?;
-        let data = decompress(&z, len, &path)?;
-        if hash_bytes(&data) != hash {
+        let z = self.src.get_cow(&path, len + len / 8 + 4096)?;
+        let data = self.decompressor.decode(&z, len, Some(len), &path)?;
+        if blake3::hash(&data).to_hex().as_str() != hash {
             return Err(FormatError::corrupt(format!("{path}: content does not match its hash")));
         }
         Ok(data)
@@ -239,12 +310,14 @@ impl Fetch for LoadFetch<'_> {
             return Err(FormatError::corrupt(format!("invalid blob hash `{hash}`")));
         }
         let path = blob_path(hash);
-        let z = self.src.get(&path, self.opts.max_blob_bytes)?;
+        // The budget limits decoded bytes; allow the same frame overhead as tiles.
+        let max_compressed = self.opts.max_blob_bytes.saturating_add(self.opts.max_blob_bytes / 8).saturating_add(4096);
+        let z = self.src.get_cow(&path, max_compressed)?;
         // Blob length is not in the manifest; the frame header bounds it and
         // we cap at max_blob_bytes.
-        let data = decompress_bounded(&z, self.opts.max_blob_bytes, None, &path)?;
+        let data = self.decompressor.decode(&z, self.opts.max_blob_bytes, None, &path)?;
         self.account(data.len())?;
-        if hash_bytes(&data) != hash {
+        if blake3::hash(&data).to_hex().as_str() != hash {
             return Err(FormatError::corrupt(format!("{path}: content does not match its hash")));
         }
         let data = Arc::new(data);
@@ -271,7 +344,7 @@ fn admit_canvas(size: photocraft_geom::Size, opts: &LoadOptions) -> Result<()> {
 pub(crate) fn load(src: &dyn ByteSource, opts: &LoadOptions) -> Result<Document> {
     let m = read_manifest(src, opts)?;
     admit_canvas(m.document.size, opts)?;
-    let mut fetch = LoadFetch { src, opts: *opts, total: 0, blobs: HashMap::new() };
+    let mut fetch = LoadFetch { src, opts: *opts, total: 0, blobs: HashMap::new(), decompressor: Decompressor::default() };
     let mut loader = Loader {
         fetch: &mut fetch,
         preserve_ids: opts.preserve_ids,
@@ -416,8 +489,26 @@ enum Object {
 }
 
 impl Object {
-    fn compressed(&self) -> Vec<u8> {
-        compress(&self.content())
+    /// Compresses one object with the selected backend.
+    fn compressed(&self, _compressor: &mut Compressor<'_>) -> Result<Vec<u8>> {
+        let bytes = self.content();
+        #[cfg(feature = "native-zstd")]
+        return Ok(_compressor.compress(&bytes)?);
+        #[cfg(not(feature = "native-zstd"))]
+        Ok(ruzstd::encoding::compress_to_vec(bytes.as_ref(), ruzstd::encoding::CompressionLevel::Fastest))
+    }
+
+    /// Replaces a directory save's temporary output without compacting each small object.
+    fn compress_into(&self, _compressor: &mut Compressor<'_>, encoded: &mut Vec<u8>) -> Result<()> {
+        let bytes = self.content();
+        #[cfg(feature = "native-zstd")]
+        _compressor.compress_into(&bytes, encoded)?;
+        #[cfg(not(feature = "native-zstd"))]
+        {
+            encoded.clear();
+            ruzstd::encoding::compress(bytes.as_ref(), encoded, ruzstd::encoding::CompressionLevel::Fastest);
+        }
+        Ok(())
     }
 
     /// The bytes this object stores (tiles little-endian).
@@ -429,9 +520,29 @@ impl Object {
     }
 }
 
+/// At most 2 MiB of output scratch survives between objects in one directory save.
+const MAX_DIRECTORY_SCRATCH: usize = 2 << 20;
+
+/// Writes an independent frame and releases oversized output after the write.
+fn write_object(root: &Path, path: &Path, object: &Object, compressor: &mut Compressor<'_>, encoded: &mut Vec<u8>) -> Result<()> {
+    object.compress_into(compressor, encoded)?;
+    if encoded.capacity() > MAX_DIRECTORY_SCRATCH {
+        encoded.shrink_to_fit();
+    }
+    let result = write_bundle_file(root, path, encoded);
+    if encoded.capacity() > MAX_DIRECTORY_SCRATCH {
+        *encoded = Vec::new();
+    }
+    result
+}
+
 /// Whether `compressed` decodes to exactly `expected`.
 fn content_matches(expected: &[u8], compressed: &[u8], what: &str) -> bool {
-    decompress(compressed, expected.len(), what).is_ok_and(|actual| hash_bytes(&actual) == hash_bytes(expected))
+    #[cfg(feature = "native-zstd")]
+    if expected.len() > MAX_DIRECTORY_SCRATCH {
+        return photocraft_codecs::zstd_matches_exact(compressed, expected).unwrap_or(false);
+    }
+    decompress(compressed, expected.len(), what).is_ok_and(|actual| actual == expected)
 }
 
 fn file_signature(metadata: &std::fs::Metadata) -> Option<FileSignature> {
@@ -687,22 +798,27 @@ type Compressed<'a> = (&'a String, Arc<Vec<u8>>);
 
 /// Compresses `objects` on scoped worker threads (sequentially on wasm).
 fn par_compress<'a>(objects: &[(&'a String, &'a Object)]) -> Result<Vec<Compressed<'a>>> {
+    if objects.is_empty() {
+        return Ok(Vec::new());
+    }
     let threads = if cfg!(target_arch = "wasm32") { 1 } else { std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 32) };
     if threads < 2 || objects.len() < 2 {
-        return Ok(objects.iter().map(|(p, o)| (*p, Arc::new(o.compressed()))).collect());
+        let mut compressor = new_compressor()?;
+        return objects.iter().map(|(p, o)| Ok((*p, Arc::new(o.compressed(&mut compressor)?)))).collect();
     }
     let next = std::sync::atomic::AtomicUsize::new(0);
     std::thread::scope(|sc| {
         let hs: Vec<_> = (0..threads.min(objects.len()))
             .map(|_| {
-                sc.spawn(|| {
+                sc.spawn(|| -> Result<_> {
+                    let mut compressor = new_compressor()?;
                     let mut out = Vec::new();
                     loop {
                         let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         let Some((p, o)) = objects.get(i) else { break };
-                        out.push((*p, Arc::new(o.compressed())));
+                        out.push((*p, Arc::new(o.compressed(&mut compressor)?)));
                     }
-                    out
+                    Ok(out)
                 })
             })
             .collect();
@@ -711,7 +827,7 @@ fn par_compress<'a>(objects: &[(&'a String, &'a Object)]) -> Result<Vec<Compress
         let joined: Vec<_> = hs.into_iter().map(|h| h.join()).collect();
         let mut out = Vec::with_capacity(objects.len());
         for r in joined {
-            out.extend(r.map_err(|_| FormatError::Io(std::io::Error::other("compression worker panicked")))?);
+            out.extend(r.map_err(|_| FormatError::Io(std::io::Error::other("compression worker panicked")))??);
         }
         Ok(out)
     })
@@ -793,7 +909,10 @@ impl PcraftWriter {
                         Object::Tile(..) => stats.tiles_written += 1,
                         Object::Blob(_) => stats.blobs_written += 1,
                     }
-                    fresh.remove(path).unwrap_or_else(|| Arc::new(obj.compressed()))
+                    match fresh.remove(path) {
+                        Some(data) => data,
+                        None => Arc::new(obj.compressed(&mut new_compressor()?)?),
+                    }
                 }
             };
             z.add(path, &data)?;
@@ -828,6 +947,8 @@ impl PcraftWriter {
             None => 0,
         };
         let recheck = self.rolling_recheck(&p.objects);
+        let mut compressor = None;
+        let mut encoded = Vec::new();
         for (path, obj) in &p.objects {
             let object_path = dir.join(path);
             // bundle_root and list_objects validated the fixed parent directories once. Check
@@ -862,7 +983,11 @@ impl PcraftWriter {
                 Object::Tile(..) => stats.tiles_written += 1,
                 Object::Blob(_) => stats.blobs_written += 1,
             }
-            write_bundle_file(dir, &object_path, &obj.compressed())?;
+            let compressor = match &mut compressor {
+                Some(c) => c,
+                None => compressor.insert(new_compressor()?),
+            };
+            write_object(dir, &object_path, obj, compressor, &mut encoded)?;
             let written = path_signature(&object_path)?;
             if let Some(cache) = &mut self.verified_directory {
                 match written {
@@ -1010,4 +1135,158 @@ fn list_objects(dir: &Path) -> Result<HashSet<String>> {
 pub(crate) fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
     crate::atomic::atomic_write(path, data)?;
     Ok(())
+}
+
+/// Reuse must preserve independent objects and recover after a failed frame.
+#[test]
+fn decoder_reuse_preserves_independent_objects() {
+    let mut decoder = Decompressor::default();
+    for bytes in [vec![37; 262_147], vec![], vec![19; 131_072], vec![42; 17]] {
+        let encoded = Object::Blob(Arc::new(bytes.clone())).compressed(&mut new_compressor().unwrap()).unwrap();
+        let mut reference = ruzstd::decoding::StreamingDecoder::new(encoded.as_slice()).unwrap();
+        let mut expected = Vec::new();
+        reference.read_to_end(&mut expected).unwrap();
+        assert_eq!(decoder.decode(&encoded, bytes.len(), Some(bytes.len()), "tile").unwrap(), expected);
+        assert!(decoder.decode(&encoded[..encoded.len() - 1], bytes.len(), None, "blob").is_err());
+        assert_eq!(decoder.decode(&encoded, bytes.len(), None, "blob").unwrap(), bytes);
+        if !bytes.is_empty() {
+            assert!(matches!(decoder.decode(&encoded, bytes.len() - 1, None, "blob"), Err(FormatError::LimitExceeded(_))));
+        }
+    }
+}
+
+/// Blob limits apply to decoded bytes, including empty and expanding frames.
+#[test]
+fn blob_budget_allows_frame_overhead() {
+    for bytes in [vec![], vec![42], (0..32).collect()] {
+        let hash = hash_bytes(&bytes);
+        let mut encoded = Object::Blob(Arc::new(bytes.clone())).compressed(&mut new_compressor().unwrap()).unwrap();
+        assert!(encoded.len() > bytes.len());
+        for corrupt in [false, true] {
+            if corrupt {
+                encoded.pop();
+            }
+            let mut zip = ZipWriter::new();
+            zip.add(&blob_path(&hash), &encoded).unwrap();
+            let zip = zip.finish().unwrap();
+            let source = ZipSource::new(&zip).unwrap();
+            let fetch = |max| LoadFetch {
+                src: &source,
+                opts: LoadOptions { max_blob_bytes: max, max_total_bytes: bytes.len() as u64, ..LoadOptions::default() },
+                total: 0,
+                blobs: HashMap::new(),
+                decompressor: Decompressor::default(),
+            };
+            if corrupt {
+                assert!(fetch(bytes.len()).blob(&hash).is_err());
+            } else {
+                assert_eq!(*fetch(bytes.len()).blob(&hash).unwrap(), bytes);
+                if !bytes.is_empty() {
+                    assert!(matches!(fetch(bytes.len() - 1).blob(&hash), Err(FormatError::LimitExceeded(_))));
+                }
+            }
+        }
+    }
+}
+
+/// Buffer reuse preserves frame bytes and releases large outputs, including failed writes.
+#[test]
+fn directory_output_reuse_is_bounded_and_preserves_frames() {
+    let dir = std::env::temp_dir().join(format!("photocraft-output-reuse-{}", std::process::id()));
+    let root = bundle_root(&dir).unwrap();
+    let path = root.join("blobs/test.zst");
+    let mut compressor = new_compressor().unwrap();
+    let mut encoded = Vec::new();
+    let mut first = std::ptr::null();
+    // Incompressible bytes exercise the output limit, without a timing fixture or document.
+    let mut state = 0x1234_5678u32;
+    let big: Vec<u8> = (0..MAX_DIRECTORY_SCRATCH + 4096)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            state as u8
+        })
+        .collect();
+    for (i, bytes) in [vec![42; 1024], vec![19; 1024], big, vec![]].into_iter().enumerate() {
+        let object = Object::Blob(Arc::new(bytes));
+        let expected = object.compressed(&mut new_compressor().unwrap()).unwrap();
+        write_object(&root, &path, &object, &mut compressor, &mut encoded).unwrap();
+        let actual = std::fs::read(&path).unwrap();
+        assert_eq!(actual, expected);
+        let content = object.content();
+        assert!(content_matches(&content, &actual, "test"));
+        assert_eq!(decompress_bounded(&actual, content.len(), Some(content.len()), "test").unwrap(), content.as_ref());
+        assert!(encoded.capacity() <= MAX_DIRECTORY_SCRATCH);
+        if i == 0 {
+            first = encoded.as_ptr();
+        }
+        if i == 1 {
+            assert_eq!(encoded.as_ptr(), first);
+        }
+        if i == 2 {
+            let mut wrong = content.to_vec();
+            wrong[0] ^= 1;
+            assert!(!content_matches(&wrong, &actual, "test"));
+            assert!(actual.len() > MAX_DIRECTORY_SCRATCH);
+            assert_eq!(encoded.capacity(), 0);
+            assert!(write_object(&root, &root.join("invalid/test.zst"), &object, &mut compressor, &mut encoded).is_err());
+            assert_eq!(encoded.capacity(), 0);
+        }
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(all(test, feature = "native-zstd"))]
+mod tests {
+    use super::*;
+
+    thread_local! {
+        pub(super) static COMPRESSORS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    /// Empty and cached-only saves need no encoder, while new objects share one.
+    #[test]
+    fn unchanged_saves_skip_encoder_creation() {
+        use photocraft_color::{Color, ColorMode};
+        let doc = Document::with_background("reuse", photocraft_geom::Size::new(1, 1), ColorMode::Rgb, SampleType::U8, Color::BLACK);
+        let mut writer = PcraftWriter::new();
+        COMPRESSORS.set(0);
+        assert!(par_compress(&[]).unwrap().is_empty());
+        assert_eq!(COMPRESSORS.get(), 0);
+        let (first, _) = writer.save_zip(&doc, &SaveOptions::default()).unwrap();
+        assert_eq!(COMPRESSORS.get(), 1);
+        assert_eq!(writer.save_zip(&doc, &SaveOptions::default()).unwrap().0, first);
+        assert_eq!(COMPRESSORS.get(), 1);
+        let dir = std::env::temp_dir().join(format!("photocraft-native-reuse-{}", std::process::id()));
+        writer.save_dir(&doc, &dir, &SaveOptions::default()).unwrap();
+        assert_eq!(COMPRESSORS.get(), 2);
+        writer.save_dir(&doc, &dir, &SaveOptions::default()).unwrap();
+        assert_eq!(COMPRESSORS.get(), 2);
+        assert_eq!(crate::load_path(&dir).unwrap(), doc);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Reusing a native encoder preserves independent frames in both readers.
+    #[test]
+    fn reused_compressor_produces_independent_frames() {
+        let data: Vec<Arc<Vec<u8>>> =
+            [0, 1, 8, 131_072, 262_144, 262_147, 131_072, 1].into_iter().map(|n| Arc::new((0..n).map(|i| ((i * 37 + i / 97) % 251) as u8).collect())).collect();
+        let objects: Vec<_> = data.iter().cloned().map(Object::Blob).collect();
+        let mut compressor = new_compressor().unwrap();
+        for (object, bytes) in objects.iter().zip(&data) {
+            let encoded = object.compressed(&mut compressor).unwrap();
+            assert_eq!(decompress(&encoded, bytes.len(), "test").unwrap(), **bytes);
+            assert_eq!(decompress_bounded(&encoded, bytes.len(), None, "blob").unwrap(), **bytes);
+            if !bytes.is_empty() {
+                assert!(matches!(decompress_bounded(&encoded, bytes.len() - 1, None, "blob"), Err(FormatError::LimitExceeded(_))));
+            }
+            let mut rust_reader = ruzstd::decoding::StreamingDecoder::new(encoded.as_slice()).unwrap();
+            let mut rust_bytes = Vec::new();
+            rust_reader.read_to_end(&mut rust_bytes).unwrap();
+            assert_eq!(rust_bytes, **bytes);
+            let rust = ruzstd::encoding::compress_to_vec(bytes.as_slice(), ruzstd::encoding::CompressionLevel::Fastest);
+            assert_eq!(decompress(&rust, bytes.len(), "Rust encoder").unwrap(), **bytes);
+        }
+    }
 }

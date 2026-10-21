@@ -10,6 +10,8 @@ rust-version.workspace = true
 workspace = true
 
 [features]
+# Reference Zstandard decoder; pure Rust remains the default.
+native-zstd = ["dep:zstd"]
 # Synthetic-container builders for tests and fuzz seeds; not an Affinity exporter.
 synth = []
 
@@ -17,6 +19,7 @@ synth = []
 crc32fast = "1.5"
 flate2 = { workspace = true }
 ruzstd = "0.9.1"
+zstd = { version = "0.13.3", default-features = false, optional = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

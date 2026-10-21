@@ -77,15 +77,17 @@ fn missing_manifest_is_error() {
 }
 
 #[test]
-fn swapped_tile_content_fails_hash_check() {
+fn swapped_tile_and_blob_content_fails_hash_check() {
     let b = sample();
     let r = zip::ZipReader::new(&b).unwrap();
-    let tiles: Vec<_> = r.entries.iter().filter(|e| e.name.starts_with("tiles/")).map(|e| e.name.clone()).collect();
-    let other = r.read_by_name(&tiles[1], usize::MAX).unwrap();
-    let first = tiles[0].clone();
-    let b2 = rebuild(&b, |n, d| Some(if n == first { other.clone() } else { d }));
-    let e = load_from_bytes(&b2).unwrap_err();
-    assert!(e.to_string().contains("hash"), "{e}");
+    for prefix in ["tiles/", "blobs/"] {
+        let entries: Vec<_> = r.entries.iter().filter(|e| e.name.starts_with(prefix)).collect();
+        let other = r.read(entries[1], usize::MAX).unwrap();
+        let first = &entries[0].name;
+        let b2 = rebuild(&b, |n, d| Some(if n == first { other.clone() } else { d }));
+        let e = load_from_bytes(&b2).unwrap_err();
+        assert!(e.to_string().contains("hash"), "{prefix}: {e}");
+    }
 }
 
 #[test]
@@ -238,6 +240,42 @@ fn directory_bundle_resave_repairs_tampered_objects() {
     }
 
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// Reused blobs need a complete first frame; large native objects reject trailing input.
+#[test]
+fn directory_save_repairs_missing_and_split_blob_frames() {
+    for len in [0, 64, (2 << 20) + 1] {
+        let bytes = vec![37; len];
+        let damaged: Vec<u8> = if len == 0 {
+            Vec::new()
+        } else {
+            [&bytes[..len / 2], &bytes[len / 2..]]
+                .into_iter()
+                .flat_map(|b| ruzstd::encoding::compress_to_vec(b, ruzstd::encoding::CompressionLevel::Fastest))
+                .collect()
+        };
+        let mut doc = photocraft_doc::Document::new("blob frames", photocraft_geom::Size::new(1, 1), ColorMode::Rgb, SampleType::U8);
+        doc.icc_profile = Some(std::sync::Arc::new(bytes));
+        let dir = temp_dir("blob-frames");
+        let mut writer = PcraftWriter::new();
+        writer.save_dir(&doc, &dir, &SaveOptions::default()).unwrap();
+        let blob = std::fs::read_dir(dir.join("blobs")).unwrap().next().unwrap().unwrap().path();
+        std::fs::write(&blob, damaged).unwrap();
+        assert!(load_path(&dir).is_err());
+        assert_eq!(writer.save_dir(&doc, &dir, &SaveOptions::default()).unwrap().blobs_written, 1, "{len} bytes");
+        assert_eq!(load_path(&dir).unwrap(), doc);
+        #[cfg(feature = "native-zstd")]
+        if len > 2 << 20 {
+            let original = std::fs::read(&blob).unwrap();
+            for suffix in [b"trailing".as_slice(), original.as_slice()] {
+                std::fs::write(&blob, [original.as_slice(), suffix].concat()).unwrap();
+                assert_eq!(writer.save_dir(&doc, &dir, &SaveOptions::default()).unwrap().blobs_written, 1);
+                assert_eq!(std::fs::read(&blob).unwrap(), original);
+            }
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }
 
 /// Damages one object in place without changing its length or modification time, the case a
