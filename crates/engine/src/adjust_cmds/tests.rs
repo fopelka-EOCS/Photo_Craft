@@ -780,3 +780,46 @@ fn invert_turns_the_black_of_quick_mask_and_alpha_channels_white() {
         }
     }
 }
+
+#[test]
+fn equalize_smart_filter_uses_selected_pixels_for_its_histogram() {
+    for depth in DEPTHS {
+        let mut plain = session(depth, "rgb");
+        let mut smart = session(depth, "rgb");
+        smart.execute("layer.smartObjects.convertToSmartObject", json!({})).unwrap();
+        for s in [&mut plain, &mut smart] {
+            s.execute("select.rect", json!({"x": 0, "y": 0, "width": 12, "height": 32})).unwrap();
+            s.execute("image.adjustments.equalize", json!({})).unwrap();
+        }
+        assert!(max_diff(&flatten(&plain), &flatten(&smart)) < 2.0 / 255.0, "depth={depth}");
+        // Disabling the filter mask changes the histogram too: no stale cached stage.
+        let mut full = session(depth, "rgb");
+        full.execute("image.adjustments.equalize", json!({})).unwrap();
+        smart.execute("select.deselect", json!({})).unwrap();
+        smart.execute("layer.smartFilter.disableFilterMask", json!({"enabled": false})).unwrap();
+        assert!(max_diff(&flatten(&full), &flatten(&smart)) < 2.0 / 255.0, "disabled mask, depth={depth}");
+    }
+}
+
+#[test]
+fn replace_color_null_records_foreground_and_bad_color_does_not_edit() {
+    for depth in DEPTHS {
+        let mut plain = session(depth, "rgb");
+        let mut smart = session(depth, "rgb");
+        smart.execute("layer.smartObjects.convertToSmartObject", json!({})).unwrap();
+        let params = json!({"color": null, "fuzziness": 200, "hue": 90});
+        for s in [&mut plain, &mut smart] {
+            s.tools.foreground = [0.27, 0.6, 0.52, 1.0];
+            s.execute("image.adjustments.replaceColor", params.clone()).unwrap();
+        }
+        assert_eq!(max_diff(&flatten(&plain), &flatten(&smart)), 0.0);
+        assert_eq!(smart_filters_of(&smart)[0].params["color"], json!([0.27_f32, 0.6_f32, 0.52_f32, 1.0_f32]));
+        let before = smart.active().unwrap().doc.clone();
+        let steps = smart.active().unwrap().history.past_len();
+        for color in [json!(3), json!("wrong"), json!([1, 2])] {
+            assert!(smart.execute("image.adjustments.replaceColor", json!({"color": color})).is_err());
+            assert!(std::sync::Arc::ptr_eq(&smart.active().unwrap().doc, &before));
+            assert_eq!(smart.active().unwrap().history.past_len(), steps);
+        }
+    }
+}

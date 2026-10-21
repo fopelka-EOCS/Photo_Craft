@@ -314,7 +314,7 @@ pub fn apply_smart_filters(placed: &Surface, sm: &SmartObject, canvas: Rect) -> 
     // Edge pixels repeat at the canvas ∪ placed-content edge, as for layer filters.
     let extent = canvas.union(&placed.content_bounds());
     for f in sm.smart_filters.iter().filter(|f| f.visible) {
-        cur = apply_smart_filter(f, &cur, canvas, extent)?;
+        cur = apply_smart_filter(f, &cur, canvas, extent, sm.filter_mask.as_ref())?;
     }
     Ok(match sm.filter_mask.as_ref().filter(|m| m.enabled) {
         Some(m) => photocraft_compose::filter_mask::mix(placed, &cur, m),
@@ -325,8 +325,14 @@ pub fn apply_smart_filters(placed: &Surface, sm: &SmartObject, canvas: Rect) -> 
 /// One visible smart filter over `cur`, blended with its blend mode and opacity. `Err` when the
 /// requesting session's authority denies the filter's params: callers surface the error instead of
 /// rendering (and caching) unfiltered pixels.
-fn apply_smart_filter(f: &SmartFilter, cur: &Surface, canvas: Rect, extent: Rect) -> Result<Surface> {
-    let out = match crate::filters::apply_filter_to_surface(&f.command, &f.params, cur, canvas, None, extent)? {
+fn apply_smart_filter(f: &SmartFilter, cur: &Surface, canvas: Rect, extent: Rect, mask: Option<&photocraft_doc::LayerMask>) -> Result<Surface> {
+    crate::jobs::authorize_render_command(&f.command, &f.params)?;
+    let rendered = if f.command == "image.adjustments.equalize" {
+        crate::adjust_cmds::adjust_as_filter("equalize", &f.params, cur, mask)
+    } else {
+        crate::filters::apply_filter_to_surface(&f.command, &f.params, cur, canvas, None, extent)?
+    };
+    let out = match rendered {
         // Unknown ids (e.g. Photoshop filters we don't implement) leave the pixels alone.
         Some(out) => out,
         None => cur.clone(),
@@ -414,7 +420,7 @@ fn render_in(doc: &Document, sm: &SmartObject, ctx: &JobCtx) -> Result<Option<Su
     let keys: Vec<StageKey> = filters
         .iter()
         .scan(placed_key, |key, f| {
-            *key = stack_cache::filter_key(key, f);
+            *key = stack_cache::filter_key(key, f, sm.filter_mask.as_ref());
             Some(*key)
         })
         .collect();
@@ -427,7 +433,7 @@ fn render_in(doc: &Document, sm: &SmartObject, ctx: &JobCtx) -> Result<Option<Su
     for (i, (f, key)) in filters.iter().zip(&keys).enumerate().skip(done) {
         ctx.check()?;
         ctx.progress(i as f32 / n, "");
-        cur = Stage { surface: apply_smart_filter(f, &cur.surface, canvas, cur.extent)?, extent: cur.extent };
+        cur = Stage { surface: apply_smart_filter(f, &cur.surface, canvas, cur.extent, sm.filter_mask.as_ref())?, extent: cur.extent };
         stack_cache::put(*key, &cur);
     }
     ctx.progress(1.0, "");

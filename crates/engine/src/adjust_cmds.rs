@@ -297,7 +297,7 @@ fn has_doc(s: &Session) -> std::result::Result<(), String> {
 
 /// Image › Adjustments run as a smart filter (`image.adjustments.<kind>` recorded on a smart
 /// object): the adjustment applied to a copy of `surf`. `None` for kinds or params it can't run.
-pub(crate) fn adjust_as_filter(kind: &str, p: &Value, surf: &Surface) -> Option<Surface> {
+pub(crate) fn adjust_as_filter(kind: &str, p: &Value, surf: &Surface, histogram_mask: Option<&photocraft_doc::LayerMask>) -> Option<Surface> {
     // A Color Lookup filter re-reads its LUT `file`, a path stored in the document: followed only
     // as `doc_path` allows, else the filter can't run (like a missing file).
     let resolved;
@@ -320,8 +320,10 @@ pub(crate) fn adjust_as_filter(kind: &str, p: &Value, surf: &Surface) -> Option<
         let mode = surf.format().mode;
         crate::pixels::adjust_surface(&mut out, &crate::commands::desaturate_adjustment(), None, mode);
     } else if kind == "equalize" {
-        process_surface(&mut out, None, &mut |px, _| {
-            let cover = vec![1.0; px.len()];
+        process_surface(&mut out, None, &mut |px, area| {
+            let width = area.width() as usize;
+            let cover =
+                (0..px.len()).map(|i| histogram_mask.map_or(1.0, |m| m.value(area.x0 + (i % width) as i32, area.y0 + (i / width) as i32))).collect::<Vec<_>>();
             crate::extra_cmds::equalize_pixels(px, &cover);
         });
     } else if kind == "shadowsHighlights" {
@@ -374,21 +376,17 @@ fn replace_color(s: &mut Session, p: &Value) -> Result<Value> {
     if localized_requested && on_smart {
         return Err(bad(CMD, "Localized Color Clusters are not available as a smart filter yet"));
     }
+    let (c, fuzz, h, sat, l) = replace_color_params(CMD, p, s.tools.foreground)?;
     if !localized_requested {
-        // A smart object records the foreground colour it was sampled with, so the filter does not
-        // change when the foreground does.
-        let mut q = p.clone();
-        if p.get("color").is_none()
-            && let Value::Object(m) = &mut q
-        {
-            let f = s.tools.foreground;
-            m.insert("color".into(), json!([f[0], f[1], f[2], f[3]]));
+        // Resolve and validate before recording, including the null foreground fallback.
+        let mut q = Value::Object(p.as_object().cloned().unwrap_or_default());
+        if let Value::Object(m) = &mut q {
+            m.insert("color".into(), json!(c));
         }
         if adjust_as_smart_filter(s, "replaceColor", "Replace Color", &q)? {
             return Ok(Value::Null);
         }
     }
-    let (c, fuzz, h, sat, l) = replace_color_params(CMD, p, s.tools.foreground)?;
     // Localized Color Clusters, as in Select › Color Range: the colour only matches within Range
     // (a percentage of the canvas's longer side) of where it was picked.
     let points = sample_points(p).map_err(|m| bad(CMD, m))?;
