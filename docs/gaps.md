@@ -243,7 +243,10 @@ what an agent can't finish alone.
 ## File-format gaps
 
 ### G10. Missing and partial file formats
-- **Missing:** JPEG Options dialog (FILE-215-19), Photoshop PDF read and its vector/text/multi-page
+- **Done (2026-10-21):** Save As / Save a Copy JPEG Options dialog (FILE-215-19): quality 0–12,
+  Baseline Standard/Optimized and Progressive (3–5 scans); scripted saves and actions accept the
+  same options. `scorecard/file_compat.toml` and the generated scorecard record the closure.
+- **Missing:** Photoshop PDF read and its vector/text/multi-page
   write (FILE-215-10, #2541; a single flattened page now saves via Save As / Save a Copy / CLI,
   2026-10-11, #3401), AVIF read (#463) and default-build AVIF write, JPEG XL, JPEG 2000 (#1047),
   Cineon write (read landed), DICOM, EPS/DCS, Pixar, IFF, WBMP, MPO/JPS, PICT, Scitex CT, Photoshop
@@ -339,6 +342,7 @@ what an agent can't finish alone.
 | 2026-10-11 | minor | G4: Pattern Stamp and Background Eraser draw live, Spot Healing shows a dark overlay while dragging (#3754); only the Mixer Brush is left of TOOL-213-7 |
 | 2026-10-11 | minor | G8: Character panel OpenType buttons landed (TYPE-218-5, #3752); Numerals and Stylistic Sets submenus still missing |
 | 2026-10-11 | minor | G10: one-page flattened PDF write shipped (io::pdf, #3401); FILE-215-10 now partial |
+| 2026-10-21 | minor | G10: Save As / Save a Copy JPEG Options dialog landed (FILE-215-19); removed it from the missing list |
 | 2026-10-10 | minor | G2: recorded Tilt-Shift computation/filtered-proxy measurements and limits; gap and estimate remain open
 | 2026-10-10 | minor | Checked against the alpha gate (no alpha blockers); #2374 marked closed |
 | 2026-10-10 | major | First version, from the full re-measure against Photoshop 2026 27.11.0 and the open issues |

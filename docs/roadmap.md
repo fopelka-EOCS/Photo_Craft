@@ -1,6 +1,6 @@
 # Roadmap
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (adaptive Unsharp Mask performance evidence linked; Photomerge status correction retained; alpha gate, focus and estimates unchanged) · **Target:** Adobe Photoshop 2026
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-21 · **Change:** minor (FILE-215-19 JPEG Options dialog landed and removed from the 0.7 scope; alpha gate, current focus and estimates unchanged) · **Target:** Adobe Photoshop 2026
 
 - UI.5: Panels can detach, join other tab groups, split, resize and redock through shared docking transactions. Custom layouts persist with workspaces, respect workspace locking, and retain collapse flags for intact native groups.
 
@@ -86,7 +86,7 @@ Ranked; each item links to its gap entry. Pick from the top unless an issue is a
 
 | Next milestone | Scope | Estimate |
 |---|---|---:|
-| 0.7 "files you can trust" | Current focus 1 plus JPEG Options, AVIF read, Photoshop PDF read | 200–320 h |
+| 0.7 "files you can trust" | Current focus 1 plus AVIF read, Photoshop PDF read | 200–320 h |
 | 0.8 "fast enough" | Current focus 2; GPU tiling past the texture limit (#49); complex layout documents | 200–350 h |
 | 0.9 "feels like Photoshop" | Current focus 4 and 5; transform context menu; floating panels; Color panel | 300–500 h |
 | Beta | All of the above, type depth, Select and Mask / Content-Aware Fill workspaces, Hindi/Arabic/Vietnamese + RTL, bug backlog under 100 | 1,100–1,800 h total |
@@ -117,6 +117,7 @@ Each milestone has a **definition of done (DoD)** and must leave `main` green on
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-11 | minor | Linked adaptive Unsharp Mask performance and quality evidence; milestones, alpha gate and estimates unchanged |
+| 2026-10-21 | minor | FILE-215-19 JPEG Options dialog landed and was removed from the 0.7 scope; estimates unchanged |
 | 2026-10-10 | minor | Photomerge is implemented; real-world quality validation remains open |
 | 2026-10-10 | minor | Alpha gate table (core-workflow gate from the progress-docs standard): passes, stage stays alpha |
 | 2026-10-10 | major | Progress-docs standard: honest assessment and dated measurements moved to `target-app-parity.md`, Affinity notes to `file-format-parity.md`; new Current focus and estimates; `parity.md` renamed `parity-checklist.md` |
