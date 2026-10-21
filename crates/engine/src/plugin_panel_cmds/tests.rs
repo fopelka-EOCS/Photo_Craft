@@ -866,3 +866,19 @@ fn the_store_is_capped_at_one_mib_and_a_refused_value_is_not_kept() {
     }
     cleanup(&mut s, id);
 }
+
+#[test]
+fn an_armed_timer_tells_the_ui_when_to_draw_again() {
+    let _ticking = ticking();
+    let id = "test.panel.nexttimer";
+    let mut s = app(id, &panel(id, &[VIEW, r#"[{"op": "timer.set", "id": "poll", "ms": 60000}]"#]));
+    open(&mut s, id);
+    assert_eq!(next_timer_in(), None, "no timer is armed, so there is nothing to wake for");
+    click(&mut s, id, "go").unwrap();
+    let wait = next_timer_in().expect("a visible panel armed a timer");
+    assert!(wait <= 60_000, "the nearest timer is 60 s away, not {wait} ms");
+    // A closed panel has no window to repaint for: its timers wait until it is shown again.
+    s.execute("plugin.panel.close", json!({"id": id})).unwrap();
+    assert_eq!(next_timer_in(), None);
+    cleanup(&mut s, id);
+}

@@ -316,6 +316,17 @@ pub fn any_open() -> bool {
     !panels().is_empty()
 }
 
+/// Milliseconds until the next timer of a visible, running panel is due; `None` when no panel is
+/// waiting.
+///
+/// Timers are the one thing a panel asks for that happens without the user: an editor repaints only
+/// when something changes, so without this a panel whose timer polls a printer would fire when the
+/// pointer next moved rather than when it was due.
+pub fn next_timer_in() -> Option<u64> {
+    let now = now_ms();
+    panels().values().filter(|panel| panel.visible && panel.stopped().is_none()).filter_map(|panel| panel.instance.timers().next_due_in(now)).min()
+}
+
 /// What the host knows while it is carrying out a batch of operations.
 struct HostCtx<'a> {
     now: u64,
