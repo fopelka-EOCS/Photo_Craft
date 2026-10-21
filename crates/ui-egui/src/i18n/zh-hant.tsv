@@ -2779,6 +2779,10 @@ curves	Smooth	平滑
 	Sent to {printer}	已傳送至 {printer}
 	set in Print Settings…	在列印設定中設定…
 	ICO is limited to 256 × 256 pixels	ICO 最大為 256 × 256 像素
+	Selection / Layer Bounds	選取範圍 / 圖層邊界
+	No selection or layer	沒有選取範圍或圖層
+	{label}: empty	{label}：空
+	{label}: X {x}  Y {y}  W {w}  H {h}	{label}: X {x}  Y {y}  W {w}  H {h}
 # Embedded Profile Mismatch: profile names beside the choices, Remember this choice
 	Use the embedded profile ({profile})	使用內嵌描述檔 ({profile})
 	Convert to the working space ({profile})	轉換為工作空間 ({profile})

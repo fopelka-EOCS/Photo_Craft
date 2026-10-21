@@ -4139,6 +4139,10 @@ navigator	Zoom	Zoom
 	Sent to {printer}	Inviato a {printer}
 	set in Print Settings…	impostato nelle impostazioni di stampa…
 	ICO is limited to 256 × 256 pixels	ICO è limitato a 256 × 256 pixel
+	Selection / Layer Bounds	Limiti selezione / livello
+	No selection or layer	Nessuna selezione o livello
+	{label}: empty	{label}: vuoto
+	{label}: X {x}  Y {y}  W {w}  H {h}	{label}: X {x}  Y {y}  W {w}  H {h}
 # Embedded Profile Mismatch: profile names beside the choices, Remember this choice
 	Use the embedded profile ({profile})	Usa profilo incorporato ({profile})
 	Convert to the working space ({profile})	Converti in spazio di lavoro ({profile})

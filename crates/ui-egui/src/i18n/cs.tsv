@@ -3783,6 +3783,10 @@ navigator	Zoom	Zvětšení
 	Sent to {printer}	Odesláno do {printer}
 	set in Print Settings…	nastavuje se v nastavení tisku…
 	ICO is limited to 256 × 256 pixels	ICO je omezen na 256 × 256 pixelů
+	Selection / Layer Bounds	Výběr / Hranice vrstvy
+	No selection or layer	Žádný výběr ani vrstva
+	{label}: empty	{label}: prázdné
+	{label}: X {x}  Y {y}  W {w}  H {h}	{label}: X {x}  Y {y}  W {w}  H {h}
 # Embedded Profile Mismatch: profile names beside the choices, Remember this choice
 	Use the embedded profile ({profile})	Použít vložený profil ({profile})
 	Convert to the working space ({profile})	Převést do pracovního prostoru barev ({profile})

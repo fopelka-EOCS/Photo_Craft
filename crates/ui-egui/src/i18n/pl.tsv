@@ -3773,6 +3773,10 @@ curves	Smooth	Wygładź
 	Sent to {printer}	Wysłano do {printer}
 	set in Print Settings…	ustawiane w ustawieniach druku…
 	ICO is limited to 256 × 256 pixels	ICO jest ograniczony do 256 × 256 pikseli
+	Selection / Layer Bounds	Granice zaznaczenia / warstwy
+	No selection or layer	Brak zaznaczenia lub warstwy
+	{label}: empty	{label}: puste
+	{label}: X {x}  Y {y}  W {w}  H {h}	{label}: X {x}  Y {y}  W {w}  H {h}
 # Embedded Profile Mismatch: profile names beside the choices, Remember this choice
 	Use the embedded profile ({profile})	Użyj osadzonego profilu ({profile})
 	Convert to the working space ({profile})	Konwertuj na przestrzeń roboczą ({profile})

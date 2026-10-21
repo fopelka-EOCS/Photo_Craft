@@ -3181,6 +3181,10 @@ curves	Smooth	Lisser
 	Sent to {printer}	Envoyé à {printer}
 	set in Print Settings…	défini dans les paramètres d’impression…
 	ICO is limited to 256 × 256 pixels	Le format ICO est limité à 256 × 256 pixels
+	Selection / Layer Bounds	Limites de la sélection / du calque
+	No selection or layer	Aucune sélection ni aucun calque
+	{label}: empty	{label} : vide
+	{label}: X {x}  Y {y}  W {w}  H {h}	{label}: X {x}  Y {y}  W {w}  H {h}
 # Embedded Profile Mismatch: profile names beside the choices, Remember this choice
 	Use the embedded profile ({profile})	Utiliser le profil incorporé ({profile})
 	Convert to the working space ({profile})	Convertir vers l'espace de travail ({profile})

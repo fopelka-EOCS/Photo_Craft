@@ -4230,6 +4230,10 @@ shape	Appearance	Izgled
 	Ink Characteristics	Karakteristike mastila
 	Solidity:	Punoća:
 	Redrawing	Ponovno iscrtavanje
+	Selection / Layer Bounds	Границе избора / слоја
+	No selection or layer	Нема избора или слоја
+	{label}: empty	{label}: празно
+	{label}: X {x}  Y {y}  W {w}  H {h}	{label}: X {x}  Y {y}  W {w}  H {h}
 # Edit › Content-Aware Fill workspace
 	Sampling Brush Tool	Alatka četkica za uzorkovanje
 	Sampling Area Overlay	Preklop oblasti uzorkovanja

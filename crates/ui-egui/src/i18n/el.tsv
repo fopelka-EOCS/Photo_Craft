@@ -3873,6 +3873,10 @@ curves	Smooth	Εξομάλυνση
 	Sent to {printer}	Στάλθηκε στον {printer}
 	set in Print Settings…	ορίζεται στις ρυθμίσεις εκτύπωσης…
 	ICO is limited to 256 × 256 pixels	Το ICO περιορίζεται σε 256 × 256 εικονοστοιχεία
+	Selection / Layer Bounds	Όρια επιλογής / επιπέδου
+	No selection or layer	Δεν υπάρχει επιλογή ή επίπεδο
+	{label}: empty	{label}: κενό
+	{label}: X {x}  Y {y}  W {w}  H {h}	{label}: X {x}  Y {y}  W {w}  H {h}
 # Embedded Profile Mismatch: profile names beside the choices, Remember this choice
 	Use the embedded profile ({profile})	Χρήση ενσωματωμένου προφίλ ({profile})
 	Convert to the working space ({profile})	Μετατροπή στον χώρο εργασίας ({profile})

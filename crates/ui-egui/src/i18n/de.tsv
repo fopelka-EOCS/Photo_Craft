@@ -3177,6 +3177,10 @@ curves	Smooth	Glätten
 	Sent to {printer}	An {printer} gesendet
 	set in Print Settings…	in den Druckeinstellungen festlegen…
 	ICO is limited to 256 × 256 pixels	ICO ist auf 256 × 256 Pixel begrenzt
+	Selection / Layer Bounds	Auswahl / Ebenengrenzen
+	No selection or layer	Keine Auswahl oder Ebene
+	{label}: empty	{label}: leer
+	{label}: X {x}  Y {y}  W {w}  H {h}	{label}: X {x}  Y {y}  W {w}  H {h}
 # Embedded Profile Mismatch: profile names beside the choices, Remember this choice
 	Use the embedded profile ({profile})	Eingebettetes Profil verwenden ({profile})
 	Convert to the working space ({profile})	In den Arbeitsfarbraum konvertieren ({profile})
