@@ -2420,11 +2420,19 @@ fn type_sections(app: &mut PhotocraftApp, ui: &mut egui::Ui, character: bool, pa
             }
         });
         row(ui, &mut |ui| {
-            if let Some(v) = num_field(ui, "↑¶", "Add space before paragraph", para.space_before_pt * u, 0.0 * u..=1296.0 * u, unit, w) {
+            if let Some(v) = num_field(ui, "¶↑", "Add space before paragraph", para.space_before_pt * u, 0.0 * u..=1296.0 * u, unit, w) {
                 apply(app, ui.ctx(), json!({"spaceBefore": v / u}));
             }
             if let Some(v) = num_field(ui, "¶↓", "Add space after paragraph", para.space_after_pt * u, 0.0 * u..=1296.0 * u, unit, w) {
                 apply(app, ui.ctx(), json!({"spaceAfter": v / u}));
+            }
+        });
+        // Roman Hanging Punctuation: trailing marks hang past the box edge and don't steer the
+        // alignment (Photoshop keeps this checkbox at the bottom of the Paragraph panel).
+        row(ui, &mut |ui| {
+            let mut hanging = para.hanging;
+            if ui.checkbox(&mut hanging, tl!("Roman Hanging Punctuation")).changed() {
+                apply(app, ui.ctx(), json!({"hanging": hanging}));
             }
         });
         // Hyphenate is stored (⌥⇧⌘H / PSD AutoHyphenate) but layout never breaks words (#6710).

@@ -457,6 +457,9 @@ struct KernSlot {
     size: f32,
     rtl: bool,
     blank: bool,
+    /// Hangs at the line's end when the paragraph has hanging punctuation on (every character
+    /// of the cluster is a hangable mark, never a space or a tab).
+    hang: bool,
     /// Advance along the line (px, horizontal scale included).
     advance: f32,
     /// What horizontal scale adds to the shaped advance (px; negative below 100%).
@@ -765,6 +768,120 @@ impl Layouter {
                 } else {
                     (first_px * 0.8, first_px * 0.2)
                 };
+                // Hang-row detection needs the byte mapping the rest of the body uses.
+                let map = |o: usize| (prange.start + o.saturating_sub(prefix.len())).min(content_end);
+                // Hanging punctuation: a row of nothing but marks was pushed here because they
+                // didn't fit the line above; with the paragraph's hanging on, step them back
+                // onto that line so they hang past the box edge (Photoshop's Roman Hanging
+                // Punctuation): a centered line keeps its centering, a left line keeps filling
+                // the box. Horizontal lines only (vertical type has Burasagari instead) and no
+                // RTL marks; the text between the line above and the marks stays contiguous, so
+                // carets and selection keep their rows. The marks keep their style's manual
+                // kerning but drop optical pair kerning and underline decorations along the way.
+                let hang_row = ps.hanging
+                    && !vertical
+                    // An empty row (two forced breaks in a row) has no items: `all` would read
+                    // it as a hanging run and merge it into the line above, dropping the blank
+                    // row.
+                    && line.items().next().is_some()
+                    && line.items().all(|it| match it {
+                        PositionedLayoutItem::GlyphRun(gr) => gr.run().visual_clusters().all(|c| {
+                            !c.is_rtl()
+                                && !c.is_space_or_nbsp()
+                                && c.text_range().end > prefix.len()
+                                && hang_cluster(ptext.get(c.text_range().clone()).unwrap_or(""))
+                        }),
+                        _ => false,
+                    });
+                if hang_row
+                    && let Some(prev) = out.lines.last()
+                    && prev.paragraph == pi
+                {
+                    // Start past the row above's trailing breaking space: that space's cluster
+                    // stays on the row, and `prev.x1` excludes trailing whitespace, so starting
+                    // there would put the marks on top of the space cluster and carets could
+                    // not tell them apart.
+                    let merged_line = out.lines.len() - 1;
+                    let mut cx = out.clusters.iter().rev().find(|c| c.line == merged_line).map_or(prev.x1, |c| c.x + c.advance);
+                    let merged_baseline = prev.baseline;
+                    // The kern of a pair comes from the pair's left cluster's style, as the
+                    // line's kern_px does; it moves the following cluster and lands in the left
+                    // cluster's reported advance. The pair with the row above's last cluster
+                    // crosses a row boundary there, so it contributes none and the first
+                    // cluster starts un-kerned.
+                    let mut left: Option<(usize, f32)> = None; // (byte, font size) of the pair's left cluster
+                    // Count the row's clusters so the last one (whose pair would lead into
+                    // nothing) keeps its drawn advance only, like the line's last kern slot.
+                    let total = line
+                        .items()
+                        .map(|it| match it {
+                            PositionedLayoutItem::GlyphRun(gr) => gr.run().visual_clusters().count(),
+                            _ => 0,
+                        })
+                        .sum::<usize>();
+                    let mut n = 0usize;
+                    let mut merged_end = cx;
+                    for item in line.items() {
+                        let PositionedLayoutItem::GlyphRun(gr) = item else {
+                            continue;
+                        };
+                        let run = gr.run();
+                        let si = gr.style().brush.0;
+                        let st = &out.styles[si as usize];
+                        let hs = if st.horizontal_scale > 0.0 { st.horizontal_scale } else { 1.0 };
+                        let synth = run.synthesis();
+                        let face = out.faces.len() as u32;
+                        out.faces.push(GlyphFace {
+                            font: run.font().clone(),
+                            coords: run.normalized_coords().to_vec(),
+                            size_px: run.font_size(),
+                            embolden: synthetic_bold(synth.embolden(), st.weight, run.font_attrs().weight.value()),
+                            skew_deg: synth.skew().unwrap_or(0.0),
+                        });
+                        for c in run.visual_clusters() {
+                            n += 1;
+                            cx += left.take().map_or(0.0, |(byte, size)| {
+                                let st_p = &out.styles[style_at(byte)];
+                                let units = if st_p.kern.is_finite() { st_p.kern } else { 0.0 };
+                                units / 1000.0 * size
+                            });
+                            let r = c.text_range();
+                            let st_h = &out.styles[style_at(map(r.start))];
+                            let kern = if st_h.kern.is_finite() { st_h.kern } else { 0.0 } / 1000.0 * run.font_size();
+                            let drawn = c.advance() * hs;
+                            // The glyph pen is local to the cluster: the growth is already in
+                            // the drawn advance, and each cluster starts where the pen is.
+                            let mut gp = 0.0f32;
+                            for g in c.glyphs() {
+                                out.glyphs.push(PlacedGlyph {
+                                    face,
+                                    id: g.id,
+                                    x: cx + gp + g.x,
+                                    y: merged_baseline + g.y,
+                                    style: si,
+                                    orient: GlyphOrient::Horizontal,
+                                });
+                                gp += g.advance * hs;
+                            }
+                            let adv = drawn + if n == total { 0.0 } else { kern };
+                            out.clusters.push(ClusterInfo {
+                                range: map(r.start)..map(r.end),
+                                x: cx,
+                                advance: adv,
+                                line: merged_line,
+                                rtl: false,
+                            });
+                            cx += drawn;
+                            merged_end = cx;
+                            left = Some((r.start, run.font_size()));
+                        }
+                    }
+                    if let Some(p) = out.lines.last_mut() {
+                        p.x1 = merged_end;
+                        p.range.end = map(line.text_range().end);
+                    }
+                    continue;
+                }
                 let baseline = match prev_baseline {
                     // The first column's right edge touches the box's right edge.
                     None if is_box && vertical => -(box_rect.0 + box_rect.2) + col_half,
@@ -787,7 +904,6 @@ impl Layouter {
                 prev_baseline = Some(baseline);
                 let last_line = li + 1 == nlines;
                 let adv = m.advance - m.trailing_whitespace;
-                let map = |o: usize| (prange.start + o.saturating_sub(prefix.len())).min(content_end);
 
                 // Kerning after each cluster (px), per run in visual cluster order: manual
                 // kerning plus optical pair kerning. Applied after shaping (like horizontal
@@ -820,6 +936,7 @@ impl Layouter {
                             size: run.font_size(),
                             rtl: c.is_rtl(),
                             blank: first.is_none() || c.is_space_or_nbsp() || c.text_range().end <= prefix.len(),
+                            hang: hang_cluster(ptext.get(c.text_range().clone()).unwrap_or("")),
                             upright: vertical && c.first_style().brush.1 != VClass::Rotate as u8,
                             advance: c.advance() * hs,
                             growth: c.advance() * (hs - 1.0),
@@ -883,6 +1000,35 @@ impl Layouter {
                     pos += s.advance + kern_px.get(j).copied().unwrap_or(0.0);
                 }
                 let line_kern: f32 = kern_px.iter().sum::<f32>() - trailing_tabs;
+                // Hanging punctuation (Photoshop's Roman Hanging Punctuation): a trailing run
+                // of marks doesn't count toward the aligned width and hangs past the box edge,
+                // though the marks keep their full drawn width. `hang_edge` is where the run
+                // starts along the line (shaped space), to tell that it sits at the margin.
+                let (hang_adv, hang_kern, hang_edge) = if ps.hanging && !vertical {
+                    match hang_runs(&slots) {
+                        Some((start, tail)) => {
+                            let adv: f32 = slots[start..tail].iter().map(|s| s.advance).sum();
+                            let kern: f32 = (start..tail).map(|j| kern_px.get(j).copied().unwrap_or(0.0)).sum();
+                            // Where the run starts along the line, in layout pixels: the slot
+                            // advances before it plus the kerning between them. The box's
+                            // content width (`avail`) is in the same space, so the margin test
+                            // compares like with like at any horizontal scale.
+                            let edge = slots[..start].iter().map(|s| s.advance).sum::<f32>()
+                                + kern_px[..start].iter().sum::<f32>();
+                            (adv, kern, edge)
+                        }
+                        None => (0.0, 0.0, 0.0),
+                    }
+                } else {
+                    (0.0, 0.0, 0.0)
+                };
+                // Point text has no box, so every trailing run trims; on a box, centered and
+                // right lines move as a whole, so any trailing run there trims too (and a run
+                // at the margin trims whatever the alignment — Photoshop's RHP hangs it at the
+                // alignment edge).
+                let trim = hang_adv > 0.0
+                    && (!is_box || matches!(ps.align, TextAlign::Center | TextAlign::Right) || hang_edge >= avail.unwrap_or(0.0) - 0.5);
+                let (trim_adv, trim_kern) = if trim { (hang_adv, hang_kern) } else { (0.0, 0.0) };
                 // Per run on the line: (run index, glyph → slot, glyphs emitted, first slot whose
                 // kerning isn't applied yet).
                 let mut cursors: Vec<(usize, Vec<usize>, usize, usize)> = Vec::new();
@@ -904,8 +1050,8 @@ impl Layouter {
                 // Parley aligned box lines without the kerning.
                 let kern_align = if is_box {
                     match ps.align {
-                        TextAlign::Center => line_kern / 2.0,
-                        TextAlign::Right => line_kern,
+                        TextAlign::Center => (line_kern - trim_kern) / 2.0,
+                        TextAlign::Right => line_kern - trim_kern,
                         _ => 0.0,
                     }
                 } else {
@@ -913,14 +1059,27 @@ impl Layouter {
                 };
                 let dx = if is_box {
                     let base = line_origin + indent_start - kern_align;
-                    let slack = avail.unwrap_or(0.0) - adv * break_scale - line_kern;
+                    let aligned = adv - trim_adv;
+                    let slack = avail.unwrap_or(0.0) - aligned * break_scale - (line_kern - trim_kern);
                     // Parley aligned the unscaled line in `avail / break_scale`: scale its
                     // indent and alignment offset back to the box.
                     let scaled_offset = m.offset * (break_scale - 1.0);
+                    // A hung run trims out of the width, so the marks stop steering the
+                    // alignment: place center/right lines with the same formulas the last
+                    // line uses (parley's own offset made the marks count).
+                    let hung = trim && matches!(ps.align, TextAlign::Center | TextAlign::Right);
                     base + if last_line {
                         match ps.align {
                             TextAlign::JustifyCenter => slack * 0.5 - m.offset,
                             TextAlign::JustifyRight => slack - m.offset,
+                            TextAlign::Center if hung => slack * 0.5 - m.offset,
+                            TextAlign::Right if hung => slack - m.offset,
+                            _ => scaled_offset,
+                        }
+                    } else if hung {
+                        match ps.align {
+                            TextAlign::Center => slack * 0.5 - m.offset,
+                            TextAlign::Right => slack - m.offset,
                             _ => scaled_offset,
                         }
                     } else {
@@ -928,8 +1087,8 @@ impl Layouter {
                     }
                 } else {
                     let target = match ps.align {
-                        TextAlign::Center | TextAlign::JustifyCenter => -(adv + line_kern) / 2.0,
-                        TextAlign::Right | TextAlign::JustifyRight => -(adv + line_kern),
+                        TextAlign::Center | TextAlign::JustifyCenter => -(adv + line_kern - trim_adv - trim_kern) / 2.0,
+                        TextAlign::Right | TextAlign::JustifyRight => -(adv + line_kern - trim_adv - trim_kern),
                         _ => indent_start,
                     };
                     target - m.offset
@@ -1054,7 +1213,7 @@ impl Layouter {
                     extra -= squeeze_punctuation(text, &mut out.clusters[c0..], &mut out.glyphs[g0..]);
                 }
                 if justify_all {
-                    let slack = avail.unwrap_or(0.0) - (adv + extra);
+                    let slack = avail.unwrap_or(0.0) - (adv - trim_adv + extra - trim_kern);
                     let n = out.clusters.len() - c0;
                     if n > 1 && slack > 0.0 {
                         let step = slack / (n - 1) as f32;
@@ -1104,6 +1263,32 @@ impl Layouter {
 /// A style's horizontal scale; unset (zero or negative) is 100%.
 fn effective_horizontal_scale(st: &CharStyle) -> f32 {
     if st.horizontal_scale > 0.0 && st.horizontal_scale.is_finite() { st.horizontal_scale } else { 1.0 }
+}
+
+/// A cluster consisting only of characters that may hang at the line's end with hanging
+/// punctuation on: the closing marks (a period, a comma, a colon, a semicolon, an
+/// exclamation or question mark, an ellipsis) and their fullwidth twins. Photoshop's
+/// checkbox is Roman Hanging Punctuation; its opening-quote rule is a later step.
+fn hang_cluster(text: &str) -> bool {
+    !text.is_empty() && text.chars().all(hang_mark)
+}
+
+fn hang_mark(c: char) -> bool {
+    matches!(c, '.' | ',' | ':' | ';' | '!' | '?' | '…' | '，' | '．' | '：' | '；' | '！' | '？')
+}
+
+/// Where the hanging run at the line's tail starts: the first slot after the last non-hang,
+/// non-blank cluster. Returns `(run start, tail)` — the tail sits after the last non-blank
+/// slot, because a line parley wrapped ends with the breaking space, whose slot must not
+/// count into the sums (nor stop the run walk). `None` when nothing hangs there or when the
+/// whole line is marks (an all-mark line is the merge-back case, and its trim would fight it).
+fn hang_runs(slots: &[KernSlot]) -> Option<(usize, usize)> {
+    let tail = slots.iter().rposition(|s| !s.blank).map_or(0, |i| i + 1);
+    let mut end = tail;
+    while end > 0 && slots[end - 1].hang {
+        end -= 1;
+    }
+    (end > 0 && end < tail).then_some((end, tail))
 }
 
 /// The first tab stop after `pos` (px from the anchor or box edge); stops are `interval` apart.

@@ -368,6 +368,182 @@ fn alignment_point_and_box() {
     assert!((l.lines[0].x1 - 200.0).abs() < 0.5, "{:?}", l.lines[0]);
 }
 
+/// Hanging punctuation (Roman Hanging Punctuation): trailing marks don't steer the alignment.
+/// A centered line keeps its text centered and lets the marks hang right instead of pulling
+/// everything left — a centered text ending in an ellipsis no longer sits off-center.
+#[test]
+fn hanging_marks_do_not_steer_the_alignment() {
+    let mut e = TextEngine::new();
+    // The comma and the ellipsis both hang, so the content is exactly "Hello" (bytes 0..5).
+    let mut centered = |hanging: bool| {
+        e.layout(
+            &with_para(point("Hello,…", 20.0), ParagraphStyle { align: TextAlign::Center, hanging, ..Default::default() }),
+            72.0,
+        )
+    };
+    let off = centered(false);
+    let on = centered(true);
+    let lo = &off.lines[0];
+    let ln = &on.lines[0];
+    assert!((lo.x0 + lo.x1) * 0.5 < 0.01, "without the flag the whole line centers: {lo:?}");
+    // With hanging, the content before the marks sits centered on the anchor: the first mark
+    // (the comma) starts at the anchor's far side.
+    let comma = on
+        .clusters
+        .iter()
+        .find(|c| c.range.start == 5)
+        .unwrap_or_else(|| panic!("the comma is its own cluster: {:?}", on.clusters));
+    assert!((ln.x0 + comma.x) * 0.5 < 0.01, "content centered: {ln:?} comma at {}", comma.x);
+    assert!(ln.x1 > comma.x, "the marks hang past the anchor: {ln:?}");
+    assert!(ln.x0 > lo.x0 + 0.5, "the content sits further right than with the marks counted: {ln:?} vs {lo:?}");
+
+    // Right-aligned point text: the content stays flush at the anchor, marks hang past it.
+    let mut right = |hanging: bool| {
+        e.layout(
+            &with_para(point("Hello,…", 20.0), ParagraphStyle { align: TextAlign::Right, hanging, ..Default::default() }),
+            72.0,
+        )
+    };
+    let roff = right(false);
+    let ron = right(true);
+    assert!(roff.lines[0].x1.abs() < 0.01, "everything ends at the anchor: {:?}", roff.lines[0]);
+    assert!(ron.lines[0].x1 > 0.5, "the marks hang past the anchor: {:?}", ron.lines[0]);
+    assert!(ron.lines[0].x0 > roff.lines[0].x0 + 0.5, "the content stays put: {:?}", ron.lines[0]);
+}
+
+/// Hanging punctuation steps a wrapped run of marks back onto the line above: a box holding
+/// text plus a mark nobody could fit keeps one row, the mark hanging past the box edge, and
+/// the mark belongs to that row for carets and selection.
+#[test]
+fn a_hanging_run_steps_back_onto_the_line_above() {
+    let mut e = TextEngine::new();
+    // A box just wide enough for "xx" (probed left-aligned at the same size).
+    let probe = e.layout(&point("xx", 20.0), 72.0);
+    let w = probe.lines[0].x1 - probe.lines[0].x0;
+    let mut boxed = |hanging: bool| {
+        let mut t = point("xx …", 20.0);
+        t.shape = TextShape::Box { x: 0.0, y: 0.0, width: w + 0.5, height: 100.0 };
+        e.layout(&with_para(t, ParagraphStyle { hanging, ..Default::default() }), 72.0)
+    };
+    let off = boxed(false);
+    assert_eq!(off.lines.len(), 2, "the ellipsis wraps onto its own row: {:?}", off.lines);
+    let on = boxed(true);
+    assert_eq!(on.lines.len(), 1, "the mark steps back up: {:?}", on.lines);
+    let ln = &on.lines[0];
+    assert!(ln.x1 > w + 0.5, "the mark hangs past the box edge: {ln:?}");
+    assert_eq!(ln.range.end, 6, "the row's range now covers the mark ({})", ln.range.end);
+    let mark = on
+        .clusters
+        .iter()
+        .find(|c| c.range.start == 3)
+        .unwrap_or_else(|| panic!("the ellipsis is its own cluster: {:?}", on.clusters));
+    // The row above keeps its trailing breaking space (as a blank cluster); the mark starts
+    // past it, so hit-testing can tell the space from the mark.
+    let space = on
+        .clusters
+        .iter()
+        .find(|c| c.range.start == 2)
+        .unwrap_or_else(|| panic!("the space is its own cluster: {:?}", on.clusters));
+    assert!((mark.x - (space.x + space.advance)).abs() < 1e-3, "mark follows the space: {mark:?} {space:?}");
+    assert_eq!(mark.line, 0, "the mark's caret lives on the merged row: {mark:?}");
+    assert!(
+        on.glyphs.iter().any(|g| g.x >= w && (g.y - ln.baseline).abs() < 1e-3),
+        "the mark's glyphs draw on that row past the edge: {ln:?}"
+    );
+}
+
+/// A merged row of several marks keeps its clusters and glyphs in step: each cluster starts
+/// where the previous one's advance ended, and a mark's glyphs sit relative to its own cluster
+/// (a per-cluster pen), not wherever a shared pen would drop them.
+#[test]
+fn a_merged_mark_row_keeps_its_clusters_and_glyphs_in_step() {
+    let mut e = TextEngine::new();
+    let probe = e.layout(&point("xx", 20.0), 72.0);
+    let w = probe.lines[0].x1 - probe.lines[0].x0;
+    let mut t = point("xx ……", 20.0);
+    t.shape = TextShape::Box { x: 0.0, y: 0.0, width: w + 0.5, height: 100.0 };
+    let on = e.layout(&with_para(t, ParagraphStyle { hanging: true, ..Default::default() }), 72.0);
+    assert_eq!(on.lines.len(), 1, "both marks step back up: {:?}", on.lines);
+    // The row above keeps its trailing breaking space (as a blank cluster); the mark starts
+    // past it, so hit-testing can tell the space from the mark.
+
+    let space = on
+        .clusters
+        .iter()
+        .find(|c| c.range.start == 2)
+        .unwrap_or_else(|| panic!("the space is its own cluster: {:?}", on.clusters));
+    let marks: Vec<_> = on.clusters.iter().filter(|c| c.range.start >= 3).collect();
+    assert_eq!(marks.len(), 2, "the two ellipses are two clusters: {:?}", on.clusters);
+    let first = marks[0];
+    let second = marks[1];
+    assert!((first.x - (space.x + space.advance)).abs() < 1e-3, "run starts past the space: {first:?} {space:?}");
+    assert!((second.x - (first.x + first.advance)).abs() < 1e-3, "chain: {first:?} {second:?}");
+    // The same glyph in both clusters carries the same offset from its own cluster: a shared
+    // (run-wide) pen would leave the second mark's glyph an advance too far right.
+    let glyph_shift = |c: &crate::ClusterInfo| on.glyphs.iter().filter(|g| g.x >= c.x - 0.5).map(|g| g.x - c.x).min_by(|a, b| a.partial_cmp(b).unwrap());
+    let (d1, d2) = (glyph_shift(first), glyph_shift(second));
+    assert!(d1.zip(d2).is_some_and(|(a, b)| (a - b).abs() < 1e-3), "glyph pens belong to their clusters: {d1:?} vs {d2:?}");
+}
+
+/// Hanging punctuation trims out of centered box lines too, not only ones at the margin: a
+/// centered `Hello…` line that doesn't come near the box edges still centers its text and
+/// lets the mark hang.
+#[test]
+fn hanging_centers_the_box_content_behind_its_marks() {
+    let mut e = TextEngine::new();
+    let mut boxed = |hanging: bool| {
+        let mut t = point("Hello…", 20.0);
+        t.shape = TextShape::Box { x: 0.0, y: 0.0, width: 400.0, height: 60.0 };
+        e.layout(&with_para(t, ParagraphStyle { align: TextAlign::Center, hanging, ..Default::default() }), 72.0)
+    };
+    let off = boxed(false);
+    let on = boxed(true);
+    let lo = &off.lines[0];
+    let ln = &on.lines[0];
+    assert_eq!(off.lines.len(), 1);
+    assert_eq!(on.lines.len(), 1);
+    assert!((lo.x0 + lo.x1) * 0.5 - 200.0 < 0.01, "without the flag the whole line centers: {lo:?}");
+    // With hanging, the text before the mark is centered and the mark starts at the content's
+    // right edge.
+    let ell = on
+        .clusters
+        .iter()
+        .find(|c| c.range.start == 5)
+        .unwrap_or_else(|| panic!("the mark is its own cluster: {:?}", on.clusters));
+    assert!((ln.x0 + ell.x) * 0.5 - 200.0 < 0.01, "content centered: {ln:?} mark at {}", ell.x);
+    assert!(ln.x1 > ell.x, "the mark hangs past the content: {ln:?}");
+}
+
+/// Two forced breaks in a row keep their blank paragraph row with hanging on: a row with no
+/// glyphs must not be read as a hanging run and merged into the line above.
+#[test]
+fn hanging_keeps_empty_rows_between_forced_breaks() {
+    let mut e = TextEngine::new();
+    let mut boxed = |hanging: bool| {
+        let mut t = point("abc\u{3}\u{3}def", 16.0);
+        t.shape = TextShape::Box { x: 0.0, y: 0.0, width: 300.0, height: 300.0 };
+        e.layout(&with_para(t, ParagraphStyle { hanging, ..Default::default() }), 72.0)
+    };
+    assert_eq!(boxed(false).lines.len(), boxed(true).lines.len(), "same rows either way");
+}
+
+/// Hanging changes nothing when no line ends in a mark: the same breaks at the same place.
+#[test]
+fn hanging_leaves_plain_paragraphs_untouched() {
+    let mut e = TextEngine::new();
+    let mut boxed = |hanging: bool| {
+        let mut t = point("The quick brown fox jumps over the lazy dog", 16.0);
+        t.shape = TextShape::Box { x: 0.0, y: 0.0, width: 160.0, height: 300.0 };
+        e.layout(&with_para(t, ParagraphStyle { hanging, ..Default::default() }), 72.0)
+    };
+    let off = boxed(false);
+    let on = boxed(true);
+    assert_eq!(off.lines.len(), on.lines.len(), "same breaks");
+    for (a, b) in off.lines.iter().zip(&on.lines) {
+        assert!((a.x0 - b.x0).abs() < 1e-3 && (a.x1 - b.x1).abs() < 1e-3, "same place: {a:?} vs {b:?}");
+    }
+}
+
 #[test]
 fn rtl_text_is_reordered() {
     let mut e = TextEngine::new();
@@ -1498,6 +1674,27 @@ fn legacy_tysh_point_origin_imports_and_round_trips_on_canvas() {
 
 /// Regression: a PSD whose text engine data has no `EngineDict` (or isn't a dictionary)
 /// panicked with `expect("EngineDict")` when the layer was written back (PSD export).
+/// Hanging travels in the text engine data under the paragraph sheet's `Hanging` key, written
+/// explicitly on and off so Photoshop keeps the flag; the corpus files show it right after
+/// `/LeadingType` (false), as Photoshop's own writer places it.
+#[test]
+fn hanging_punctuation_writes_into_the_paragraph_sheet() {
+    let raw = |t: &TextLayer, what: &str| {
+        let data = crate::engine_data::write(&crate::psd::build_engine_data(t, None, 72.0));
+        String::from_utf8_lossy(&data).lines()
+            .find(|l| l.contains("Hanging"))
+            .unwrap_or("<no Hanging key>")
+            .to_owned()
+            + format!(" ({what})").as_str()
+    };
+    let on = with_para(point("Hello, world.", 12.0), ParagraphStyle { hanging: true, ..Default::default() });
+    let got = raw(&on, "on");
+    assert!(got.contains("/Hanging true"), "flag on: {got}");
+    let off = with_para(point("Hello, world.", 12.0), ParagraphStyle::default());
+    let got = raw(&off, "off");
+    assert!(got.contains("/Hanging false"), "flag off: {got}");
+}
+
 #[test]
 fn engine_data_template_without_engine_dict() {
     use crate::engine_data::{self as ed, Value as E};

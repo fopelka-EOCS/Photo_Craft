@@ -223,11 +223,13 @@ Paragraph; the rest open as in-app floating windows.
 | Smart filter rows: click selects, drag onto another smart object moves, ⌥-drag copies, drag onto Delete removes | done | `smart_ui.rs`, `layer.smartFilter.transfer` (#4271) |
 | Layers panel: Clip Thumbnails to Layer Bounds (panel menu, `interface.clipThumbnailsToLayerBounds`) | done (2026-10-12) | `layer_thumb_bounds_tests.rs`; #4281. Thumbnail size and the Panel Options dialog to come |
 | Smart filter rows: drag up or down the stack to reorder (a line marks the drop; the bottom filter is applied first) | done | `smart_ui.rs` `reorder_drop`, `layer.smartFilter.move` |
+| Paragraph panel: Roman Hanging Punctuation checkbox (trailing marks hang past the box edge, a centered line ending in an ellipsis keeps its centering); the Paragraph Styles editor carries the attribute too | done (2026-10-21) | Differs: RTL lines and vertical type don't hang (vertical is Burasagari's field), marks drop optical kerning and decorations when stepped back onto the line above (`type_tool.rs` type_sections, `type_panels_ui.rs`, `text/layout.rs`, `io/tests/psd_style_sheets.rs` `hanging_punctuation_comes_from_the_paragraph_sheet`) |
 
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | Paragraph panel: Roman Hanging Punctuation done — layout hang + merge-back, panel checkbox, PSD `/Hanging` round trip |
 | 2026-10-15 | minor | Shape Density and Feather row added as done (TOOL-214-12, #5846) |
 | 2026-10-13 | minor | Menu bar from the keyboard: Alt / F10 focus, Alt+letter, underlined mnemonics (#4988) |
 | 2026-10-13 | minor | Layers panel filter row: Kind is a real dropdown with Kind, Name and Mode filters, drivable by `ui.set {layerFilter}` (#5048); row added as partial |
