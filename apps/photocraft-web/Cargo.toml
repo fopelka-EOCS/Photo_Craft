@@ -14,6 +14,10 @@ heif = ["photocraft-codecs/heif"]
 [lints]
 workspace = true
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
 [[bin]]
 name = "photocraft-web"
 path = "src/main.rs"
