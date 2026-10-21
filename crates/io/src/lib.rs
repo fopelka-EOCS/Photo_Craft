@@ -476,9 +476,6 @@ pub fn export(doc: &Document, name_or_ext: &str, opts: &ExportOptions) -> Result
 /// export fails with [`IoError::Cancelled`]; otherwise the bytes are exactly [`export`]'s.
 pub fn export_with(doc: &Document, name_or_ext: &str, opts: &ExportOptions, ctl: &photocraft_raster::Interrupt) -> Result<ExportResult, IoError> {
     ctl.check().map_err(|_| IoError::Cancelled)?;
-    // Smart-object files left in the file the document was opened from are read for the save
-    // (the writers work on bytes in memory); a failed read fails the save, never writes them empty.
-    let doc = &*with_blocks_loaded(doc)?;
     let r = export_stages(doc, name_or_ext, opts, ctl)?;
     ctl.check().map_err(|_| IoError::Cancelled)?;
     ctl.progress(1.0);
@@ -549,6 +546,10 @@ fn export_stages(doc: &Document, name_or_ext: &str, opts: &ExportOptions, ctl: &
         return Ok(ExportResult { bytes, warnings: Vec::new() });
     }
     if ext == "psd" || ext == "psb" {
+        // Smart-object files left in the file the document was opened from are read for the save
+        // (the writer works on bytes in memory); a failed read fails it, never writes them empty.
+        // Only the formats that write the blocks read them: a flat export doesn't need them.
+        let doc = &*with_blocks_loaded(doc)?;
         let o = PsdExportOptions {
             force_psb: opts.force_psb || ext == "psb",
             maximize_compatibility: opts.psd_maximize_compatibility,
@@ -579,7 +580,8 @@ fn export_stages(doc: &Document, name_or_ext: &str, opts: &ExportOptions, ctl: &
     }
     let format = photocraft_codecs::from_extension(&ext).ok_or_else(|| IoError::UnknownFormat(name_or_ext.to_string()))?;
     if format == photocraft_codecs::Format::Tiff && opts.tiff_layers && tiff_layers::would_write_layers(doc) {
-        return tiff_layers::export_layered(doc, opts, ctl);
+        // Its layer data is a PSD layer section, with the PSD's global blocks.
+        return tiff_layers::export_layered(&*with_blocks_loaded(doc)?, opts, ctl);
     }
     flat::export_flat_with(doc, format, opts, ctl)
 }

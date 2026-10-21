@@ -1929,6 +1929,8 @@ mod tests {
         doc.metadata.psd_global_blocks.push((*b"8BIM", *b"lnk2", photocraft_doc::Blob::deferred(std::sync::Arc::new(Gone))));
         assert!(document_to_psd_with(&doc, &PsdExportOptions::default()).is_err());
         assert!(crate::export(&doc, "x.psd", &Default::default()).is_err());
+        // A flat export doesn't write the blocks, so it doesn't need them.
+        assert!(crate::export(&doc, "x.png", &Default::default()).is_ok());
     }
 
     use super::*;
