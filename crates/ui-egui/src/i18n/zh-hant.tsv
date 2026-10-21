@@ -2860,6 +2860,11 @@ curves	Smooth	平滑
 	Download the update and save your work before installing the new version.	下載更新，並在安裝新版本之前儲存工作。
 	For package-managed installations, update PhotoCraft through your package manager. Other downloads are on the release page.	透過套件管理員安裝的版本，請使用套件管理員更新PhotoCraft。其他下載位於發佈頁面。
 	Install Update	安裝更新
+	Open Release Page on GitHub	在 GitHub 上開啟發行頁面
+	View Downloads	檢視下載
+	Web builds are always running the latest version.	Web 版一律執行最新版本。
+	What's new in this release:	此版本的新內容：
+	You're up to date	已是最新
 	PhotoCraft downloads the update in the background and installs it when you quit, so your session is not interrupted. Save your work first.	PhotoCraft 會在背景下載更新，並在結束時安裝，不會打斷您的工作。請先儲存工作。
 	PhotoCraft will install the update when you quit.	PhotoCraft 將在結束時安裝更新。
 	Memory Usage	記憶體使用量

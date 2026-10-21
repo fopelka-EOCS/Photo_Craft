@@ -3950,6 +3950,11 @@ curves	Smooth	Εξομάλυνση
 	Download the update and save your work before installing the new version.	Κατεβάστε την ενημέρωση και αποθηκεύστε την εργασία σας πριν εγκαταστήσετε τη νέα έκδοση.
 	For package-managed installations, update PhotoCraft through your package manager. Other downloads are on the release page.	Για εγκαταστάσεις μέσω διαχειριστή πακέτων, ενημερώστε το PhotoCraft μέσω αυτού. Άλλες λήψεις βρίσκονται στη σελίδα της έκδοσης.
 	Install Update	Εγκατάσταση ενημέρωσης
+	Open Release Page on GitHub	Άνοιγμα σελίδας έκδοσης στο GitHub
+	View Downloads	Προβολή λήψεων
+	Web builds are always running the latest version.	Οι εκδόσεις ιστού εκτελούν πάντα την πιο πρόσφατη έκδοση.
+	What's new in this release:	Τι νέο υπάρχει σε αυτή την έκδοση:
+	You're up to date	Είστε ενημερωμένοι
 	PhotoCraft downloads the update in the background and installs it when you quit, so your session is not interrupted. Save your work first.	Το PhotoCraft κατεβάζει την ενημέρωση στο παρασκήνιο και την εγκαθιστά κατά την έξοδο, ώστε η εργασία σας να μη διακοπεί. Αποθηκεύστε πρώτα την εργασία σας.
 	PhotoCraft will install the update when you quit.	Το PhotoCraft θα εγκαταστήσει την ενημέρωση κατά την έξοδο.
 	Memory Usage	Χρήση μνήμης

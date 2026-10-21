@@ -4212,6 +4212,11 @@ navigator	Zoom	Zoom
 	Download the update and save your work before installing the new version.	Descargue la actualización y guarde su trabajo antes de instalar la nueva versión.
 	For package-managed installations, update PhotoCraft through your package manager. Other downloads are on the release page.	Para instalaciones gestionadas por paquetes, actualice PhotoCraft mediante su gestor de paquetes. Las demás descargas están en la página de la versión.
 	Install Update	Instalar actualización
+	Open Release Page on GitHub	Abrir la página de la versión en GitHub
+	View Downloads	Ver descargas
+	Web builds are always running the latest version.	Las compilaciones web siempre ejecutan la versión más reciente.
+	What's new in this release:	Novedades de esta versión:
+	You're up to date	Está actualizado
 	PhotoCraft downloads the update in the background and installs it when you quit, so your session is not interrupted. Save your work first.	PhotoCraft descarga la actualización en segundo plano y la instala al cerrar, para no interrumpir su trabajo. Guarde primero su trabajo.
 	PhotoCraft will install the update when you quit.	PhotoCraft instalará la actualización al cerrar.
 	Memory Usage	Uso de memoria

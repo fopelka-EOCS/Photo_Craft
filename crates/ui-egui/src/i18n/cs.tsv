@@ -3859,6 +3859,11 @@ navigator	Zoom	Zvětšení
 	Download the update and save your work before installing the new version.	Stáhněte aktualizaci a před instalací nové verze uložte práci.
 	For package-managed installations, update PhotoCraft through your package manager. Other downloads are on the release page.	U instalací spravovaných správci balíčků aktualizujte PhotoCraft pomocí správce balíčků. Další soubory jsou na stránce vydání.
 	Install Update	Instalovat aktualizaci
+	Open Release Page on GitHub	Otevřít stránku vydání na GitHubu
+	View Downloads	Zobrazit stažení
+	Web builds are always running the latest version.	Webová sestavení vždy běží na nejnovější verzi.
+	What's new in this release:	Co je nového v tomto vydání:
+	You're up to date	Máte aktuální verzi
 	PhotoCraft downloads the update in the background and installs it when you quit, so your session is not interrupted. Save your work first.	PhotoCraft stáhne aktualizaci na pozadí a nainstaluje ji při ukončení, aby se práce nepřerušila. Nejdříve uložte práci.
 	PhotoCraft will install the update when you quit.	PhotoCraft nainstaluje aktualizaci při ukončení.
 	Memory Usage	Využití paměti

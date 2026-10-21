@@ -3224,6 +3224,11 @@ curves	Smooth	Сгладить
 	Download the update and save your work before installing the new version.	Скачайте обновление и сохраните работу перед установкой новой версии.
 	For package-managed installations, update PhotoCraft through your package manager. Other downloads are on the release page.	Если программа установлена через менеджер пакетов, обновите PhotoCraft с его помощью. Другие загрузки доступны на странице выпуска.
 	Install Update	Установить обновление
+	Open Release Page on GitHub	Открыть страницу выпуска на GitHub
+	View Downloads	Просмотреть загрузки
+	Web builds are always running the latest version.	Веб-сборки всегда используют последнюю версию.
+	What's new in this release:	Что нового в этом выпуске:
+	You're up to date	У вас актуальная версия
 	PhotoCraft downloads the update in the background and installs it when you quit, so your session is not interrupted. Save your work first.	PhotoCraft загружает обновление в фоновом режиме и устанавливает его при выходе, не прерывая работу. Сначала сохраните работу.
 	PhotoCraft will install the update when you quit.	PhotoCraft установит обновление при выходе.
 	Memory Usage	Использование памяти
