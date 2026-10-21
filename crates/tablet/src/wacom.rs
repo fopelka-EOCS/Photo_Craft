@@ -46,6 +46,11 @@ fn application_scope(text: &str, exe: &str) -> Option<u32> {
         rest = &rest[end..];
         let digits: String = block["<AppID".len()..].chars().take_while(char::is_ascii_digit).collect();
         let Ok(id) = digits.parse::<u32>() else { continue };
+        // The "All" scope (`AppID0`) applies to every executable and need not have an
+        // `ApplicationLongName`; record it before the name lookup can skip the block.
+        if id == 0 {
+            all = Some(id);
+        }
         let Some(path) = tagged(block, "ApplicationLongName") else { continue };
         let path = path.to_lowercase();
         if path == exe {
@@ -53,9 +58,6 @@ fn application_scope(text: &str, exe: &str) -> Option<u32> {
         }
         if by_name.is_none() && name.is_some() && name == file_name(&path) {
             by_name = Some(id);
-        }
-        if id == 0 {
-            all = Some(id);
         }
     }
     by_name.or(all)
@@ -149,6 +151,24 @@ mod tests {
         assert_eq!(application_scope(TWO_SCOPES, r"C:\Apps\PhotoCraft\PhotoCraft.exe"), Some(7));
         // The stored scope's own case is ignored the same way.
         assert_eq!(application_scope(TWO_SCOPES, r"d:\other\photocraft.EXE"), Some(5));
+    }
+
+    /// The "All" scope applies to every executable, so it is found even when the driver stores
+    /// no `ApplicationLongName` for it (the block is then skipped by the name lookup).
+    const ALL_WITHOUT_NAME: &str = r#"<WacomTablet version="...">
+  <AppID0>
+    <WinUseInk modifier="modified">false</WinUseInk>
+  </AppID0>
+  <AppID7>
+    <ApplicationLongName modifier="modified">C:\Apps\PhotoCraft\photocraft.exe</ApplicationLongName>
+  </AppID7>
+</WacomTablet>"#;
+
+    #[test]
+    fn the_all_scope_needs_no_application_long_name() {
+        assert_eq!(application_scope(ALL_WITHOUT_NAME, r"c:\apps\others\reader.exe"), Some(0));
+        // A scope naming the executable still wins over the "All" scope.
+        assert_eq!(application_scope(ALL_WITHOUT_NAME, r"c:\apps\photocraft\photocraft.exe"), Some(7));
     }
 
     #[test]

@@ -141,7 +141,8 @@ pub fn canvas_buttons(app: &mut PhotocraftApp, response: &Response, tool: Tool) 
     let resize_gesture = crate::brush_resize::applies(tool) && crate::brush_resize::is_right_gesture(crate::workspace_ui::sticky_mods(app, mods));
     // Only a press on the canvas itself: `contains_pointer` is false under a floating panel over
     // it, and a stroke in progress owns the barrel.
-    let right_press = response.ctx.input(|i| i.pointer.button_pressed(PointerButton::Secondary)) && response.contains_pointer();
+    let right_press = (response.ctx.input(|i| i.pointer.button_pressed(PointerButton::Secondary)) || response.long_touched())
+        && response.contains_pointer();
     let right_open = right_press && app.drag.is_none() && !resize_gesture && !resizing && !layer_menu && !erase;
     if right_open
         && has_brush_picker(tool)
