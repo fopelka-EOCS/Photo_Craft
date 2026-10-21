@@ -38,6 +38,7 @@ use photocraft_doc::{Document, Fill, Layer, LayerContent, Pattern};
 use photocraft_geom::Rect;
 use photocraft_raster::{Rgba8Image, Surface};
 use psblend as blend;
+pub(crate) use psblend::to_blitter_blend_mode;
 
 pub use advanced::advanced_active;
 
@@ -1651,17 +1652,15 @@ fn composite_pixel_layer(layer: &Layer, surf: &Surface, backdrop: &mut Buffer, c
     }
     let mv = mask_vals(layer, rect, cx);
     let gamma = text_gamma(layer);
-    let mut row = vec![[0.0f32; 4]; w];
-    for (ry, dst) in backdrop.px.chunks_exact_mut(w).enumerate() {
-        let y = rect.y0 + ry as i32;
-        surf.read_rgba_into(Rect::new(rect.x0, y, rect.x1, y + 1), &mut row);
-        if let Some(m) = mv.as_ref().and_then(|m| m.get(ry * w..(ry + 1) * w)) {
-            for (p, k) in row.iter_mut().zip(m) {
-                p[3] *= k;
-            }
+    let mut content = scratch_buffer(rect);
+    surf.read_rgba_into(rect, &mut content.px);
+    if let Some(m) = &mv {
+        for (p, &k) in content.px.iter_mut().zip(m) {
+            p[3] *= k;
         }
-        blend_span_fill(dst, &row, rect.x0, y, layer.blend, layer.opacity, layer.fill_opacity, gamma);
     }
+    blend_into_fill(backdrop, &content, layer.blend, layer.opacity, layer.fill_opacity, gamma);
+    recycle_buffer(content);
 }
 
 fn composite_layer_plain(layer: &Layer, clipped: &[Layer], backdrop: &mut Buffer, cx: &Ctx, scope: advanced::Scope) {
@@ -2142,16 +2141,9 @@ fn composite_atop_any(layer: &Layer, base: &mut Buffer, cx: &Ctx) {
     let Some(content) = render_content(layer, rect, cx) else { return };
     let opacity = layer.opacity * layer.fill_opacity;
     let gamma = text_gamma(layer);
-    for (i, p) in base.px.iter_mut().enumerate() {
-        let alpha = p[3];
-        if alpha <= 0.0 {
-            continue;
-        }
-        let s = content.px[i];
-        // Blend as if the base were opaque, then keep the base's alpha.
-        let r = blend::composite_gamma(layer.blend, [p[0], p[1], p[2], 1.0], s, opacity, gamma);
-        *p = [r[0], r[1], r[2], alpha];
-    }
+    let bmode = to_blitter_blend_mode(layer.blend);
+    let hdr = psblend::HDR.with(|h| h.get());
+    craft_blitter::blit_rgba32f_opts(&mut base.px, &content.px, bmode, opacity, 1.0, gamma, hdr, craft_blitter::AlphaMode::Straight, true);
 }
 
 /// Blend an isolated layer buffer into the backdrop.
@@ -2162,6 +2154,10 @@ fn blend_into(backdrop: &mut Buffer, src: &Buffer, mode: BlendMode, opacity: f32
 /// [`blend_into_g`] for a layer's own `opacity` and `fill`: Fill is part of the blend for
 /// Photoshop's special eight ([`psblend::composite_fill`]), plain coverage otherwise.
 fn blend_into_fill(backdrop: &mut Buffer, src: &Buffer, mode: BlendMode, opacity: f32, fill: f32, gamma: f32) {
+    if mode != BlendMode::Dissolve && !psblend::LAB_MIX.with(|m| m.get()) {
+        craft_blitter::blit_rgba32f_gamma(&mut backdrop.px, &src.px, to_blitter_blend_mode(mode), opacity, fill, gamma, psblend::HDR.with(|h| h.get()));
+        return;
+    }
     for_rows(backdrop, src, |dst, s, x0, y| blend_span_fill(dst, s, x0, y, mode, opacity, fill, gamma));
 }
 
@@ -2185,17 +2181,11 @@ fn blend_span_fill(dst: &mut [[f32; 4]], src: &[[f32; 4]], x0: i32, y: i32, mode
     if fill >= 1.0 || !psblend::fill_is_special(mode) {
         return blend_span_g(dst, src, x0, y, mode, opacity * fill, gamma);
     }
-    for (b, s) in dst.iter_mut().zip(src) {
-        if s[3] > 0.0 {
-            *b = psblend::composite_fill(mode, *b, *s, opacity, fill, gamma);
-        }
-    }
+    craft_blitter::blit_rgba32f_gamma(dst, src, psblend::to_blitter_blend_mode(mode), opacity, fill, gamma, psblend::HDR.with(|h| h.get()));
 }
 
 /// [`blend_into_g`] of one row: `dst` and `src` start at pixel (`x0`, `y`).
 fn blend_span_g(dst: &mut [[f32; 4]], src: &[[f32; 4]], x0: i32, y: i32, mode: BlendMode, opacity: f32, gamma: f32) {
-    // The blend space is constant in this loop. Some TLS implementations synchronise even a
-    // boolean read, so select the common Normal kernel once instead of once per pixel.
     if mode == BlendMode::Normal && gamma == 1.0 && !psblend::LAB_MIX.with(|l| l.get()) {
         return psblend::composite_normal_rgb_span(dst, src, opacity);
     }
