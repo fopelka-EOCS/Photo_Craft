@@ -1,6 +1,6 @@
 //! Swatches panel commands (`swatches.*`): add, delete, rename, reorder and group swatches, set
 //! the foreground or background colour from one, restore the defaults, and import or export
-//! Photoshop `.aco` and Adobe Swatch Exchange `.ase` files.
+//! Photoshop `.aco`, Adobe Swatch Exchange `.ase`, Adobe Color Table `.act` and GIMP `.gpl` files.
 //!
 //! The library is [`PresetState::swatches`](crate::presets::PresetState) (model and colour
 //! conversions in [`crate::presets::swatches`]); file parsing is `photocraft_psd::{aco, ase}`.
@@ -363,6 +363,10 @@ fn reset(s: &mut Session, p: &Value) -> Result<Value> {
 pub enum Format {
     Aco,
     Ase,
+    /// Adobe Color Table: up to 256 RGB colours, no names.
+    Act,
+    /// GIMP palette: a text list of RGB colours with names.
+    Gpl,
 }
 
 impl Format {
@@ -370,6 +374,8 @@ impl Format {
         match s.trim_start_matches('.').to_ascii_lowercase().as_str() {
             "aco" => Some(Format::Aco),
             "ase" => Some(Format::Ase),
+            "act" => Some(Format::Act),
+            "gpl" => Some(Format::Gpl),
             _ => None,
         }
     }
@@ -377,8 +383,84 @@ impl Format {
         match self {
             Format::Aco => "aco",
             Format::Ase => "ase",
+            Format::Act => "act",
+            Format::Gpl => "gpl",
         }
     }
+}
+
+/// First line of a GIMP palette.
+const GPL_SIGNATURE: &[u8] = b"GIMP Palette";
+/// Colours in an Adobe Color Table, and its size with and without the trailing count.
+const ACT_COLORS: usize = 256;
+const ACT_LEN: usize = ACT_COLORS * 3;
+
+fn byte(v: f32) -> u8 {
+    (unit(v) * 255.0).round() as u8
+}
+
+/// The colours of an `.act` file: 256 RGB triples, optionally followed by the number of colours
+/// in use and the transparent index (two big-endian `u16`s).
+fn parse_act(bytes: &[u8]) -> std::result::Result<Vec<Swatch>, String> {
+    let used = match bytes.len() {
+        ACT_LEN => ACT_COLORS,
+        l if l == ACT_LEN + 4 => match bytes.get(ACT_LEN..ACT_LEN + 2) {
+            Some(&[hi, lo]) => match usize::from(u16::from_be_bytes([hi, lo])) {
+                0 => ACT_COLORS,
+                n => n.min(ACT_COLORS),
+            },
+            _ => ACT_COLORS,
+        },
+        _ => return Err("not a readable .act file (expected 768 or 772 bytes)".into()),
+    };
+    Ok(bytes
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .take(used)
+        .enumerate()
+        .map(|(i, rgb)| Swatch::new(&format!("Swatch {}", i + 1), SwatchColor::Rgb(rgb.map(|v| f32::from(v) / 255.0))))
+        .collect())
+}
+
+/// The colours of a GIMP palette (`R G B name` lines; `#` comments and the `Name:` / `Columns:`
+/// headers are skipped).
+fn parse_gpl(bytes: &[u8]) -> std::result::Result<Vec<Swatch>, String> {
+    let text = String::from_utf8_lossy(bytes);
+    let mut lines = text.trim_start_matches('\u{feff}').lines();
+    if !lines.next().is_some_and(|l| l.trim().as_bytes().starts_with(GPL_SIGNATURE)) {
+        return Err("not a readable .gpl file (it must start with \"GIMP Palette\")".into());
+    }
+    let mut out = Vec::new();
+    for line in lines {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let mut parts = line.split_whitespace();
+        let mut rgb = [0u8; 3];
+        let mut ok = true;
+        for slot in &mut rgb {
+            match parts.next().and_then(|t| t.parse::<u8>().ok()) {
+                Some(v) => *slot = v,
+                None => {
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        // Headers (`Name: x`, `Columns: 4`) and malformed lines have no three colour numbers.
+        if !ok {
+            continue;
+        }
+        let name = parts.collect::<Vec<_>>().join(" ");
+        let name = if name.is_empty() { format!("Swatch {}", out.len() + 1) } else { clip(&name) };
+        out.push(Swatch::new(&name, SwatchColor::Rgb(rgb.map(|v| f32::from(v) / 255.0))));
+        if out.len() >= MAX_SWATCHES {
+            break;
+        }
+    }
+    Ok(out)
 }
 
 fn ext_format(path: Option<&str>) -> Option<Format> {
@@ -468,6 +550,13 @@ pub fn read_file(bytes: &[u8], format: Format, group: &str) -> std::result::Resu
     let mut out: Vec<Group<Swatch>> = Vec::new();
     let fallback = |i: usize, name: &str| if name.trim().is_empty() { format!("Swatch {}", i + 1) } else { clip(name.trim()) };
     match format {
+        Format::Act => {
+            if bytes.len() > ACT_LEN + 4 {
+                return Err("not a readable .act file (expected 768 or 772 bytes)".into());
+            }
+            out.push(Group::new(group, parse_act(bytes)?));
+        }
+        Format::Gpl => out.push(Group::new(group, parse_gpl(bytes)?)),
         Format::Aco => {
             let f = photocraft_psd::aco::parse(bytes).map_err(|e| format!("not a readable .aco swatch file: {e}"))?;
             let books = f.swatches.iter().filter(|s| matches!(s.color, AcoColor::Other { .. })).count();
@@ -525,9 +614,47 @@ pub fn read_file(bytes: &[u8], format: Format, group: &str) -> std::result::Resu
 
 /// Encode groups as a swatch file; returns the bytes, the number of swatches written and
 /// warnings about what the format cannot hold.
-pub fn write_file(groups: &[Group<Swatch>], format: Format) -> std::result::Result<(Vec<u8>, usize, Vec<String>), String> {
+pub fn write_file(groups: &[Group<Swatch>], format: Format, conv: &SwatchConv) -> std::result::Result<(Vec<u8>, usize, Vec<String>), String> {
     let mut warnings = Vec::new();
     match format {
+        Format::Act | Format::Gpl => {
+            let ext = format.id();
+            let all: Vec<&Swatch> = groups.iter().flat_map(|g| g.items.iter()).collect();
+            if groups.len() > 1 {
+                warnings.push(format!(".{ext} files have no groups; the swatches were saved as one list"));
+            }
+            let converted = all.iter().filter(|sw| !matches!(sw.color, SwatchColor::Rgb(_))).count();
+            if converted > 0 {
+                warnings.push(format!(".{ext} files hold RGB colours only; {converted} swatches were converted to RGB"));
+            }
+            let rgb: Vec<[u8; 3]> = all.iter().map(|sw| conv.rgb(&sw.color).map(byte)).collect();
+            if format == Format::Act {
+                if rgb.len() > ACT_COLORS {
+                    warnings.push(format!("an .act file holds {ACT_COLORS} colours; the first {ACT_COLORS} were saved"));
+                }
+                let n = rgb.len().min(ACT_COLORS);
+                let mut bytes = vec![0u8; ACT_LEN];
+                for (slot, c) in bytes.as_chunks_mut::<3>().0.iter_mut().zip(&rgb) {
+                    *slot = *c;
+                }
+                // Fewer than 256 colours: the trailer says how many count, and no colour is transparent.
+                if n < ACT_COLORS {
+                    bytes.extend_from_slice(&(n as u16).to_be_bytes());
+                    bytes.extend_from_slice(&0xFFFFu16.to_be_bytes());
+                }
+                return Ok((bytes, n, warnings));
+            }
+            let title = match groups {
+                [only] => only.name.as_str(),
+                _ => "Swatches",
+            };
+            let clean = |s: &str| s.chars().map(|c| if c.is_control() { ' ' } else { c }).collect::<String>();
+            let mut text = format!("GIMP Palette\nName: {}\nColumns: 0\n#\n", clean(title));
+            for (sw, c) in all.iter().zip(&rgb) {
+                text.push_str(&format!("{:>3} {:>3} {:>3}\t{}\n", c[0], c[1], c[2], clean(&sw.name)));
+            }
+            Ok((text.into_bytes(), rgb.len(), warnings))
+        }
         Format::Aco => {
             let swatches: Vec<AcoSwatch> =
                 groups.iter().flat_map(|g| g.items.iter()).map(|s| AcoSwatch { name: s.name.clone(), color: to_aco(&s.color) }).collect();
@@ -571,12 +698,15 @@ pub fn write_file(groups: &[Group<Swatch>], format: Format) -> std::result::Resu
 
 fn import(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "swatches.import";
-    let (bytes, stem) = crate::preset_import_cmds::file_bytes(p, CMD, ".aco or .ase file")?;
+    let (bytes, stem) = crate::preset_import_cmds::file_bytes(p, CMD, ".aco, .ase, .act or .gpl file")?;
     let format = match str_param(p, "format") {
-        Some(f) => Format::parse(f).ok_or_else(|| bad(CMD, format!("unknown format `{f}` (aco|ase)")))?,
+        Some(f) => Format::parse(f).ok_or_else(|| bad(CMD, format!("unknown format `{f}` (aco|ase|act|gpl)")))?,
         None if bytes.starts_with(photocraft_psd::ase::SIGNATURE) => Format::Ase,
+        None if bytes.trim_ascii_start().starts_with(GPL_SIGNATURE) => Format::Gpl,
+        // An .act has no signature, and its first bytes can look like an .aco version.
+        None if ext_format(str_param(p, "path")) == Some(Format::Act) => Format::Act,
         None if matches!(bytes.get(..2), Some([0, 1] | [0, 2])) => Format::Aco,
-        None => ext_format(str_param(p, "path")).ok_or_else(|| bad(CMD, "not an .aco or .ase swatch file"))?,
+        None => ext_format(str_param(p, "path")).ok_or_else(|| bad(CMD, "not an .aco, .ase, .act or .gpl swatch file"))?,
     };
     let mode = str_param(p, "mode").unwrap_or("append");
     let replace = match mode {
@@ -634,7 +764,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "swatches.export";
     let path = str_param(p, "path");
     let format = match str_param(p, "format") {
-        Some(f) => Format::parse(f).ok_or_else(|| bad(CMD, format!("unknown format `{f}` (aco|ase)")))?,
+        Some(f) => Format::parse(f).ok_or_else(|| bad(CMD, format!("unknown format `{f}` (aco|ase|act|gpl)")))?,
         None => ext_format(path).unwrap_or(Format::Aco),
     };
     let mut groups: Vec<Group<Swatch>> = match name_param(p, "group", CMD)? {
@@ -663,7 +793,8 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     if total(&groups) == 0 {
         return Err(bad(CMD, "no swatches to export"));
     }
-    let (bytes, count, warnings) = write_file(&groups, format).map_err(|e| bad(CMD, e))?;
+    let conv = SwatchConv::new(s);
+    let (bytes, count, warnings) = write_file(&groups, format, &conv).map_err(|e| bad(CMD, e))?;
     let mut out = json!({"format": format.id(), "count": count, "bytes": bytes.len(), "warnings": warnings});
     match path {
         Some(path) => {
@@ -790,7 +921,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Import Swatches…",
             menu: &[],
             shortcut: None,
-            params: r##"{"path":".aco or .ase file"?,"data":base64 bytes?,"format":"aco|ase"? (detected),"mode":"append|replace"="append","group":str?=file name (the group for ungrouped colours)} → {format,mode,groups,count,warnings}"##,
+            params: r##"{"path":".aco, .ase, .act or .gpl file"?,"data":base64 bytes?,"format":"aco|ase|act|gpl"? (detected),"mode":"append|replace"="append","group":str?=file name (the group for ungrouped colours)} → {format,mode,groups,count,warnings}"##,
             enabled: always,
             run: import,
             journal: true,
@@ -800,7 +931,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Export Swatches…",
             menu: &[],
             shortcut: None,
-            params: r##"{"format":"aco|ase"?=from path, else aco,"path":file? (else the bytes come back as base64 `data`),"group":name? (only that group),"swatches":[names]? (only these)} → {format,count,bytes,warnings,path|data}"##,
+            params: r##"{"format":"aco|ase|act|gpl"?=from path, else aco (act and gpl hold RGB only),"path":file? (else the bytes come back as base64 `data`),"group":name? (only that group),"swatches":[names]? (only these)} → {format,count,bytes,warnings,path|data}"##,
             enabled: has_swatches,
             run: export,
             journal: true,

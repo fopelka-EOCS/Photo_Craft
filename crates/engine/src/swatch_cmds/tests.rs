@@ -361,3 +361,83 @@ fn values_beyond_f32_range_are_rejected_so_presets_survive_a_restart() {
     assert_eq!(t.presets.swatches, s.presets.swatches, "user swatches survive a save and reload");
     assert!(names(&t).contains(&"Keep me".to_string()));
 }
+
+/// #6728: Adobe Color Tables (.act) and GIMP palettes (.gpl) import and export.
+#[test]
+fn act_and_gpl_swatch_files_round_trip() {
+    let mut s = Session::new();
+    s.execute("swatches.reset", json!({})).unwrap();
+    s.execute("swatches.add", json!({"name": "Warm Red", "group": "Mine", "color": "#ff8000"})).unwrap();
+    s.execute("swatches.add", json!({"name": "Ink", "group": "Mine", "color": {"model": "cmyk", "values": [100, 0, 0, 0]}})).unwrap();
+
+    // GIMP palette: a text file, one `R G B<TAB>name` line per swatch, CMYK converted with a note.
+    let gpl = export_bytes(&mut s, json!({"format": "gpl", "group": "Mine"}));
+    let text = String::from_utf8(gpl.clone()).unwrap();
+    assert!(text.starts_with("GIMP Palette\nName: Mine\n"), "{text}");
+    assert!(text.contains("255 128   0\tWarm Red\n"), "{text}");
+    let r = s.execute("swatches.export", json!({"format": "gpl", "group": "Mine"})).unwrap();
+    assert_eq!(r["count"], 2);
+    assert!(r["warnings"][0].as_str().unwrap().contains("RGB colours only"), "{r}");
+
+    let mut t = Session::new();
+    t.execute("swatches.deleteGroup", json!({"group": "Grays"})).unwrap();
+    let r = t.execute("swatches.import", json!({"data": b64_encode(&gpl), "group": "From GIMP"})).unwrap();
+    assert_eq!((r["format"].as_str(), r["count"].as_u64()), (Some("gpl"), Some(2)), "detected from the signature: {r}");
+    let g = t.presets.swatches.last().unwrap();
+    assert_eq!((g.name.as_str(), g.items[0].name.as_str()), ("From GIMP", "Warm Red"));
+    assert_eq!(g.items[0].color, SwatchColor::Rgb([1.0, 128.0 / 255.0, 0.0]));
+
+    // Adobe Color Table: 768 bytes padded, plus a count trailer when fewer than 256 colours.
+    let act = export_bytes(&mut s, json!({"format": "act", "group": "Mine"}));
+    assert_eq!(act.len(), 772);
+    assert_eq!(&act[..3], &[255, 128, 0]);
+    assert_eq!(&act[768..], &[0, 2, 0xFF, 0xFF]);
+    let r = t.execute("swatches.import", json!({"data": b64_encode(&act), "format": "act", "group": "Table"})).unwrap();
+    assert_eq!(r["count"], 2, "the trailer's count limits the colours: {r}");
+    let g = t.presets.swatches.last().unwrap();
+    assert_eq!(g.items[0].color, SwatchColor::Rgb([1.0, 128.0 / 255.0, 0.0]));
+    assert_eq!(g.items[1].name, "Swatch 2");
+
+    // Without a trailer all 256 are colours; the file extension names the format.
+    let dir = std::env::temp_dir().join(format!("pc-act-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("table.act");
+    let mut plain = vec![0u8; 768];
+    plain[..3].copy_from_slice(&[0, 1, 2]);
+    std::fs::write(&path, &plain).unwrap();
+    let r = t.execute("swatches.import", json!({"path": path.to_string_lossy()})).unwrap();
+    std::fs::remove_dir_all(&dir).ok();
+    assert_eq!((r["format"].as_str(), r["count"].as_u64()), (Some("act"), Some(256)), "an .act starting 0,1 is not an .aco: {r}");
+}
+
+#[test]
+fn act_and_gpl_files_that_are_not_palettes_are_refused() {
+    let mut s = Session::new();
+    let before = s.presets.swatches.clone();
+    for (data, format) in [
+        (b"junk".to_vec(), "act"),
+        (vec![0u8; 770], "act"),
+        (vec![0u8; 100_000], "act"),
+        (b"not a palette\n1 2 3 x\n".to_vec(), "gpl"),
+        (b"GIMP Palette\nName: empty\n#\n".to_vec(), "gpl"),
+        (b"GIMP Palette\n300 0 0 too big\n-1 2 3 negative\n1 2 x\n".to_vec(), "gpl"),
+    ] {
+        let r = s.execute("swatches.import", json!({"data": b64_encode(&data), "format": format}));
+        assert!(r.is_err(), "{format}: {data:?}");
+    }
+    assert_eq!(s.presets.swatches, before);
+    // A trailer count of zero or beyond 256 means all 256, and a bad format name is an error.
+    let mut act = vec![7u8; 772];
+    act[768..].copy_from_slice(&[0xFF, 0xFF, 0, 0]);
+    assert_eq!(s.execute("swatches.import", json!({"data": b64_encode(&act), "format": "act"})).unwrap()["count"], 256);
+    assert!(s.execute("swatches.export", json!({"format": "acb"})).is_err());
+    // More than 256 swatches: only the first 256 are written, with a note.
+    s.execute("swatches.reset", json!({})).unwrap();
+    for i in 0..260 {
+        s.execute("swatches.add", json!({"name": format!("c{i}"), "group": "Many", "color": "#102030"})).unwrap();
+    }
+    let r = s.execute("swatches.export", json!({"format": "act", "group": "Many"})).unwrap();
+    assert_eq!(r["count"], 256);
+    assert_eq!(r["bytes"], 768);
+    assert!(r["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().contains("256")), "{r}");
+}
