@@ -329,6 +329,9 @@ pub(crate) fn preflight(id: &str, p: &Value) -> Result<()> {
         "plugin.adapter.prepare" => &["provider", "consent"],
         _ => return Ok(()),
     };
+    if p.is_null() {
+        return Ok(());
+    }
     adapter::Limits::default().check_params(p).map_err(adapter_error)?;
     let map = p.as_object().ok_or_else(|| bad(id, "params must be an object"))?;
     if map.keys().any(|k| !allowed.contains(&k.as_str())) {

@@ -113,7 +113,8 @@ fn empty_registry_is_usable_registration_is_session_local_and_duplicates_fail() 
     assert_eq!(list["installed"][0]["devices"][0]["kind"], "cpu");
     assert_eq!(Session::new().execute(LIST, json!({})).unwrap()["installed"], json!([]));
     assert!(s.execute(LIST, json!({"provider": ID})).is_err());
-    assert!(crate::commands::find("plugin.adapter.install").is_none());
+    assert!(crate::commands::find("plugin.adapter.install").is_some());
+    assert!(crate::commands::find("plugin.adapter.loadDll").is_none());
 }
 
 #[test]

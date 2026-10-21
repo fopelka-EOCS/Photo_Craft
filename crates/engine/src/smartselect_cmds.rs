@@ -317,7 +317,8 @@ struct SubjectParams {
 
 impl SubjectParams {
     fn parse(p: &Value) -> Result<Self> {
-        let map = p.as_object().ok_or_else(|| bad(SUBJECT, "params must be an object"))?;
+        let empty = serde_json::Map::new();
+        let map = if p.is_null() { &empty } else { p.as_object().ok_or_else(|| bad(SUBJECT, "params must be an object"))? };
         for key in map.keys() {
             if !matches!(
                 key.as_str(),
