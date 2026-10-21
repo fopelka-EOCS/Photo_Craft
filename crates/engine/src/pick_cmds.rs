@@ -130,12 +130,14 @@ fn pick(s: &mut Session, p: &Value) -> Result<Value> {
     let y = p.get("y").and_then(Value::as_f64).ok_or_else(|| EngineError::BadParams { cmd: "layer.pickAt".into(), msg: "missing `y`".into() })?.floor() as i32;
     let group = p.get("target").and_then(Value::as_str) == Some("group");
     let mode = p.get("mode").and_then(Value::as_str).unwrap_or("replace");
+    let select = p.get("select").and_then(Value::as_bool).unwrap_or(true);
     // How deep the click reaches: the group the last canvas click picked, as long as nothing has
-    // changed since (a selection change or an edit moves the revision on) (#7914). A ⇧-click
-    // adds to the selection, so it never drills.
+    // changed since (a selection change or an edit moves the revision on) (#7914). Only a
+    // Group-mode click drills, so a Layer-mode click ends the drill. A ⇧-click adds to the
+    // selection, so it never drills.
     let (doc, drilled) = {
         let st = s.active().ok_or(EngineError::NoDocument)?;
-        let drilled = st.last_pick.filter(|(_, rev)| *rev == st.revision).map(|(id, _)| id).filter(|_| mode == "replace");
+        let drilled = group.then(|| st.last_pick.filter(|(_, rev)| *rev == st.revision).map(|(id, _)| id)).flatten();
         (st.doc.clone(), drilled)
     };
     // The right-click list includes type layers between glyphs, like Auto-Select.
@@ -144,20 +146,26 @@ fn pick(s: &mut Session, p: &Value) -> Result<Value> {
         let names: Vec<Value> = hits.iter().filter_map(|id| doc.layer(*id)).map(|l| json!({"layer": l.id.0, "name": l.name})).collect();
         return Ok(json!({ "layers": names }));
     }
-    let Some(target) = auto_select_target(&doc, x, y, group, drilled) else { return Ok(json!({ "layer": null })) };
-    if p.get("select").and_then(Value::as_bool).unwrap_or(true) {
+    let Some(target) = auto_select_target(&doc, x, y, group, drilled) else {
+        // A click that hit no layer ends the drill: the next click starts at the group again.
+        if select && let Some(st) = s.active_mut() {
+            st.last_pick = None;
+        }
+        return Ok(json!({ "layer": null }));
+    };
+    if select {
         // Like Photoshop, a plain click on one of several selected layers keeps them all
         // selected, so the drag that follows moves the whole selection.
         let keeps = mode == "replace" && s.active().is_some_and(|st| st.is_layer_selected(target) && st.selected_layers().len() > 1);
         if !keeps {
             s.execute("layer.select", json!({"layer": target.0, "mode": mode}))?;
-            // Remember the pick, so the next click on the same group drills into it. A click that
-            // kept a multi-selection did not enter the group, so it remembers nothing.
-            if mode == "replace"
-                && let Some(st) = s.active_mut()
-            {
-                st.last_pick = Some((target, st.revision));
-            }
+        }
+        // Remember the pick, so the next click on the same group drills into it. Only a
+        // Group-mode click drills, and one that kept a multi-selection did not enter a group.
+        if mode == "replace"
+            && let Some(st) = s.active_mut()
+        {
+            st.last_pick = (group && !keeps).then_some((target, st.revision));
         }
     }
     Ok(json!({ "layer": target.0 }))
@@ -377,6 +385,27 @@ mod tests {
         // The drill works again from there: the group, the group inside it, then the pixels.
         assert_eq!(pick(&mut s), inner.0);
         assert_eq!(pick(&mut s), leaf.0);
+    }
+
+    #[test]
+    fn a_click_that_hits_no_layer_ends_the_drill() {
+        // An empty spot is not a group, so the next click starts at the group again.
+        let (mut s, inner, outer, _) = nested_groups();
+        let pick = |s: &mut Session, x: i32| s.execute("layer.pickAt", json!({"x": x, "y": 5, "target": "group"})).unwrap()["layer"].clone();
+        assert_eq!(pick(&mut s, 5), outer.0);
+        // Past the canvas there is no layer at all: the drill ends there.
+        assert_eq!(pick(&mut s, 500), Value::Null);
+        assert_eq!(pick(&mut s, 5), outer.0, "the group, not the layer inside it");
+        assert_eq!(pick(&mut s, 5), inner.0, "and the drill works again from there");
+    }
+
+    #[test]
+    fn a_layer_mode_click_ends_the_drill() {
+        // The drill belongs to the Group mode: a Layer-mode click names the pixels, and the
+        // Group mode that follows starts at the group again.
+        let (mut s, _, outer, leaf) = nested_groups();
+        assert_eq!(s.execute("layer.pickAt", json!({"x": 5, "y": 5, "target": "layer"})).unwrap()["layer"], leaf.0);
+        assert_eq!(s.execute("layer.pickAt", json!({"x": 5, "y": 5, "target": "group"})).unwrap()["layer"], outer.0);
     }
 
     #[test]

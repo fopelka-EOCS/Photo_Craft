@@ -115,7 +115,11 @@ fn boxes(app: &mut PhotocraftApp, at: [f64; 2]) -> Option<([f64; 4], [f64; 4])> 
     // How deep a click reaches: the group the last canvas click picked, as long as nothing has
     // changed since (#7914).
     let drilled = st.last_pick.filter(|(_, rev)| *rev == revision).map(|(id, _)| id);
-    if let Some(c) = app.move_distance.as_ref().filter(|c| c.doc == doc && c.revision == revision && c.at == at && c.group == group && c.selected == selected && c.drilled == drilled) {
+    if let Some(c) = app
+        .move_distance
+        .as_ref()
+        .filter(|c| c.doc == doc && c.revision == revision && c.at == at && c.group == group && c.selected == selected && c.drilled == drilled)
+    {
         return c.boxes;
     }
     let d = &st.doc;
