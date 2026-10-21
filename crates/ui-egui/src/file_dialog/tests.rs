@@ -885,6 +885,34 @@ fn cancelling_multi_layer_quick_export_writes_nothing() {
     assert!(written.borrow().is_empty());
 }
 
+#[test]
+fn quick_export_exr_asks_before_overwriting_and_keeps_float_output() {
+    let dir = std::env::temp_dir().join(format!("photocraft-quick-exr-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let own = dir.join("scene.exr").to_string_lossy().into_owned();
+    std::fs::write(&own, b"original").unwrap();
+    let (mut app, open, _) = app();
+    app.run("prefs.set", json!({"values": {"export.quickExportFormat": "exr", "export.quickExportLocation": "sameFolder"}})).unwrap();
+    app.session.active_mut().unwrap().path = Some(own.clone());
+    let ctx = egui::Context::default();
+    menus::invoke(&mut app, &ctx, "file.export.quickExportAsPng", Value::Null).unwrap();
+    app.poll_file_dialog(&ctx, None);
+    assert!(matches!(open.borrow().as_slice(), [(FileDialogRequest::Save { suggested }, _)] if suggested.ends_with(".exr")));
+    assert_eq!(std::fs::read(&own).unwrap(), b"original");
+    answer(&open, None);
+    app.poll_file_dialog(&ctx, None);
+    assert_eq!(std::fs::read(&own).unwrap(), b"original", "Cancel leaves the original intact");
+
+    menus::invoke(&mut app, &ctx, "file.export.quickExportAsPng", Value::Null).unwrap();
+    app.poll_file_dialog(&ctx, None);
+    answer(&open, Some(FileDialogAnswer::SaveTo(own.clone())));
+    app.poll_file_dialog(&ctx, None);
+    let image = photocraft_codecs::decode(&std::fs::read(&own).unwrap()).unwrap();
+    assert_eq!(image.sample_type(), photocraft_codecs::SampleType::F32);
+    assert_eq!(app.session.active().unwrap().path.as_deref(), Some(own.as_str()));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// #3354: a system with no dialog backend answers `Unavailable`; the message reaches the status
 /// bar as an error, where a cancelled dialog stays silent.
 #[test]

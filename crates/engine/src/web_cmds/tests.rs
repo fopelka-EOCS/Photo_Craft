@@ -437,6 +437,54 @@ fn export_preferences_drive_quick_export() {
     s.execute("prefs.reset", json!({"path": "export"})).unwrap();
 }
 
+/// #7562: Quick Export must reach the float exporter, not the 8-bit web-image path.
+#[test]
+fn quick_export_exr_preserves_linear_float_pixels_and_preferences() {
+    use photocraft_doc::{ColorMode, Document, SampleType};
+    use photocraft_geom::Size;
+
+    let dir = tmp("quick_exr");
+    for (depth, sample) in [(8, SampleType::U8), (16, SampleType::U16), (32, SampleType::F32)] {
+        for mode in [ColorMode::Rgb, ColorMode::Grayscale] {
+            let mut doc = Document::new("scene.psd", Size::new(2, 1), mode, sample);
+            let fmt = doc.pixel_format();
+            let mut layer = Layer::raster("patch", fmt);
+            let value = if depth == 32 { 4.125 } else { 0.5 };
+            let pixel = photocraft_raster::from_rgba(&fmt, [value, value, value, 0.5]);
+            layer.surface_mut().unwrap().fill_rect(Rect::new(0, 0, 1, 1), &pixel);
+            doc.insert_above(None, layer);
+            if depth == 32 {
+                doc.icc_profile = Some(if mode == ColorMode::Rgb {
+                    photocraft_cms::Builtin::LinearSrgb.profile().to_bytes()
+                } else {
+                    photocraft_cms::builtin::linear_gray().to_bytes()
+                });
+            }
+            let mut s = Session::new();
+            s.add_document(doc, Some(format!("{dir}/scene.psd")));
+            // The default web preference must not clip or display-encode EXR values.
+            s.execute("file.export.exportPreferences", json!({"quickExportFormat": "exr", "quickExportLocation": "sameFolder", "convertToSrgb": true}))
+                .unwrap();
+            let restored: crate::prefs::Preferences = serde_json::from_value(s.prefs().to_json()).unwrap();
+            assert_eq!(serde_json::to_value(restored.export.quick_export_format).unwrap(), "exr");
+            let r = s.execute("file.export.quickExport", json!({})).unwrap();
+            assert_eq!(r["format"], "exr");
+            assert_eq!(r["path"], format!("{dir}/scene.exr"));
+            let image = decode(r["path"].as_str().unwrap());
+            assert_eq!(image.sample_type(), photocraft_codecs::SampleType::F32);
+            assert_eq!(image.dimensions(), (2, 1));
+            let rgba = image.convert(photocraft_codecs::ChannelLayout::Rgba, photocraft_codecs::SampleType::F32).to_normalized();
+            let expected = if depth == 32 { value } else { photocraft_color::convert::srgb_to_linear(value) };
+            assert!((rgba[0] - expected).abs() < 0.003, "{mode:?}/{depth}: {rgba:?}");
+            assert!((rgba[3] - 0.5).abs() < 0.003, "alpha: {mode:?}/{depth}: {rgba:?}");
+            assert_eq!(rgba[7], 0.0, "transparent pixel stays transparent");
+            assert_eq!(s.active().unwrap().doc.depth, sample, "export leaves document depth unchanged");
+            assert_eq!(s.active().unwrap().path.as_deref(), Some(format!("{dir}/scene.psd").as_str()));
+        }
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// #6599: with Location = Same Folder, a document opened from `photo.png` would be exported over
 /// `photo.png` itself. Without a `path` that is refused and the file is left alone; named
 /// explicitly (the save dialog's answer) it is written.

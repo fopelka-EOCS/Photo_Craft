@@ -1099,6 +1099,16 @@ fn quick_export(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let doc = d.doc.clone();
+    if fmt == "exr" {
+        // The web path reduces pixels to 8-bit display values. EXR instead uses the regular
+        // float exporter, which converts the document profile to linear RGB/gray and keeps HDR
+        // and alpha. The preference selects the codec even if an explicit path has another suffix.
+        let opts = photocraft_io::ExportOptions { xmp: photocraft_io::XmpEmbed::None, ..Default::default() };
+        let out = photocraft_io::export(&doc, "exr", &opts).map_err(other)?;
+        write_file(&path, &out.bytes)?;
+        crate::automate_cmds::fire_event(s, "export");
+        return Ok(json!({"path": path, "format": fmt, "bytes": out.bytes.len(), "warnings": out.warnings}));
+    }
     let metadata = serde_json::to_value(prefs.metadata).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
     let mut o = serde_json::Map::new();
     o.insert(
@@ -1548,7 +1558,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Export Preferences…",
             &["File", "Export"],
             None,
-            r##"{"quickExportFormat":"png|jpg|gif|webp"?,"quickExportLocation":"ask|sameFolder"?,"jpegQuality":1..100?,"webpLossless":bool?,"webpQuality":1..100?,"metadata":"none|copyright|all"?,"convertToSrgb":bool?} → {values}"##,
+            r##"{"quickExportFormat":"png|jpg|gif|webp|exr"?,"quickExportLocation":"ask|sameFolder"?,"jpegQuality":1..100?,"webpLossless":bool?,"webpQuality":1..100?,"metadata":"none|copyright|all"?,"convertToSrgb":bool?} → {values}; exr uses linear float output, ignoring web metadata and convertToSrgb"##,
             |_| Ok(()),
             export_preferences
         ),

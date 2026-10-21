@@ -1180,6 +1180,7 @@ fn humanize(key: &str) -> String {
 
 fn choice_label(v: &str) -> String {
     match v {
+        "exr" => "EXR".into(),
         "cm" => "Centimeters".into(),
         "mm" => "Millimeters".into(),
         "75" | "80" | "85" | "90" | "95" | "100" | "125" | "150" | "175" | "200" | "250" | "300" => format!("{v}%"),
@@ -1438,6 +1439,8 @@ fn export_field_visible(obj: &Map<String, Value>, key: &str) -> bool {
         "jpegQuality" => format == "jpg",
         "webpLossless" => format == "webp",
         "webpQuality" => format == "webp" && obj.get("webpLossless").and_then(Value::as_bool) != Some(true),
+        // EXR stores linear float pixels and doesn't carry these web-export metadata fields.
+        "convertToSrgb" | "metadata" => format != "exr",
         _ => true,
     }
 }
@@ -2640,6 +2643,12 @@ mod tests {
         assert!(export_field_visible(&obj, "webpQuality"));
         assert_eq!(humanize("webpLossless"), "Lossless");
         assert_eq!(humanize("webpQuality"), "Quality");
+
+        obj.insert("quickExportFormat".into(), json!("exr"));
+        for key in ["jpegQuality", "webpLossless", "webpQuality", "convertToSrgb", "metadata"] {
+            assert!(!export_field_visible(&obj, key), "{key} does not apply to EXR");
+        }
+        assert!(export_field_visible(&obj, "quickExportLocation"));
     }
 
     #[test]
