@@ -816,7 +816,7 @@ fn replace_color_null_records_foreground_and_bad_color_does_not_edit() {
         assert_eq!(smart_filters_of(&smart)[0].params["color"], json!([0.27_f32, 0.6_f32, 0.52_f32, 1.0_f32]));
         let before = smart.active().unwrap().doc.clone();
         let steps = smart.active().unwrap().history.past_len();
-        for color in [json!(3), json!("wrong"), json!([1, 2])] {
+        for color in [json!(3), json!("wrong"), json!([1, 2]), json!([1e300, 0, 0]), json!(["red", 0, 0])] {
             assert!(smart.execute("image.adjustments.replaceColor", json!({"color": color})).is_err());
             assert!(std::sync::Arc::ptr_eq(&smart.active().unwrap().doc, &before));
             assert_eq!(smart.active().unwrap().history.past_len(), steps);

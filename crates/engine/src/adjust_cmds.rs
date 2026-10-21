@@ -363,6 +363,12 @@ fn shadows_highlights_params(p: &Value) -> ShadowsHighlights {
 }
 
 fn replace_color_params(cmd: &str, p: &Value, default_color: [f32; 4]) -> Result<([f32; 4], f32, f32, f32, f32)> {
+    match given(p, "color") {
+        None => {}
+        Some(Value::String(s)) if crate::commands::parse_hex(s).is_some() => {}
+        Some(Value::Array(a)) if (3..=4).contains(&a.len()) && a.iter().all(Value::is_number) => {}
+        Some(_) => return Err(bad(cmd, "`color` must be a hex colour or an array of 3 or 4 finite numbers")),
+    }
     let c = crate::commands::color_param(cmd, p, "color", default_color)?;
     let fuzz = num(p, "fuzziness", 40.0).clamp(0.0, 200.0);
     let (h, sat, l) = (num(p, "hue", 0.0).clamp(-180.0, 180.0), num(p, "saturation", 0.0).clamp(-100.0, 100.0), num(p, "lightness", 0.0).clamp(-100.0, 100.0));
