@@ -835,7 +835,7 @@ mod tests {
         assert_eq!(titles, ["PhotoCraft", "File", "Edit", "Image", "Layer", "Type", "Select", "Filter", "View", "Window", "Help"]);
     }
 
-    /// PhotoCraft keeps Photoshop's ⌘H, ⌘M, ⌘W and ⌘, (Hide Layers): the system items give way.
+    /// PhotoCraft keeps Photoshop's ⌘H, ⌘M and ⌘W: the system items give way. Settings uses ⌘,.
     #[test]
     fn clashes_are_resolved_in_photocrafts_favour() {
         let l = layout(true);
@@ -843,7 +843,8 @@ mod tests {
         assert_eq!(clash("Cmd+H"), Some("view.extras"));
         assert_eq!(clash("Cmd+M"), Some("image.adjustments.curves"));
         assert_eq!(clash("Cmd+W"), Some("file.close"));
-        assert_eq!(clash("Cmd+,"), Some("layer.hideLayers"));
+        assert_eq!(clash("Cmd+,"), None);
+        assert_eq!(l.bar.find("edit.preferences.general").unwrap().shortcut.as_deref(), Some("Cmd+,"));
         assert_eq!(l.bar.find(HIDE).unwrap().shortcut.as_deref(), Some("Ctrl+Cmd+H"), "as in Photoshop");
         assert_eq!(l.bar.find(MINIMIZE).unwrap().shortcut.as_deref(), Some("Ctrl+Cmd+M"));
         let window = l.bar.menu(MenuRole::Window).unwrap();
@@ -916,7 +917,7 @@ mod tests {
         assert_eq!(sc("edit.undo").as_deref(), Some("Cmd+Z"));
         assert_eq!(sc("edit.copy").as_deref(), Some("Cmd+C"));
         assert_eq!(sc("edit.paste").as_deref(), Some("Cmd+V"));
-        assert_eq!(sc("layer.hideLayers").as_deref(), Some("Cmd+,"));
+        assert_eq!(sc("layer.hideLayers"), None);
         let app = app(true);
         let bindings = crate::shortcut_dispatch::bindings(&app);
         for it in crate::menus::menu_items(&app).iter().filter(|it| it.enabled) {
