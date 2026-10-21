@@ -1837,6 +1837,7 @@
 	Soften	柔化
 	Source	源
 	Source: set	源：已设置
+	Source: {name}	源：{name}
 	Sponge Tool	海绵工具
 	Spot Healing Brush Tool	污点修复画笔工具
 	Spread	扩展
@@ -2804,6 +2805,7 @@ curves	Smooth	平滑
 # History panel › History Brush source (#2966)
 	Paints from the History panel's source state	从历史记录面板的源状态绘画
 	Sets the source for the history brush	设置历史记录画笔的源
+	The History Brush source was deleted: set a new source in the History panel	历史记录画笔的源已被删除：请在“历史记录”面板中设置新的源
 # Embedded Profile Mismatch: profile names beside the choices, Remember this choice
 	Use the embedded profile ({profile})	使用嵌入的配置文件（{profile}）
 	Convert to the working space ({profile})	转换到工作空间（{profile}）

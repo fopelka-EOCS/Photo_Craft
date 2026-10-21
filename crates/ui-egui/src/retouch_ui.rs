@@ -45,6 +45,15 @@ pub(crate) fn clone_params(app: &PhotocraftApp) -> Option<Value> {
     Some(p)
 }
 
+/// History Brush params for the options bar (without `points` and `target`): shared by the live
+/// preview and the commit.
+pub(crate) fn history_params(app: &PhotocraftApp) -> Value {
+    json!({
+        "opacity": app.session.tools.brush.opacity * 100.0,
+        "flow": app.session.tools.brush.flow * 100.0,
+    })
+}
+
 /// The command and options-bar params (without `points` and `target`) of a sequential-dab tool:
 /// Blur, Sharpen, Smudge, Dodge, Burn, Sponge. Shared by the live preview and the commit.
 pub(crate) fn dab_params(app: &PhotocraftApp, tool: Tool) -> Option<(&'static str, Value)> {
@@ -141,7 +150,7 @@ pub fn finish_stroke(app: &mut PhotocraftApp, tool: Tool, points: &[[f64; 3]], m
             };
             (if tool == Tool::Healing { "paint.healingBrush" } else { "paint.cloneStamp" }, p)
         }
-        Tool::HistoryBrush => ("paint.historyBrush", json!({})),
+        Tool::HistoryBrush => ("paint.historyBrush", history_params(app)),
         Tool::Blur | Tool::Sharpen | Tool::Smudge | Tool::Dodge | Tool::Burn | Tool::Sponge => match dab_params(app, tool) {
             Some(cp) => cp,
             None => return false,
@@ -638,7 +647,33 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: Tool) -> bo
             crate::widgets::value_field(ui, &mut o.cr_tolerance, 0.0..=100.0, "%", 62.0);
             crate::widgets::checkbox(ui, &mut o.cr_anti_alias, tl!("Anti-alias"));
         }
-        Tool::HistoryBrush => opt(ui, tl!("Paints from the History panel's source state")),
+        Tool::HistoryBrush => {
+            let label = app.session.active().and_then(|st| {
+                match photocraft_engine::history_source_cmds::source(st)? {
+                    photocraft_engine::history_source_cmds::HistorySource::Snapshot(id) => {
+                        let s = st.snapshots.iter().find(|s| s.id == id)?;
+                        Some(crate::i18n::fmt(tl!("Source: {name}"), &[("name", &s.name)]))
+                    }
+                    photocraft_engine::history_source_cmds::HistorySource::State(idx) => {
+                        let entries = st.history.entries();
+                        let name = if idx < entries.len() {
+                            entries.get(idx).cloned()
+                        } else {
+                            st.history.redo_labels().nth(idx - entries.len()).map(str::to_string)
+                        }?;
+                        if idx == 0 && name == "Open" {
+                            Some(tl!("Paints from the document's opening state").to_string())
+                        } else {
+                            Some(crate::i18n::fmt(tl!("Source: {name}"), &[("name", &name)]))
+                        }
+                    }
+                }
+            });
+            match label {
+                Some(text) => opt(ui, &text),
+                None => opt(ui, tl!("The History Brush source was deleted: set a new source in the History panel")),
+            }
+        }
         Tool::QuickSelection => {
             crate::widgets::checkbox(ui, &mut o.sample_all.quick_selection, tl!("Sample All Layers"));
             crate::widgets::checkbox(ui, &mut o.enhance_edge, tl!("Enhance Edge"));
@@ -793,6 +828,21 @@ mod tests {
         assert!(pixel[0] > 0.9 && pixel[3] > 0.0 && pixel[3] < 0.5, "partial-opacity, partial-flow red stamp: {pixel:?}");
         let (id, params) = app.session.journal.last().unwrap();
         assert_eq!(id, "paint.cloneStamp");
+        assert_eq!(params["opacity"], 50.0);
+        assert_eq!(params["flow"], 50.0);
+    }
+
+    #[test]
+    fn history_brush_opacity_and_flow_reach_the_painted_pixels() {
+        let mut app = app();
+        app.run("paint.pencil", json!({"points": [[10, 10]], "size": 16, "color": "#ff0000"})).unwrap();
+        app.run("paint.pencil", json!({"points": [[10, 10]], "size": 16, "color": "#00ff00"})).unwrap();
+        app.ui.tool = Tool::HistoryBrush;
+        app.run("tools.setBrush", json!({"brush": {"opacity": 0.5, "flow": 0.5}})).unwrap();
+        assert!(finish_stroke(&mut app, Tool::HistoryBrush, &[[10.0, 10.0, 1.0]], egui::Modifiers::NONE));
+        assert!(!app.ui.status_error, "{}", app.ui.status);
+        let (id, params) = app.session.journal.last().unwrap();
+        assert_eq!(id, "paint.historyBrush");
         assert_eq!(params["opacity"], 50.0);
         assert_eq!(params["flow"], 50.0);
     }
@@ -1129,6 +1179,54 @@ mod tests {
         h.get_by_label("Darken Amount");
         assert_eq!(h.state().ui.tool_options.red_eye_pupil_size, 50.0);
         assert_eq!(h.state().ui.tool_options.red_eye_darken, 50.0);
+    }
+
+    #[test]
+    fn history_brush_options_bar_shows_source_name() {
+        use crate::theme::ThemeKind;
+        use egui::vec2;
+        use egui_kittest::kittest::Queryable;
+        let mut app = app();
+        app.ui.tool = Tool::HistoryBrush;
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(1400.0, 60.0)).build_ui_state(
+            |ui, app: &mut PhotocraftApp| {
+                if !ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                    return;
+                }
+                crate::panels::options_bar(app, ui);
+            },
+            app,
+        );
+        PhotocraftApp::setup_context(&h.ctx, ThemeKind::Studio);
+        h.run_steps(4);
+        h.get_by_label("Paints from the document's opening state");
+
+        // Now set a snapshot as the source
+        h.state_mut().run("history.newSnapshot", json!({"name": "MySnap"})).unwrap();
+        h.state_mut().run("history.setSource", json!({"snapshot": 1})).unwrap();
+        h.run_steps(4);
+        h.get_by_label("Source: MySnap");
+
+        // Now set an explicit state as the source
+        h.state_mut().run("edit.fill", json!({"color": "#ff0000"})).unwrap();
+        h.state_mut().run("history.setSource", json!({"state": 1})).unwrap();
+        h.run_steps(4);
+        h.get_by_label("Source: Fill");
+
+        // Deleting the source snapshot leaves source(st) as None, displaying the missing-source hint
+        h.state_mut().run("history.setSource", json!({"snapshot": 1})).unwrap();
+        h.state_mut().run("history.deleteSnapshot", json!({"snapshot": 1})).unwrap();
+        h.run_steps(4);
+        h.get_by_label("The History Brush source was deleted: set a new source in the History panel");
+
+        // Discarding a redo state source also leaves source(st) as None
+        h.state_mut().run("edit.fill", json!({"color": "#00ff00"})).unwrap();
+        // Set source to the latest state (state 2), then undo, then paint new stroke to discard redo
+        h.state_mut().run("history.setSource", json!({"state": 2})).unwrap();
+        h.state_mut().run("edit.undo", json!({})).unwrap();
+        h.state_mut().run("paint.pencil", json!({"points": [[10, 10]], "size": 1, "color": "#0000ff"})).unwrap();
+        h.run_steps(4);
+        h.get_by_label("The History Brush source was deleted: set a new source in the History panel");
     }
 
     #[test]

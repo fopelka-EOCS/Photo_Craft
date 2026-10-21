@@ -1205,6 +1205,7 @@
 
 # Clone Source panel
 	Source: not set ({key}-click with Clone Stamp)	Источник: не задан ({key}-клик штампом)
+	Source: {name}	Источник: {name}
 	Clone source {n} ({key}-click with Clone Stamp to set)	Источник клонирования {n} ({key}-клик штампом, чтобы задать)
 	{key}-click to set the source	{key}-клик, чтобы задать источник
 	Option-click to define a source point to clone from	Option-клик, чтобы задать точку источника клонирования
@@ -3133,6 +3134,8 @@ curves	Smooth	Сгладить
 # History panel › History Brush source (#2966)
 	Paints from the History panel's source state	Рисует из исходного состояния панели «История»
 	Sets the source for the history brush	Задаёт источник для кисти истории
+	Paints from the document's opening state	Рисует из состояния документа при открытии
+	The History Brush source was deleted: set a new source in the History panel	Источник кисти истории был удалён: задайте новый источник на панели «История»
 
 # Dynamic selection context menu and appearance favorites
 	Select Inverse	Инвертировать выделение

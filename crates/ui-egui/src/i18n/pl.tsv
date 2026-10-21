@@ -1811,6 +1811,7 @@
 	Soften	Zmiękcz
 	Source	Źródło
 	Source: set	Źródło: ustawione
+	Source: {name}	Źródło: {name}
 	Sponge Tool	Narzędzie Gąbka
 	Spot Healing Brush Tool	Narzędzie Punktowy pędzel korygujący
 	Spread	Rozszerzenie
@@ -3780,6 +3781,7 @@ curves	Smooth	Wygładź
 # History panel › History Brush source (#2966)
 	Paints from the History panel's source state	Maluje ze stanu źródłowego panelu Historia
 	Sets the source for the history brush	Ustawia źródło dla pędzla historii
+	The History Brush source was deleted: set a new source in the History panel	Źródło pędzla historii zostało usunięte: ustaw nowe źródło w panelu Historia
 # Embedded Profile Mismatch: profile names beside the choices, Remember this choice
 	Use the embedded profile ({profile})	Użyj osadzonego profilu ({profile})
 	Convert to the working space ({profile})	Konwertuj na przestrzeń roboczą ({profile})

@@ -191,3 +191,8 @@ sync_github_name = true
 
 [people.ha1des]
 sync_github_name = true
+
+[people.davidvhk]
+real_name = "David Vanhoucke"
+sync_github_name = true
+

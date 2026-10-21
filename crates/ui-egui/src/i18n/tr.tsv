@@ -1769,6 +1769,7 @@
 	Soften	Yumuşat
 	Source	Kaynak
 	Source: set	Kaynak: ayarlandı
+	Source: {name}	Kaynak: {name}
 	Sponge Tool	Sünger Aracı
 	Spot Healing Brush Tool	Nokta Düzeltme Fırçası Aracı
 	Spread	Yayılma
@@ -2183,6 +2184,7 @@
 	History Brush	Tarih Fırçası
 	Paints from the History panel's source state	Tarih panelinin kaynak durumundan boyar
 	Sets the source for the history brush	Tarih fırçasının kaynağını ayarlar
+	The History Brush source was deleted: set a new source in the History panel	Geçmiş fırçasının kaynağı silindi: Geçmiş panelinde yeni bir kaynak ayarlayın
 	Color Replacement	Renk Değiştirme
 	New Group	Yeni Grup
 	Layer Comp	Katman Kompozisyonu

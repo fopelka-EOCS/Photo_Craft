@@ -1010,7 +1010,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     crate::brush_picker::settings_toggle(app, ui);
                     widgets::vline(ui, 22.0);
                 }
-                if tool == Tool::CloneStamp {
+                if matches!(tool, Tool::CloneStamp | Tool::HistoryBrush) {
                     let before = app.session.tools.brush.clone();
                     let mut brush = before.clone();
                     let width = if t.pro { 62.0 } else { 66.0 };

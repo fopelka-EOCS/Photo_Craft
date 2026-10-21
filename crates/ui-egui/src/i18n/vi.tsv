@@ -2642,6 +2642,7 @@ shape	Appearance	Diện mạo
 	Smart Filters	Các bộ lọc thông minh
 	Soft	Mềm
 	Source: set	Nguồn: bộ
+	Source: {name}	Nguồn: {name}
 	Square, 12 x 12	Vuông, 12 x 12
 	Square, 5 x 5	Vuông, 5 x 5
 	Studio (Dark)	Studio (Tối)
@@ -3669,6 +3670,7 @@ curves	Smooth	Làm mượt
 # History panel › History Brush source (#2966)
 	Paints from the History panel's source state	Vẽ từ trạng thái nguồn của bảng Lịch sử
 	Sets the source for the history brush	Đặt nguồn cho cọ lịch sử
+	The History Brush source was deleted: set a new source in the History panel	Nguồn của cọ lịch sử đã bị xóa: đặt nguồn mới trong bảng Lịch sử
 # Embedded Profile Mismatch: profile names beside the choices, Remember this choice
 	Use the embedded profile ({profile})	Dùng hồ sơ nhúng ({profile})
 	Convert to the working space ({profile})	Chuyển sang không gian làm việc ({profile})
