@@ -104,8 +104,11 @@ pub fn load_folder(dir: &std::path::Path) -> Result<FolderReport> {
             Err(e) => report.failed.push((f.display().to_string(), e.to_string())),
         }
     }
+    let canonical_dir = dir.canonicalize().ok();
     for p in list() {
-        let from_dir = p.source().and_then(|s| std::path::Path::new(s).parent()).is_some_and(|parent| parent == dir);
+        let from_dir = p.source().and_then(|s| std::path::Path::new(s).parent()).is_some_and(|parent| {
+            parent == dir || (canonical_dir.is_some() && parent.canonicalize().ok().as_deref() == canonical_dir.as_deref())
+        });
         if from_dir && !report.loaded.iter().any(|id| id == p.id()) && remove(p.id()) {
             report.removed.push(p.id().to_string());
         }

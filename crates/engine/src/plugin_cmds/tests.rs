@@ -210,7 +210,7 @@ static FOLDER_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 #[test]
 fn preference_folder_is_loaded() {
-    let _guard = FOLDER_TEST_LOCK.lock().unwrap();
+    let _guard = FOLDER_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let dir = std::env::temp_dir().join(format!("pc-plugin-prefs-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("grey.wasm"), wat_plugin("test.cmds.folder", "{}", GREY)).unwrap();
@@ -245,7 +245,7 @@ fn preference_folder_is_loaded() {
 
 #[test]
 fn install_writes_to_folder_and_handles_collisions_and_reports_path() {
-    let _guard = FOLDER_TEST_LOCK.lock().unwrap();
+    let _guard = FOLDER_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let dir = std::env::temp_dir().join(format!("pc-plugin-install-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let mut s = Session::new();
