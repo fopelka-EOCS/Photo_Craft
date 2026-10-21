@@ -700,7 +700,9 @@ fn main() -> eframe::Result {
     // DirectComposition swapchain is always composed by DWM, so the driver never treats it as full
     // screen. A flip swapchain (Vulkan, DX12 from the HWND) engaged G-SYNC even with "full screen
     // only", and input-driven repaints then flickered VA/OLED panels [OBSERVED 2026-10-17].
-    if gpu_startup::composes_window(os, &plan, gpu_startup::read_compose_window(services::prefs_file().as_deref()), low_latency) {
+    let compose_window = gpu_startup::read_compose_window(services::prefs_file().as_deref()) && std::env::var_os(gpu_startup::NO_COMPOSE_ENV).is_none();
+    let composed = gpu_startup::composes_window(os, &plan, compose_window, low_latency);
+    if composed {
         options.viewport = options.viewport.with_transparent(true);
         if let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup {
             create.instance_descriptor.backends = eframe::wgpu::Backends::DX12;
@@ -941,15 +943,20 @@ fn main() -> eframe::Result {
             s.finish();
         }
         if let Ok(exe) = std::env::current_exe() {
-            let launched = std::process::Command::new(exe)
-                .args(std::env::args_os().skip(1))
-                .arg("--safe-gpu")
-                .env_remove("WGPU_BACKEND")
-                .env("PHOTOCRAFT_GPU_STARTUP_FAILURE", &reason)
-                .spawn();
-            match launched {
+            let mut command = std::process::Command::new(exe);
+            command.args(std::env::args_os().skip(1));
+            match gpu_startup::startup_retry(composed) {
+                gpu_startup::StartupRetry::WithoutCompositor => {
+                    log::warn!("presenting through the compositor failed ({reason}); restarting without it");
+                    command.env(gpu_startup::NO_COMPOSE_ENV, "1");
+                }
+                gpu_startup::StartupRetry::Cpu => {
+                    command.arg("--safe-gpu").env_remove("WGPU_BACKEND").env("PHOTOCRAFT_GPU_STARTUP_FAILURE", &reason);
+                }
+            }
+            match command.spawn() {
                 Ok(_) => return Ok(()),
-                Err(error) => log::error!("could not start CPU compatibility mode: {error}"),
+                Err(error) => log::error!("could not restart after the graphics start failed: {error}"),
             }
         }
     }

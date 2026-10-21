@@ -551,6 +551,25 @@ pub fn composes_window(os: Os, plan: &Plan, compose_window: bool, low_latency: b
     os == Os::Windows && compose_window && !low_latency && plan.env.is_none() && matches!(plan.backend, GpuBackend::Auto | GpuBackend::Dx12)
 }
 
+/// Set on the restart after a composed start failed: this launch presents as it would with
+/// `composeWindow` off.
+pub const NO_COMPOSE_ENV: &str = "PHOTOCRAFT_NO_COMPOSE";
+
+/// How to restart after the renderer failed to start.
+#[derive(Debug, PartialEq, Eq)]
+pub enum StartupRetry {
+    /// Once more without the compositor (Vulkan or DX12 from the HWND, as before it existed).
+    WithoutCompositor,
+    /// CPU compatibility mode (`--safe-gpu`).
+    Cpu,
+}
+
+/// A composed start only had DX12; the backends it left out may still work, so they get a try
+/// before the CPU.
+pub fn startup_retry(composed: bool) -> StartupRetry {
+    if composed { StartupRetry::WithoutCompositor } else { StartupRetry::Cpu }
+}
+
 /// Read the policy leniently at startup, including old settings without renderingMode.
 pub fn read_rendering_prefs(path: Option<&Path>) -> (GpuBackend, RenderingMode) {
     let v: Value = path.and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
@@ -609,6 +628,12 @@ mod tests {
         assert!(!composes_window(Os::Windows, &plan(Auto, Some("vulkan")), true, false), "WGPU_BACKEND wins");
         assert!(!composes_window(Os::Mac, &plan(Auto, None), true, false));
         assert!(!composes_window(Os::Other, &plan(Auto, None), true, false));
+    }
+
+    #[test]
+    fn a_failed_composed_start_retries_without_the_compositor_before_the_cpu() {
+        assert_eq!(startup_retry(true), StartupRetry::WithoutCompositor);
+        assert_eq!(startup_retry(false), StartupRetry::Cpu);
     }
 
     #[test]
