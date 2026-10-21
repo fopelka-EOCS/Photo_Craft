@@ -540,7 +540,7 @@ fn write_object(root: &Path, path: &Path, object: &Object, compressor: &mut Comp
 fn content_matches(expected: &[u8], compressed: &[u8], what: &str) -> bool {
     #[cfg(feature = "native-zstd")]
     if expected.len() > MAX_DIRECTORY_SCRATCH {
-        return photocraft_codecs::zstd_matches(compressed, expected).unwrap_or(false);
+        return photocraft_codecs::zstd_matches_exact(compressed, expected).unwrap_or(false);
     }
     decompress(compressed, expected.len(), what).is_ok_and(|actual| actual == expected)
 }

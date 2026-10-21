@@ -242,7 +242,7 @@ fn directory_bundle_resave_repairs_tampered_objects() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
-/// Reused blob content must be complete in its first frame, including empty content.
+/// Reused blobs need a complete first frame; large native objects reject trailing input.
 #[test]
 fn directory_save_repairs_missing_and_split_blob_frames() {
     for len in [0, 64, (2 << 20) + 1] {
@@ -265,6 +265,15 @@ fn directory_save_repairs_missing_and_split_blob_frames() {
         assert!(load_path(&dir).is_err());
         assert_eq!(writer.save_dir(&doc, &dir, &SaveOptions::default()).unwrap().blobs_written, 1, "{len} bytes");
         assert_eq!(load_path(&dir).unwrap(), doc);
+        #[cfg(feature = "native-zstd")]
+        if len > 2 << 20 {
+            let original = std::fs::read(&blob).unwrap();
+            for suffix in [b"trailing".as_slice(), original.as_slice()] {
+                std::fs::write(&blob, [original.as_slice(), suffix].concat()).unwrap();
+                assert_eq!(writer.save_dir(&doc, &dir, &SaveOptions::default()).unwrap().blobs_written, 1);
+                assert_eq!(std::fs::read(&blob).unwrap(), original);
+            }
+        }
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

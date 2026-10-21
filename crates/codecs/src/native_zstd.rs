@@ -71,6 +71,15 @@ pub fn zstd_matches(bytes: &[u8], mut expected: &[u8]) -> std::io::Result<bool> 
     }
 }
 
+/// Compares one complete frame with `expected`, rejecting any trailing input.
+/// Keeps the output and window bounds of [`zstd_matches`].
+pub fn zstd_matches_exact(bytes: &[u8], expected: &[u8]) -> std::io::Result<bool> {
+    if zstd::zstd_safe::find_frame_compressed_size(bytes).map_err(zstd_error)? != bytes.len() {
+        return Ok(false);
+    }
+    zstd_matches(bytes, expected)
+}
+
 impl ZstdEncoder<'_> {
     /// Creates an encoder that writes independent frames with checksums.
     pub fn new() -> std::io::Result<Self> {
@@ -138,32 +147,40 @@ mod tests {
         for mut frame in [known, unknown] {
             assert_eq!(decode_zstd_bounded(&frame, bytes.len()).unwrap(), bytes);
             assert!(zstd_matches(&frame, &bytes).unwrap());
+            assert!(zstd_matches_exact(&frame, &bytes).unwrap());
             assert!(!zstd_matches(&frame, &bytes[..bytes.len() - 1]).unwrap());
+            assert!(!zstd_matches_exact(&frame, &bytes[..bytes.len() - 1]).unwrap());
             assert!(!zstd_matches(&frame, &[0; 32]).unwrap());
             assert_eq!(decode_zstd_bounded(&frame, usize::MAX).unwrap(), bytes);
             assert_eq!(decode_zstd_bounded(&frame, bytes.len() - 1).unwrap_err().kind(), std::io::ErrorKind::FileTooLarge);
             for end in 0..frame.len() {
                 assert!(decode_zstd_bounded(&frame[..end], bytes.len()).is_err());
                 assert!(!matches!(zstd_matches(&frame[..end], &bytes), Ok(true)));
+                assert!(!matches!(zstd_matches_exact(&frame[..end], &bytes), Ok(true)));
             }
             let joined = [frame.as_slice(), frame.as_slice()].concat();
             assert_eq!(decode_zstd_bounded(&joined, bytes.len()).unwrap(), bytes);
             assert_eq!(decode_zstd(&joined, bytes.len()).unwrap(), bytes);
             assert!(zstd_matches(&joined, &bytes).unwrap());
+            assert!(!zstd_matches_exact(&joined, &bytes).unwrap());
+            assert!(!zstd_matches_exact(&[frame.as_slice(), b"trailing"].concat(), &bytes).unwrap());
             let both = [bytes.as_slice(), bytes.as_slice()].concat();
             assert!(!zstd_matches(&joined, &both).unwrap());
             *frame.last_mut().unwrap() ^= 1;
             assert!(decode_zstd_bounded(&frame, bytes.len()).is_err());
             assert!(zstd_matches(&frame, &bytes).is_err());
+            assert!(zstd_matches_exact(&frame, &bytes).is_err());
         }
         let mut window = [0x28, 0xb5, 0x2f, 0xfd, 0, 0, 1, 0, 0];
         assert!(decode_zstd_bounded(&window, 0).unwrap().is_empty());
         window[5] = 0x90;
         assert!(decode_zstd_bounded(&window, 0).is_err());
         assert!(zstd_matches(&window, &[]).is_err());
+        assert!(zstd_matches_exact(&window, &[]).is_err());
         let empty = ZstdEncoder::new().unwrap().compress(&[]).unwrap();
         assert!(decode_zstd_bounded(&empty, 0).unwrap().is_empty());
         assert!(zstd_matches(&empty, &[]).unwrap());
+        assert!(zstd_matches_exact(&empty, &[]).unwrap());
         assert!(!zstd_matches(&empty, &[0]).unwrap());
     }
 

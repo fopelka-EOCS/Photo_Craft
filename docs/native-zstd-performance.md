@@ -12,6 +12,8 @@ General changes also apply to default builds: directory verification compares de
 
 Measured on 2026-10-20 against main `872748fb`, with default and native branch builds. Apple M4 Max, 16 CPUs, 128 GiB, macOS arm64, rustc 1.99.1. Release O3, LTO off, 16 codegen units, debug off; repository-locked dependencies. Measurements ran serially at normal priority, without concurrent builds, with 16 Rayon workers. These are manual API measurements, not CI performance assertions or x86/browser results.
 
+The tables predate decoder-state reuse in `9dba39c8` and the exact-input verification guard. They do not measure those changes.
+
 CPU is process user plus system time around the operation, including its worker threads. Wall time uses a monotonic clock. Input reads, photo development, thumbnail rendering, output checks and cleanup are outside timers. Load validation remains inside. Directory saves include atomic writes and flushes. ZIP saves use a fresh `PcraftWriter`; common reads use main-written files, while own reads use each backend's files. Directory cases cover a new bundle, an existing bundle with a fresh writer, and a writer with its verification cache populated.
 
 Each configuration has three fresh-process samples, with version order rotated per trial. Layout own reads and the U16 Deflate control have nine paired samples. The embedded-photo own read and large-directory verification have seven pairs. Changes compare medians. The intervals below resample paired ratios. Small three-sample differences do not establish a regression. TIFF compression variants are descriptive comparisons on matching pixels.
@@ -106,6 +108,6 @@ PHOTOCRAFT_BACKEND_READ_OTHER=1 cargo test -p photocraft-format --locked --featu
 PHOTOCRAFT_BACKEND_READ_OTHER=1 cargo test -p photocraft-format --locked --test roundtrip cross_backend_documents -- --ignored --exact
 ```
 
-Decoder and format tests cover truncation, wrong checksums, excessive output, oversized windows, large-object verification and directory repair. Directory verification uses the same first-frame boundary as loading; Affinity reads concatenated frames.
+Decoder and format tests cover truncation, wrong checksums, excessive output, oversized windows, large-object verification and directory repair. Large native directory objects must contain exactly one frame, with no trailing input. The first-frame matching API remains available; Affinity reads concatenated frames.
 
 CI runs optional-backend checks only for relevant source, test, dependency and build-input changes; manual runs and `full-ci` force them. It includes decoder tests, an Affinity import, format tests, cross-backend fixtures, strict Clippy and WASM checks with Clang. Default builds keep their existing checks.
