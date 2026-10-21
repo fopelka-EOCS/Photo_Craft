@@ -9,6 +9,9 @@
 
 pub mod actions_cmds;
 pub mod actions_edit_cmds;
+pub mod adapter_cmds;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod adapter_packages;
 pub mod adjust_cmds;
 pub mod adjust_params;
 pub mod align_cmds;
@@ -491,6 +494,10 @@ pub struct Session {
     pub print_spooler: Option<print_cmds::Spooler>,
     /// Background jobs (see [`jobs`]).
     jobs: jobs::Jobs,
+    /// Trusted compatibility adapters. Native package installation is a separate explicit-consent path.
+    adapters: photocraft_plugins::adapter::Registry,
+    #[cfg(not(target_arch = "wasm32"))]
+    adapter_packages: adapter_packages::PackageStore,
     /// Color Sampler points dropped by the last canvas-size change (crop, Canvas Size, Image Size,
     /// rotation), for the status message. Read with [`Session::take_samplers_removed`].
     samplers_removed: usize,
@@ -689,6 +696,7 @@ impl Session {
         if !(params.is_object() || params.is_null()) {
             return Err(EngineError::BadParams { cmd: id.to_string(), msg: "params must be a JSON object".into() });
         }
+        crate::adapter_cmds::preflight(id, params)?;
         crate::param_check::check(spec, params)?;
         crate::filters::validate_params(id, params)?;
         if id == "layer.new.layer" {
@@ -744,6 +752,9 @@ impl Session {
     /// [`Self::disabled_reason`] for a call with `params`.
     pub fn disabled_reason_with(&self, id: &str, params: &Value) -> Option<String> {
         let Some(s) = commands::find(id) else { return Some(format!("unknown command `{id}`")) };
+        if let Err(error) = crate::adapter_cmds::preflight(id, params) {
+            return Some(error.to_string());
+        }
         self.precondition(s, &channel_cmds::inject_target(self, id, params.clone())).err().or_else(|| self.job_conflict(id, s.journal))
     }
 

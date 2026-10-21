@@ -259,6 +259,15 @@ fn file_error(operation: &str, path: &str, error: std::io::Error) -> AutomationE
 /// directory capabilities. Automation must use `doc.open`, `doc.save` and
 /// `doc.render` for file effects until those commands are migrated.
 pub fn authorize_engine_command(id: &str, params: &Value) -> Result<(), AutomationError> {
+    // Unlike the WASM filter sandbox, a trusted compatibility adapter can own native runtimes,
+    // workers or opaque resource references. Scanning parameters for a field named `path` cannot
+    // confine those effects. Keep execution closed to automation until an adapter-specific,
+    // capability-scoped policy exists; discovery remains safe and available.
+    if id.starts_with("plugin.adapter.") && !matches!(id, "plugin.adapter.list" | "plugin.adapter.packages") {
+        return Err(AutomationError::BadRequest(
+            "automation cannot execute trusted compatibility adapters; a capability-scoped adapter policy is required".into(),
+        ));
+    }
     let safe_file_command = matches!(
         id,
         "file.new"
@@ -779,6 +788,52 @@ mod tests {
         assert!(session.execute("file.automate.conditionalModeChange", params).is_err());
         assert_eq!(session.active().unwrap().doc.mode, photocraft_engine::doc::ColorMode::Rgb);
         assert!(authorize_desktop_engine_step("file.saveACopy", &serde_json::json!({})).is_err());
+    }
+
+    #[test]
+    fn compatibility_adapter_execution_requires_a_capability_scoped_policy() {
+        // Resource names and parameters are adapter-defined: a harmless-looking id may resolve
+        // a model on disk, or an adapter may launch its own native worker. Deny even without a
+        // literal path, through both direct and nested command authorization hooks.
+        for params in [
+            serde_json::json!({}),
+            serde_json::json!({"provider": "example", "operation": "filter", "output": "pixels"}),
+            serde_json::json!({"provider": "example", "resource": "opaque-model-id", "params": {"asset": "hidden"}}),
+            serde_json::json!({"resource": "/outside/model.data"}),
+        ] {
+            let error = authorize_engine_command("plugin.adapter.run", &params).unwrap_err().to_string();
+            assert!(error.contains("capability-scoped adapter policy"), "{error}");
+            assert!(authorize_desktop_engine_command("plugin.adapter.run", &params).is_err());
+            assert!(authorize_engine_step("plugin.adapter.run", &params).is_err());
+            assert!(authorize_desktop_engine_step("plugin.adapter.run", &params).is_err());
+        }
+        assert!(authorize_engine_command("plugin.adapter.list", &serde_json::json!({})).is_ok());
+        assert!(authorize_desktop_engine_command("plugin.adapter.list", &serde_json::json!({})).is_ok());
+        let mut session = photocraft_engine::Session::new();
+        session.execute("file.new", serde_json::json!({"width": 4, "height": 4})).unwrap();
+        session.authorize = Some(authorize_desktop_engine_step);
+        let error = session
+            .execute("plugin.adapter.run", serde_json::json!({"provider": "example", "operation": "filter", "output": "pixels"}))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("capability-scoped adapter policy"), "authorization must run before adapter dispatch: {error}");
+    }
+
+    #[test]
+    fn native_adapter_management_cannot_be_authorized_by_json_consent() {
+        for id in [
+            "plugin.adapter.inspectPackage",
+            "plugin.adapter.install",
+            "plugin.adapter.enable",
+            "plugin.adapter.remove",
+            "plugin.adapter.status",
+            "plugin.adapter.prepare",
+        ] {
+            let params = serde_json::json!({"path":"/outside/adapter.json","provider":"example","trust":true,"consent":true,"enabled":true});
+            assert!(authorize_engine_command(id, &params).is_err(), "{id}");
+            assert!(authorize_desktop_engine_command(id, &params).is_err(), "{id}");
+        }
+        assert!(authorize_engine_command("plugin.adapter.packages", &serde_json::json!({})).is_ok());
     }
 
     #[test]

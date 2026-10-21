@@ -15,6 +15,7 @@ macro_rules! tl {
 }
 
 pub mod actions;
+pub mod adapter_ui;
 pub mod adjust_dialog;
 pub mod adjust_editors;
 pub mod adjust_preview;
@@ -887,6 +888,7 @@ pub struct PhotocraftApp {
     pub(crate) targa_options: Option<targa_options_ui::Prompt>,
     /// A save to a DDS texture parked behind the DDS Options prompt (see `dds_options_ui`).
     pub(crate) dds_options: Option<dds_options_ui::Prompt>,
+    pub(crate) adapter_ui: adapter_ui::State,
     /// Files read but not opened yet: the first waits on its profile prompt, the rest behind it
     /// (see `open_prompt`).
     pub(crate) held_opens: std::collections::VecDeque<open_prompt::Held>,
@@ -1040,6 +1042,7 @@ impl PhotocraftApp {
             disk_stamps: HashMap::new(),
             targa_options: None,
             dds_options: None,
+            adapter_ui: adapter_ui::State::default(),
             held_opens: Default::default(),
             allow_close: false,
             stylus: Default::default(),
@@ -2181,6 +2184,7 @@ impl eframe::App for PhotocraftApp {
         workspace_ui::windows(self, &ctx);
         palette::show(self, &ctx);
         dialogs::show(self, &ctx);
+        adapter_ui::show(self, &ctx);
         rasterize_prompt::run_pending(self, &ctx);
         jobs_ui::dialog(self, &ctx);
         discard_ui::show(self, &ctx);
