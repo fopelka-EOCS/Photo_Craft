@@ -116,6 +116,17 @@ pub enum Tool {
     Sponge,
     QuickSelection,
     ObjectSelection,
+    /// Object Selection with a local AI model (Edit › Preferences › AI Models).
+    AiObjectSelection,
+    /// Paint over an object and the AI selection model selects it.
+    ObjectSelectionBrush,
+    /// The Generative Brushes (one toolbar button, a box of brushes beside it): a local AI
+    /// model fills what the stroke covers when it ends. Infill fills it from a prompt.
+    GenerativeInfill,
+    GenerativeRemoval,
+    ReflectionRemoval,
+    /// Paints sharpness and detail back into an area (an Enhance model).
+    GenerativeEnhance,
     Pen,
     FreeformPen,
     CurvaturePen,
@@ -138,7 +149,7 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Tool; 67] = [
+    pub const ALL: [Tool; 73] = [
         Tool::Move,
         Tool::Artboard,
         Tool::RectMarquee,
@@ -189,6 +200,12 @@ impl Tool {
         Tool::Sponge,
         Tool::QuickSelection,
         Tool::ObjectSelection,
+        Tool::AiObjectSelection,
+        Tool::ObjectSelectionBrush,
+        Tool::GenerativeInfill,
+        Tool::GenerativeRemoval,
+        Tool::ReflectionRemoval,
+        Tool::GenerativeEnhance,
         Tool::Pen,
         Tool::FreeformPen,
         Tool::CurvaturePen,
@@ -263,6 +280,12 @@ impl Tool {
             Tool::Sponge => "Sponge Tool",
             Tool::QuickSelection => "Quick Selection Tool",
             Tool::ObjectSelection => "Object Selection Tool",
+            Tool::AiObjectSelection => "AI Object Selection Tool",
+            Tool::ObjectSelectionBrush => "Object Selection Brush Tool",
+            Tool::GenerativeEnhance => "Generative Enhance Brush Tool",
+            Tool::GenerativeInfill => "Infill Brush Tool",
+            Tool::GenerativeRemoval => "Generative Removal Brush Tool",
+            Tool::ReflectionRemoval => "Reflection Removal Brush Tool",
             Tool::Pen => "Pen Tool",
             Tool::FreeformPen => "Freeform Pen Tool",
             Tool::CurvaturePen => "Curvature Pen Tool",
@@ -302,6 +325,11 @@ impl Tool {
                 | Tool::Eraser
                 | Tool::BackgroundEraser
                 | Tool::Remove
+                | Tool::GenerativeInfill
+                | Tool::GenerativeRemoval
+                | Tool::ReflectionRemoval
+                | Tool::GenerativeEnhance
+                | Tool::ObjectSelectionBrush
                 | Tool::SpotHealing
                 | Tool::Healing
                 | Tool::CloneStamp
@@ -339,7 +367,9 @@ impl Tool {
             // In the Marquee flyout, but M cycles only the Rectangular and Elliptical Marquee.
             Tool::SingleRowMarquee | Tool::SingleColumnMarquee => '\0',
             Tool::Dodge | Tool::Burn | Tool::Sponge => 'O',
-            Tool::QuickSelection | Tool::ObjectSelection => 'W',
+            Tool::QuickSelection | Tool::ObjectSelection | Tool::AiObjectSelection | Tool::ObjectSelectionBrush => 'W',
+            // Chosen from the Generative Brush box.
+            Tool::GenerativeInfill | Tool::GenerativeRemoval | Tool::ReflectionRemoval | Tool::GenerativeEnhance => '\0',
             Tool::Pen | Tool::FreeformPen | Tool::CurvaturePen | Tool::AddAnchorPoint | Tool::DeleteAnchorPoint | Tool::ConvertPoint => 'P',
             Tool::PathSelection | Tool::DirectSelection => 'A',
             Tool::Rectangle | Tool::EllipseShape | Tool::Triangle | Tool::Polygon | Tool::Line | Tool::CustomShape => 'U',
@@ -521,6 +551,28 @@ pub struct ToolOptions {
     /// Remove tool: each stroke is filled when released (Photoshop's default). Off, the strokes
     /// collect as a tint on the canvas and ↩ applies them together (Esc drops them).
     pub remove_after_each_stroke: bool,
+    /// AI Object Selection's model (an installed model's id; empty = the best one enabled).
+    #[serde(default)]
+    pub ai_select_model: String,
+    /// Generative Removal Brush's model (empty = the best one enabled).
+    #[serde(default)]
+    pub gen_removal_model: String,
+    /// Reflection Removal Brush's model (empty = the best one enabled).
+    #[serde(default)]
+    pub reflection_model: String,
+    /// The Generative Brushes: the fill goes to a new layer above the target.
+    #[serde(default)]
+    pub gen_new_layer: bool,
+    /// Infill brush: its model (empty = the best one enabled), prompt, negative prompt and seed
+    /// (empty = a new one each time).
+    pub infill_model: String,
+    pub infill_prompt: String,
+    pub infill_negative: String,
+    pub infill_seed: String,
+    /// Generative Enhance brush: its model, how strong (0–1) and seed (empty = new each time).
+    pub enhance_model: String,
+    pub enhance_detail: f32,
+    pub enhance_seed: String,
     pub feather: f32,
     /// linear | radial | angle | reflected | diamond
     pub gradient_style: String,
@@ -782,6 +834,12 @@ pub struct SampleAllLayers {
     pub blur: bool,
     pub sharpen: bool,
     pub smudge: bool,
+    pub ai_object_selection: bool,
+    pub object_selection_brush: bool,
+    pub generative_infill: bool,
+    pub generative_enhance: bool,
+    pub generative_removal: bool,
+    pub reflection_removal: bool,
 }
 
 impl SampleAllLayers {
@@ -805,6 +863,12 @@ impl SampleAllLayers {
             Tool::Blur => &mut self.blur,
             Tool::Sharpen => &mut self.sharpen,
             Tool::Smudge => &mut self.smudge,
+            Tool::AiObjectSelection => &mut self.ai_object_selection,
+            Tool::ObjectSelectionBrush => &mut self.object_selection_brush,
+            Tool::GenerativeInfill => &mut self.generative_infill,
+            Tool::GenerativeEnhance => &mut self.generative_enhance,
+            Tool::GenerativeRemoval => &mut self.generative_removal,
+            Tool::ReflectionRemoval => &mut self.reflection_removal,
             _ => return None,
         })
     }
@@ -820,6 +884,17 @@ impl Default for ToolOptions {
             object_finder: true,
             remove_new_layer: false,
             remove_after_each_stroke: true,
+            ai_select_model: String::new(),
+            gen_removal_model: String::new(),
+            reflection_model: String::new(),
+            gen_new_layer: false,
+            infill_model: String::new(),
+            infill_prompt: String::new(),
+            infill_negative: String::new(),
+            infill_seed: String::new(),
+            enhance_model: String::new(),
+            enhance_detail: 0.5,
+            enhance_seed: String::new(),
             feather: 0.0,
             gradient_style: "linear".into(),
             gradient_reverse: false,
@@ -1528,7 +1603,14 @@ mod tests {
         assert!(!Tool::RedEye.is_brushlike());
         assert_eq!(Tool::from_name("patternStamp"), Some(Tool::PatternStamp));
         assert_eq!(Tool::from_name("Pattern Stamp Tool"), Some(Tool::PatternStamp));
-        assert_eq!(Tool::ALL.len(), 67);
+        assert_eq!(Tool::ALL.len(), 73);
+        assert_eq!(Tool::from_name("objectSelectionBrush"), Some(Tool::ObjectSelectionBrush));
+        assert_eq!(Tool::from_name("Generative Enhance Brush Tool"), Some(Tool::GenerativeEnhance));
+        assert_eq!(Tool::from_name("AI Object Selection Tool"), Some(Tool::AiObjectSelection));
+        assert_eq!(Tool::from_name("generativeRemoval"), Some(Tool::GenerativeRemoval));
+        assert_eq!(Tool::from_name("generativeInfill"), Some(Tool::GenerativeInfill));
+        assert_eq!(Tool::GenerativeInfill.key(), '\0');
+        assert_eq!(Tool::ReflectionRemoval.key(), '\0', "picked from the Generative Brush box");
         assert_eq!(Tool::from_name("Vertical Type Mask Tool"), Some(Tool::VerticalTypeMask));
         assert_eq!(Tool::from_name("addAnchorPoint"), Some(Tool::AddAnchorPoint));
         assert_eq!(Tool::from_name("Delete Anchor Point Tool"), Some(Tool::DeleteAnchorPoint));

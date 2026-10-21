@@ -4323,6 +4323,123 @@ shape	Appearance	Izgled
 	In Front	Ispred
 	Behind	Iza
 
+# Edit › Preferences › AI: local AI models
+	AI	AI
+	AI Models…	AI modeli…
+	AI models run in the desktop app. Download PhotoCraft for your computer to use them.	AI modeli rade u aplikaciji za računar. Preuzmite PhotoCraft za svoj računar da biste ih koristili.
+	AI Models	AI modeli
+	Add a model from a file or a link	Dodaj model iz datoteke ili sa linka
+	Cancelled	Otkazano
+	Choose Files…	Izaberi datoteke…
+	Delete this model	Obriši ovaj model
+	Disabled: no tool offers this model	Isključen: nijedan alat ne nudi ovaj model
+	Download	Preuzmi
+	Enabled: tools can use this model	Uključen: alati mogu da koriste ovaj model
+	Finished in {time}	Završeno za {time}
+	From a File	Iz datoteke
+	From a Link	Sa linka
+	Generative Fill & Infill	Generativno popunjavanje i dopunjavanje
+	Generative Removal	Generativno uklanjanje
+	Hugging Face, Civitai or download link	Hugging Face, Civitai ili link za preuzimanje
+	Imported models PhotoCraft's tools don't use yet.	Uvezeni modeli koje alati programa PhotoCraft još ne koriste.
+	Importing {name}	Uvoz: {name}
+	Keep	Zadrži
+	Looking up the model…	Traženje modela…
+	Models are stored in {path}	Modeli se čuvaju u {path}
+	No models match your search.	Nijedan model ne odgovara pretrazi.
+	No models yet. Use Import… to add one.	Još nema modela. Pomoću opcije Uvezi… dodajte model.
+	ONNX, safetensors, checkpoint or GGUF. Pick an ONNX model and its .data file together.	ONNX, safetensors, checkpoint ili GGUF. Izaberite ONNX model zajedno sa njegovom .data datotekom.
+	Object Selection	Izbor objekta
+	Optional	Opciono
+	Other Models	Ostali modeli
+	Paste a Hugging Face file or repository (org/name), a Civitai model page, or a direct link to a model file.	Nalepite Hugging Face datoteku ili repozitorijum (org/name), stranicu modela na Civitai-ju ili direktan link do datoteke modela.
+	Recommended	Preporučeno
+	Reflection Removal	Uklanjanje odsjaja
+	Search models by name…	Pretraži modele po imenu…
+	Subject & Background	Subjekat i pozadina
+	Use as	Koristi kao
+	Used by the AI Object Selection tool.	Koristi ga alat AI izbor objekta.
+	Used by the Generative Removal brush.	Koristi ga četkica Generativno uklanjanje.
+	Used by the Infill brush and Generative Fill (prompts).	Koriste ga četkica Dopunjavanje i Generativno popunjavanje (upiti).
+	Used by the Reflection Removal brush.	Koristi ga četkica Uklanjanje odsjaja.
+	Used to select people, animals and products in one click.	Služi za izbor ljudi, životinja i proizvoda jednim klikom.
+	about {time} left	još oko {time}
+	{done} of {total}	{done} od {total}
+	{n} installed	Instalirano: {n}
+	{n} to download	Za preuzimanje: {n}
+
+# AI Object Selection, the Generative Brushes, AI Models accounts
+	AI Object Selection found nothing there — try a box around the object	AI izbor objekta tu nije ništa našao — nacrtajte okvir oko objekta
+	Accounts	Nalozi
+	Also in {sections}	Takođe u: {sections}
+	Choose one or more uses, or paste a link to guess them.	Izaberite jednu ili više namena ili nalepite link da ih pogodi.
+	Download a model in Edit › Preferences › AI Models	Preuzmite model u Uređivanje › Podešavanja › AI modeli
+	Drag a box around the object, or click it	Prevucite okvir oko objekta ili kliknite na njega
+	Generative Brush	Generativna četkica
+	Get Models…	Nabavi modele…
+	Get a token	Nabavi token
+	Guessed from the link. Click a use to change it.	Pogođeno iz linka. Kliknite na namenu da je promenite.
+	Hide the token	Sakrij token
+	Model:	Model:
+	No {kind} model yet. Download one in Edit › Preferences › AI Models.	Još nema modela za {kind}. Preuzmite ga u Uređivanje › Podešavanja › AI modeli.
+	Not signed in	Niste prijavljeni
+	Paint over the reflection	Prebojte odsjaj
+	Paint over what to remove	Prebojte ono što treba ukloniti
+	Rename this model	Preimenuj ovaj model
+	Show the token	Prikaži token
+	Some models need you to sign in before they download. Paste an access token from your account; it's kept on this computer and sent only to its own site.	Neki modeli traže prijavu pre preuzimanja. Nalepite pristupni token sa svog naloga; čuva se na ovom računaru i šalje se samo njegovom sajtu.
+	This build can't run AI models	Ova verzija ne može da pokreće AI modele
+	{n} signed in	Prijavljeno: {n}
+	AI Object Selection Tool	Alatka AI izbor objekta
+	Generative Removal Brush Tool	Četkica Generativno uklanjanje
+	Reflection Removal Brush Tool	Četkica Uklanjanje odsjaja
+	API key	API ključ
+
+# Generative Fill dialog and Infill brush
+	Generative Fill…	Generativno popunjavanje…
+	Infill Brush Tool	Četkica Dopunjavanje
+	A Stable Diffusion ONNX pipeline folder (model_index.json with unet, text_encoder, vae_encoder and vae_decoder folders)	Fascikla Stable Diffusion ONNX protočnog sistema (model_index.json sa fasciklama unet, text_encoder, vae_encoder i vae_decoder)
+	AI models run in the desktop app.	AI modeli rade u desktop aplikaciji.
+	All three can be left empty. Paint over the area; it fills when you let go.	Sva tri polja mogu ostati prazna. Prebojite oblast; popuniće se kada pustite taster.
+	Choose Folder…	Izaberi fasciklu…
+	Ctrl+click to switch it in every section	Ctrl+klik ga uključuje ili isključuje u svakom odeljku
+	Describe what to put there, e.g. a cat sitting on the bench	Opišite šta treba da bude tamo, npr. mačka koja sedi na klupi
+	Generative Fill needs a model. Download one in Edit › Preferences › AI Models (Generative Fill & Infill).	Za generativno popunjavanje potreban je model. Preuzmite ga u Uređivanje › Podešavanja › AI modeli (Generativno popunjavanje i dopunjavanje).
+	Make a variation	Napravi varijaciju
+	Negative prompt	Negativni upit
+	New seed	Novo seme
+	ONNX, safetensors, checkpoint or GGUF files (pick an ONNX model and its .data file together), or a diffusion pipeline's folder.	ONNX, safetensors, checkpoint ili GGUF datoteke (izaberite ONNX model zajedno sa njegovom .data datotekom) ili fascikla difuzionog protočnog sistema.
+	Paint over the area to fill	Prebojite oblast koju treba popuniti
+	Press + (or Enter in the prompt) to make a variation, or OK to fill with one.	Pritisnite + (ili Enter u upitu) da napravite varijaciju, ili U redu da popunite jednom od njih.
+	Prompt	Upit
+	Prompt, negative prompt and seed	Upit, negativni upit i seme
+	Prompt…	Upit…
+	Random each time	Svaki put nasumično
+	The same seed and prompt give the same result. Leave it empty for a new one each time.	Isto seme i upit daju isti rezultat. Ostavite prazno za novo seme svaki put.
+	Variation {n} · seed {seed}	Varijacija {n} · seme {seed}
+	Variations	Varijacije
+	What to avoid, e.g. blurry, text	Šta izbeći, npr. mutno, tekst
+
+# Generative Sharpen, Object Selection Brush, AI model device
+	Generative Sharpen…	Generativno izoštravanje…
+	Detail:	Detalji:
+	Falls back to the next option when a model can't run there.	Prelazi na sledeću opciju kada model ne može tu da se pokrene.
+	Generative Sharpen needs a model. Download one in Edit › Preferences › AI Models (Generative Enhance).	Za generativno izoštravanje potreban je model. Preuzmite ga u Uređivanje › Podešavanja › AI modeli (Generativno poboljšanje).
+	Paint over a blurry or pixelated area	Prebojite zamućenu ili pikselizovanu oblast
+	Paint over the object to select it (⇧ adds, Alt subtracts)	Prebojite objekat da biste ga izabrali (⇧ dodaje, Alt oduzima)
+	Preparing it to run… {percent}%	Priprema za pokretanje… {percent}%
+	Press + to make a variation, or OK to sharpen with one. Seeds change the result with Stable Diffusion models.	Pritisnite + da napravite varijaciju, ili U redu da izoštrite jednom od njih. Seme menja rezultat kod Stable Diffusion modela.
+	Run models on	Pokreći modele na
+	Seeds change the result with Stable Diffusion models. Leave it empty for a new one each time.	Seme menja rezultat kod Stable Diffusion modela. Ostavite prazno za novo seme svaki put.
+	The Object Selection Brush found nothing there — paint over more of the object	Četkica za izbor objekta tu nije ništa našla — prebojite veći deo objekta
+
+# AI model device per category, tool names
+	Subtle	Blago
+	Run on	Pokreći na
+	As above	Kao gore
+	Object Selection Brush Tool	Alatka četkica za izbor objekta
+	Generative Enhance Brush Tool	Alatka četkica za generativno poboljšanje
+
 # DDS Options (#1327)
 	DDS Options	DDS opcije
 	Generate Mipmaps	Generiši mipmape

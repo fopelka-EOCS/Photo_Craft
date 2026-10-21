@@ -140,9 +140,24 @@ what an agent can't finish alone.
 - **Estimate:** 120–200 h.
 
 ### G15. AI and generative features
-- **Missing:** Generative Fill and Expand, Generative Upscale, Neural Filters, Sky Replacement,
-  Super Zoom, ML Select Subject/Sky. There is no ML runtime (AUTO-219-7). Classical substitutes
-  exist (GrabCut/max-flow selection, Remove tool by non-local patch completion).
+- **Landed (2026-10-19):** a local model manager (Edit › Preferences › AI Models: recommended
+  models, imports from Hugging Face, Civitai, links and files, per-use switches, sign-in tokens)
+  and an optional ONNX Runtime (`photocraft-ml` features `onnx` / `onnx-dynamic`, GPU through
+  DirectML or WebGPU with CPU fallback). It drives AI Object Selection (SAM 2.1, MobileSAM,
+  matting models) and the Generative Brushes: Generative Removal and Reflection Removal (LaMa,
+  MI-GAN, or an image-to-image model such as a DINOv3 reflection remover). Prompted fills
+  (Infill brush, Edit › Generative Fill with a variations list) run Stable Diffusion 1.5/2
+  inpainting pipelines exported to ONNX (CLIP tokenizer, DDIM, classifier-free guidance);
+  ordinary 4-channel pipelines inpaint by keeping the unmasked latents. Single-file Stable
+  Diffusion 1.x/2.x/XL checkpoints (.safetensors) are converted to ONNX on import or first use
+  (`photocraft_ml::convert`, checked against diffusers on tiny models). The Generative Enhance
+  brush and Edit › Generative Sharpen (variations, seed, no prompt) run a super-resolution
+  network in tiles or a light img2img diffusion pass; the Object Selection Brush selects the
+  object painted over (SAM). Models run on the GPU, an NPU (DirectML, Windows) or the CPU,
+  falling back in that order. Default builds have no runtime; the tools say so.
+- **Missing:** Generative Expand, Generative Upscale as a resize, Neural
+  Filters, Sky Replacement, Super Zoom, ML Select Subject/Sky. Classical substitutes exist
+  (GrabCut/max-flow selection, Remove tool by non-local patch completion).
 - **Evidence:** Photoshop's `Required/UXP` ships the Neural Filters gallery and its `.kys` has
   a Neural Filters taskspace; users ask for local models (#2313, #1996, #2682).
 - **Estimate:** 300–600 h. **Human:** owner decision #41 (model licences, local vs remote).

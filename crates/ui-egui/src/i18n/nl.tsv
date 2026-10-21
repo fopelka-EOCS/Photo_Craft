@@ -4010,6 +4010,123 @@ curves	Smooth	Vloeiend maken
 	In Front	Voor
 	Behind	Achter
 
+# Edit › Preferences › AI: local AI models
+	AI	AI
+	AI Models…	AI-modellen…
+	AI models run in the desktop app. Download PhotoCraft for your computer to use them.	AI-modellen werken in de desktop-app. Download PhotoCraft voor je computer om ze te gebruiken.
+	AI Models	AI-modellen
+	Add a model from a file or a link	Een model toevoegen uit een bestand of via een link
+	Cancelled	Geannuleerd
+	Choose Files…	Bestanden kiezen…
+	Delete this model	Dit model verwijderen
+	Disabled: no tool offers this model	Uitgeschakeld: geen enkele tool biedt dit model aan
+	Download	Downloaden
+	Enabled: tools can use this model	Ingeschakeld: tools kunnen dit model gebruiken
+	Finished in {time}	Klaar na {time}
+	From a File	Uit een bestand
+	From a Link	Via een link
+	Generative Fill & Infill	Generatief vullen en infill
+	Generative Removal	Generatief verwijderen
+	Hugging Face, Civitai or download link	Hugging Face-, Civitai- of downloadlink
+	Imported models PhotoCraft's tools don't use yet.	Geïmporteerde modellen die de tools van PhotoCraft nog niet gebruiken.
+	Importing {name}	{name} importeren
+	Keep	Behouden
+	Looking up the model…	Model opzoeken…
+	Models are stored in {path}	Modellen worden opgeslagen in {path}
+	No models match your search.	Geen modellen gevonden voor je zoekopdracht.
+	No models yet. Use Import… to add one.	Nog geen modellen. Gebruik Importeren… om er een toe te voegen.
+	ONNX, safetensors, checkpoint or GGUF. Pick an ONNX model and its .data file together.	ONNX, safetensors, checkpoint of GGUF. Kies een ONNX-model samen met het bijbehorende .data-bestand.
+	Object Selection	Objectselectie
+	Optional	Optioneel
+	Other Models	Andere modellen
+	Paste a Hugging Face file or repository (org/name), a Civitai model page, or a direct link to a model file.	Plak een Hugging Face-bestand of -repository (org/name), een Civitai-modelpagina of een directe link naar een modelbestand.
+	Recommended	Aanbevolen
+	Reflection Removal	Reflecties verwijderen
+	Search models by name…	Modellen zoeken op naam…
+	Subject & Background	Onderwerp en achtergrond
+	Use as	Gebruiken als
+	Used by the AI Object Selection tool.	Gebruikt door de tool AI-objectselectie.
+	Used by the Generative Removal brush.	Gebruikt door het penseel Generatief verwijderen.
+	Used by the Infill brush and Generative Fill (prompts).	Gebruikt door het Infill-penseel en Generatief vullen (prompts).
+	Used by the Reflection Removal brush.	Gebruikt door het penseel Reflecties verwijderen.
+	Used to select people, animals and products in one click.	Gebruikt om mensen, dieren en producten met één klik te selecteren.
+	about {time} left	nog ongeveer {time}
+	{done} of {total}	{done} van {total}
+	{n} installed	{n} geïnstalleerd
+	{n} to download	{n} te downloaden
+
+# AI Object Selection, the Generative Brushes, AI Models accounts
+	AI Object Selection found nothing there — try a box around the object	AI-objectselectie heeft daar niets gevonden — trek een kader rond het object
+	Accounts	Accounts
+	Also in {sections}	Ook in {sections}
+	Choose one or more uses, or paste a link to guess them.	Kies een of meer toepassingen, of plak een link om ze te raden.
+	Download a model in Edit › Preferences › AI Models	Download een model via Bewerken › Voorkeuren › AI-modellen
+	Drag a box around the object, or click it	Sleep een kader rond het object, of klik erop
+	Generative Brush	Generatief penseel
+	Get Models…	Modellen ophalen…
+	Get a token	Token ophalen
+	Guessed from the link. Click a use to change it.	Geraden uit de link. Klik op een toepassing om die te wijzigen.
+	Hide the token	Token verbergen
+	Model:	Model:
+	No {kind} model yet. Download one in Edit › Preferences › AI Models.	Nog geen {kind}-model. Download er een via Bewerken › Voorkeuren › AI-modellen.
+	Not signed in	Niet aangemeld
+	Paint over the reflection	Schilder over de reflectie
+	Paint over what to remove	Schilder over wat weg moet
+	Rename this model	Dit model hernoemen
+	Show the token	Token tonen
+	Some models need you to sign in before they download. Paste an access token from your account; it's kept on this computer and sent only to its own site.	Sommige modellen vragen je om je aan te melden voordat ze downloaden. Plak een toegangstoken van je account; het blijft op deze computer en wordt alleen naar de eigen site gestuurd.
+	This build can't run AI models	Deze versie kan geen AI-modellen uitvoeren
+	{n} signed in	{n} aangemeld
+	AI Object Selection Tool	Tool AI-objectselectie
+	Generative Removal Brush Tool	Penseel Generatief verwijderen
+	Reflection Removal Brush Tool	Penseel Reflecties verwijderen
+	API key	API-sleutel
+
+# Generative Fill dialog and Infill brush
+	Generative Fill…	Generatief vullen…
+	Infill Brush Tool	Penseel Infill
+	A Stable Diffusion ONNX pipeline folder (model_index.json with unet, text_encoder, vae_encoder and vae_decoder folders)	Een Stable Diffusion ONNX-pipelinemap (model_index.json met de mappen unet, text_encoder, vae_encoder en vae_decoder)
+	AI models run in the desktop app.	AI-modellen draaien in de desktop-app.
+	All three can be left empty. Paint over the area; it fills when you let go.	Alle drie mogen leeg blijven. Schilder over het gebied; het wordt gevuld zodra je loslaat.
+	Choose Folder…	Map kiezen…
+	Ctrl+click to switch it in every section	Ctrl+klik om het in elke sectie om te schakelen
+	Describe what to put there, e.g. a cat sitting on the bench	Beschrijf wat er moet komen, bijv. een kat die op het bankje zit
+	Generative Fill needs a model. Download one in Edit › Preferences › AI Models (Generative Fill & Infill).	Generatief vullen heeft een model nodig. Download er een via Bewerken › Voorkeuren › AI-modellen (Generatief vullen en infill).
+	Make a variation	Variatie maken
+	Negative prompt	Negatieve prompt
+	New seed	Nieuwe startwaarde
+	ONNX, safetensors, checkpoint or GGUF files (pick an ONNX model and its .data file together), or a diffusion pipeline's folder.	ONNX-, safetensors-, checkpoint- of GGUF-bestanden (kies een ONNX-model samen met het bijbehorende .data-bestand), of de map van een diffusiepipeline.
+	Paint over the area to fill	Schilder over het te vullen gebied
+	Press + (or Enter in the prompt) to make a variation, or OK to fill with one.	Druk op + (of Enter in de prompt) om een variatie te maken, of op OK om met een ervan te vullen.
+	Prompt	Prompt
+	Prompt, negative prompt and seed	Prompt, negatieve prompt en startwaarde
+	Prompt…	Prompt…
+	Random each time	Elke keer willekeurig
+	The same seed and prompt give the same result. Leave it empty for a new one each time.	Dezelfde startwaarde en prompt geven hetzelfde resultaat. Laat leeg voor elke keer een nieuwe.
+	Variation {n} · seed {seed}	Variatie {n} · startwaarde {seed}
+	Variations	Variaties
+	What to avoid, e.g. blurry, text	Wat te vermijden, bijv. wazig, tekst
+
+# Generative Sharpen, Object Selection Brush, AI model device
+	Generative Sharpen…	Generatief verscherpen…
+	Detail:	Detail:
+	Falls back to the next option when a model can't run there.	Valt terug op de volgende optie als een model daar niet kan draaien.
+	Generative Sharpen needs a model. Download one in Edit › Preferences › AI Models (Generative Enhance).	Generatief verscherpen heeft een model nodig. Download er een via Bewerken › Voorkeuren › AI-modellen (Generatief verbeteren).
+	Paint over a blurry or pixelated area	Schilder over een wazig of korrelig gebied
+	Paint over the object to select it (⇧ adds, Alt subtracts)	Schilder over het object om het te selecteren (⇧ voegt toe, Alt trekt af)
+	Preparing it to run… {percent}%	Voorbereiden om uit te voeren… {percent}%
+	Press + to make a variation, or OK to sharpen with one. Seeds change the result with Stable Diffusion models.	Druk op + om een variatie te maken, of op OK om met een ervan te verscherpen. Startwaarden veranderen het resultaat bij Stable Diffusion-modellen.
+	Run models on	Modellen uitvoeren op
+	Seeds change the result with Stable Diffusion models. Leave it empty for a new one each time.	Startwaarden veranderen het resultaat bij Stable Diffusion-modellen. Laat leeg voor elke keer een nieuwe.
+	The Object Selection Brush found nothing there — paint over more of the object	Het objectselectiepenseel heeft daar niets gevonden — schilder over meer van het object
+
+# AI model device per category, tool names
+	Subtle	Subtiel
+	Run on	Uitvoeren op
+	As above	Zoals hierboven
+	Object Selection Brush Tool	Objectselectiepenseel
+	Generative Enhance Brush Tool	Penseel Generatief verbeteren
+
 # DDS Options (#1327)
 	DDS Options	DDS-opties
 	Generate Mipmaps	Mipmaps genereren

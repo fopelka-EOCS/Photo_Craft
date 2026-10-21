@@ -3950,6 +3950,123 @@ curves	Smooth	Εξομάλυνση
 	In Front	Μπροστά
 	Behind	Πίσω
 
+# Edit › Preferences › AI: local AI models
+	AI	ΤΝ
+	AI Models…	Μοντέλα ΤΝ…
+	AI models run in the desktop app. Download PhotoCraft for your computer to use them.	Τα μοντέλα ΤΝ λειτουργούν στην εφαρμογή υπολογιστή. Κατεβάστε το PhotoCraft για τον υπολογιστή σας για να τα χρησιμοποιήσετε.
+	AI Models	Μοντέλα ΤΝ
+	Add a model from a file or a link	Προσθήκη μοντέλου από αρχείο ή σύνδεσμο
+	Cancelled	Ακυρώθηκε
+	Choose Files…	Επιλογή αρχείων…
+	Delete this model	Διαγραφή αυτού του μοντέλου
+	Disabled: no tool offers this model	Ανενεργό: κανένα εργαλείο δεν προσφέρει αυτό το μοντέλο
+	Download	Λήψη
+	Enabled: tools can use this model	Ενεργό: τα εργαλεία μπορούν να χρησιμοποιούν αυτό το μοντέλο
+	Finished in {time}	Ολοκληρώθηκε σε {time}
+	From a File	Από αρχείο
+	From a Link	Από σύνδεσμο
+	Generative Fill & Infill	Παραγωγική γέμιση και συμπλήρωση
+	Generative Removal	Παραγωγική αφαίρεση
+	Hugging Face, Civitai or download link	Σύνδεσμος Hugging Face, Civitai ή λήψης
+	Imported models PhotoCraft's tools don't use yet.	Εισηγμένα μοντέλα που τα εργαλεία του PhotoCraft δεν χρησιμοποιούν ακόμη.
+	Importing {name}	Εισαγωγή {name}
+	Keep	Διατήρηση
+	Looking up the model…	Αναζήτηση του μοντέλου…
+	Models are stored in {path}	Τα μοντέλα αποθηκεύονται στο {path}
+	No models match your search.	Κανένα μοντέλο δεν ταιριάζει με την αναζήτηση.
+	No models yet. Use Import… to add one.	Δεν υπάρχουν ακόμη μοντέλα. Με την Εισαγωγή… προσθέστε ένα.
+	ONNX, safetensors, checkpoint or GGUF. Pick an ONNX model and its .data file together.	ONNX, safetensors, checkpoint ή GGUF. Επιλέξτε ένα μοντέλο ONNX μαζί με το αρχείο .data του.
+	Object Selection	Επιλογή αντικειμένου
+	Optional	Προαιρετικό
+	Other Models	Άλλα μοντέλα
+	Paste a Hugging Face file or repository (org/name), a Civitai model page, or a direct link to a model file.	Επικολλήστε ένα αρχείο ή αποθετήριο Hugging Face (org/name), μια σελίδα μοντέλου του Civitai ή έναν άμεσο σύνδεσμο σε αρχείο μοντέλου.
+	Recommended	Προτεινόμενο
+	Reflection Removal	Αφαίρεση αντανακλάσεων
+	Search models by name…	Αναζήτηση μοντέλων κατά όνομα…
+	Subject & Background	Θέμα και φόντο
+	Use as	Χρήση ως
+	Used by the AI Object Selection tool.	Χρησιμοποιείται από το εργαλείο Επιλογή αντικειμένου ΤΝ.
+	Used by the Generative Removal brush.	Χρησιμοποιείται από το πινέλο Παραγωγική αφαίρεση.
+	Used by the Infill brush and Generative Fill (prompts).	Χρησιμοποιείται από το πινέλο Συμπλήρωση και την Παραγωγική γέμιση (εντολές).
+	Used by the Reflection Removal brush.	Χρησιμοποιείται από το πινέλο Αφαίρεση αντανακλάσεων.
+	Used to select people, animals and products in one click.	Χρησιμοποιείται για την επιλογή ανθρώπων, ζώων και προϊόντων με ένα κλικ.
+	about {time} left	απομένουν περίπου {time}
+	{done} of {total}	{done} από {total}
+	{n} installed	Εγκατεστημένα: {n}
+	{n} to download	Για λήψη: {n}
+
+# AI Object Selection, the Generative Brushes, AI Models accounts
+	AI Object Selection found nothing there — try a box around the object	Η Επιλογή αντικειμένου ΤΝ δεν βρήκε τίποτα εκεί — σχεδιάστε ένα πλαίσιο γύρω από το αντικείμενο
+	Accounts	Λογαριασμοί
+	Also in {sections}	Επίσης σε: {sections}
+	Choose one or more uses, or paste a link to guess them.	Επιλέξτε μία ή περισσότερες χρήσεις ή επικολλήστε έναν σύνδεσμο για να μαντέψει.
+	Download a model in Edit › Preferences › AI Models	Κατεβάστε ένα μοντέλο από Επεξεργασία › Προτιμήσεις › Μοντέλα ΤΝ
+	Drag a box around the object, or click it	Σύρετε ένα πλαίσιο γύρω από το αντικείμενο ή κάντε κλικ πάνω του
+	Generative Brush	Παραγωγικό πινέλο
+	Get Models…	Λήψη μοντέλων…
+	Get a token	Λήψη διακριτικού
+	Guessed from the link. Click a use to change it.	Μαντεύτηκε από τον σύνδεσμο. Κάντε κλικ σε μια χρήση για αλλαγή.
+	Hide the token	Απόκρυψη διακριτικού
+	Model:	Μοντέλο:
+	No {kind} model yet. Download one in Edit › Preferences › AI Models.	Δεν υπάρχει ακόμη μοντέλο για {kind}. Κατεβάστε ένα από Επεξεργασία › Προτιμήσεις › Μοντέλα ΤΝ.
+	Not signed in	Χωρίς σύνδεση
+	Paint over the reflection	Βάψτε πάνω από την αντανάκλαση
+	Paint over what to remove	Βάψτε πάνω από ό,τι θέλετε να αφαιρεθεί
+	Rename this model	Μετονομασία αυτού του μοντέλου
+	Show the token	Εμφάνιση διακριτικού
+	Some models need you to sign in before they download. Paste an access token from your account; it's kept on this computer and sent only to its own site.	Ορισμένα μοντέλα ζητούν σύνδεση πριν από τη λήψη. Επικολλήστε ένα διακριτικό πρόσβασης από τον λογαριασμό σας· μένει σε αυτόν τον υπολογιστή και στέλνεται μόνο στον δικό του ιστότοπο.
+	This build can't run AI models	Αυτή η έκδοση δεν μπορεί να εκτελέσει μοντέλα ΤΝ
+	{n} signed in	Συνδεδεμένοι: {n}
+	AI Object Selection Tool	Εργαλείο Επιλογή αντικειμένου ΤΝ
+	Generative Removal Brush Tool	Πινέλο Παραγωγική αφαίρεση
+	Reflection Removal Brush Tool	Πινέλο Αφαίρεση αντανακλάσεων
+	API key	Κλειδί API
+
+# Generative Fill dialog and Infill brush
+	Generative Fill…	Παραγωγική γέμιση…
+	Infill Brush Tool	Πινέλο Συμπλήρωση
+	A Stable Diffusion ONNX pipeline folder (model_index.json with unet, text_encoder, vae_encoder and vae_decoder folders)	Φάκελος pipeline Stable Diffusion σε ONNX (model_index.json με τους φακέλους unet, text_encoder, vae_encoder και vae_decoder)
+	AI models run in the desktop app.	Τα μοντέλα ΤΝ εκτελούνται στην εφαρμογή υπολογιστή.
+	All three can be left empty. Paint over the area; it fills when you let go.	Και τα τρία μπορούν να μείνουν κενά. Βάψτε πάνω στην περιοχή· γεμίζει μόλις αφήσετε το κουμπί.
+	Choose Folder…	Επιλογή φακέλου…
+	Ctrl+click to switch it in every section	Ctrl+κλικ για εναλλαγή σε κάθε ενότητα
+	Describe what to put there, e.g. a cat sitting on the bench	Περιγράψτε τι θα μπει εκεί, π.χ. μια γάτα που κάθεται στο παγκάκι
+	Generative Fill needs a model. Download one in Edit › Preferences › AI Models (Generative Fill & Infill).	Η Παραγωγική γέμιση χρειάζεται μοντέλο. Κατεβάστε ένα από Επεξεργασία › Προτιμήσεις › Μοντέλα ΤΝ (Παραγωγική γέμιση και συμπλήρωση).
+	Make a variation	Δημιουργία παραλλαγής
+	Negative prompt	Αρνητική εντολή
+	New seed	Νέα αρχική τιμή
+	ONNX, safetensors, checkpoint or GGUF files (pick an ONNX model and its .data file together), or a diffusion pipeline's folder.	Αρχεία ONNX, safetensors, checkpoint ή GGUF (επιλέξτε ένα μοντέλο ONNX μαζί με το αρχείο .data του) ή ο φάκελος ενός pipeline διάχυσης.
+	Paint over the area to fill	Βάψτε πάνω στην περιοχή που θα γεμίσει
+	Press + (or Enter in the prompt) to make a variation, or OK to fill with one.	Πατήστε + (ή Enter στην εντολή) για να δημιουργήσετε παραλλαγή ή Εντάξει για γέμισμα με μία από αυτές.
+	Prompt	Εντολή
+	Prompt, negative prompt and seed	Εντολή, αρνητική εντολή και αρχική τιμή
+	Prompt…	Εντολή…
+	Random each time	Τυχαία κάθε φορά
+	The same seed and prompt give the same result. Leave it empty for a new one each time.	Η ίδια αρχική τιμή και εντολή δίνουν το ίδιο αποτέλεσμα. Αφήστε το κενό για νέα τιμή κάθε φορά.
+	Variation {n} · seed {seed}	Παραλλαγή {n} · αρχική τιμή {seed}
+	Variations	Παραλλαγές
+	What to avoid, e.g. blurry, text	Τι να αποφευχθεί, π.χ. θολό, κείμενο
+
+# Generative Sharpen, Object Selection Brush, AI model device
+	Generative Sharpen…	Παραγωγική όξυνση…
+	Detail:	Λεπτομέρεια:
+	Falls back to the next option when a model can't run there.	Μεταβαίνει στην επόμενη επιλογή όταν ένα μοντέλο δεν μπορεί να εκτελεστεί εκεί.
+	Generative Sharpen needs a model. Download one in Edit › Preferences › AI Models (Generative Enhance).	Η Παραγωγική όξυνση χρειάζεται μοντέλο. Κατεβάστε ένα από Επεξεργασία › Προτιμήσεις › Μοντέλα ΤΝ (Παραγωγική βελτίωση).
+	Paint over a blurry or pixelated area	Βάψτε πάνω σε μια θολή ή πιξελιασμένη περιοχή
+	Paint over the object to select it (⇧ adds, Alt subtracts)	Βάψτε πάνω στο αντικείμενο για να το επιλέξετε (το ⇧ προσθέτει, το Alt αφαιρεί)
+	Preparing it to run… {percent}%	Προετοιμασία για εκτέλεση… {percent}%
+	Press + to make a variation, or OK to sharpen with one. Seeds change the result with Stable Diffusion models.	Πατήστε + για να δημιουργήσετε παραλλαγή ή Εντάξει για όξυνση με μία από αυτές. Οι αρχικές τιμές αλλάζουν το αποτέλεσμα στα μοντέλα Stable Diffusion.
+	Run models on	Εκτέλεση μοντέλων σε
+	Seeds change the result with Stable Diffusion models. Leave it empty for a new one each time.	Οι αρχικές τιμές αλλάζουν το αποτέλεσμα στα μοντέλα Stable Diffusion. Αφήστε το κενό για νέα τιμή κάθε φορά.
+	The Object Selection Brush found nothing there — paint over more of the object	Το Πινέλο επιλογής αντικειμένου δεν βρήκε τίποτα εκεί — βάψτε πάνω σε μεγαλύτερο μέρος του αντικειμένου
+
+# AI model device per category, tool names
+	Subtle	Διακριτικό
+	Run on	Εκτέλεση σε
+	As above	Όπως παραπάνω
+	Object Selection Brush Tool	Πινέλο επιλογής αντικειμένου (Object Selection Brush Tool)
+	Generative Enhance Brush Tool	Πινέλο παραγωγικής βελτίωσης (Generative Enhance Brush Tool)
+
 # DDS Options (#1327)
 	DDS Options	Επιλογές DDS
 	Generate Mipmaps	Δημιουργία mipmap

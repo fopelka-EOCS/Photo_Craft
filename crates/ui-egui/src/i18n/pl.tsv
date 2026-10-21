@@ -3849,6 +3849,123 @@ curves	Smooth	Wygładź
 	In Front	Z przodu
 	Behind	Z tyłu
 
+# Edit › Preferences › AI: local AI models
+	AI	AI
+	AI Models…	Modele AI…
+	AI models run in the desktop app. Download PhotoCraft for your computer to use them.	Modele AI działają w aplikacji na komputer. Pobierz PhotoCraft na swój komputer, aby z nich korzystać.
+	AI Models	Modele AI
+	Add a model from a file or a link	Dodaj model z pliku lub linku
+	Cancelled	Anulowano
+	Choose Files…	Wybierz pliki…
+	Delete this model	Usuń ten model
+	Disabled: no tool offers this model	Wyłączony: żadne narzędzie nie oferuje tego modelu
+	Download	Pobierz
+	Enabled: tools can use this model	Włączony: narzędzia mogą używać tego modelu
+	Finished in {time}	Ukończono w {time}
+	From a File	Z pliku
+	From a Link	Z linku
+	Generative Fill & Infill	Wypełnienie generatywne i infill
+	Generative Removal	Usuwanie generatywne
+	Hugging Face, Civitai or download link	Link Hugging Face, Civitai lub do pobrania
+	Imported models PhotoCraft's tools don't use yet.	Zaimportowane modele, których narzędzia PhotoCraft jeszcze nie używają.
+	Importing {name}	Importowanie: {name}
+	Keep	Zachowaj
+	Looking up the model…	Wyszukiwanie modelu…
+	Models are stored in {path}	Modele są przechowywane w {path}
+	No models match your search.	Żaden model nie pasuje do wyszukiwania.
+	No models yet. Use Import… to add one.	Nie ma jeszcze modeli. Użyj opcji Importuj…, aby dodać model.
+	ONNX, safetensors, checkpoint or GGUF. Pick an ONNX model and its .data file together.	ONNX, safetensors, checkpoint lub GGUF. Wybierz model ONNX razem z jego plikiem .data.
+	Object Selection	Zaznaczanie obiektu
+	Optional	Opcjonalnie
+	Other Models	Inne modele
+	Paste a Hugging Face file or repository (org/name), a Civitai model page, or a direct link to a model file.	Wklej plik lub repozytorium Hugging Face (org/name), stronę modelu Civitai albo bezpośredni link do pliku modelu.
+	Recommended	Polecane
+	Reflection Removal	Usuwanie odbić
+	Search models by name…	Szukaj modeli po nazwie…
+	Subject & Background	Obiekt i tło
+	Use as	Użyj jako
+	Used by the AI Object Selection tool.	Używany przez narzędzie Zaznaczanie obiektu AI.
+	Used by the Generative Removal brush.	Używany przez pędzel Usuwanie generatywne.
+	Used by the Infill brush and Generative Fill (prompts).	Używany przez pędzel Infill i Wypełnienie generatywne (prompty).
+	Used by the Reflection Removal brush.	Używany przez pędzel Usuwanie odbić.
+	Used to select people, animals and products in one click.	Służy do zaznaczania ludzi, zwierząt i produktów jednym kliknięciem.
+	about {time} left	zostało około {time}
+	{done} of {total}	{done} z {total}
+	{n} installed	Zainstalowane: {n}
+	{n} to download	Do pobrania: {n}
+
+# AI Object Selection, the Generative Brushes, AI Models accounts
+	AI Object Selection found nothing there — try a box around the object	Zaznaczanie obiektu AI nic tam nie znalazło — obrysuj obiekt prostokątem
+	Accounts	Konta
+	Also in {sections}	Także w: {sections}
+	Choose one or more uses, or paste a link to guess them.	Wybierz jedno lub więcej zastosowań albo wklej link, aby je odgadnąć.
+	Download a model in Edit › Preferences › AI Models	Pobierz model w Edycja › Preferencje › Modele AI
+	Drag a box around the object, or click it	Przeciągnij prostokąt wokół obiektu lub go kliknij
+	Generative Brush	Pędzel generatywny
+	Get Models…	Pobierz modele…
+	Get a token	Uzyskaj token
+	Guessed from the link. Click a use to change it.	Odgadnięto z linku. Kliknij zastosowanie, aby je zmienić.
+	Hide the token	Ukryj token
+	Model:	Model:
+	No {kind} model yet. Download one in Edit › Preferences › AI Models.	Brak jeszcze modelu: {kind}. Pobierz go w Edycja › Preferencje › Modele AI.
+	Not signed in	Niezalogowano
+	Paint over the reflection	Zamaluj odbicie
+	Paint over what to remove	Zamaluj to, co chcesz usunąć
+	Rename this model	Zmień nazwę tego modelu
+	Show the token	Pokaż token
+	Some models need you to sign in before they download. Paste an access token from your account; it's kept on this computer and sent only to its own site.	Niektóre modele wymagają zalogowania przed pobraniem. Wklej token dostępu ze swojego konta; jest przechowywany na tym komputerze i wysyłany tylko do jego witryny.
+	This build can't run AI models	Ta wersja nie może uruchamiać modeli AI
+	{n} signed in	Zalogowano: {n}
+	AI Object Selection Tool	Narzędzie Zaznaczanie obiektu AI
+	Generative Removal Brush Tool	Pędzel Usuwanie generatywne
+	Reflection Removal Brush Tool	Pędzel Usuwanie odbić
+	API key	Klucz API
+
+# Generative Fill dialog and Infill brush
+	Generative Fill…	Wypełnienie generatywne…
+	Infill Brush Tool	Pędzel Infill
+	A Stable Diffusion ONNX pipeline folder (model_index.json with unet, text_encoder, vae_encoder and vae_decoder folders)	Folder potoku ONNX Stable Diffusion (model_index.json z folderami unet, text_encoder, vae_encoder i vae_decoder)
+	AI models run in the desktop app.	Modele AI działają w aplikacji desktopowej.
+	All three can be left empty. Paint over the area; it fills when you let go.	Wszystkie trzy pola mogą pozostać puste. Zamaluj obszar; wypełni się po puszczeniu przycisku.
+	Choose Folder…	Wybierz folder…
+	Ctrl+click to switch it in every section	Ctrl+kliknięcie przełącza go we wszystkich sekcjach
+	Describe what to put there, e.g. a cat sitting on the bench	Opisz, co ma się tam znaleźć, np. kot siedzący na ławce
+	Generative Fill needs a model. Download one in Edit › Preferences › AI Models (Generative Fill & Infill).	Wypełnienie generatywne wymaga modelu. Pobierz go w Edycja › Preferencje › Modele AI (Wypełnienie generatywne i infill).
+	Make a variation	Utwórz wariant
+	Negative prompt	Prompt negatywny
+	New seed	Nowe ziarno
+	ONNX, safetensors, checkpoint or GGUF files (pick an ONNX model and its .data file together), or a diffusion pipeline's folder.	Pliki ONNX, safetensors, checkpoint lub GGUF (wybierz model ONNX razem z jego plikiem .data) albo folder potoku dyfuzyjnego.
+	Paint over the area to fill	Zamaluj obszar do wypełnienia
+	Press + (or Enter in the prompt) to make a variation, or OK to fill with one.	Naciśnij + (lub Enter w polu promptu), aby utworzyć wariant, albo OK, aby wypełnić jednym z nich.
+	Prompt	Prompt
+	Prompt, negative prompt and seed	Prompt, prompt negatywny i ziarno losowania
+	Prompt…	Prompt…
+	Random each time	Za każdym razem losowe
+	The same seed and prompt give the same result. Leave it empty for a new one each time.	To samo ziarno i prompt dają ten sam wynik. Zostaw puste, aby za każdym razem użyć nowego.
+	Variation {n} · seed {seed}	Wariant {n} · ziarno {seed}
+	Variations	Warianty
+	What to avoid, e.g. blurry, text	Czego unikać, np. rozmycie, tekst
+
+# Generative Sharpen, Object Selection Brush, AI model device
+	Generative Sharpen…	Wyostrzanie generatywne…
+	Detail:	Szczegóły:
+	Falls back to the next option when a model can't run there.	Przechodzi do następnej opcji, gdy model nie może tam działać.
+	Generative Sharpen needs a model. Download one in Edit › Preferences › AI Models (Generative Enhance).	Wyostrzanie generatywne wymaga modelu. Pobierz go w Edycja › Preferencje › Modele AI (Ulepszanie generatywne).
+	Paint over a blurry or pixelated area	Zamaluj rozmyty lub rozpikselowany obszar
+	Paint over the object to select it (⇧ adds, Alt subtracts)	Zamaluj obiekt, aby go zaznaczyć (⇧ dodaje, Alt odejmuje)
+	Preparing it to run… {percent}%	Przygotowywanie do uruchomienia… {percent}%
+	Press + to make a variation, or OK to sharpen with one. Seeds change the result with Stable Diffusion models.	Naciśnij +, aby utworzyć wariant, albo OK, aby wyostrzyć jednym z nich. Ziarno zmienia wynik w modelach Stable Diffusion.
+	Run models on	Uruchamiaj modele na
+	Seeds change the result with Stable Diffusion models. Leave it empty for a new one each time.	Ziarno zmienia wynik w modelach Stable Diffusion. Zostaw puste, aby za każdym razem użyć nowego.
+	The Object Selection Brush found nothing there — paint over more of the object	Pędzel zaznaczania obiektów nic tam nie znalazł — zamaluj większą część obiektu
+
+# AI model device per category, tool names
+	Subtle	Subtelne
+	Run on	Uruchamiaj na
+	As above	Jak wyżej
+	Object Selection Brush Tool	Narzędzie Pędzel zaznaczania obiektów
+	Generative Enhance Brush Tool	Narzędzie Pędzel ulepszania generatywnego
+
 # DDS Options (#1327)
 	DDS Options	Opcje DDS
 	Compression	Kompresja

@@ -25,6 +25,8 @@ use crate::commands::{CommandSpec, blend_from_str};
 use crate::{EngineError, Result, Session};
 
 mod content_aware_move;
+mod generative;
+pub(crate) mod generative_fill;
 mod patch;
 mod pattern_stamp;
 mod periodic;
@@ -1369,6 +1371,114 @@ pub fn specs() -> Vec<CommandSpec> {
             ),
             enabled: has_pixel_layer,
             run: remove::remove,
+            journal: true,
+        },
+        CommandSpec {
+            id: "edit.generativeFill",
+            label: "Generative Fill",
+            menu: &[],
+            shortcut: None,
+            params: r#"{"prompt":text?="","negativePrompt":text?="","seed":0..4294967295?=new each time,"steps":1..150=25,"guidance":1..30=7.5,"model":id?=best enabled Generative Fill model (see ai.models),"preview":bool=false (true: keep it as a variation of the Generative Fill dialog and show it, replacing the one shown)} → {"layer","seed","damage"} or, previewing, {"variation","seed","layer","count"} (a background job: a local diffusion model fills the selection from the prompt, on a new layer named after it)"#,
+            enabled: generative_fill::enabled,
+            run: generative_fill::generative_fill,
+            journal: true,
+        },
+        CommandSpec {
+            id: "edit.generativeSharpen",
+            label: "Generative Sharpen",
+            menu: &[],
+            shortcut: None,
+            params: r#"{"seed":0..4294967295?=new each time,"detail":0..1=0.5 (how strongly it's redrawn),"model":id?=best enabled Generative Enhance model (see ai.models),"preview":bool=false (as edit.generativeFill)} → {"layer","seed","damage"} or, previewing, {"variation","seed","layer","count"} (a background job: a local model redraws the selection sharper and more detailed, on a new layer; seeds matter with Stable Diffusion models, not super-resolution ones)"#,
+            enabled: generative_fill::enabled,
+            run: generative_fill::generative_sharpen,
+            journal: true,
+        },
+        CommandSpec {
+            id: "paint.generativeEnhance",
+            label: "Generative Enhance",
+            menu: &[],
+            shortcut: None,
+            params: brush_params!(
+                r#","strokes":[[[x,y,pressure?],…],…]?,"seed":0..4294967295?=new each time,"detail":0..1=0.5,"model":id?=best enabled Generative Enhance model (see ai.models),"closeLoops":bool=true,"sampleAllLayers":bool=false,"newLayer":bool=false → {"damage","layer"?,"seed"} (a background job: a local model redraws what the strokes cover sharper and more detailed)"#
+            ),
+            enabled: generative::enhance_enabled,
+            run: generative::generative_enhance,
+            journal: true,
+        },
+        CommandSpec {
+            id: "edit.generativeFill.show",
+            label: "Show Generative Fill Variation",
+            menu: &[],
+            shortcut: None,
+            params: r#"{"variation":index} → {"variation","seed","layer","count"} (takes back the variation shown and shows this one)"#,
+            enabled: |_| Ok(()),
+            run: generative_fill::show,
+            journal: false,
+        },
+        CommandSpec {
+            id: "edit.generativeFill.variations",
+            label: "Generative Fill Variations",
+            menu: &[],
+            shortcut: None,
+            params: r#"{} → {"open":bool,"variations":[{"seed"}],"shown":index|null}"#,
+            enabled: |_| Ok(()),
+            run: generative_fill::variations,
+            journal: false,
+        },
+        CommandSpec {
+            id: "edit.generativeFill.commit",
+            label: "Keep Generative Fill",
+            menu: &[],
+            shortcut: None,
+            params: r#"{} → {"kept":index|null} (keeps the variation shown and forgets the others)"#,
+            enabled: |_| Ok(()),
+            run: generative_fill::commit,
+            journal: false,
+        },
+        CommandSpec {
+            id: "edit.generativeFill.cancel",
+            label: "Cancel Generative Fill",
+            menu: &[],
+            shortcut: None,
+            params: r#"{} → {"undone":bool} (takes back the variation shown and forgets them all)"#,
+            enabled: |_| Ok(()),
+            run: generative_fill::cancel,
+            journal: false,
+        },
+        CommandSpec {
+            id: "paint.generativeInfill",
+            label: "Infill",
+            menu: &[],
+            shortcut: None,
+            params: brush_params!(
+                r#","strokes":[[[x,y,pressure?],…],…]? (several strokes filled together; else "points"),"prompt":text?="" (what to put there),"negativePrompt":text?="" (what to avoid),"seed":0..4294967295?=new each time,"steps":1..150=25,"guidance":1..30=7.5,"model":id?=best enabled Generative Fill model (see ai.models),"closeLoops":bool=true,"sampleAllLayers":bool=false,"newLayer":bool=false → {"damage","layer"?,"seed"} (a background job: a local diffusion model fills what the strokes cover from the prompt)"#
+            ),
+            enabled: generative::infill_enabled,
+            run: generative::generative_infill,
+            journal: true,
+        },
+        CommandSpec {
+            id: "paint.generativeRemoval",
+            label: "Generative Removal",
+            menu: &[],
+            shortcut: None,
+            params: brush_params!(
+                r#","strokes":[[[x,y,pressure?],…],…]? (several strokes filled together; else "points"),"model":id?=best enabled Generative Removal model (see ai.models),"closeLoops":bool=true,"sampleAllLayers":bool=false,"newLayer":bool=false → {"damage","layer"?} (a background job: a local AI model fills what the strokes cover)"#
+            ),
+            enabled: generative::removal_enabled,
+            run: generative::generative_removal,
+            journal: true,
+        },
+        CommandSpec {
+            id: "paint.reflectionRemoval",
+            label: "Reflection Removal",
+            menu: &[],
+            shortcut: None,
+            params: brush_params!(
+                r#","strokes":[[[x,y,pressure?],…],…]?,"model":id?=best enabled Reflection Removal model (see ai.models),"closeLoops":bool=false,"sampleAllLayers":bool=false,"newLayer":bool=false → {"damage","layer"?} (a background job: a local AI model removes the reflection where the strokes go)"#
+            ),
+            enabled: generative::reflection_enabled,
+            run: generative::reflection_removal,
             journal: true,
         },
         CommandSpec {

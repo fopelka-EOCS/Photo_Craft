@@ -3980,6 +3980,123 @@ cameraData	Lens	Lens
 	In Front	Önde
 	Behind	Arkada
 
+# Edit › Preferences › AI: local AI models
+	AI	Yapay Zeka
+	AI Models…	Yapay Zeka Modelleri…
+	AI models run in the desktop app. Download PhotoCraft for your computer to use them.	Yapay zeka modelleri masaüstü uygulamasında çalışır. Kullanmak için bilgisayarınıza PhotoCraft'ı indirin.
+	AI Models	Yapay Zeka Modelleri
+	Add a model from a file or a link	Dosyadan veya bağlantıdan model ekle
+	Cancelled	İptal edildi
+	Choose Files…	Dosya Seç…
+	Delete this model	Bu modeli sil
+	Disabled: no tool offers this model	Devre dışı: bu modeli kullanan araç yok
+	Download	İndir
+	Enabled: tools can use this model	Etkin: araçlar bu modeli kullanabilir
+	Finished in {time}	{time} içinde bitti
+	From a File	Dosyadan
+	From a Link	Bağlantıdan
+	Generative Fill & Infill	Üretken Dolgu ve Doldurma
+	Generative Removal	Üretken Kaldırma
+	Hugging Face, Civitai or download link	Hugging Face, Civitai veya indirme bağlantısı
+	Imported models PhotoCraft's tools don't use yet.	PhotoCraft araçlarının henüz kullanmadığı içe aktarılmış modeller.
+	Importing {name}	{name} içe aktarılıyor
+	Keep	Tut
+	Looking up the model…	Model aranıyor…
+	Models are stored in {path}	Modeller {path} konumunda saklanır
+	No models match your search.	Aramanızla eşleşen model yok.
+	No models yet. Use Import… to add one.	Henüz model yok. Eklemek için İçe Aktar…'ı kullanın.
+	ONNX, safetensors, checkpoint or GGUF. Pick an ONNX model and its .data file together.	ONNX, safetensors, checkpoint veya GGUF. ONNX modelini .data dosyasıyla birlikte seçin.
+	Object Selection	Nesne Seçimi
+	Optional	İsteğe bağlı
+	Other Models	Diğer Modeller
+	Paste a Hugging Face file or repository (org/name), a Civitai model page, or a direct link to a model file.	Bir Hugging Face dosyası veya deposu (org/name), bir Civitai model sayfası ya da model dosyasına doğrudan bağlantı yapıştırın.
+	Recommended	Önerilen
+	Reflection Removal	Yansıma Kaldırma
+	Search models by name…	Modelleri ada göre ara…
+	Subject & Background	Konu ve Arka Plan
+	Use as	Kullanım
+	Used by the AI Object Selection tool.	Yapay Zeka Nesne Seçimi aracı tarafından kullanılır.
+	Used by the Generative Removal brush.	Üretken Kaldırma fırçası tarafından kullanılır.
+	Used by the Infill brush and Generative Fill (prompts).	Doldurma fırçası ve Üretken Dolgu (komutlar) tarafından kullanılır.
+	Used by the Reflection Removal brush.	Yansıma Kaldırma fırçası tarafından kullanılır.
+	Used to select people, animals and products in one click.	İnsanları, hayvanları ve ürünleri tek tıklamayla seçmek için kullanılır.
+	about {time} left	yaklaşık {time} kaldı
+	{done} of {total}	{done} / {total}
+	{n} installed	{n} yüklü
+	{n} to download	{n} indirilebilir
+
+# AI Object Selection, the Generative Brushes, AI Models accounts
+	AI Object Selection found nothing there — try a box around the object	Yapay Zeka Nesne Seçimi orada bir şey bulamadı — nesnenin çevresine bir kutu çizin
+	Accounts	Hesaplar
+	Also in {sections}	Ayrıca: {sections}
+	Choose one or more uses, or paste a link to guess them.	Bir veya daha fazla kullanım seçin ya da tahmin için bir bağlantı yapıştırın.
+	Download a model in Edit › Preferences › AI Models	Düzen › Tercihler › Yapay Zeka Modelleri'nden bir model indirin
+	Drag a box around the object, or click it	Nesnenin çevresine kutu sürükleyin ya da nesneye tıklayın
+	Generative Brush	Üretken Fırça
+	Get Models…	Model Edin…
+	Get a token	Belirteç al
+	Guessed from the link. Click a use to change it.	Bağlantıdan tahmin edildi. Değiştirmek için bir kullanıma tıklayın.
+	Hide the token	Belirteci gizle
+	Model:	Model:
+	No {kind} model yet. Download one in Edit › Preferences › AI Models.	Henüz {kind} modeli yok. Düzen › Tercihler › Yapay Zeka Modelleri'nden indirin.
+	Not signed in	Oturum açılmadı
+	Paint over the reflection	Yansımanın üzerini boyayın
+	Paint over what to remove	Kaldırılacak yerin üzerini boyayın
+	Rename this model	Bu modeli yeniden adlandır
+	Show the token	Belirteci göster
+	Some models need you to sign in before they download. Paste an access token from your account; it's kept on this computer and sent only to its own site.	Bazı modeller indirilmeden önce oturum açmanızı ister. Hesabınızdaki erişim belirtecini yapıştırın; bu bilgisayarda saklanır ve yalnızca kendi sitesine gönderilir.
+	This build can't run AI models	Bu sürüm yapay zeka modellerini çalıştıramaz
+	{n} signed in	{n} oturum açık
+	AI Object Selection Tool	Yapay Zeka Nesne Seçimi Aracı
+	Generative Removal Brush Tool	Üretken Kaldırma Fırçası
+	Reflection Removal Brush Tool	Yansıma Kaldırma Fırçası
+	API key	API anahtarı
+
+# Generative Fill dialog and Infill brush
+	Generative Fill…	Üretken Dolgu…
+	Infill Brush Tool	Doldurma Fırçası
+	A Stable Diffusion ONNX pipeline folder (model_index.json with unet, text_encoder, vae_encoder and vae_decoder folders)	Stable Diffusion ONNX işlem hattı klasörü (model_index.json ile unet, text_encoder, vae_encoder ve vae_decoder klasörleri)
+	AI models run in the desktop app.	Yapay zeka modelleri masaüstü uygulamasında çalışır.
+	All three can be left empty. Paint over the area; it fills when you let go.	Üçü de boş bırakılabilir. Alanın üzerine boyayın; bıraktığınızda doldurulur.
+	Choose Folder…	Klasör Seç…
+	Ctrl+click to switch it in every section	Her bölümde değiştirmek için Ctrl+tıklayın
+	Describe what to put there, e.g. a cat sitting on the bench	Oraya ne konacağını tarif edin, ör. bankta oturan bir kedi
+	Generative Fill needs a model. Download one in Edit › Preferences › AI Models (Generative Fill & Infill).	Üretken Dolgu için bir model gerekir. Düzen › Tercihler › Yapay Zeka Modelleri (Üretken Dolgu ve Doldurma) bölümünden bir model indirin.
+	Make a variation	Varyasyon oluştur
+	Negative prompt	Negatif komut
+	New seed	Yeni tohum
+	ONNX, safetensors, checkpoint or GGUF files (pick an ONNX model and its .data file together), or a diffusion pipeline's folder.	ONNX, safetensors, checkpoint veya GGUF dosyaları (ONNX modelini .data dosyasıyla birlikte seçin) ya da bir difüzyon işlem hattının klasörü.
+	Paint over the area to fill	Doldurulacak alanın üzerine boyayın
+	Press + (or Enter in the prompt) to make a variation, or OK to fill with one.	Varyasyon oluşturmak için + (veya komut alanında Enter), biriyle doldurmak için Tamam düğmesine basın.
+	Prompt	Komut
+	Prompt, negative prompt and seed	Komut, negatif komut ve tohum
+	Prompt…	Komut…
+	Random each time	Her seferinde rastgele
+	The same seed and prompt give the same result. Leave it empty for a new one each time.	Aynı tohum ve komut aynı sonucu verir. Her seferinde yenisi için boş bırakın.
+	Variation {n} · seed {seed}	Varyasyon {n} · tohum {seed}
+	Variations	Varyasyonlar
+	What to avoid, e.g. blurry, text	Kaçınılacaklar, ör. bulanık, metin
+
+# Generative Sharpen, Object Selection Brush, AI model device
+	Generative Sharpen…	Üretken Keskinleştirme…
+	Detail:	Ayrıntı:
+	Falls back to the next option when a model can't run there.	Bir model orada çalışamadığında sonraki seçeneğe geçer.
+	Generative Sharpen needs a model. Download one in Edit › Preferences › AI Models (Generative Enhance).	Üretken Keskinleştirme için bir model gerekir. Düzen › Tercihler › Yapay Zeka Modelleri (Üretken İyileştirme) bölümünden bir model indirin.
+	Paint over a blurry or pixelated area	Bulanık veya pikselli bir alanın üzerine boyayın
+	Paint over the object to select it (⇧ adds, Alt subtracts)	Seçmek için nesnenin üzerine boyayın (⇧ ekler, Alt çıkarır)
+	Preparing it to run… {percent}%	Çalıştırmaya hazırlanıyor… %{percent}
+	Press + to make a variation, or OK to sharpen with one. Seeds change the result with Stable Diffusion models.	Varyasyon oluşturmak için +, biriyle keskinleştirmek için Tamam düğmesine basın. Tohumlar, Stable Diffusion modellerinde sonucu değiştirir.
+	Run models on	Modelleri çalıştırma yeri
+	Seeds change the result with Stable Diffusion models. Leave it empty for a new one each time.	Tohumlar, Stable Diffusion modellerinde sonucu değiştirir. Her seferinde yenisi için boş bırakın.
+	The Object Selection Brush found nothing there — paint over more of the object	Nesne Seçme Fırçası orada bir şey bulamadı — nesnenin daha fazlasının üzerine boyayın
+
+# AI model device per category, tool names
+	Subtle	Hafif
+	Run on	Çalıştırma yeri
+	As above	Yukarıdakiyle aynı
+	Object Selection Brush Tool	Nesne Seçme Fırçası Aracı
+	Generative Enhance Brush Tool	Üretken İyileştirme Fırçası Aracı
+
 # DDS Options (#1327)
 	DDS Options	DDS Seçenekleri
 	Generate Mipmaps	Mipmap oluştur

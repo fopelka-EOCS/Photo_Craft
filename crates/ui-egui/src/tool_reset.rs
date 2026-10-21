@@ -109,6 +109,8 @@ fn is_selection_tool(tool: Tool) -> bool {
             | Tool::MagicWand
             | Tool::QuickSelection
             | Tool::ObjectSelection
+            | Tool::AiObjectSelection
+            | Tool::ObjectSelectionBrush
     )
 }
 
@@ -165,6 +167,11 @@ pub fn option_keys(tool: Tool) -> &'static [&'static str] {
         Tool::MagicWand => reset!(tolerance, anti_alias, contiguous),
         Tool::QuickSelection => reset!(enhance_edge),
         Tool::ObjectSelection => reset!(enhance_edge, object_finder),
+        Tool::AiObjectSelection | Tool::ObjectSelectionBrush => reset!(ai_select_model),
+        Tool::GenerativeEnhance => reset!(enhance_model, enhance_detail, enhance_seed, gen_new_layer),
+        Tool::GenerativeInfill => reset!(infill_model, infill_prompt, infill_negative, infill_seed, gen_new_layer),
+        Tool::GenerativeRemoval => reset!(gen_removal_model, gen_new_layer),
+        Tool::ReflectionRemoval => reset!(reflection_model, gen_new_layer),
         Tool::Crop => reset!(
             crop_ratio,
             crop_delete,
@@ -304,6 +311,6 @@ mod tests {
         assert_eq!(sample_all_key(Tool::Brush), None);
         let keys: Vec<String> = Tool::ALL.iter().filter_map(|t| sample_all_key(*t)).collect();
         let distinct: std::collections::BTreeSet<&String> = keys.iter().collect();
-        assert_eq!((keys.len(), distinct.len()), (12, 12), "one key per tool with the option");
+        assert_eq!((keys.len(), distinct.len()), (18, 18), "one key per tool with the option");
     }
 }

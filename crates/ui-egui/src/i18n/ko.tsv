@@ -3433,6 +3433,124 @@ curves	Smooth	매끄럽게
 	Behind	뒤
 	Blend	혼합
 
+# Edit › Preferences › AI: local AI models
+	AI	AI
+	AI Models…	AI 모델…
+	AI models run in the desktop app. Download PhotoCraft for your computer to use them.	AI 모델은 데스크톱 앱에서 실행됩니다. 사용하려면 컴퓨터용 PhotoCraft를 다운로드하세요.
+	AI Models	AI 모델
+	Add a model from a file or a link	파일 또는 링크에서 모델 추가
+	Cancelled	취소됨
+	Choose Files…	파일 선택…
+	Delete this model	이 모델 삭제
+	Disabled: no tool offers this model	사용 안 함: 이 모델을 쓰는 도구가 없습니다
+	Download	다운로드
+	Enabled: tools can use this model	사용: 도구에서 이 모델을 쓸 수 있습니다
+	Finished in {time}	{time} 만에 완료
+	From a File	파일에서
+	From a Link	링크에서
+	Generative Fill & Infill	생성형 채우기 및 인필
+	Generative Removal	생성형 제거
+	Hugging Face, Civitai or download link	Hugging Face, Civitai 또는 다운로드 링크
+	Imported models PhotoCraft's tools don't use yet.	PhotoCraft 도구에서 아직 사용하지 않는 가져온 모델입니다.
+	Importing {name}	{name} 가져오는 중
+	Import…	가져오기…
+	Keep	유지
+	Looking up the model…	모델을 찾는 중…
+	Models are stored in {path}	모델 저장 위치: {path}
+	No models match your search.	검색과 일치하는 모델이 없습니다.
+	No models yet. Use Import… to add one.	아직 모델이 없습니다. 가져오기…로 추가하세요.
+	ONNX, safetensors, checkpoint or GGUF. Pick an ONNX model and its .data file together.	ONNX, safetensors, 체크포인트 또는 GGUF. ONNX 모델은 .data 파일과 함께 선택하세요.
+	Object Selection	개체 선택
+	Optional	선택 사항
+	Other Models	기타 모델
+	Paste a Hugging Face file or repository (org/name), a Civitai model page, or a direct link to a model file.	Hugging Face 파일이나 저장소(org/name), Civitai 모델 페이지 또는 모델 파일의 직접 링크를 붙여 넣으세요.
+	Recommended	추천
+	Reflection Removal	반사 제거
+	Search models by name…	이름으로 모델 검색…
+	Subject & Background	피사체 및 배경
+	Use as	용도
+	Used by the AI Object Selection tool.	AI 개체 선택 도구에서 사용합니다.
+	Used by the Generative Removal brush.	생성형 제거 브러시에서 사용합니다.
+	Used by the Infill brush and Generative Fill (prompts).	인필 브러시와 생성형 채우기(프롬프트)에서 사용합니다.
+	Used by the Reflection Removal brush.	반사 제거 브러시에서 사용합니다.
+	Used to select people, animals and products in one click.	사람, 동물, 제품을 한 번의 클릭으로 선택하는 데 사용합니다.
+	about {time} left	약 {time} 남음
+	{done} of {total}	{done} / {total}
+	{n} installed	{n}개 설치됨
+	{n} to download	{n}개 다운로드 가능
+
+# AI Object Selection, the Generative Brushes, AI Models accounts
+	AI Object Selection found nothing there — try a box around the object	AI 개체 선택이 그곳에서 아무것도 찾지 못했습니다 — 개체 주위에 상자를 그려 보세요
+	Accounts	계정
+	Also in {sections}	{sections}에도 있음
+	Choose one or more uses, or paste a link to guess them.	용도를 하나 이상 선택하거나, 링크를 붙여 넣어 추측하게 하세요.
+	Download a model in Edit › Preferences › AI Models	편집 › 환경 설정 › AI 모델에서 모델을 다운로드하세요
+	Drag a box around the object, or click it	개체 주위로 상자를 드래그하거나 클릭하세요
+	Generative Brush	생성형 브러시
+	Get Models…	모델 받기…
+	Get a token	토큰 받기
+	Guessed from the link. Click a use to change it.	링크로 추측했습니다. 용도를 클릭해 바꿀 수 있습니다.
+	Hide the token	토큰 숨기기
+	Model:	모델:
+	No {kind} model yet. Download one in Edit › Preferences › AI Models.	아직 {kind} 모델이 없습니다. 편집 › 환경 설정 › AI 모델에서 다운로드하세요.
+	Not signed in	로그인 안 됨
+	Paint over the reflection	반사 부분 위를 칠하세요
+	Paint over what to remove	제거할 부분 위를 칠하세요
+	Rename this model	이 모델 이름 바꾸기
+	Show the token	토큰 표시
+	Some models need you to sign in before they download. Paste an access token from your account; it's kept on this computer and sent only to its own site.	일부 모델은 다운로드 전에 로그인이 필요합니다. 계정의 액세스 토큰을 붙여 넣으세요. 토큰은 이 컴퓨터에 저장되며 해당 사이트로만 전송됩니다.
+	This build can't run AI models	이 빌드는 AI 모델을 실행할 수 없습니다
+	{n} signed in	{n}개 로그인됨
+	AI Object Selection Tool	AI 개체 선택 도구
+	Generative Removal Brush Tool	생성형 제거 브러시
+	Reflection Removal Brush Tool	반사 제거 브러시
+	API key	API 키
+
+# Generative Fill dialog and Infill brush
+	Generative Fill…	생성형 채우기…
+	Infill Brush Tool	인필 브러시
+	A Stable Diffusion ONNX pipeline folder (model_index.json with unet, text_encoder, vae_encoder and vae_decoder folders)	Stable Diffusion ONNX 파이프라인 폴더(model_index.json과 unet, text_encoder, vae_encoder, vae_decoder 폴더)
+	AI models run in the desktop app.	AI 모델은 데스크톱 앱에서 실행됩니다.
+	All three can be left empty. Paint over the area; it fills when you let go.	세 항목 모두 비워 두어도 됩니다. 영역 위에 칠하면 버튼을 놓을 때 채워집니다.
+	Choose Folder…	폴더 선택…
+	Ctrl+click to switch it in every section	Ctrl+클릭하면 모든 섹션에서 전환됩니다
+	Describe what to put there, e.g. a cat sitting on the bench	그 자리에 넣을 것을 설명하세요. 예: 벤치에 앉아 있는 고양이
+	Generative Fill needs a model. Download one in Edit › Preferences › AI Models (Generative Fill & Infill).	생성형 채우기에는 모델이 필요합니다. 편집 › 환경 설정 › AI 모델(생성형 채우기 및 인필)에서 다운로드하세요.
+	Make a variation	변형 만들기
+	Negative prompt	네거티브 프롬프트
+	New seed	새 난수 시드
+	ONNX, safetensors, checkpoint or GGUF files (pick an ONNX model and its .data file together), or a diffusion pipeline's folder.	ONNX, safetensors, 체크포인트 또는 GGUF 파일(ONNX 모델은 .data 파일과 함께 선택) 또는 확산 파이프라인 폴더.
+	Paint over the area to fill	채울 영역 위에 칠하세요
+	Press + (or Enter in the prompt) to make a variation, or OK to fill with one.	+(또는 프롬프트에서 Enter)를 누르면 변형을 만들고, 확인을 누르면 그중 하나로 채웁니다.
+	Prompt	프롬프트
+	Prompt, negative prompt and seed	프롬프트, 네거티브 프롬프트 및 난수 시드
+	Prompt…	프롬프트…
+	Random each time	매번 임의
+	The same seed and prompt give the same result. Leave it empty for a new one each time.	같은 난수 시드와 프롬프트는 같은 결과를 냅니다. 매번 새 시드를 쓰려면 비워 두세요.
+	Variation {n} · seed {seed}	변형 {n} · 시드 {seed}
+	Variations	변형
+	What to avoid, e.g. blurry, text	피할 것, 예: 흐림, 텍스트
+
+# Generative Sharpen, Object Selection Brush, AI model device
+	Generative Sharpen…	생성형 선명하게…
+	Detail:	디테일:
+	Falls back to the next option when a model can't run there.	모델을 그곳에서 실행할 수 없으면 다음 옵션으로 넘어갑니다.
+	Generative Sharpen needs a model. Download one in Edit › Preferences › AI Models (Generative Enhance).	생성형 선명하게에는 모델이 필요합니다. 편집 › 환경 설정 › AI 모델(생성형 향상)에서 다운로드하세요.
+	Paint over a blurry or pixelated area	흐리거나 픽셀이 깨진 영역 위에 칠하세요
+	Paint over the object to select it (⇧ adds, Alt subtracts)	선택할 개체 위에 칠하세요(⇧ 추가, Alt 빼기)
+	Preparing it to run… {percent}%	실행 준비 중… {percent}%
+	Press + to make a variation, or OK to sharpen with one. Seeds change the result with Stable Diffusion models.	+를 누르면 변형을 만들고, 확인을 누르면 그중 하나로 선명하게 합니다. 시드는 Stable Diffusion 모델에서만 결과를 바꿉니다.
+	Run models on	모델 실행 장치
+	Seeds change the result with Stable Diffusion models. Leave it empty for a new one each time.	시드는 Stable Diffusion 모델에서만 결과를 바꿉니다. 매번 새 시드를 쓰려면 비워 두세요.
+	The Object Selection Brush found nothing there — paint over more of the object	개체 선택 브러시가 그곳에서 아무것도 찾지 못했습니다 — 개체를 더 많이 칠해 보세요
+
+# AI model device per category, tool names
+	Subtle	약하게
+	Run on	실행 장치
+	As above	위와 동일
+	Object Selection Brush Tool	개체 선택 브러시 도구
+	Generative Enhance Brush Tool	생성형 향상 브러시 도구
+
 # DDS Options (#1327)
 	DDS Options	DDS 옵션
 	Compression	압축

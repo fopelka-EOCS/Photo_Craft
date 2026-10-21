@@ -4169,6 +4169,123 @@ cameraRaw	Yellow	Sárga
 	In Front	Elöl
 	Behind	Mögött
 
+# Edit › Preferences › AI: local AI models
+	AI	MI
+	AI Models…	MI-modellek…
+	AI models run in the desktop app. Download PhotoCraft for your computer to use them.	Az MI-modellek az asztali alkalmazásban futnak. Használatukhoz töltse le a PhotoCraftot a számítógépére.
+	AI Models	MI-modellek
+	Add a model from a file or a link	Modell hozzáadása fájlból vagy hivatkozásból
+	Cancelled	Megszakítva
+	Choose Files…	Fájlok kiválasztása…
+	Delete this model	A modell törlése
+	Disabled: no tool offers this model	Kikapcsolva: egyik eszköz sem kínálja ezt a modellt
+	Download	Letöltés
+	Enabled: tools can use this model	Bekapcsolva: az eszközök használhatják ezt a modellt
+	Finished in {time}	Elkészült {time} alatt
+	From a File	Fájlból
+	From a Link	Hivatkozásból
+	Generative Fill & Infill	Generatív kitöltés és infill
+	Generative Removal	Generatív eltávolítás
+	Hugging Face, Civitai or download link	Hugging Face-, Civitai- vagy letöltési hivatkozás
+	Imported models PhotoCraft's tools don't use yet.	Importált modellek, amelyeket a PhotoCraft eszközei még nem használnak.
+	Importing {name}	{name} importálása
+	Keep	Megtartás
+	Looking up the model…	A modell keresése…
+	Models are stored in {path}	A modellek helye: {path}
+	No models match your search.	Egy modell sem felel meg a keresésnek.
+	No models yet. Use Import… to add one.	Még nincs modell. Adjon hozzá egyet az Importálás… gombbal.
+	ONNX, safetensors, checkpoint or GGUF. Pick an ONNX model and its .data file together.	ONNX, safetensors, checkpoint vagy GGUF. Az ONNX-modellt a hozzá tartozó .data fájllal együtt válassza ki.
+	Object Selection	Objektumkijelölés
+	Optional	Nem kötelező
+	Other Models	Egyéb modellek
+	Paste a Hugging Face file or repository (org/name), a Civitai model page, or a direct link to a model file.	Illesszen be egy Hugging Face-fájlt vagy -tárolót (org/name), egy Civitai-modelloldalt vagy egy modellfájlra mutató közvetlen hivatkozást.
+	Recommended	Ajánlott
+	Reflection Removal	Tükröződés eltávolítása
+	Search models by name…	Modellek keresése név szerint…
+	Subject & Background	Alany és háttér
+	Use as	Felhasználás
+	Used by the AI Object Selection tool.	Az MI-objektumkijelölő eszköz használja.
+	Used by the Generative Removal brush.	A Generatív eltávolítás ecset használja.
+	Used by the Infill brush and Generative Fill (prompts).	Az Infill ecset és a Generatív kitöltés (promptok) használja.
+	Used by the Reflection Removal brush.	A Tükröződés eltávolítása ecset használja.
+	Used to select people, animals and products in one click.	Emberek, állatok és termékek egy kattintással való kijelöléséhez.
+	about {time} left	kb. {time} van hátra
+	{done} of {total}	{done} / {total}
+	{n} installed	{n} telepítve
+	{n} to download	{n} letölthető
+
+# AI Object Selection, the Generative Brushes, AI Models accounts
+	AI Object Selection found nothing there — try a box around the object	Az MI-objektumkijelölés nem talált ott semmit — rajzoljon keretet az objektum köré
+	Accounts	Fiókok
+	Also in {sections}	Itt is: {sections}
+	Choose one or more uses, or paste a link to guess them.	Válasszon egy vagy több felhasználást, vagy illesszen be egy hivatkozást a kitaláláshoz.
+	Download a model in Edit › Preferences › AI Models	Töltsön le egy modellt: Szerkesztés › Beállítások › MI-modellek
+	Drag a box around the object, or click it	Húzzon keretet az objektum köré, vagy kattintson rá
+	Generative Brush	Generatív ecset
+	Get Models…	Modellek beszerzése…
+	Get a token	Token beszerzése
+	Guessed from the link. Click a use to change it.	A hivatkozásból kitalálva. Kattintson egy felhasználásra a módosításhoz.
+	Hide the token	Token elrejtése
+	Model:	Modell:
+	No {kind} model yet. Download one in Edit › Preferences › AI Models.	Még nincs {kind} modell. Töltsön le egyet: Szerkesztés › Beállítások › MI-modellek.
+	Not signed in	Nincs bejelentkezve
+	Paint over the reflection	Fesse át a tükröződést
+	Paint over what to remove	Fesse át, amit el szeretne távolítani
+	Rename this model	A modell átnevezése
+	Show the token	Token megjelenítése
+	Some models need you to sign in before they download. Paste an access token from your account; it's kept on this computer and sent only to its own site.	Egyes modellek letöltése bejelentkezést igényel. Illessze be fiókja hozzáférési tokenjét; ezen a számítógépen marad, és csak a saját webhelyére kerül.
+	This build can't run AI models	Ez a változat nem tud MI-modelleket futtatni
+	{n} signed in	{n} bejelentkezve
+	AI Object Selection Tool	MI-objektumkijelölő eszköz
+	Generative Removal Brush Tool	Generatív eltávolítás ecset
+	Reflection Removal Brush Tool	Tükröződés eltávolítása ecset
+	API key	API-kulcs
+
+# Generative Fill dialog and Infill brush
+	Generative Fill…	Generatív kitöltés…
+	Infill Brush Tool	Infill ecset
+	A Stable Diffusion ONNX pipeline folder (model_index.json with unet, text_encoder, vae_encoder and vae_decoder folders)	Stable Diffusion ONNX-folyamat mappája (model_index.json az unet, text_encoder, vae_encoder és vae_decoder mappákkal)
+	AI models run in the desktop app.	Az MI-modellek az asztali alkalmazásban futnak.
+	All three can be left empty. Paint over the area; it fills when you let go.	Mindhárom üresen hagyható. Fessen a terület fölé; a kitöltés a gomb felengedésekor történik.
+	Choose Folder…	Mappa kiválasztása…
+	Ctrl+click to switch it in every section	Ctrl+kattintással minden szakaszban átkapcsolja
+	Describe what to put there, e.g. a cat sitting on the bench	Írja le, mi kerüljön oda, pl. egy macska, amely a padon ül
+	Generative Fill needs a model. Download one in Edit › Preferences › AI Models (Generative Fill & Infill).	A Generatív kitöltéshez modell kell. Töltsön le egyet: Szerkesztés › Beállítások › MI-modellek (Generatív kitöltés és infill).
+	Make a variation	Változat készítése
+	Negative prompt	Negatív prompt
+	New seed	Új kezdőérték
+	ONNX, safetensors, checkpoint or GGUF files (pick an ONNX model and its .data file together), or a diffusion pipeline's folder.	ONNX-, safetensors-, checkpoint- vagy GGUF-fájlok (az ONNX-modellt a .data fájljával együtt válassza ki), vagy egy diffúziós folyamat mappája.
+	Paint over the area to fill	Fessen a kitöltendő terület fölé
+	Press + (or Enter in the prompt) to make a variation, or OK to fill with one.	A + (vagy a promptban az Enter) megnyomásával változatot készít, az OK gombbal pedig kitölt az egyikkel.
+	Prompt	Prompt
+	Prompt, negative prompt and seed	Prompt, negatív prompt és kezdőérték
+	Prompt…	Prompt…
+	Random each time	Minden alkalommal véletlenszerű
+	The same seed and prompt give the same result. Leave it empty for a new one each time.	Ugyanaz a kezdőérték és prompt ugyanazt az eredményt adja. Hagyja üresen, ha minden alkalommal újat szeretne.
+	Variation {n} · seed {seed}	{n}. változat · kezdőérték: {seed}
+	Variations	Változatok
+	What to avoid, e.g. blurry, text	Mit kerüljön, pl. elmosódott, szöveg
+
+# Generative Sharpen, Object Selection Brush, AI model device
+	Generative Sharpen…	Generatív élesítés…
+	Detail:	Részletesség:
+	Falls back to the next option when a model can't run there.	A következő lehetőségre vált, ha egy modell ott nem tud futni.
+	Generative Sharpen needs a model. Download one in Edit › Preferences › AI Models (Generative Enhance).	A Generatív élesítéshez modell kell. Töltsön le egyet: Szerkesztés › Beállítások › MI-modellek (Generatív javítás).
+	Paint over a blurry or pixelated area	Fessen egy elmosódott vagy pixeles terület fölé
+	Paint over the object to select it (⇧ adds, Alt subtracts)	Fessen az objektum fölé a kijelöléséhez (⇧ hozzáad, Alt kivon)
+	Preparing it to run… {percent}%	Előkészítés a futtatásra… {percent}%
+	Press + to make a variation, or OK to sharpen with one. Seeds change the result with Stable Diffusion models.	A + megnyomásával változatot készít, az OK gombbal pedig élesít az egyikkel. A kezdőérték a Stable Diffusion modelleknél változtatja meg az eredményt.
+	Run models on	Modellek futtatása ezen:
+	Seeds change the result with Stable Diffusion models. Leave it empty for a new one each time.	A kezdőérték a Stable Diffusion modelleknél változtatja meg az eredményt. Hagyja üresen, ha minden alkalommal újat szeretne.
+	The Object Selection Brush found nothing there — paint over more of the object	Az objektumkijelölő ecset nem talált ott semmit — fessen az objektum nagyobb része fölé
+
+# AI model device per category, tool names
+	Subtle	Finom
+	Run on	Futtatás ezen:
+	As above	Mint fent
+	Object Selection Brush Tool	Objektumkijelölő ecset
+	Generative Enhance Brush Tool	Generatív javítás ecset
+
 # DDS Options (#1327)
 	DDS Options	DDS-beállítások
 	Generate Mipmaps	Mipmapek létrehozása

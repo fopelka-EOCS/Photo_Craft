@@ -3224,6 +3224,124 @@ curves	Smooth	Сгладить
 	In Front	Спереди
 	Behind	Сзади
 
+# Edit › Preferences › AI: local AI models
+	AI	ИИ
+	AI Models…	Модели ИИ…
+	AI models run in the desktop app. Download PhotoCraft for your computer to use them.	Модели ИИ работают в настольном приложении. Скачайте PhotoCraft для своего компьютера, чтобы ими пользоваться.
+	AI Models	Модели ИИ
+	Add a model from a file or a link	Добавить модель из файла или по ссылке
+	Cancelled	Отменено
+	Choose Files…	Выбрать файлы…
+	Delete this model	Удалить эту модель
+	Disabled: no tool offers this model	Отключена: ни один инструмент не предлагает эту модель
+	Download	Скачать
+	Enabled: tools can use this model	Включена: инструменты могут использовать эту модель
+	Finished in {time}	Готово за {time}
+	From a File	Из файла
+	From a Link	По ссылке
+	Generative Fill & Infill	Генеративная заливка и дорисовка
+	Generative Removal	Генеративное удаление
+	Hugging Face, Civitai or download link	Ссылка Hugging Face, Civitai или ссылка на загрузку
+	Imported models PhotoCraft's tools don't use yet.	Импортированные модели, которые инструменты PhotoCraft пока не используют.
+	Importing {name}	Импорт: {name}
+	Keep	Оставить
+	Looking up the model…	Поиск модели…
+	Models are stored in {path}	Модели хранятся в {path}
+	No models match your search.	Нет моделей, соответствующих запросу.
+	No models yet. Use Import… to add one.	Моделей пока нет. Добавьте модель с помощью «Импорт…».
+	ONNX, safetensors, checkpoint or GGUF. Pick an ONNX model and its .data file together.	ONNX, safetensors, checkpoint или GGUF. Выберите модель ONNX вместе с её файлом .data.
+	Object Selection	Выделение объектов
+	Optional	Необязательно
+	Other Models	Другие модели
+	Paste a Hugging Face file or repository (org/name), a Civitai model page, or a direct link to a model file.	Вставьте файл или репозиторий Hugging Face (org/name), страницу модели Civitai или прямую ссылку на файл модели.
+	Recommended	Рекомендуется
+	Reflection Removal	Удаление отражений
+	Search models by name…	Искать модели по названию…
+	Subject & Background	Объект и фон
+	Use as	Использовать как
+	Used by the AI Object Selection tool.	Используется инструментом «Выделение объектов ИИ».
+	Used by the Generative Removal brush.	Используется кистью «Генеративное удаление».
+	Used by the Infill brush and Generative Fill (prompts).	Используется кистью «Дорисовка» и генеративной заливкой (запросы).
+	Used by the Reflection Removal brush.	Используется кистью «Удаление отражений».
+	Used to select people, animals and products in one click.	Используется, чтобы выделять людей, животных и товары одним щелчком.
+	about {time} left	осталось около {time}
+	{done} of {total}	{done} из {total}
+	{n} installed	Установлено: {n}
+	{n} to download	Можно скачать: {n}
+
+# AI Object Selection, the Generative Brushes, AI Models accounts
+	AI Object Selection found nothing there — try a box around the object	Выделение объектов ИИ ничего там не нашло — обведите объект рамкой
+	Accounts	Учётные записи
+	Also in {sections}	Также в: {sections}
+	Choose one or more uses, or paste a link to guess them.	Выберите одно или несколько назначений или вставьте ссылку, чтобы угадать их.
+	Download a model in Edit › Preferences › AI Models	Скачайте модель в разделе Редактирование › Настройки › Модели ИИ
+	Drag a box around the object, or click it	Обведите объект рамкой или щёлкните по нему
+	Generative Brush	Генеративная кисть
+	Get Models…	Получить модели…
+	Get a token	Получить токен
+	Guessed from the link. Click a use to change it.	Определено по ссылке. Щёлкните назначение, чтобы изменить его.
+	Hide the token	Скрыть токен
+	Model:	Модель:
+	No {kind} model yet. Download one in Edit › Preferences › AI Models.	Модели для «{kind}» пока нет. Скачайте её в разделе Редактирование › Настройки › Модели ИИ.
+	Not signed in	Вход не выполнен
+	Paint over the reflection	Закрасьте отражение
+	Paint over what to remove	Закрасьте то, что нужно удалить
+	Rename this model	Переименовать эту модель
+	Show the token	Показать токен
+	Some models need you to sign in before they download. Paste an access token from your account; it's kept on this computer and sent only to its own site.	Некоторые модели требуют входа перед загрузкой. Вставьте токен доступа из своей учётной записи; он хранится на этом компьютере и отправляется только на свой сайт.
+	This build can't run AI models	Эта сборка не может запускать модели ИИ
+	{n} signed in	Вход выполнен: {n}
+	AI Object Selection Tool	Инструмент «Выделение объектов ИИ»
+	Generative Removal Brush Tool	Кисть «Генеративное удаление»
+	Reflection Removal Brush Tool	Кисть «Удаление отражений»
+	API key	Ключ API
+
+# Generative Fill dialog and Infill brush
+	Generative Fill…	Генеративная заливка…
+	Infill Brush Tool	Кисть «Дорисовка»
+	A Stable Diffusion ONNX pipeline folder (model_index.json with unet, text_encoder, vae_encoder and vae_decoder folders)	Папка конвейера Stable Diffusion в формате ONNX (model_index.json с папками unet, text_encoder, vae_encoder и vae_decoder)
+	AI models run in the desktop app.	Модели ИИ работают в настольном приложении.
+	All three can be left empty. Paint over the area; it fills when you let go.	Все три поля можно оставить пустыми. Закрасьте область; она заполнится, когда вы отпустите кнопку.
+	Choose Folder…	Выбрать папку…
+	Ctrl+click to switch it in every section	Ctrl+щелчок переключает его во всех разделах
+	Describe what to put there, e.g. a cat sitting on the bench	Опишите, что там должно быть, например кошка, сидящая на скамейке
+	Generative Fill needs a model. Download one in Edit › Preferences › AI Models (Generative Fill & Infill).	Для генеративной заливки нужна модель. Скачайте её в разделе Редактирование › Настройки › Модели ИИ (Генеративная заливка и дорисовка).
+	Make a variation	Создать вариант
+	Negative prompt	Негативный запрос
+	New seed	Новое начальное значение
+	ONNX, safetensors, checkpoint or GGUF files (pick an ONNX model and its .data file together), or a diffusion pipeline's folder.	Файлы ONNX, safetensors, checkpoint или GGUF (модель ONNX выбирайте вместе с её файлом .data) или папка диффузионного конвейера.
+	Paint over the area to fill	Закрасьте область, которую нужно заполнить
+	Press + (or Enter in the prompt) to make a variation, or OK to fill with one.	Нажмите + (или Enter в поле запроса), чтобы создать вариант, или OK, чтобы залить одним из них.
+	Prompt	Запрос
+	Prompt, negative prompt and seed	Запрос, негативный запрос и начальное значение
+	Prompt…	Запрос…
+	Random each time	Каждый раз случайно
+	The same seed and prompt give the same result. Leave it empty for a new one each time.	Одинаковые начальное значение и запрос дают одинаковый результат. Оставьте поле пустым, чтобы каждый раз получать новое.
+	Variation {n} · seed {seed}	Вариант {n} · начальное значение {seed}
+	Variations	Варианты
+	What to avoid, e.g. blurry, text	Чего избегать, например размытость, текст
+	Seed	Начальное значение
+
+# Generative Sharpen, Object Selection Brush, AI model device
+	Generative Sharpen…	Генеративная резкость…
+	Detail:	Детализация:
+	Falls back to the next option when a model can't run there.	Если модель не может работать на этом устройстве, используется следующий вариант.
+	Generative Sharpen needs a model. Download one in Edit › Preferences › AI Models (Generative Enhance).	Для генеративной резкости нужна модель. Скачайте её в разделе Редактирование › Настройки › Модели ИИ (Генеративное улучшение).
+	Paint over a blurry or pixelated area	Закрасьте размытую или пикселизированную область
+	Paint over the object to select it (⇧ adds, Alt subtracts)	Закрасьте объект, чтобы выделить его (⇧ добавляет, Alt вычитает)
+	Preparing it to run… {percent}%	Подготовка к запуску… {percent}%
+	Press + to make a variation, or OK to sharpen with one. Seeds change the result with Stable Diffusion models.	Нажмите +, чтобы создать вариант, или OK, чтобы повысить резкость одним из них. Начальное значение влияет на результат только у моделей Stable Diffusion.
+	Run models on	Запускать модели на
+	Seeds change the result with Stable Diffusion models. Leave it empty for a new one each time.	Начальное значение влияет на результат только у моделей Stable Diffusion. Оставьте поле пустым, чтобы каждый раз получать новое.
+	The Object Selection Brush found nothing there — paint over more of the object	Кисть выделения объектов ничего там не нашла — закрасьте бо́льшую часть объекта
+
+# AI model device per category, tool names
+	Subtle	Слабый
+	Run on	Запускать на
+	As above	Как выше
+	Object Selection Brush Tool	Кисть выделения объектов
+	Generative Enhance Brush Tool	Кисть генеративного улучшения
+
 # DDS Options (#1327)
 	DDS Options	Параметры DDS
 	Compression	Сжатие

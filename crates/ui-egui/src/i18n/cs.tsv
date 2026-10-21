@@ -3858,6 +3858,124 @@ navigator	Zoom	Zvětšení
 	In Front	Vpředu
 	Behind	Vzadu
 
+# Edit › Preferences › AI: local AI models
+	AI	AI
+	AI Models…	Modely AI…
+	AI models run in the desktop app. Download PhotoCraft for your computer to use them.	Modely AI běží v desktopové aplikaci. Chcete-li je používat, stáhněte si PhotoCraft pro svůj počítač.
+	AI Models	Modely AI
+	Add a model from a file or a link	Přidat model ze souboru nebo odkazu
+	Cancelled	Zrušeno
+	Choose Files…	Vybrat soubory…
+	Delete this model	Odstranit tento model
+	Disabled: no tool offers this model	Vypnuto: tento model nenabízí žádný nástroj
+	Download	Stáhnout
+	Enabled: tools can use this model	Zapnuto: nástroje mohou tento model používat
+	Finished in {time}	Dokončeno za {time}
+	From a File	Ze souboru
+	From a Link	Z odkazu
+	Generative Fill & Infill	Generativní výplň a infill
+	Generative Removal	Generativní odstranění
+	Hugging Face, Civitai or download link	Odkaz Hugging Face, Civitai nebo ke stažení
+	Imported models PhotoCraft's tools don't use yet.	Importované modely, které nástroje PhotoCraftu zatím nepoužívají.
+	Importing {name}	Importuje se {name}
+	Import…	Importovat…
+	Keep	Ponechat
+	Looking up the model…	Vyhledává se model…
+	Models are stored in {path}	Modely jsou uloženy v {path}
+	No models match your search.	Hledání neodpovídá žádný model.
+	No models yet. Use Import… to add one.	Zatím žádné modely. Příkazem Importovat… přidáte model.
+	ONNX, safetensors, checkpoint or GGUF. Pick an ONNX model and its .data file together.	ONNX, safetensors, checkpoint nebo GGUF. Vyberte model ONNX spolu s jeho souborem .data.
+	Object Selection	Výběr objektu
+	Optional	Volitelné
+	Other Models	Další modely
+	Paste a Hugging Face file or repository (org/name), a Civitai model page, or a direct link to a model file.	Vložte soubor nebo repozitář Hugging Face (org/name), stránku modelu na Civitai nebo přímý odkaz na soubor modelu.
+	Recommended	Doporučené
+	Reflection Removal	Odstranění odlesků
+	Search models by name…	Hledat modely podle názvu…
+	Subject & Background	Objekt a pozadí
+	Use as	Použít jako
+	Used by the AI Object Selection tool.	Používá nástroj Výběr objektu AI.
+	Used by the Generative Removal brush.	Používá štětec Generativní odstranění.
+	Used by the Infill brush and Generative Fill (prompts).	Používá štětec Infill a Generativní výplň (prompty).
+	Used by the Reflection Removal brush.	Používá štětec Odstranění odlesků.
+	Used to select people, animals and products in one click.	Slouží k výběru lidí, zvířat a produktů jedním kliknutím.
+	about {time} left	zbývá asi {time}
+	{done} of {total}	{done} z {total}
+	{n} installed	Nainstalováno: {n}
+	{n} to download	Ke stažení: {n}
+
+# AI Object Selection, the Generative Brushes, AI Models accounts
+	AI Object Selection found nothing there — try a box around the object	Výběr objektu AI tam nic nenašel — obtáhněte objekt rámečkem
+	Accounts	Účty
+	Also in {sections}	Také v: {sections}
+	Choose one or more uses, or paste a link to guess them.	Zvolte jedno nebo více použití, nebo vložte odkaz a nechte je odhadnout.
+	Download a model in Edit › Preferences › AI Models	Stáhněte model v Úpravy › Předvolby › Modely AI
+	Drag a box around the object, or click it	Přetáhněte rámeček kolem objektu nebo na něj klikněte
+	Generative Brush	Generativní štětec
+	Get Models…	Získat modely…
+	Get a token	Získat token
+	Guessed from the link. Click a use to change it.	Odhadnuto z odkazu. Kliknutím na použití ho změníte.
+	Hide the token	Skrýt token
+	Model:	Model:
+	No {kind} model yet. Download one in Edit › Preferences › AI Models.	Zatím žádný model: {kind}. Stáhněte ho v Úpravy › Předvolby › Modely AI.
+	Not signed in	Nepřihlášeno
+	Paint over the reflection	Přemalujte odlesk
+	Paint over what to remove	Přemalujte, co chcete odstranit
+	Rename this model	Přejmenovat tento model
+	Show the token	Zobrazit token
+	Some models need you to sign in before they download. Paste an access token from your account; it's kept on this computer and sent only to its own site.	Některé modely vyžadují přihlášení před stažením. Vložte přístupový token ze svého účtu; zůstane v tomto počítači a odešle se jen na jeho vlastní web.
+	This build can't run AI models	Tato verze nemůže spouštět modely AI
+	{n} signed in	Přihlášeno: {n}
+	AI Object Selection Tool	Nástroj Výběr objektu AI
+	Generative Removal Brush Tool	Štětec Generativní odstranění
+	Reflection Removal Brush Tool	Štětec Odstranění odlesků
+	API key	Klíč API
+
+# Generative Fill dialog and Infill brush
+	Generative Fill…	Generativní výplň…
+	Infill Brush Tool	Štětec Infill
+	A Stable Diffusion ONNX pipeline folder (model_index.json with unet, text_encoder, vae_encoder and vae_decoder folders)	Složka pipeline Stable Diffusion ve formátu ONNX (model_index.json se složkami unet, text_encoder, vae_encoder a vae_decoder)
+	AI models run in the desktop app.	Modely AI běží v desktopové aplikaci.
+	All three can be left empty. Paint over the area; it fills when you let go.	Všechna tři pole můžete nechat prázdná. Přemalujte oblast; vyplní se, jakmile pustíte tlačítko.
+	Choose Folder…	Vybrat složku…
+	Ctrl+click to switch it in every section	Ctrl+kliknutím ho přepnete ve všech sekcích
+	Describe what to put there, e.g. a cat sitting on the bench	Popište, co tam má být, např. kočka sedící na lavičce
+	Generative Fill needs a model. Download one in Edit › Preferences › AI Models (Generative Fill & Infill).	Generativní výplň potřebuje model. Stáhněte ho v Úpravy › Předvolby › Modely AI (Generativní výplň a infill).
+	Make a variation	Vytvořit variantu
+	Negative prompt	Negativní prompt
+	New seed	Nové semínko
+	ONNX, safetensors, checkpoint or GGUF files (pick an ONNX model and its .data file together), or a diffusion pipeline's folder.	Soubory ONNX, safetensors, checkpoint nebo GGUF (model ONNX vyberte spolu s jeho souborem .data), nebo složka difuzní pipeline.
+	Paint over the area to fill	Přemalujte oblast, kterou chcete vyplnit
+	Press + (or Enter in the prompt) to make a variation, or OK to fill with one.	Stisknutím + (nebo Enter v promptu) vytvoříte variantu, tlačítkem OK oblast jednou z nich vyplníte.
+	Prompt	Prompt
+	Prompt, negative prompt and seed	Prompt, negativní prompt a semínko
+	Prompt…	Prompt…
+	Random each time	Pokaždé náhodně
+	The same seed and prompt give the same result. Leave it empty for a new one each time.	Stejné semínko a prompt dají stejný výsledek. Nechte pole prázdné, chcete-li pokaždé nový.
+	Variation {n} · seed {seed}	Varianta {n} · semínko {seed}
+	Variations	Varianty
+	What to avoid, e.g. blurry, text	Čemu se vyhnout, např. rozmazané, text
+
+# Generative Sharpen, Object Selection Brush, AI model device
+	Generative Sharpen…	Generativní doostření…
+	Detail:	Detail:
+	Falls back to the next option when a model can't run there.	Když model nelze spustit tam, přejde se na další možnost.
+	Generative Sharpen needs a model. Download one in Edit › Preferences › AI Models (Generative Enhance).	Generativní doostření potřebuje model. Stáhněte ho v Úpravy › Předvolby › Modely AI (Generativní vylepšení).
+	Paint over a blurry or pixelated area	Přemalujte rozmazanou nebo rozpixelovanou oblast
+	Paint over the object to select it (⇧ adds, Alt subtracts)	Přemalujte objekt, který chcete vybrat (⇧ přidává, Alt odebírá)
+	Preparing it to run… {percent}%	Příprava ke spuštění… {percent}%
+	Press + to make a variation, or OK to sharpen with one. Seeds change the result with Stable Diffusion models.	Stisknutím + vytvoříte variantu, tlačítkem OK oblast jednou z nich doostříte. Semínko mění výsledek u modelů Stable Diffusion.
+	Run models on	Spouštět modely na
+	Seeds change the result with Stable Diffusion models. Leave it empty for a new one each time.	Semínko mění výsledek u modelů Stable Diffusion. Nechte pole prázdné, chcete-li pokaždé nový.
+	The Object Selection Brush found nothing there — paint over more of the object	Štětec výběru objektu tam nic nenašel — přemalujte větší část objektu
+
+# AI model device per category, tool names
+	Subtle	Jemné
+	Run on	Spouštět na
+	As above	Stejně jako výše
+	Object Selection Brush Tool	Nástroj štětec výběru objektu
+	Generative Enhance Brush Tool	Nástroj štětec generativního vylepšení
+
 # DDS Options (#1327)
 	DDS Options	Možnosti DDS
 	Generate Mipmaps	Generovat mipmapy

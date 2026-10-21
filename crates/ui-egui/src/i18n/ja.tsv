@@ -3927,6 +3927,123 @@ curves	Smooth	スムーズ
 	In Front	前面
 	Behind	背面
 
+# Edit › Preferences › AI: local AI models
+	AI	AI
+	AI Models…	AI モデル…
+	AI models run in the desktop app. Download PhotoCraft for your computer to use them.	AI モデルはデスクトップアプリで動作します。使用するには、お使いのコンピューター用の PhotoCraft をダウンロードしてください。
+	AI Models	AI モデル
+	Add a model from a file or a link	ファイルまたはリンクからモデルを追加
+	Cancelled	キャンセルしました
+	Choose Files…	ファイルを選択…
+	Delete this model	このモデルを削除
+	Disabled: no tool offers this model	無効: このモデルを使うツールはありません
+	Download	ダウンロード
+	Enabled: tools can use this model	有効: ツールでこのモデルを使用できます
+	Finished in {time}	{time} で完了
+	From a File	ファイルから
+	From a Link	リンクから
+	Generative Fill & Infill	生成塗りつぶしとインフィル
+	Generative Removal	生成削除
+	Hugging Face, Civitai or download link	Hugging Face、Civitai またはダウンロードリンク
+	Imported models PhotoCraft's tools don't use yet.	PhotoCraft のツールでまだ使われていない読み込み済みモデルです。
+	Importing {name}	{name} を読み込み中
+	Keep	残す
+	Looking up the model…	モデルを確認しています…
+	Models are stored in {path}	モデルの保存場所: {path}
+	No models match your search.	検索に一致するモデルはありません。
+	No models yet. Use Import… to add one.	モデルはまだありません。「読み込み…」で追加してください。
+	ONNX, safetensors, checkpoint or GGUF. Pick an ONNX model and its .data file together.	ONNX、safetensors、チェックポイント、GGUF に対応。ONNX モデルは .data ファイルと一緒に選択してください。
+	Object Selection	オブジェクト選択
+	Optional	任意
+	Other Models	その他のモデル
+	Paste a Hugging Face file or repository (org/name), a Civitai model page, or a direct link to a model file.	Hugging Face のファイルやリポジトリ (org/name)、Civitai のモデルページ、またはモデルファイルへの直接リンクを貼り付けてください。
+	Recommended	おすすめ
+	Reflection Removal	映り込み除去
+	Search models by name…	モデル名で検索…
+	Subject & Background	被写体と背景
+	Use as	用途
+	Used by the AI Object Selection tool.	AI オブジェクト選択ツールで使用します。
+	Used by the Generative Removal brush.	生成削除ブラシで使用します。
+	Used by the Infill brush and Generative Fill (prompts).	インフィルブラシと生成塗りつぶし (プロンプト) で使用します。
+	Used by the Reflection Removal brush.	映り込み除去ブラシで使用します。
+	Used to select people, animals and products in one click.	人物、動物、製品をワンクリックで選択するのに使用します。
+	about {time} left	残り約 {time}
+	{done} of {total}	{done} / {total}
+	{n} installed	{n} 個インストール済み
+	{n} to download	{n} 個ダウンロード可能
+
+# AI Object Selection, the Generative Brushes, AI Models accounts
+	AI Object Selection found nothing there — try a box around the object	AI オブジェクト選択では何も見つかりませんでした — オブジェクトを囲むように範囲を指定してください
+	Accounts	アカウント
+	Also in {sections}	{sections} にもあります
+	Choose one or more uses, or paste a link to guess them.	用途を 1 つ以上選ぶか、リンクを貼り付けて推測させてください。
+	Download a model in Edit › Preferences › AI Models	編集 › 環境設定 › AI モデルでモデルをダウンロードしてください
+	Drag a box around the object, or click it	オブジェクトを囲むようにドラッグするか、クリックします
+	Generative Brush	生成ブラシ
+	Get Models…	モデルを入手…
+	Get a token	トークンを取得
+	Guessed from the link. Click a use to change it.	リンクから推測しました。用途をクリックして変更できます。
+	Hide the token	トークンを隠す
+	Model:	モデル:
+	No {kind} model yet. Download one in Edit › Preferences › AI Models.	{kind} のモデルがまだありません。編集 › 環境設定 › AI モデルでダウンロードしてください。
+	Not signed in	サインインしていません
+	Paint over the reflection	映り込みの上をペイントします
+	Paint over what to remove	削除する部分をペイントします
+	Rename this model	このモデルの名前を変更
+	Show the token	トークンを表示
+	Some models need you to sign in before they download. Paste an access token from your account; it's kept on this computer and sent only to its own site.	一部のモデルはダウンロード前にサインインが必要です。アカウントのアクセストークンを貼り付けてください。トークンはこのコンピューターに保存され、そのサイトにだけ送信されます。
+	This build can't run AI models	このビルドでは AI モデルを実行できません
+	{n} signed in	{n} 件サインイン済み
+	AI Object Selection Tool	AI オブジェクト選択ツール
+	Generative Removal Brush Tool	生成削除ブラシ
+	Reflection Removal Brush Tool	映り込み除去ブラシ
+	API key	API キー
+
+# Generative Fill dialog and Infill brush
+	Generative Fill…	生成塗りつぶし…
+	Infill Brush Tool	インフィルブラシ
+	A Stable Diffusion ONNX pipeline folder (model_index.json with unet, text_encoder, vae_encoder and vae_decoder folders)	Stable Diffusion の ONNX パイプラインフォルダー (model_index.json と unet、text_encoder、vae_encoder、vae_decoder フォルダー)
+	AI models run in the desktop app.	AI モデルはデスクトップアプリで実行されます。
+	All three can be left empty. Paint over the area; it fills when you let go.	3 つとも空欄のままでかまいません。領域をペイントすると、ボタンを離したときに塗りつぶされます。
+	Choose Folder…	フォルダーを選択…
+	Ctrl+click to switch it in every section	Ctrl+クリックですべてのセクションで切り替え
+	Describe what to put there, e.g. a cat sitting on the bench	配置するものを説明してください (例: ベンチに座っている猫)
+	Generative Fill needs a model. Download one in Edit › Preferences › AI Models (Generative Fill & Infill).	生成塗りつぶしにはモデルが必要です。編集 › 環境設定 › AI モデル (生成塗りつぶしとインフィル) でダウンロードしてください。
+	Make a variation	バリエーションを作成
+	Negative prompt	ネガティブプロンプト
+	New seed	新しいシード
+	ONNX, safetensors, checkpoint or GGUF files (pick an ONNX model and its .data file together), or a diffusion pipeline's folder.	ONNX、safetensors、チェックポイント、GGUF ファイル (ONNX モデルは .data ファイルと一緒に選択)、または拡散パイプラインのフォルダー。
+	Paint over the area to fill	塗りつぶす領域をペイント
+	Press + (or Enter in the prompt) to make a variation, or OK to fill with one.	+ (またはプロンプトで Enter) でバリエーションを作成し、OK でそのいずれかで塗りつぶします。
+	Prompt	プロンプト
+	Prompt, negative prompt and seed	プロンプト、ネガティブプロンプト、シード
+	Prompt…	プロンプト…
+	Random each time	毎回ランダム
+	The same seed and prompt give the same result. Leave it empty for a new one each time.	同じシードとプロンプトからは同じ結果が得られます。毎回新しいシードにするには空欄のままにします。
+	Variation {n} · seed {seed}	バリエーション {n} · シード {seed}
+	Variations	バリエーション
+	What to avoid, e.g. blurry, text	避けたいもの (例: ぼやけ、テキスト)
+
+# Generative Sharpen, Object Selection Brush, AI model device
+	Generative Sharpen…	生成シャープ…
+	Detail:	ディテール:
+	Falls back to the next option when a model can't run there.	そこでモデルを実行できない場合は次の選択肢に切り替えます。
+	Generative Sharpen needs a model. Download one in Edit › Preferences › AI Models (Generative Enhance).	生成シャープにはモデルが必要です。編集 › 環境設定 › AI モデル (生成強化) でダウンロードしてください。
+	Paint over a blurry or pixelated area	ぼやけた部分やピクセル化した部分をペイントします
+	Paint over the object to select it (⇧ adds, Alt subtracts)	選択するオブジェクトの上をペイントします (⇧ で追加、Alt で削除)
+	Preparing it to run… {percent}%	実行の準備中… {percent}%
+	Press + to make a variation, or OK to sharpen with one. Seeds change the result with Stable Diffusion models.	+ でバリエーションを作成し、OK でそのいずれかでシャープにします。シードで結果が変わるのは Stable Diffusion モデルの場合です。
+	Run models on	モデルの実行先
+	Seeds change the result with Stable Diffusion models. Leave it empty for a new one each time.	シードで結果が変わるのは Stable Diffusion モデルの場合です。毎回新しいシードにするには空欄のままにします。
+	The Object Selection Brush found nothing there — paint over more of the object	オブジェクト選択ブラシでは何も見つかりませんでした — オブジェクトのより広い範囲をペイントしてください
+
+# AI model device per category, tool names
+	Subtle	控えめ
+	Run on	実行先
+	As above	上と同じ
+	Object Selection Brush Tool	オブジェクト選択ブラシツール
+	Generative Enhance Brush Tool	生成強化ブラシツール
+
 # DDS Options (#1327)
 	DDS Options	DDS オプション
 	Compression	圧縮

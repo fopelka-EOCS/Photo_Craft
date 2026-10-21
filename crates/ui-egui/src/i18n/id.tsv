@@ -3245,6 +3245,124 @@ curves	Smooth	Haluskan
 	In Front	Di Depan
 	Behind	Di Belakang
 
+# Edit › Preferences › AI: local AI models
+	AI	AI
+	AI Models…	Model AI…
+	AI models run in the desktop app. Download PhotoCraft for your computer to use them.	Model AI berjalan di aplikasi desktop. Unduh PhotoCraft untuk komputer Anda untuk menggunakannya.
+	AI Models	Model AI
+	Add a model from a file or a link	Tambahkan model dari file atau tautan
+	Cancelled	Dibatalkan
+	Choose Files…	Pilih File…
+	Delete this model	Hapus model ini
+	Disabled: no tool offers this model	Nonaktif: tidak ada alat yang memakai model ini
+	Download	Unduh
+	Enabled: tools can use this model	Aktif: alat dapat memakai model ini
+	Finished in {time}	Selesai dalam {time}
+	From a File	Dari File
+	From a Link	Dari Tautan
+	Generative Fill & Infill	Isi Generatif & Infill
+	Generative Removal	Penghapusan Generatif
+	Hugging Face, Civitai or download link	Tautan Hugging Face, Civitai, atau unduhan
+	Imported models PhotoCraft's tools don't use yet.	Model impor yang belum dipakai alat PhotoCraft.
+	Importing {name}	Mengimpor {name}
+	Keep	Simpan
+	Looking up the model…	Mencari model…
+	Models are stored in {path}	Model disimpan di {path}
+	No models match your search.	Tidak ada model yang cocok dengan pencarian.
+	No models yet. Use Import… to add one.	Belum ada model. Gunakan Impor… untuk menambahkannya.
+	ONNX, safetensors, checkpoint or GGUF. Pick an ONNX model and its .data file together.	ONNX, safetensors, checkpoint, atau GGUF. Pilih model ONNX bersama file .data-nya.
+	Object Selection	Pemilihan Objek
+	Optional	Opsional
+	Other Models	Model Lain
+	Paste a Hugging Face file or repository (org/name), a Civitai model page, or a direct link to a model file.	Tempel file atau repositori Hugging Face (org/name), halaman model Civitai, atau tautan langsung ke file model.
+	Recommended	Disarankan
+	Reflection Removal	Penghapusan Pantulan
+	Search models by name…	Cari model berdasarkan nama…
+	Subject & Background	Subjek & Latar
+	Use as	Gunakan sebagai
+	Used by the AI Object Selection tool.	Dipakai oleh alat Pemilihan Objek AI.
+	Used by the Generative Removal brush.	Dipakai oleh kuas Penghapusan Generatif.
+	Used by the Infill brush and Generative Fill (prompts).	Dipakai oleh kuas Infill dan Isi Generatif (prompt).
+	Used by the Reflection Removal brush.	Dipakai oleh kuas Penghapusan Pantulan.
+	Used to select people, animals and products in one click.	Dipakai untuk memilih orang, hewan, dan produk dalam satu klik.
+	about {time} left	sekitar {time} lagi
+	{done} of {total}	{done} dari {total}
+	{n} installed	{n} terpasang
+	{n} to download	{n} dapat diunduh
+
+# AI Object Selection, the Generative Brushes, AI Models accounts
+	AI Object Selection found nothing there — try a box around the object	Pemilihan Objek AI tidak menemukan apa pun di sana — coba kotak di sekitar objek
+	Accounts	Akun
+	Also in {sections}	Juga di {sections}
+	Choose one or more uses, or paste a link to guess them.	Pilih satu kegunaan atau lebih, atau tempel tautan untuk menebaknya.
+	Download a model in Edit › Preferences › AI Models	Unduh model di Edit › Preferensi › Model AI
+	Drag a box around the object, or click it	Seret kotak di sekitar objek, atau klik objeknya
+	Generative Brush	Kuas Generatif
+	Get Models…	Dapatkan Model…
+	Get a token	Dapatkan token
+	Guessed from the link. Click a use to change it.	Ditebak dari tautan. Klik kegunaan untuk mengubahnya.
+	Hide the token	Sembunyikan token
+	Model:	Model:
+	No {kind} model yet. Download one in Edit › Preferences › AI Models.	Belum ada model {kind}. Unduh di Edit › Preferensi › Model AI.
+	Not signed in	Belum masuk
+	Paint over the reflection	Lukis di atas pantulan
+	Paint over what to remove	Lukis di atas yang ingin dihapus
+	Rename this model	Ganti nama model ini
+	Show the token	Tampilkan token
+	Some models need you to sign in before they download. Paste an access token from your account; it's kept on this computer and sent only to its own site.	Beberapa model mengharuskan Anda masuk sebelum diunduh. Tempel token akses dari akun Anda; token disimpan di komputer ini dan hanya dikirim ke situsnya sendiri.
+	This build can't run AI models	Build ini tidak dapat menjalankan model AI
+	{n} signed in	{n} masuk
+	AI Object Selection Tool	Alat Pemilihan Objek AI
+	Generative Removal Brush Tool	Kuas Penghapusan Generatif
+	Reflection Removal Brush Tool	Kuas Penghapusan Pantulan
+	API key	Kunci API
+
+# Generative Fill dialog and Infill brush
+	Generative Fill…	Isi Generatif…
+	Infill Brush Tool	Kuas Infill
+	A Stable Diffusion ONNX pipeline folder (model_index.json with unet, text_encoder, vae_encoder and vae_decoder folders)	Folder pipeline ONNX Stable Diffusion (model_index.json dengan folder unet, text_encoder, vae_encoder, dan vae_decoder)
+	AI models run in the desktop app.	Model AI berjalan di aplikasi desktop.
+	All three can be left empty. Paint over the area; it fills when you let go.	Ketiganya boleh dikosongkan. Lukis di atas area; area terisi saat Anda melepasnya.
+	Choose Folder…	Pilih Folder…
+	Ctrl+click to switch it in every section	Ctrl+klik untuk mengalihkannya di setiap bagian
+	Describe what to put there, e.g. a cat sitting on the bench	Jelaskan apa yang ditaruh di sana, mis. kucing yang duduk di bangku
+	Generative Fill needs a model. Download one in Edit › Preferences › AI Models (Generative Fill & Infill).	Isi Generatif memerlukan model. Unduh satu di Edit › Preferensi › Model AI (Isi Generatif & Infill).
+	Make a variation	Buat variasi
+	Negative prompt	Prompt negatif
+	New seed	Seed baru
+	ONNX, safetensors, checkpoint or GGUF files (pick an ONNX model and its .data file together), or a diffusion pipeline's folder.	File ONNX, safetensors, checkpoint, atau GGUF (pilih model ONNX bersama file .data-nya), atau folder pipeline difusi.
+	Paint over the area to fill	Lukis di atas area yang akan diisi
+	Press + (or Enter in the prompt) to make a variation, or OK to fill with one.	Tekan + (atau Enter di prompt) untuk membuat variasi, atau OK untuk mengisi dengan salah satunya.
+	Prompt	Prompt
+	Prompt, negative prompt and seed	Prompt, prompt negatif, dan seed
+	Prompt…	Prompt…
+	Random each time	Acak setiap kali
+	The same seed and prompt give the same result. Leave it empty for a new one each time.	Seed dan prompt yang sama memberi hasil yang sama. Kosongkan untuk seed baru setiap kali.
+	Variation {n} · seed {seed}	Variasi {n} · seed {seed}
+	Variations	Variasi
+	What to avoid, e.g. blurry, text	Yang dihindari, mis. buram, teks
+	Seed	Seed
+
+# Generative Sharpen, Object Selection Brush, AI model device
+	Generative Sharpen…	Pertajam Generatif…
+	Detail:	Detail:
+	Falls back to the next option when a model can't run there.	Beralih ke opsi berikutnya jika model tidak dapat berjalan di sana.
+	Generative Sharpen needs a model. Download one in Edit › Preferences › AI Models (Generative Enhance).	Pertajam Generatif memerlukan model. Unduh satu di Edit › Preferensi › Model AI (Peningkatan Generatif).
+	Paint over a blurry or pixelated area	Lukis di atas area yang buram atau pecah-pecah
+	Paint over the object to select it (⇧ adds, Alt subtracts)	Lukis di atas objek untuk memilihnya (⇧ menambah, Alt mengurangi)
+	Preparing it to run… {percent}%	Menyiapkan agar dapat berjalan… {percent}%
+	Press + to make a variation, or OK to sharpen with one. Seeds change the result with Stable Diffusion models.	Tekan + untuk membuat variasi, atau OK untuk mempertajam dengan salah satunya. Seed mengubah hasil pada model Stable Diffusion.
+	Run models on	Jalankan model di
+	Seeds change the result with Stable Diffusion models. Leave it empty for a new one each time.	Seed mengubah hasil pada model Stable Diffusion. Kosongkan untuk seed baru setiap kali.
+	The Object Selection Brush found nothing there — paint over more of the object	Kuas Pemilihan Objek tidak menemukan apa pun di sana — lukis lebih banyak bagian objek
+
+# AI model device per category, tool names
+	Subtle	Halus
+	Run on	Jalankan di
+	As above	Sama seperti di atas
+	Object Selection Brush Tool	Alat Kuas Pemilihan Objek
+	Generative Enhance Brush Tool	Alat Kuas Peningkatan Generatif
+
 # DDS Options (#1327)
 	DDS Options	Opsi DDS
 	Compression	Kompresi

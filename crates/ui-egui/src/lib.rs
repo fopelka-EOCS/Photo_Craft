@@ -19,6 +19,8 @@ pub mod adjust_dialog;
 pub mod adjust_editors;
 pub mod adjust_preview;
 pub mod adjust_ui;
+pub mod ai_prefs_ui;
+pub mod ai_tools_ui;
 mod alt_grab;
 pub mod analysis_ui;
 pub mod anchor_tools;
@@ -101,6 +103,7 @@ pub mod flick_pan;
 mod font_preview;
 pub mod frame_tool;
 pub mod gallery_ui;
+pub mod generative_fill_ui;
 pub mod gpu_canvas;
 pub mod gpu_status;
 pub mod gradient_ui;
@@ -606,6 +609,9 @@ pub struct Services {
     /// while AppKit's run loop is still going crashes or hangs Touch Bar Macs (#1575, #1458).
     /// Without one, eframe closes the window and the app ends with it.
     pub quit: Option<QuitFn>,
+    /// Edit › Preferences › AI: the local model manager (desktop; `None` on the web, where the
+    /// tab says models need the desktop app).
+    pub models: Option<photocraft_ml::Manager>,
 }
 
 /// A document histogram being computed off the UI thread: (document, revision, receiver of
@@ -656,6 +662,8 @@ pub struct PhotocraftApp {
     pub(crate) remove_pending: Vec<Vec<[f64; 3]>>,
     pub(crate) remove_pending_target: Option<retouch_ui::RemoveTarget>,
     pub(crate) remove_trail: Option<stroke_trail::Trail>,
+    /// A Generative Brush stroke being filled (its tint stays until the job lands).
+    pub(crate) ai_pending: Option<ai_tools_ui::Pending>,
     /// The open menus' items, reused between frames (`menus::ItemCache`).
     pub(crate) menu_cache: Option<menus::ItemCache>,
     /// Move tool drag shown live (`move_ui`).
@@ -911,7 +919,11 @@ pub struct PhotocraftApp {
 }
 
 impl PhotocraftApp {
-    pub fn new(session: Session, services: Services) -> Self {
+    pub fn new(mut session: Session, services: Services) -> Self {
+        // The AI tools' commands find their models through the session.
+        if session.models().is_none() {
+            session.set_models(services.models.clone());
+        }
         let mut app = Self {
             session,
             ui: UiState::default(),
@@ -933,6 +945,7 @@ impl PhotocraftApp {
             remove_pending: Vec::new(),
             remove_pending_target: None,
             remove_trail: None,
+            ai_pending: None,
             menu_cache: None,
             move_preview: None,
             move_hover: None,
@@ -2984,6 +2997,8 @@ mod view_sync_tests;
 #[cfg(test)]
 mod stamp_tests;
 
+#[cfg(test)]
+mod ai_screenshot_tests;
 #[cfg(test)]
 mod alt_click_tests;
 #[cfg(test)]
