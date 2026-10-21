@@ -425,11 +425,10 @@ difference even when it is below that threshold. Non-finite rendered samples pro
 
 This measures the committed document's composited appearance, including masks and Smart Filters.
 Pending floating selections and other transient tool previews are excluded and remain pending. It does not
-compare hidden native channels, exported file bytes or monitor-transformed colors, and does
-not judge anatomy or retouch quality. The active selection does not restrict the requested
-regions. The command does not change layers, snapshots, undo/redo state, the journal or the
-document's saved state. Comparison buffers are processed in bounded tiles; the compositor's
-own caches and rendering costs still apply.
+compare hidden native channels, exported file bytes or monitor-transformed colors. The active selection
+does not restrict the requested regions. The command does not change layers, snapshots, undo/redo state,
+the journal or the document's saved state. Comparison buffers are processed in bounded tiles; the
+compositor's own caches and rendering costs still apply.
 
 ## Transport limits
 

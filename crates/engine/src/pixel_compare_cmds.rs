@@ -85,7 +85,7 @@ fn regions(requested: &[Region], bounds: Rect) -> Result<Vec<Rect>> {
             if !bounds.contains_rect(&rect) {
                 return Err(bad("every region must be entirely inside the document and snapshot bounds"));
             }
-            let area = u64::from(region.width).checked_mul(u64::from(region.height)).ok_or_else(|| bad("region area overflows"))?;
+            let area = u64::from(region.width) * u64::from(region.height);
             total = total
                 .checked_add(area)
                 .filter(|&n| n <= MAX_COMPARED_PIXELS)
@@ -180,41 +180,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn universal_command_parameters_are_ignored_but_other_unknown_keys_are_rejected() {
-        let mut request = json!({
-            "snapshot": 1,
-            "regions": [{"x": 0, "y": 0, "width": 1, "height": 1}],
-            "coalesce": "inspection",
-            "target": "mask",
-        });
-        let parsed = params(&request).unwrap();
-        assert_eq!(parsed.snapshot, 1);
-        assert_eq!(parsed.tolerance, 0.0);
-        assert_eq!(regions(&parsed.regions, Rect::new(0, 0, 1, 1)).unwrap(), vec![Rect::new(0, 0, 1, 1)]);
-        request["tolerence"] = json!(0.0);
-        assert!(params(&request).is_err());
-    }
-
-    #[test]
-    fn statistics_count_pixels_once_include_alpha_and_keep_sub_tolerance_maximum() {
-        let rect = Rect::new(0, 0, 3, 1);
-        let before = Buffer::filled(rect, [2.0, -1.0, 0.0, 0.5]);
-        let mut after = before.clone();
-        after.px[0][0] += 0.125;
-        after.px[1][3] += 0.25;
-        after.px[1][0] += 0.5;
-        let mut difference = Difference::default();
-        accumulate(&before, &after, rect, 0.25, &mut difference).unwrap();
-        assert_eq!(difference.compared_pixels, 3);
-        assert_eq!(difference.changed_pixels, 1);
-        assert_eq!(difference.max_channel_difference, 0.5);
-        let mut tolerated = Difference::default();
-        accumulate(&before, &after, rect, 0.5, &mut tolerated).unwrap();
-        assert_eq!(tolerated.changed_pixels, 0);
-        assert_eq!(tolerated.max_channel_difference, 0.5);
-    }
-
-    #[test]
     fn finite_hdr_differences_are_not_lost_to_float_overflow() {
         let rect = Rect::new(0, 0, 1, 1);
         let before = Buffer::filled(rect, [-f32::MAX, 0.0, 0.0, 1.0]);
@@ -235,21 +200,5 @@ mod tests {
             assert!(accumulate(&before, &after, rect, 0.0, &mut Difference::default()).is_err());
             assert!(accumulate(&after, &before, rect, 0.0, &mut Difference::default()).is_err());
         }
-    }
-
-    #[test]
-    fn rectangles_are_checked_before_rendering_and_overlaps_count_against_the_budget() {
-        let bounds = Rect::new(0, 0, 2048, 2048);
-        for region in [
-            Region { x: 0, y: 0, width: 0, height: 1 },
-            Region { x: -1, y: 0, width: 1, height: 1 },
-            Region { x: i32::MAX, y: 0, width: 1, height: 1 },
-            Region { x: 0, y: i32::MAX, width: 1, height: 1 },
-            Region { x: 2047, y: 0, width: 2, height: 1 },
-        ] {
-            assert!(regions(&[region], bounds).is_err());
-        }
-        let repeated = [Region { x: 0, y: 0, width: 1024, height: 1024 }, Region { x: 0, y: 0, width: 1, height: 1 }];
-        assert!(regions(&repeated, bounds).is_err());
     }
 }

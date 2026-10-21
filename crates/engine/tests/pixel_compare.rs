@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use photocraft_color::{ColorMode, PixelFormat, SampleType};
 use photocraft_doc::{Document, Layer, LayerContent, LayerMask, Slice, SliceOrigin};
-use photocraft_engine::{Session, inspect};
+use photocraft_engine::{EngineError, Session, inspect};
 use photocraft_geom::{Rect, Size};
 use photocraft_raster::Surface;
 use serde_json::{Value, json};
@@ -195,7 +195,7 @@ fn successful_and_rejected_queries_preserve_redo_journal_and_document_state() {
     for (params, valid) in
         [(json!({"snapshot": baseline, "regions": [region(0, 0, 4, 3)]}), true), (json!({"snapshot": baseline, "regions": [region(-1, 0, 1, 1)]}), false)]
     {
-        assert_eq!(session.execute(COMMAND, params).is_ok(), valid);
+        assert!(matches!((session.execute(COMMAND, params), valid), (Ok(_), true) | (Err(EngineError::BadParams { .. }), false)));
         assert_eq!(state(&session), before);
         assert!(Arc::ptr_eq(&document, &session.active().unwrap().doc));
         assert_eq!(session.active().unwrap().doc.slices, slices, "inspection must not refresh stale layer-based slices");
@@ -204,7 +204,10 @@ fn successful_and_rejected_queries_preserve_redo_journal_and_document_state() {
     assert_eq!(photocraft_compose::render(&session.active().unwrap().doc, Rect::new(0, 0, 1, 1)).get(0, 0), [1.0, 0.0, 0.0, 1.0]);
     session.add_document(Document::new("Other", Size::new(4, 3), ColorMode::Rgb, SampleType::F32), None);
     let before = state(&session);
-    assert!(session.execute(COMMAND, json!({"snapshot": baseline, "regions": [region(0, 0, 1, 1)]})).is_err(), "snapshot IDs belong to the active document");
+    assert!(
+        matches!(session.execute(COMMAND, json!({"snapshot": baseline, "regions": [region(0, 0, 1, 1)]})), Err(EngineError::BadParams { .. })),
+        "snapshot IDs belong to the active document"
+    );
     assert_eq!(state(&session), before);
 }
 
@@ -233,6 +236,7 @@ fn malformed_parameters_and_stale_snapshot_ids_are_rejected_without_mutation() {
         json!([region(0, 0, 0, 1)]),
         json!([region(0, 0, 1, 0)]),
         json!([region(i32::MAX, 0, 1, 1)]),
+        json!([region(0, i32::MAX, 1, 1)]),
         json!([{"x": 0.5, "y": 0, "width": 1, "height": 1}]),
         json!([{"x": 0, "y": 0, "width": -1, "height": 1}]),
         json!([{"x": 0, "y": 0, "width": 4294967296u64, "height": 1}]),
@@ -248,7 +252,7 @@ fn malformed_parameters_and_stale_snapshot_ids_are_rejected_without_mutation() {
     }
     let before = state(&session);
     for params in invalid {
-        assert!(session.execute(COMMAND, params.clone()).is_err(), "accepted {params}");
+        assert!(matches!(session.execute(COMMAND, params.clone()), Err(EngineError::BadParams { .. })), "expected invalid parameters for {params}");
         assert_eq!(state(&session), before, "rejected {params} mutated editing state");
     }
     assert_eq!(session.execute(COMMAND, valid).unwrap()["regions"][0]["changedPixels"], 0, "a remaining snapshot ID must not be mistaken for its array index");
@@ -263,7 +267,7 @@ fn region_limits_count_overlaps_and_reject_incompatible_snapshot_metadata() {
     assert_eq!(accepted["regions"][0]["comparedPixels"], 524288);
     assert_eq!(accepted["regions"][1]["comparedPixels"], 524288);
     assert!(
-        large.execute(COMMAND, json!({"snapshot": baseline, "regions": vec![region(0, 0, 1024, 513); 2]})).is_err(),
+        matches!(large.execute(COMMAND, json!({"snapshot": baseline, "regions": vec![region(0, 0, 1024, 513); 2]})), Err(EngineError::BadParams { .. })),
         "overlapping ROI areas still count against the sum budget"
     );
     assert_eq!(compare(&mut large, baseline, vec![region(0, 0, 1, 1); 32], None)["regions"].as_array().unwrap().len(), 32);
@@ -291,7 +295,10 @@ fn region_limits_count_overlaps_and_reject_incompatible_snapshot_metadata() {
             }
         }
         let before = state(&session);
-        assert!(session.execute(COMMAND, json!({"snapshot": baseline, "regions": [region(0, 0, 1, 1)]})).is_err(), "accepted incompatible {mismatch}");
+        assert!(
+            matches!(session.execute(COMMAND, json!({"snapshot": baseline, "regions": [region(0, 0, 1, 1)]})), Err(EngineError::BadParams { .. })),
+            "expected invalid parameters for incompatible {mismatch}"
+        );
         assert_eq!(state(&session), before);
     }
 }
@@ -323,7 +330,7 @@ fn queries_preserve_pending_and_stale_floating_selections_and_measure_only_commi
         for valid in [true, false] {
             let roi = if valid { region(0, 0, 8, 4) } else { region(-1, 0, 1, 1) };
             let result = session.execute(COMMAND, json!({"snapshot": baseline, "regions": [roi]}));
-            assert_eq!(result.is_ok(), valid);
+            assert!(matches!((&result, valid), (Ok(_), true) | (Err(EngineError::BadParams { .. }), false)));
             if let Ok(result) = result {
                 assert_eq!(result["regions"][0]["changedPixels"], 0, "floating previews are outside the committed-composite comparison");
             }
@@ -395,7 +402,7 @@ fn universal_command_parameters_leave_comparison_semantics_and_state_unchanged()
         } else {
             invalid["tolernace"] = json!(0.1);
         }
-        assert!(session.execute(COMMAND, invalid).is_err(), "only documented universal keys may be ignored");
+        assert!(matches!(session.execute(COMMAND, invalid), Err(EngineError::BadParams { .. })), "only documented universal keys may be ignored");
         assert_eq!(state(&session), before);
         assert!(Arc::ptr_eq(&document, &session.active().unwrap().doc));
     }
