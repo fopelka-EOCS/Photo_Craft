@@ -86,6 +86,10 @@ pub struct FolderReport {
 /// Synchronizes `dir` with the registry: installs every `*.wasm` directly in `dir` (not recursive)
 /// in file-name order, and removes any previously installed plug-in whose source was directly in
 /// `dir` but is no longer present. A bad module is reported and skipped; the others still load.
+///
+/// Note: If a previously loaded plug-in whose `.wasm` file still exists in `dir` now fails to
+/// load (for example, following an invalid or broken update), it is unloaded from the active
+/// registry so broken modules cannot be executed, and is reported in both `failed` and `removed`.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn load_folder(dir: &std::path::Path) -> Result<FolderReport> {
     let rd = std::fs::read_dir(dir).map_err(|e| Error::Io(format!("{}: {e}", dir.display())))?;

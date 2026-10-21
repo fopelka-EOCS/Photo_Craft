@@ -638,10 +638,14 @@ fn link_updates(app: &mut PhotocraftApp, ctx: &egui::Context) {
 }
 
 /// Hot-reloads WebAssembly filter plug-ins installed, updated, repaired, or uninstalled on disk
-/// (for example via ArtCraft Launcher) while PhotoCraft is running, without closing or losing any
-/// open document or undo history.
+/// while PhotoCraft is running, without closing or losing any open document or undo history.
 #[cfg(not(target_arch = "wasm32"))]
 fn plugin_updates(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    let pi = &app.session.prefs().plug_ins;
+    if !pi.use_additional_plugins_folder || pi.additional_plugins_folder.trim().is_empty() {
+        return;
+    }
+
     let (last_key, focus_key) = (egui::Id::new("pluginWatch.lastScan"), egui::Id::new("pluginWatch.focused"));
     let now = ctx.input(|i| i.time);
     let focused = ctx.input(|i| i.focused);
@@ -652,28 +656,6 @@ fn plugin_updates(app: &mut PhotocraftApp, ctx: &egui::Context) {
         return;
     }
     ctx.data_mut(|d| d.insert_temp(last_key, now));
-
-    // If the Plug-ins folder wasn't configured when PhotoCraft launched, check whether an external
-    // manager (ArtCraft Launcher) enabled `plugIns.additionalPluginsFolder` in `preferences.json`.
-    let needs_folder = {
-        let pi = &app.session.prefs().plug_ins;
-        !pi.use_additional_plugins_folder || pi.additional_plugins_folder.trim().is_empty()
-    };
-    if needs_folder
-        && app.session.prefs.rev() == app.prefs_rt.saved_rev
-        && let Some(stored) = app.services.load_prefs.as_mut().and_then(|load| load()).and_then(|t| serde_json::from_str::<Value>(&t).ok())
-        && let Some(pi_val) = stored.get("plugIns")
-        && let Ok(disk_pi) = serde_json::from_value::<prefs::PlugIns>(pi_val.clone())
-        && disk_pi.use_additional_plugins_folder
-        && !disk_pi.additional_plugins_folder.trim().is_empty()
-    {
-        app.session.edit_prefs(|p| p.plug_ins = disk_pi);
-        app.prefs_rt.saved_rev = app.session.prefs.rev();
-        app.prefs_rt.saved_value = Some(app.session.prefs_value());
-        app.menu_cache = None;
-        ctx.request_repaint();
-        return;
-    }
 
     if app.session.poll_plugin_folder().is_some() {
         app.menu_cache = None;

@@ -11,8 +11,6 @@ const PREFIX: &str = "plugin.filter.";
 
 /// Inserts the installed plug-ins into Filter › Plug-ins, above "Install Plug-in…".
 pub fn insert_menu_items(app: &PhotocraftApp, items: &mut Vec<MenuItem>) {
-    #[cfg(not(target_arch = "wasm32"))]
-    let _ = app.session.poll_plugin_folder();
     let plugins = photocraft_plugins::registry::list();
     let Some(at) = items.iter().position(|i| i.id == "plugin.install") else { return };
     // `MenuItem::path` is the untranslated English path from the command's engine spec: the menu
@@ -93,7 +91,7 @@ pub fn can_confirm(fields: &Map<String, Value>) -> bool {
 }
 
 /// Renders the `Install Plug-in` dialog body with a file path field, a native `Browse…` button
-/// (supporting `.wasm`, `.afs`, and `.8bf` plug-ins), and the `Replace` checkbox.
+/// (supporting `.wasm` plug-ins), and the `Replace` checkbox.
 pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, fields: &mut Map<String, Value>) {
     let t = crate::theme::Tokens::get(ui.ctx());
     let mut path = fields.get("path").and_then(Value::as_str).unwrap_or_default().to_string();
@@ -118,7 +116,7 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, fields: &mut Map<String,
     fields.insert("replace".into(), json!(replace));
 
     if browse_clicked {
-        let req = crate::FileDialogRequest::Open { multiple: false, initial_dir: None, extensions: Some(vec!["wasm".into(), "afs".into(), "8bf".into()]) };
+        let req = crate::FileDialogRequest::Open { multiple: false, initial_dir: None, extensions: Some(vec!["wasm".into()]) };
         let _ = app.ask_file(req, |app, answer| {
             if let Some(d) = app.ui.dialogs.iter_mut().rev().find(|d| owns(&d.fields)) {
                 match answer {
