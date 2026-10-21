@@ -502,7 +502,6 @@
 	Deselect	Seçimi Kaldır
 	Reselect	Yeniden Seç
 	Inverse	Ters Çevir
-	Inverse Selection	Ters Seçim
 	Similar	Benzer
 	Color Range…	Renk Aralığı…
 	Focus Area…	Odaklanma Alanı…
@@ -620,8 +619,8 @@
 	Legacy Macintosh RGB	Eski Macintosh RGB
 	Internet Standard RGB	İnternet Standardı RGB
 	Monitor RGB	RGB'yi izleyin
-	Color Blindness — Protanopia-type	Renk Körlüğü — Protanopi tipi
-	Color Blindness — Deuteranopia-type	Renk Körlüğü – Döteranopi tipi
+	Color Blindness - Protanopia-type	Renk Körlüğü - Protanopi tipi
+	Color Blindness - Deuteranopia-type	Renk Körlüğü – Döteranopi tipi
 	Zoom In	Yakınlaştır
 	Zoom Out	Uzaklaştır
 	Fit on Screen	Ekrana Sığdır
@@ -913,7 +912,7 @@
 	Click to add a point · drag off or {key}-click or Delete to remove	Nokta eklemek için tıklayın · sürükleyin veya {key} tuşuna basıp tıklayın veya kaldırmak için Sil
 	Click to apply, {key}-click to clear overrides, double-click for Style Options	Uygulamak için tıklayın, geçersiz kılmaları temizlemek için {key}-tıklayın, Stil Seçenekleri için çift tıklayın
 	Click to edit the gradient	Degradeyi düzenlemek için tıklayın
-	Click to restore the current colour	Mevcut rengi geri yüklemek için tıklayın
+	Click to restore the current color	Mevcut rengi geri yüklemek için tıklayın
 	Click to zoom in  ·  {key}-click to zoom out  ·  drag right/left to zoom in/out	Yakınlaştırmak için tıklayın · {key}-uzaklaştırmak için tıklayın · yakınlaştırmak/uzaklaştırmak için sağa/sola sürükleyin
 	Click with the Note tool to add a note.	Not eklemek için Not aracıyla tıklayın.
 	Click: corner · Drag: smooth · Click first point: close · {key} finish · Esc cancel	Tıklayın: köşe · Sürükleyin: pürüzsüz · İlk noktaya tıklayın: kapat · {key} bitiş · Esc iptal
@@ -995,7 +994,7 @@
 	Darks	Karanlıklar
 	Data Sets	Veri Setleri
 	Default	Varsayılan
-	Default colours (D)	Varsayılan renkler (D)
+	Default Foreground and Background Colors (D)	Varsayılan renkler (D)
 	Default printer	Varsayılan yazıcı
 	Default restored.	Varsayılan geri yüklendi.
 	Define	Tanımla
@@ -1275,7 +1274,7 @@
 	Opacity Jitter	Opaklık Değişimi
 	Opacity:	Opaklık:
 	Open a document to define variables.	Değişkenleri tanımlamak için bir belge açın.
-	Open a document to select a colour range.	Bir renk aralığı seçmek için bir belge açın.
+	Open a document to select a color range.	Bir renk aralığı seçmek için bir belge açın.
 	Open a document to use the timeline.	Zaman çizelgesini kullanmak için bir belge açın.
 	Optical	Optik
 	Optimized	Optimize edilmiş
@@ -1349,7 +1348,6 @@
 	Purity	saflık
 	Quality	Kalite
 	Quick Actions	Hızlı Eylemler
-	Quick Export As PNG	PNG Olarak Hızlı Dışa Aktarma
 	Radial Gradient	Radyal Gradyan
 	Radius	Yarıçap
 	Radius:	Yarıçap:
@@ -1487,7 +1485,7 @@
 	Subtract from Sample	Örnekten Çıkart
 	Subtract from selection  ({key})	Seçimden çıkar ({key})
 	Suggestions:	Öneriler:
-	Swap colours (X)	Renkleri değiştir (X)
+	Switch Foreground and Background Colors (X)	Renkleri değiştir (X)
 	Swaps height and width	Yüksekliği ve genişliği değiştirir
 	Switch between free transform and warp modes	Serbest dönüştürme ve çarpıtma modları arasında geçiş yapın
 	Switch theme	Temayı değiştir
@@ -1589,7 +1587,7 @@
 	Choke	Şok
 	Classic	Klasik
 	Click to add text	Metin eklemek için tıklayın
-	Click to fill similar colours	Benzer renkleri doldurmak için tıklayın
+	Click to fill similar colors	Benzer renkleri doldurmak için tıklayın
 	Clone Stamp Tool	Klonlama Damgası Aracı
 	Color Burn	Renk Yanması
 	Color Dodge	Renk Soldurma
@@ -1748,7 +1746,7 @@
 	Rectangular Marquee Tool	Dikdörtgen İşaretleme Aracı
 	Reds	Kırmızılar
 	Reflected	Yansıyan
-	Sample: foreground colour	Örnek: ön plan rengi
+	Sample: foreground color	Örnek: ön plan rengi
 	Sampled Colors	Örneklenen Renkler
 	Satin	Saten
 	Save Pixel Aspect Ratio	Piksel En Boy Oranını Kaydet
@@ -1786,7 +1784,6 @@
 	Transfer	Aktarım
 	Triangle Tool	Üçgen Aracı
 	Unsaved changes	Kaydedilmemiş değişiklikler
-	Uses the foreground and background colours.	Ön plan ve arka plan renklerini kullanır.
 	Web	ağ
 	Web Large	Web Büyük
 	Web Minimum	Web Minimumu
@@ -2049,7 +2046,7 @@
 	Graphics	Grafik
 	Reset GPU Backend	GPU Arka Uçunu Sıfırla
 	Applies at next launch.	Bir sonraki açılışta geçerlidir.
-	Click to sample the foreground colour  ·  {key}-click for background	Ön plan rengini örneklemek için tıklayın · {key}-arka plan için tıklayın
+	Click to sample the foreground color  ·  {key}-click for background	Ön plan rengini örneklemek için tıklayın · {key}-arka plan için tıklayın
 	{key}-click to set the source	{key}-kaynağı ayarlamak için tıklayın
 	{key} to subtract	{key} çıkarmak için
 	Clone source {n} ({key}-click with Clone Stamp to set)	Kaynağı kopyala {n} ({key}-ayarlamak için Klonlama Damgası ile tıklayın)
@@ -2108,7 +2105,7 @@
 	Gradient Options	Degrade Seçenekleri
 	Align with layer	Katmanla hizala
 	Reset Alignment	Hizalamayı Sıfırla
-	Centre the gradient (offset 0, 0)	Degradeyi ortalayın (kaydırma 0, 0)
+	Center the gradient (offset 0, 0)	Degradeyi ortalayın (kaydırma 0, 0)
 	Gradient Editor	Degrade Düzenleyici
 	Gradient picker	Degrade seçici
 	Gradient stops	Gradyan durakları
@@ -2142,19 +2139,19 @@
 	Alt-click to define a source point to clone from	Kopyalanacak kaynak noktayı tanımlamak için Alt tuşuna basarak tıklayın
 	No path to make a selection from: draw one with the Pen tool or select one in the Paths panel.	Seçim yapılabilecek yol yok: Kalem aracıyla bir yol çizin veya Yollar panelinden birini seçin.
 	Cancel opening	Açılışı iptal et
-	Cancelled opening {name}	{name} açılışı iptal edildi
+	Canceled opening {name}	{name} açılışı iptal edildi
 	The document “{name}” does not have an embedded {mode} profile.	'{name}' belgesinde gömülü bir {mode} profili yok.
 	The document “{name}” has an embedded color profile that does not match the current {mode} working space.	'{name}' belgesinin gömülü renk profili geçerli {mode} çalışma alanıyla eşleşmiyor.
 	Working: {working}	Çalışma alanı: {working}
 	Developing {name}	{name} geliştiriliyor
-	Cancelled {label}	{label} iptal edildi
+	Canceled {label}	{label} iptal edildi
 	Esc to cancel	İptal etmek için Esc
 	Opened {name}	{name} tarihinde açıldı
 	Opening {name}	{name} açılıyor
 	Saved {name}	{name} kaydedildi
 	Saving {name}	{name} kaydediliyor
 	A save to {name} is still running; try again when it finishes	{name} konumuna kaydetme işlemi hâlâ devam ediyor; bittiğinde tekrar dene
-	{label} is writing the file and can no longer be cancelled	{label} dosyayı yazıyor ve artık iptal edilemez
+	{label} is writing the file and can no longer be canceled	{label} dosyayı yazıyor ve artık iptal edilemez
 	Opening {name}…	{name} açılıyor…
 	Opening…	Açılıyor…
 	Reading…	Okunuyor…
@@ -2215,7 +2212,7 @@
 	Pixel	Piksel
 	Adjustment	Ayarlama
 	Drag (lasso) or click points (polygonal) · {add} add · {sub} subtract	Noktaları sürükleyin (kement) veya tıklayın (çokgen) · {add} ekle · {sub} çıkar
-	Drag a crop box · drag inside to move · edges resize ({ratio} ratio, {centre} centre) · Space moves while drawing · arrows nudge · X swaps orientation · {commit} commits · Esc cancels	Kırpma kutusunu sürükleyin · taşımak için içeriye sürükleyin · kenarları yeniden boyutlandırın ({ratio} oranı, {centre} merkez) · Çizim sırasında boşluk hareket eder · oklar iter · X yönünü değiştirir · {commit} gerçekleştirir · Esc iptal eder
+	Drag a crop box · drag inside to move · edges resize ({ratio} ratio, {centre} center) · Space moves while drawing · arrows nudge · X swaps orientation · {commit} commits · Esc cancels	Kırpma kutusunu sürükleyin · taşımak için içeriye sürükleyin · kenarları yeniden boyutlandırın ({ratio} oranı, {centre} merkez) · Çizim sırasında boşluk hareket eder · oklar iter · X yönünü değiştirir · {commit} gerçekleştirir · Esc iptal eder
 	{mode} Color · {bits} bit	{mode} Renkli · {bits} bit
 	Scrubby Zoom	Süpürge Yakınlaştırma
 	Auto Erase	Otomatik Silme
@@ -2300,7 +2297,7 @@
 	Discard Layers and Save a Copy	Katmanları Atın ve Bir Kopyasını Kaydedin
 	Don't show again	Bir daha gösterme
 	Save failed: {error}	Kaydetme başarısız oldu: {error}
-	Save cancelled	Kaydetme iptal edildi
+	Save canceled	Kaydetme iptal edildi
 	Style {name} saved	{name} stili kaydedildi
 	Make Default	Varsayılan Yap
 	Reset to Default	Varsayılana Sıfırla
@@ -2433,7 +2430,7 @@ fontWeight	Italic	İtalik
 	Rotate View	Görünümü Döndür
 	Rotate View Tool	Görünümü Döndürme Aracı
 	Reset View	Görünümü Sıfırla
-	Drag around the centre to rotate the view  ·  Shift constrains to 15°	Görünümü döndürmek için merkezin etrafında sürükleyin · Kaydırma 15° ile sınırlandırılır
+	Drag around the center to rotate the view  ·  Shift constrains to 15°	Görünümü döndürmek için merkezin etrafında sürükleyin · Kaydırma 15° ile sınırlandırılır
 @id	select.all	Tümünü Seç
 @id	edit.stroke	Kontur…
 @id	edit.transform.scale	Ölçekle
@@ -3608,8 +3605,8 @@ cameraRaw	Whites	Beyazlar
 @id	filter.sharpen.sharpen	Keskinleştir
 	Good	iyi
 	Best	En iyi
-	Out of gamut for printing: click for the nearest printable colour	Yazdırma için gamın dışında: yazdırılabilir en yakın renk için tıklayın
-	Not a web colour: click for the nearest web colour	Web rengi değil: en yakın web rengi için tıklayın
+	Out of gamut for printing: click for the nearest printable color	Yazdırma için gamın dışında: yazdırılabilir en yakın renk için tıklayın
+	Not a web color: click for the nearest web color	Web rengi değil: en yakın web rengi için tıklayın
 	Adjustment Properties	Ayarlama Özellikleri
 	Brush Stroke	Fırça Darbesi
 	Default Foreground and Background Colors	Varsayılan Ön Plan ve Arka Plan Renkleri
@@ -3894,7 +3891,7 @@ cameraData	Lens	Lens
 # Native Windows printing qualification
 	Don't also tick Mirror Image in Print Settings…: the two flips cancel out.	Yazdırma Ayarlarında ayrıca Ayna Görüntüsünü açmayın: iki yansıtma birbirini iptal eder.
 	Print Settings…	Yazdırma Ayarları…
-	Remember to turn off the printer's own colour management in Print Settings…	Yazdırma Ayarlarında yazıcının kendi renk yönetimini kapatmayı unutmayın…
+	Remember to turn off the printer's own color management in Print Settings…	Yazdırma Ayarlarında yazıcının kendi renk yönetimini kapatmayı unutmayın…
 	Sent to {printer}	{printer} yazıcısına gönderildi
 	set in Print Settings…	Yazdırma Ayarlarında belirlenir…
 	ICO is limited to 256 × 256 pixels	ICO 256 × 256 piksel ile sınırlıdır

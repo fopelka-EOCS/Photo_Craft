@@ -59,7 +59,7 @@ pub fn entries(l: &Layer, multi: bool, has_selection: bool) -> Vec<Entry> {
         v.push(Some((tl!("Group from Layers…"), "layer.groupLayers")));
     }
     v.push(None);
-    v.push(Some((tl!("Quick Export As PNG"), "layer.quickExportAsPng")));
+    v.push(Some((tl!("Quick Export as PNG"), "layer.quickExportAsPng")));
     v.push(Some((tl!("Export As…"), "layer.exportAs")));
     v.push(None);
     v.push(Some((tl!("Artboard from Layers…"), "layer.new.artboardFromLayers")));
@@ -667,7 +667,7 @@ mod tests {
             assert!(h.get_by_label(label).accesskit_node().is_disabled(), "{label} works on one layer only");
         }
         for label in [
-            "Quick Export As PNG",
+            "Quick Export as PNG",
             "Export As…",
             "Add Layer Mask",
             "Duplicate Layers…",
