@@ -91,10 +91,15 @@ pub(crate) fn surface_image(surf: &Surface, r: Rect, max_side: usize) -> ColorIm
     ColorImage::new([tw, th], px)
 }
 
-/// The document shown on the canvas while Puppet or Perspective Warp previews a layer.
-pub fn display_doc(app: &PhotocraftApp, idx: usize) -> Option<(Arc<Document>, u64)> {
+/// The document shown on the canvas while Puppet or Perspective Warp previews a layer: the layer
+/// composited in its place through the tool's mesh (transform_live.rs), else (no live preview)
+/// the document without it, the mesh drawn over it.
+pub fn display_doc(app: &mut PhotocraftApp, idx: usize) -> Option<(Arc<Document>, u64)> {
     if app.session.active_index() != Some(idx) {
         return None;
+    }
+    if let Some(shown) = crate::transform_live::distort_display_doc(app, idx) {
+        return Some(shown);
     }
     if let Some(p) = &app.distort.puppet {
         return Some((p.preview_doc.clone(), (1 << 42) + p.key));

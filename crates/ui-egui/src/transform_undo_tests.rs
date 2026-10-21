@@ -310,9 +310,11 @@ fn holding_space_still_pans_while_transforming() {
 fn transform_preview_stays_visible_while_panning() {
     let mut h = harness();
     begin(&mut h);
-    let texture = h.state().transform_preview.as_ref().unwrap().texture.pick(&h.ctx, 1.0, 1.0, false).0;
+    // The canvas composites the moving layer (transform_live.rs) as long as the box is open.
     let has_preview = |h: &Harness<'static, PhotocraftApp>| {
-        h.output().shapes.iter().any(|clipped| matches!(&clipped.shape, egui::epaint::Shape::Mesh(mesh) if mesh.texture_id == texture))
+        let app = h.state();
+        let doc = app.session.active().map(|st| st.doc.id);
+        app.ui.transform.is_some() && doc.is_some_and(|d| crate::transform_live::current(app, d).is_some())
     };
     assert!(has_preview(&h), "the transformed pixels are visible before panning");
 

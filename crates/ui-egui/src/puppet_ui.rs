@@ -38,6 +38,8 @@ pub struct PuppetSession {
     texture: TextureHandle,
     opacity: f32,
     pub preview_doc: Arc<Document>,
+    /// The layer composited in its place through the deformed mesh (transform_live.rs).
+    pub(crate) live: Option<crate::transform_live::LiveSession>,
     /// Pins before each edit of this session, newest last (⌘Z), and the edits undone (⌘⇧Z).
     undo: Vec<Vec<PuppetPin>>,
     redo: Vec<Vec<PuppetPin>>,
@@ -181,6 +183,7 @@ pub fn begin(app: &mut PhotocraftApp, ctx: &egui::Context, command: &str) -> Res
     }
     let opacity = l.opacity * l.fill_opacity;
     let preview_doc = crate::distort_ui::without_layer(&st.doc, layer);
+    let live = crate::transform_live::LiveSession::start(&st.doc, st.revision, layer, Some(&surface), None);
     let img = crate::distort_ui::surface_image(&surface, bounds, 2048);
     let key = app.ui.alloc_id();
     let texture = ctx.load_texture(format!("puppet-{key}"), img, egui::TextureOptions::LINEAR);
@@ -201,6 +204,7 @@ pub fn begin(app: &mut PhotocraftApp, ctx: &egui::Context, command: &str) -> Res
         texture,
         opacity,
         preview_doc,
+        live,
         undo: Vec::new(),
         redo: Vec::new(),
         drag_from: None,
@@ -318,6 +322,29 @@ pub fn pointer(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers) {
     }
 }
 
+impl PuppetSession {
+    /// What the deformed mesh is now, for the live preview.
+    pub(crate) fn live_key(&self) -> String {
+        crate::transform_live::points_key(&self.deformed)
+    }
+
+    /// The deformed mesh carrying the layer's pixels (transform_live.rs): each vertex where the
+    /// pins put it, showing the pixel it started on, triangles in the solver's drawing order.
+    pub(crate) fn live_mesh(&self) -> photocraft_compose::live::LiveMesh {
+        let mut m = photocraft_compose::live::LiveMesh::default();
+        for (d, r) in self.deformed.iter().zip(&self.mesh.verts) {
+            m.pos.push([d[0] as f32, d[1] as f32]);
+            m.uv.push([r[0] as f32, r[1] as f32]);
+        }
+        for &t in &self.order {
+            if let Some(tri) = self.mesh.tris.get(t) {
+                m.indices.extend(tri.iter().map(|&i| i as u32));
+            }
+        }
+        m
+    }
+}
+
 pub fn draw(s: &PuppetSession, painter: &egui::Painter, xf: &ViewXform) {
     let b = s.bounds;
     let (w, h) = (f64::from(b.width()), f64::from(b.height()));
@@ -331,7 +358,11 @@ pub fn draw(s: &PuppetSession, painter: &egui::Painter, xf: &ViewXform) {
         let [a, bb, c] = s.mesh.tris[t];
         mesh.add_triangle(a as u32, bb as u32, c as u32);
     }
-    painter.add(mesh);
+    // A live preview is composited on the canvas in the layer's place: only the mesh and pins
+    // are drawn here.
+    if s.live.is_none() {
+        painter.add(mesh);
+    }
     if s.show_mesh {
         let line = Stroke::new(0.6, Color32::from_rgba_unmultiplied(40, 40, 40, 150));
         let mut seen = std::collections::HashSet::new();
@@ -472,10 +503,10 @@ mod tests {
         crate::distort_ui::drop_foreign(&mut app);
         assert!(app.distort.puppet.is_some());
         app.session.execute("file.new", json!({"width": 32, "height": 32, "depth": 8})).unwrap();
-        assert!(crate::distort_ui::display_doc(&app, 1).is_some());
+        assert!(crate::distort_ui::display_doc(&mut app, 1).is_some());
         crate::distort_ui::drop_foreign(&mut app);
         assert!(app.distort.puppet.is_none());
-        assert!(crate::distort_ui::display_doc(&app, 1).is_none());
+        assert!(crate::distort_ui::display_doc(&mut app, 1).is_none());
         // Closing the document it was started on drops it too.
         assert!(app.session.set_active(0));
         crate::distort_ui::menu(&mut app, &ctx, "edit.puppetWarp", &json!({})).unwrap().unwrap();
@@ -543,6 +574,39 @@ mod tests {
         }
         assert!(pins(&app).is_empty());
         assert_eq!(app.session.active().unwrap().history.past_len(), past);
+    }
+
+    /// The pinned layer previews in its place with its blend mode (transform_live.rs): red in
+    /// Difference over white shows cyan where the pins moved it, and the canvas is that.
+    #[test]
+    fn the_preview_keeps_the_layers_blend_mode() {
+        let ctx = egui::Context::default();
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        app.session.execute("file.new", json!({"width": 100, "height": 80, "background": "white"})).unwrap();
+        app.session.execute("layer.new.layer", json!({})).unwrap();
+        app.session
+            .edit("paint", |doc, active| {
+                doc.layer_mut(active.unwrap()).unwrap().surface_mut().unwrap().fill_rect(Rect::new(20, 30, 80, 50), &[1.0, 0.0, 0.0, 1.0]);
+                Ok(())
+            })
+            .unwrap();
+        app.session.execute("layer.setProps", json!({"blend": "Difference"})).unwrap();
+        app.sync_views();
+        crate::distort_ui::menu(&mut app, &ctx, "edit.puppetWarp", &json!({})).unwrap().unwrap();
+        let ev = |app: &mut PhotocraftApp, e| crate::distort_ui::pointer(app, e, egui::Modifiers::NONE);
+        ev(&mut app, ToolEvent::Down { x: 25.0, y: 40.0, pressure: 1.0 });
+        ev(&mut app, ToolEvent::Up { x: 25.0, y: 40.0 });
+        ev(&mut app, ToolEvent::Down { x: 75.0, y: 40.0, pressure: 1.0 });
+        ev(&mut app, ToolEvent::Up { x: 75.0, y: 15.0 });
+        let (shown, key) = crate::canvas::display_doc(&mut app, 0);
+        let id = app.session.active().unwrap().active_layer.unwrap();
+        assert_eq!(shown.layer(id).unwrap().blend, photocraft_color::BlendMode::Difference);
+        assert!(crate::transform_live::current(&app, shown.id).is_some(), "the GPU gets the live mesh");
+        let moved = crate::transform_live::cpu_doc(&mut app, shown, key);
+        let px = |x: i32, y: i32| photocraft_compose::render(&moved, Rect::new(x, y, x + 1, y + 1)).px[0];
+        let p = px(75, 15);
+        assert!(p[0] < 0.05 && p[1] > 0.95 && p[2] > 0.95, "red in Difference over white is cyan where the pin went: {p:?}");
+        assert!(px(75, 45)[0] > 0.95, "white where it left: {:?}", px(75, 45));
     }
 
     #[test]

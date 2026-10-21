@@ -16,6 +16,7 @@
 use photocraft_color::BlendMode;
 use photocraft_compose::adjust::{self, Transfer};
 use photocraft_compose::effects::has_effects;
+use photocraft_compose::live::LiveTransform;
 use photocraft_doc::adjust::{ToneSpace, lut3d_len};
 use photocraft_doc::{Adjustment, Document, Effect, Fill, FxPaint, GlobalLight, Glow, Gradient, Layer, LayerContent, LayerId, Pattern, StrokePosition};
 use photocraft_geom::Rect;
@@ -31,6 +32,9 @@ pub type Slot = u32;
 pub enum Kernel {
     /// Transparent fill (no draw).
     Clear,
+    /// The live transform's mesh drawn over transparency (`live.wgsl`): the moving layer's pixels
+    /// while a transform box is open. Its own pipeline, outside [`Kernel::DRAWN`].
+    Mesh,
     Content,
     Mask,
     Blend,
@@ -77,7 +81,7 @@ impl Kernel {
     /// Fragment entry point in `compose.wgsl` (`None` for copies and clears).
     pub fn entry(self) -> Option<&'static str> {
         Some(match self {
-            Kernel::Clear | Kernel::CopyRect | Kernel::CopyFull => return None,
+            Kernel::Clear | Kernel::CopyRect | Kernel::CopyFull | Kernel::Mesh => return None,
             Kernel::Content => "fs_content",
             Kernel::Mask => "fs_mask",
             Kernel::Blend => "fs_blend",
@@ -342,16 +346,47 @@ impl<'a> DocCtx<'a> {
 
 /// Build the pass list for `doc`.
 pub fn plan(doc: &Document) -> Result<Plan<'_>, Unsupported> {
+    plan_with(doc, None)
+}
+
+/// Build the pass list for `doc` with `live` (`photocraft_compose::live`) moving one of its
+/// layers: `doc` is [`photocraft_compose::live::prepare`]d for it, and the layer's content is its
+/// remaining pixels with the mesh drawn over them ([`Kernel::Mesh`]), composited in its place like
+/// any layer's. A moving layer with a style or a moving pass-through group is [`Unsupported`]: its
+/// effects follow its shape, which the GPU only has from the CPU, so the CPU composites it.
+pub fn plan_with<'a>(doc: &'a Document, live: Option<&'a LiveTransform>) -> Result<Plan<'a>, Unsupported> {
     if doc.mode == photocraft_color::ColorMode::Multichannel {
         return Err(Unsupported("Multichannel inks (printed on the CPU)".into()));
     }
+    // The root layer holding the moving one: stack reuse stops below it, since its pixels change
+    // every frame without the document changing.
+    let mut live_root = None;
+    if let Some(live) = live {
+        let layer = doc.layer(live.layer).ok_or_else(|| Unsupported("the moving layer is gone".into()))?;
+        if has_effects(layer) {
+            return Err(Unsupported(format!("live transform of `{}`, which has a style (composited on the CPU)", layer.name)));
+        }
+        if layer.is_group() && layer.blend == BlendMode::PassThrough {
+            return Err(Unsupported(format!("live transform of the pass-through group `{}` (composited on the CPU)", layer.name)));
+        }
+        live_root = doc.layers.iter().position(|l| holds(l, live.layer, 0));
+    }
     let mut p = Planner::new(DocCtx::of(doc));
+    p.live = live;
     let root = p.clear();
     // Start at the topmost layer that hides everything beneath it (an opaque fill layer): the
     // layers below can't change the result, so they cost no passes or uploads.
     let start = doc.layers.iter().rposition(|l| photocraft_compose::occludes_below(l, doc.mode)).unwrap_or(0);
     let root = p.stack_inner(doc.layers.get(start..).unwrap_or(&doc.layers), root, Some(start))?;
+    if let Some(r) = live_root {
+        p.checkpoints.retain(|c| c.layer_end <= r);
+    }
     Ok(p.finish(root))
+}
+
+/// Is `id` the layer `l` or inside it (at most 256 groups deep)?
+fn holds(l: &Layer, id: LayerId, depth: u32) -> bool {
+    l.id == id || (depth < 256 && matches!(&l.content, LayerContent::Group(g) if g.children.iter().any(|c| holds(c, id, depth + 1))))
 }
 
 struct Planner<'a> {
@@ -361,6 +396,8 @@ struct Planner<'a> {
     cx: DocCtx<'a>,
     fx: Vec<FxLayer<'a>>,
     checkpoints: Vec<Checkpoint>,
+    /// The live transform moving one layer, if any.
+    live: Option<&'a LiveTransform>,
 }
 
 /// Coverage source of an effect paint (`kind` in `fs_fxpaint`); flags refine it.
@@ -455,7 +492,7 @@ pub const SHAPE_MAP: usize = usize::MAX;
 
 impl<'a> Planner<'a> {
     fn new(cx: DocCtx<'a>) -> Self {
-        Planner { passes: Vec::new(), free: Vec::new(), refs: Vec::new(), cx, fx: Vec::new(), checkpoints: Vec::new() }
+        Planner { passes: Vec::new(), free: Vec::new(), refs: Vec::new(), cx, fx: Vec::new(), checkpoints: Vec::new(), live: None }
     }
 
     fn finish(self, root: Slot) -> Plan<'a> {
@@ -784,8 +821,10 @@ impl<'a> Planner<'a> {
         }
         // A layer with nothing clipped to it whose content is one Content pass is blended
         // straight from its pixels (`Kernel::LayerBlend`): one pass instead of two, and no
-        // scratch chunk written and read back.
-        let mut p = if visible_clipped.is_empty() && single_content_pass(layer) {
+        // scratch chunk written and read back. Not the layer a live transform moves: its content
+        // is the mesh drawn over its remaining pixels (`live_content`).
+        let moving = self.live.is_some_and(|l| l.layer == layer.id);
+        let mut p = if visible_clipped.is_empty() && !moving && single_content_pass(layer) {
             let mut p = self.content_pass(layer)?;
             p.kernel = Kernel::LayerBlend;
             p
@@ -825,7 +864,17 @@ impl<'a> Planner<'a> {
     /// the canvas (beyond that, compositing everywhere costs less than the copy back).
     fn local_clip(&self, layer: &Layer) -> Option<Rect> {
         let canvas = self.cx.canvas;
-        let b = bounds::composite_bounds(layer, canvas)?;
+        let mut b = bounds::composite_bounds(layer, canvas);
+        // A moving layer also covers where the mesh puts its pixels.
+        if let Some(live) = self.live.filter(|l| l.layer == layer.id) {
+            let m = live.mesh.bounds().inflate(1).intersect(&canvas);
+            b = Some(match b {
+                Some(b) if !b.is_empty() && !m.is_empty() => b.union(&m),
+                Some(b) if !b.is_empty() => b,
+                _ => m,
+            });
+        }
+        let b = b?;
         (b.width() as u64 * b.height() as u64 * 2 <= canvas.width() as u64 * canvas.height() as u64).then_some(b)
     }
 
@@ -867,6 +916,9 @@ impl<'a> Planner<'a> {
 
     /// render_content for non-adjustment layers.
     fn content(&mut self, layer: &'a Layer) -> Result<Slot, Unsupported> {
+        if self.live.is_some_and(|l| l.layer == layer.id) {
+            return Ok(self.live_content(layer));
+        }
         match &layer.content {
             LayerContent::Group(g) => {
                 let empty = self.clear();
@@ -904,6 +956,29 @@ impl<'a> Planner<'a> {
                 Ok(self.emit(p))
             }
         }
+    }
+
+    /// The moving layer's content (`photocraft_compose::live::apply`): its remaining pixels (the
+    /// layer is prepared as a raster layer holding them) with the mesh drawn over them, then its
+    /// unlinked masks.
+    fn live_content(&mut self, layer: &'a Layer) -> Slot {
+        let mut s = self.emit(Pass::new(Kernel::Mesh, 0));
+        if let Some(rest) = layer.surface().filter(|r| r.tile_count() > 0) {
+            let mut p = Pass::new(Kernel::Content, 0);
+            self.surface_tex(&mut p, layer.id, rest);
+            let rest = self.emit(p);
+            let mut p = Pass::new(Kernel::Blend, 0);
+            p.a = Some(rest);
+            p.b = Some(s);
+            s = self.emit(p);
+        }
+        if let Some(m) = self.mask_use(layer) {
+            let mut p = Pass::new(Kernel::Mask, 0);
+            p.a = Some(s);
+            p.mask = Some(m);
+            s = self.emit(p);
+        }
+        s
     }
 
     /// The Content pass of a raster / text / shape / smart / fill layer.

@@ -48,6 +48,8 @@ pub struct PerspSession {
     texture: TextureHandle,
     opacity: f32,
     pub preview_doc: Arc<Document>,
+    /// The layer composited in its place through the grid (transform_live.rs).
+    pub(crate) live: Option<crate::transform_live::LiveSession>,
     /// Preview mesh: (screen-independent destination points) for a 40×40 grid over `bounds`.
     grid: Vec<[f64; 2]>,
 }
@@ -130,6 +132,7 @@ pub fn begin(app: &mut PhotocraftApp, ctx: &egui::Context, command: &str) -> Res
     }
     let opacity = l.opacity * l.fill_opacity;
     let preview_doc = crate::distort_ui::without_layer(&st.doc, layer);
+    let live = crate::transform_live::LiveSession::start(&st.doc, st.revision, layer, Some(&surface), None);
     let key = app.ui.alloc_id();
     let texture = ctx.load_texture(format!("persp-{key}"), crate::distort_ui::surface_image(&surface, bounds, 2048), egui::TextureOptions::LINEAR);
     let mut s = PerspSession {
@@ -143,6 +146,7 @@ pub fn begin(app: &mut PhotocraftApp, ctx: &egui::Context, command: &str) -> Res
         texture,
         opacity,
         preview_doc,
+        live,
         grid: Vec::new(),
     };
     s.update_grid();
@@ -255,6 +259,39 @@ pub fn pointer(app: &mut PhotocraftApp, ev: ToolEvent, _mods: egui::Modifiers) {
     }
 }
 
+impl PerspSession {
+    /// What the grid is now, for the live preview.
+    pub(crate) fn live_key(&self) -> String {
+        crate::transform_live::points_key(&self.grid)
+    }
+
+    /// The grid carrying the layer's pixels (transform_live.rs): each point of a 40×40 grid over
+    /// the layer where the planes put it, showing the pixel it started on.
+    pub(crate) fn live_mesh(&self) -> photocraft_compose::live::LiveMesh {
+        let b = self.bounds;
+        let (w, h) = (f64::from(b.width()), f64::from(b.height()));
+        let mut m = photocraft_compose::live::LiveMesh::default();
+        if self.grid.len() != (GRID + 1) * (GRID + 1) {
+            return m;
+        }
+        for j in 0..=GRID {
+            for i in 0..=GRID {
+                let p = self.grid[j * (GRID + 1) + i];
+                m.pos.push([p[0] as f32, p[1] as f32]);
+                m.uv.push([(f64::from(b.x0) + w * i as f64 / GRID as f64) as f32, (f64::from(b.y0) + h * j as f64 / GRID as f64) as f32]);
+            }
+        }
+        for j in 0..GRID {
+            for i in 0..GRID {
+                let a = (j * (GRID + 1) + i) as u32;
+                let n = GRID as u32;
+                m.indices.extend_from_slice(&[a, a + 1, a + n + 2, a, a + n + 2, a + n + 1]);
+            }
+        }
+        m
+    }
+}
+
 pub fn draw(s: &PerspSession, painter: &egui::Painter, xf: &ViewXform) {
     let scr = |p: [f64; 2]| xf.to_screen(p[0] as f32, p[1] as f32);
     let mut mesh = egui::Mesh::with_texture(s.texture.id());
@@ -272,7 +309,11 @@ pub fn draw(s: &PerspSession, painter: &egui::Painter, xf: &ViewXform) {
             mesh.add_triangle(a, a + GRID as u32 + 2, a + GRID as u32 + 1);
         }
     }
-    painter.add(mesh);
+    // A live preview is composited on the canvas in the layer's place: only the planes are
+    // drawn here.
+    if s.live.is_none() {
+        painter.add(mesh);
+    }
     let accent = crate::theme::Tokens::get(painter.ctx()).accent;
     let warp = s.mode == PerspMode::Warp;
     for p in &s.planes {
@@ -378,6 +419,12 @@ mod tests {
         assert_eq!(s.planes[0].dst[1], [100.0, 5.0]);
         assert_eq!(s.planes[1].dst[0], [100.0, 5.0]);
         assert_eq!(s.planes[0].src[1], [100.0, 20.0], "warp mode keeps the layout");
+        // The canvas composites the layer in its place through the warped grid.
+        let (shown, key) = crate::canvas::display_doc(&mut app, 0);
+        assert!(crate::transform_live::current(&app, shown.id).is_some());
+        let moved = crate::transform_live::cpu_doc(&mut app, shown, key);
+        let id = app.session.active().unwrap().active_layer.unwrap();
+        assert!(moved.layer(id).unwrap().surface().unwrap().rgba(100, 8)[3] > 0.5, "the dragged corner's pixels moved up");
         let before = app.session.active().unwrap().history.past_len();
         commit(&mut app);
         assert_eq!(app.session.active().unwrap().history.past_len(), before + 1);

@@ -221,7 +221,7 @@ pub mod tool_feedback;
 pub(crate) mod tool_memory;
 mod tool_reset;
 mod tool_shortcuts;
-pub mod transform_fx;
+mod transform_live;
 pub mod transform_tex;
 pub mod transform_tool;
 mod type_font_preview;
@@ -2899,9 +2899,6 @@ mod tool_shortcut_tests;
 
 #[cfg(test)]
 mod pixel_aspect_tests;
-
-#[cfg(test)]
-mod transform_fx_tests;
 
 #[cfg(test)]
 mod layer_props_ui_tests;
