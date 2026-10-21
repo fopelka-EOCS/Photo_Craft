@@ -7,8 +7,8 @@
 //! - `brush.presets.importImage` turns an image file (anything File › Open reads: PNG, JPEG,
 //!   TIFF, PSD…) into a sampled-tip brush preset, as Edit › Define Brush Preset does with a
 //!   selection: dark pixels paint, white and transparent ones don't (TOOL-213-12).
-//! - `gradient.presets.importGrd` adds the gradients of a `.grd` file (version 5) to the
-//!   Gradients panel as one group.
+//! - `gradient.presets.importGrd` adds the gradients of a `.grd` file (version 5) or a GIMP
+//!   `.ggr` gradient to the Gradients panel as one group.
 //!
 //! [`BrushSettings`]: photocraft_paint::BrushSettings
 
@@ -253,7 +253,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Import Gradients…",
             menu: &[],
             shortcut: None,
-            params: r##"{"path":".grd file"?,"data":base64 bytes?,"group":string?=file name,"replace":bool=true (replace a group of the same name)}"##,
+            params: r##"{"path":".grd or .ggr file"?,"data":base64 bytes?,"group":string?=file name,"replace":bool=true (replace a group of the same name)}"##,
             enabled: always,
             run: import_grd,
             journal: true,
@@ -315,13 +315,24 @@ fn stop_color(c: photocraft_psd::grd::GrdColor) -> crate::presets::gradients::St
 fn import_grd(s: &mut Session, p: &Value) -> Result<Value> {
     use crate::presets::{Group, gradients::GradientPreset};
     let cmd = "gradient.presets.importGrd";
-    let (bytes, stem) = file_bytes(p, cmd, ".grd file")?;
+    let (bytes, stem) = file_bytes(p, cmd, ".grd or .ggr file")?;
+    let file_stem = stem.clone();
     let group = match p.get("group") {
         Some(v) => v.as_str().map(str::trim).filter(|g| !g.is_empty()).ok_or_else(|| bad(cmd, "`group` must be a non-empty string"))?.to_string(),
         None if !stem.is_empty() => stem,
         None => "Imported Gradients".to_string(),
     };
-    let grads = photocraft_psd::grd::parse(&bytes).map_err(|e| bad(cmd, format!("not a readable gradient file (.grd): {e}")))?;
+    // A GIMP gradient is a text file, told apart by its header, not by the extension (browser
+    // files arrive as bytes). It holds one gradient.
+    let grads = if bytes.starts_with(photocraft_psd::ggr::SIGNATURE) {
+        let mut g = photocraft_psd::ggr::parse(&bytes).map_err(|e| bad(cmd, format!("not a readable gradient file (.ggr): {e}")))?;
+        if g.name.trim().is_empty() {
+            g.name = file_stem;
+        }
+        vec![g]
+    } else {
+        photocraft_psd::grd::parse(&bytes).map_err(|e| bad(cmd, format!("not a readable gradient file (.grd): {e}")))?
+    };
     let mut warnings = Vec::new();
     let mut items = Vec::new();
     let (mut noise, mut midpoints) = (0, false);
@@ -436,6 +447,30 @@ mod tests {
             assert!(s.execute("brush.presets.importAbr", p.clone()).is_err(), "{p}");
         }
         assert_eq!(s.tools.presets.len(), n);
+    }
+
+    #[test]
+    fn ggr_import_adds_a_gradient() {
+        use crate::presets::gradients::StopColor;
+        let ggr = "GIMP Gradient\nName: Sunset\n2\n0 0.25 0.5 1 0.5 0 1 1 1 0 1 0 0\n0.5 0.6 1 1 1 0 1 0 0 1 0.25 0 0\n";
+        let mut s = Session::new();
+        let data = photocraft_paint::tile::b64_encode(ggr.as_bytes());
+        let r = s.execute("gradient.presets.importGrd", json!({"data": data, "group": "GIMP"})).unwrap();
+        assert_eq!(r["imported"], json!(["Sunset"]));
+        let g = s.presets.gradients.iter().find(|g| g.name == "GIMP").unwrap();
+        let stops = &g.items[0].stops;
+        assert_eq!(stops.first(), Some(&(0.0, StopColor::Rgb([1.0, 0.5, 0.0]))));
+        assert_eq!(stops.last(), Some(&(1.0, StopColor::Rgb([0.0, 0.0, 1.0]))));
+        assert!(stops.len() > 3, "off-centre middles are sampled");
+        assert_eq!(g.items[0].opacity.last(), Some(&(1.0, 0.25)), "the alpha of the last segment survives");
+        // The name falls back to the file name, and a broken file is refused.
+        let nameless = photocraft_paint::tile::b64_encode(b"GIMP Gradient\n1\n0 0.5 1 0 0 0 1 1 1 1 1 0 0\n");
+        let r = s.execute("gradient.presets.importGrd", json!({"data": nameless})).unwrap();
+        assert_eq!(r["imported"], json!(["Gradient 1"]));
+        for bad in ["GIMP Gradient\n3\n", "GIMP Gradient\n1\n0 0.5 1\n"] {
+            let p = json!({"data": photocraft_paint::tile::b64_encode(bad.as_bytes())});
+            assert!(s.execute("gradient.presets.importGrd", p).is_err(), "{bad:?}");
+        }
     }
 
     #[test]
