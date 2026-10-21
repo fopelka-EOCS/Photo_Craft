@@ -339,10 +339,8 @@ pub(crate) fn preflight(id: &str, p: &Value) -> Result<()> {
             "path" | "provider" => {
                 text(p, key, id)?;
             }
-            "trust" | "enabled" | "consent" => {
-                if p.get(*key).and_then(Value::as_bool).is_none() {
-                    return Err(bad(id, format!("{key} must be a boolean")));
-                }
+            "trust" | "enabled" | "consent" if p.get(*key).and_then(Value::as_bool).is_none() => {
+                return Err(bad(id, format!("{key} must be a boolean")));
             }
             _ => {}
         }

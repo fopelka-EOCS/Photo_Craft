@@ -18,7 +18,8 @@
   </Dependencies>
   <Resources><Resource Language="en-us" /></Resources>
   <Applications>
-    <Application Id="Companion" Executable="photocraft-windows-ai.exe" EntryPoint="Windows.FullTrustApplication">
+    <Application Id="Companion" Executable="photocraft-windows-ai.exe" EntryPoint="Windows.FullTrustApplication"
+                 desktop4:SupportsMultipleInstances="true">
       <uap:VisualElements DisplayName="PhotoCraft Windows AI Companion"
                           Description="External Windows AI foreground extraction companion; no CPU fallback."
                           BackgroundColor="transparent"
