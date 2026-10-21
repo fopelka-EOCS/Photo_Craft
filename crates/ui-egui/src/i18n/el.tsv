@@ -3956,3 +3956,6 @@ curves	Smooth	Εξομάλυνση
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Προσαρμογέας GPU
+
+# PNG export compression (#5409)
+	Best	Βέλτιστο

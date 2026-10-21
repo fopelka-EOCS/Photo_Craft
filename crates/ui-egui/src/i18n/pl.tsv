@@ -3856,3 +3856,6 @@ curves	Smooth	Wygładź
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Karta GPU
+
+# PNG export compression (#5409)
+	Best	Najlepsza

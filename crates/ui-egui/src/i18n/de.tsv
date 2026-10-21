@@ -3259,3 +3259,6 @@ curves	Smooth	Glätten
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	GPU-Adapter
+
+# PNG export compression (#5409)
+	Fast	Schnell
