@@ -6155,17 +6155,22 @@ pub(crate) fn constrained_polygon_point(from: [f64; 2], point: [f64; 2]) -> [f64
 }
 
 /// How close (in document units) a click must land to a polygon's first vertex to close it: 8
-/// points on screen, but never more than a quarter of the outline's own on-screen size (at least
+/// points on screen, but never more than a quarter of the shortest consecutive edge on screen (at least
 /// 1 point), so the last corner of a small shape doesn't close it early (#6578).
 pub(crate) fn polygon_close_reach(points: impl IntoIterator<Item = [f64; 2]>, point_zoom: f32) -> f64 {
     let zoom = f64::from(point_zoom.max(0.01));
-    let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+    let mut previous: Option<[f64; 2]> = None;
+    let mut shortest = f64::INFINITY;
     for p in points.into_iter().filter(|p| p.iter().all(|n| n.is_finite())) {
-        lo = [lo[0].min(p[0]), lo[1].min(p[1])];
-        hi = [hi[0].max(p[0]), hi[1].max(p[1])];
+        if let Some(q) = previous {
+            let edge = (p[0] - q[0]).hypot(p[1] - q[1]);
+            if edge > 0.0 {
+                shortest = shortest.min(edge);
+            }
+        }
+        previous = Some(p);
     }
-    let extent = (hi[0] - lo[0]).max(hi[1] - lo[1]) * zoom;
-    let screen = if extent.is_finite() { (extent / 4.0).clamp(1.0, 8.0) } else { 8.0 };
+    let screen = if shortest.is_finite() { (shortest * zoom / 4.0).clamp(1.0, 8.0) } else { 8.0 };
     screen / zoom
 }
 

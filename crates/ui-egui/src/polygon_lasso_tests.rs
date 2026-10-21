@@ -533,3 +533,21 @@ fn polygon_close_reach_scales_with_small_outlines_only() {
     assert_eq!(reach([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]], 1.0), 1.0);
     assert_eq!(crate::canvas::polygon_close_reach([[f64::NAN, 0.0]], 1.0), 8.0);
 }
+
+#[test]
+fn narrow_and_rotated_polygons_keep_the_fourth_corner() {
+    for corners in [[[100.0, 100.0], [200.0, 100.0], [200.0, 106.0], [100.0, 106.0]], [[100.0, 100.0], [160.0, 180.0], [155.2, 183.6], [95.2, 103.6]]] {
+        let mut app = polygon_app();
+        app.ui.views[0].zoom = 1.0;
+        app.ui.views[0].fit_pending = false;
+        for [x, y] in corners {
+            ev(&mut app, "down", x, y, Modifiers::NONE);
+            ev(&mut app, "up", x, y, Modifiers::NONE);
+        }
+        assert_eq!(app.ui.polygon.len(), 4, "{corners:?}");
+        assert!(app.session.active().unwrap().doc.selection.is_none());
+        ev(&mut app, "down", 100.0, 100.0, Modifiers::NONE);
+        assert!(app.ui.polygon.is_empty());
+        assert!(app.session.active().unwrap().doc.selection.is_some());
+    }
+}

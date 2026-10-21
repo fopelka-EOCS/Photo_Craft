@@ -354,3 +354,22 @@ fn real_canvas_cmd_drag_outside_the_selection_moves_the_layer() {
     assert!(app.session.active().unwrap().doc.selection.is_none(), "no selection was made");
     assert_eq!((alpha(105, 120), alpha(165, 120)), (0.0, 1.0), "the layer moved 30 px to the right");
 }
+
+#[test]
+fn alt_clicking_narrow_and_rotated_polygons_keeps_the_fourth_corner() {
+    for corners in [[[100.0, 100.0], [200.0, 100.0], [200.0, 106.0], [100.0, 106.0]], [[100.0, 100.0], [160.0, 180.0], [155.2, 183.6], [95.2, 103.6]]] {
+        let mut app = app();
+        app.ui.views[0].zoom = 1.0;
+        app.ui.views[0].fit_pending = false;
+        for [x, y] in corners {
+            event(&mut app, "down", x, y, Modifiers::ALT);
+            event(&mut app, "up", x, y, Modifiers::ALT);
+            assert!(active(&app), "{corners:?}");
+        }
+        assert_eq!(app.drag.as_ref().unwrap().points.len(), 4);
+        assert!(app.session.active().unwrap().doc.selection.is_none());
+        event(&mut app, "down", 100.0, 100.0, Modifiers::ALT);
+        assert!(!active(&app));
+        assert!(app.session.active().unwrap().doc.selection.is_some());
+    }
+}
