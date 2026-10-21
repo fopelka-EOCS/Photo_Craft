@@ -1532,6 +1532,8 @@ fn build() -> Vec<CommandSpec> {
     v.extend(crate::variables_cmds::specs());
     v.extend(crate::plugin_cmds::specs());
     v.extend(crate::adapter_cmds::specs());
+    #[cfg(not(target_arch = "wasm32"))]
+    v.extend(crate::adapter_packages::specs());
     v.extend(crate::group_view_cmds::specs());
     v.extend(crate::fx_view_cmds::specs());
     v.extend(crate::fx_visibility_cmds::specs());

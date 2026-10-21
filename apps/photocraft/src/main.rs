@@ -740,6 +740,17 @@ fn main() -> eframe::Result {
             };
             #[cfg(not(target_os = "linux"))]
             let session = Session::new();
+            let mut session = session;
+            if let Some(directory) = services::config_dir() {
+                match session.attach_adapter_directory(directory.join("Adapters")) {
+                    Ok(warnings) => {
+                        for warning in warnings {
+                            log::warn!("{warning}");
+                        }
+                    }
+                    Err(error) => log::warn!("Native adapter storage: {error}"),
+                }
+            }
             let mut app = PhotocraftApp::new(session, services);
             app.min_frame_ms = uncapped.then_some(1000.0 / 240.0);
             app.integrated_titlebar = cfg!(target_os = "macos");

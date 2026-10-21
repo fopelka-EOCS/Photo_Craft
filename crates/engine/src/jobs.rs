@@ -776,7 +776,7 @@ impl Session {
 
     /// Run the command `id`: inline, or (with `background`) as a job when it is one.
     pub(crate) fn dispatch(&mut self, id: &str, params: Value, background: bool) -> Result<Started> {
-        let mut incoming = IncomingParams { value: params, iterative_drop: matches!(id, crate::adapter_cmds::LIST | crate::adapter_cmds::RUN) };
+        let mut incoming = IncomingParams { value: params, iterative_drop: id.starts_with("plugin.adapter.") || id == "select.subject" };
         let params = &incoming.value;
         let spec = crate::commands::find(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
         // Params are named fields: anything but an object (or null, meaning none) is a caller
@@ -814,7 +814,8 @@ impl Session {
         // Compatibility-adapter discovery must be a query, and a failed/cancelled adapter must
         // not first commit a floating selection. Its run path explicitly rejects floating input;
         // the user can drop/return it separately. Existing command behavior is unchanged.
-        if !matches!(id, crate::adapter_cmds::LIST | crate::adapter_cmds::RUN)
+        if !id.starts_with("plugin.adapter.")
+            && id != "select.subject"
             && let Some(v) = crate::float_cmds::before_command(self, id)?
         {
             return Ok(Started::Done(v));

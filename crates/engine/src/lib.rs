@@ -10,6 +10,8 @@
 pub mod actions_cmds;
 pub mod actions_edit_cmds;
 pub mod adapter_cmds;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod adapter_packages;
 pub mod adjust_cmds;
 pub mod adjust_params;
 pub mod align_cmds;
@@ -492,8 +494,10 @@ pub struct Session {
     pub print_spooler: Option<print_cmds::Spooler>,
     /// Background jobs (see [`jobs`]).
     jobs: jobs::Jobs,
-    /// Trusted compatibility adapters registered through Rust, never arbitrary JSON installation.
+    /// Trusted compatibility adapters. Native package installation is a separate explicit-consent path.
     adapters: photocraft_plugins::adapter::Registry,
+    #[cfg(not(target_arch = "wasm32"))]
+    adapter_packages: adapter_packages::PackageStore,
     /// Color Sampler points dropped by the last canvas-size change (crop, Canvas Size, Image Size,
     /// rotation), for the status message. Read with [`Session::take_samplers_removed`].
     samplers_removed: usize,

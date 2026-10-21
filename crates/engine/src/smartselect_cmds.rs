@@ -6,6 +6,7 @@
 use photocraft_algo::matting::{self, RefineParams};
 use photocraft_algo::segment::{Sampler, SurfaceSampler, focus, grabcut, quick, subject};
 use photocraft_algo::selection::{Region, SelectionMode, combine_region};
+use photocraft_color::{ColorMode, PixelFormat};
 use photocraft_doc::{Document, Layer, LayerContent, LayerId, LayerMask};
 use photocraft_geom::Rect;
 use photocraft_plugins::adapter::{self, Image, Limits, OutputKind, Request};
@@ -277,12 +278,16 @@ fn object_selection(s: &mut Session, p: &Value) -> Result<Value> {
 /// Deselect keep it. One entry per session; the document is held weakly, so the cache never
 /// keeps a closed or edited document's tiles alive (the session also drops it on pixel edits
 /// and when its document closes). Its memory is the mask: one byte per pixel of its bounds.
+/// Only classical results are cached: adapter output can depend on the selection seed, opaque
+/// parameters/resources, device and registration identity, not merely the document's pixels.
 #[derive(Debug, Default)]
 pub struct SubjectCache {
     doc: std::sync::Weak<Document>,
     doc_id: Option<photocraft_doc::DocId>,
     /// The sampled layer; `None` = the composite.
     target: Option<LayerId>,
+    /// Classical refinement changes the result even when the sampled pixels do not.
+    enhance_edge: bool,
     region: Option<std::sync::Arc<Region>>,
 }
 
@@ -295,192 +300,365 @@ impl SubjectCache {
     }
 }
 
-struct SubjectContext;
+const SUBJECT: &str = "select.subject";
+const SUBJECT_OPERATION: &str = "select-subject";
 
-impl adapter::Context for SubjectContext {
-    fn cancelled(&self) -> bool {
-        false
-    }
-
-    fn progress(&self, _fraction: f32) {}
+struct SubjectParams {
+    all_layers: bool,
+    mode: SelectionMode,
+    enhance_edge: bool,
+    force_classical: bool,
+    provider: Option<String>,
+    device: Option<String>,
+    resource: Option<String>,
+    params: Value,
+    allow_fallback: bool,
 }
 
-fn subject_from_adapter(s: &Session, doc: &Document, layer_id: Option<LayerId>, all_layers: bool, p: &Value) -> Result<Option<Option<Region>>> {
-    let force_classical = b(p, "forceClassical", false) || p.get("method").and_then(Value::as_str) == Some("classical");
-    if force_classical {
-        return Ok(None);
-    }
-
-    let provider = p.get("provider").and_then(Value::as_str);
-    let registered = match provider {
-        Some(id) => {
-            let entry = s.adapters.get(id).ok_or_else(|| bad("select.subject", &format!("adapter `{id}` is not registered")))?;
-            let desc = entry.descriptor();
-            if !desc.operations.iter().any(|op| op.id == "select-subject") {
-                return Err(bad("select.subject", &format!("adapter `{id}` does not advertise operation `select-subject`")));
+impl SubjectParams {
+    fn parse(p: &Value) -> Result<Self> {
+        let map = p.as_object().ok_or_else(|| bad(SUBJECT, "params must be an object"))?;
+        for key in map.keys() {
+            if !matches!(
+                key.as_str(),
+                "sampleAllLayers"
+                    | "mode"
+                    | "enhanceEdge"
+                    | "forceClassical"
+                    | "method"
+                    | "provider"
+                    | "device"
+                    | "resource"
+                    | "params"
+                    | "allowFallback"
+                    | "target"
+                    | "coalesce"
+            ) {
+                let preview: String = key.chars().take(128).collect();
+                return Err(bad(SUBJECT, &format!("unknown parameter `{preview}`; adapter parameters belong in `params`")));
             }
-            Some(entry)
         }
-        None => s.adapters.list().iter().find(|d| d.operations.iter().any(|op| op.id == "select-subject")).and_then(|d| s.adapters.get(&d.id)),
-    };
+        let boolean = |key: &str, default: bool| -> Result<bool> {
+            map.get(key).map_or(Ok(default), |v| v.as_bool().ok_or_else(|| bad(SUBJECT, &format!("`{key}` must be a boolean"))))
+        };
+        let text = |key: &str, max: usize, id: bool| -> Result<Option<String>> {
+            map.get(key)
+                .map(|v| {
+                    let value = v
+                        .as_str()
+                        .filter(|v| v.len() <= max && (!id || (!v.is_empty() && v.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b)))))
+                        .ok_or_else(|| {
+                            bad(SUBJECT, &format!("`{key}` must be {}text of at most {max} bytes", if id { "a nonempty ASCII identifier: " } else { "" }))
+                        })?;
+                    Ok(value.to_string())
+                })
+                .transpose()
+        };
+        let mode = match map.get("mode").map(Value::as_str) {
+            None | Some(Some("replace" | "new")) => SelectionMode::Replace,
+            Some(Some("add")) => SelectionMode::Add,
+            Some(Some("subtract")) => SelectionMode::Subtract,
+            Some(Some("intersect")) => SelectionMode::Intersect,
+            _ => return Err(bad(SUBJECT, "`mode` must be replace|new|add|subtract|intersect")),
+        };
+        let classical_method = match map.get("method").map(Value::as_str) {
+            None | Some(Some("auto")) => false,
+            Some(Some("classical")) => true,
+            _ => return Err(bad(SUBJECT, "`method` must be auto|classical")),
+        };
+        if map.get("target").is_some_and(|v| v.as_str() != Some("pixels")) {
+            return Err(bad(SUBJECT, "unsupported target: Select Subject analyses pixels, not a channel or mask"));
+        }
+        if map.get("coalesce").is_some_and(|v| v.as_str().is_none_or(|s| s.len() > 1024)) {
+            return Err(bad(SUBJECT, "`coalesce` must be a string of at most 1024 bytes"));
+        }
+        let limits = Limits::default();
+        let params = map.get("params");
+        if let Some(value) = params {
+            // Prove depth/size bounded before cloning any caller-built adapter JSON.
+            limits.check_params(value).map_err(|e| bad(SUBJECT, &format!("adapter parameters: {e}")))?;
+        }
+        Ok(Self {
+            all_layers: boolean("sampleAllLayers", true)?,
+            mode,
+            enhance_edge: boolean("enhanceEdge", false)?,
+            force_classical: boolean("forceClassical", false)? || classical_method,
+            provider: text("provider", 128, true)?,
+            device: text("device", 128, true)?,
+            resource: text("resource", limits.max_resource_bytes, false)?,
+            params: params.cloned().unwrap_or_else(|| json!({})),
+            allow_fallback: boolean("allowFallback", false)?,
+        })
+    }
+}
 
+/// Called by the dispatcher's adapter preflight before it clones caller-built JSON.
+pub(crate) fn preflight(id: &str, params: &Value) -> Result<()> {
+    if id == SUBJECT {
+        SubjectParams::parse(params)?;
+    }
+    Ok(())
+}
+
+struct SubjectContext<'a>(&'a crate::jobs::JobCtx);
+
+impl adapter::Context for SubjectContext<'_> {
+    fn cancelled(&self) -> bool {
+        self.0.cancelled()
+    }
+
+    fn progress(&self, fraction: f32) {
+        self.0.progress(fraction, "");
+    }
+}
+
+/// Resolve on every invocation, before consulting the classical-only cache. Registry mutations,
+/// provider/device/resource/params and the selection seed can all change adapter output, so no
+/// adapter result is cached until a complete input/registration identity is available.
+fn subject_adapter(s: &Session, p: &SubjectParams) -> Result<Option<std::sync::Arc<adapter::RegisteredAdapter>>> {
+    if p.force_classical {
+        return Ok(None);
+    }
+    let registered = match &p.provider {
+        Some(id) => Some(s.adapters.get(id).ok_or_else(|| bad(SUBJECT, &format!("adapter `{id}` is not registered")))?),
+        None => s.adapters.list().iter().find(|d| d.operations.iter().any(|op| op.id == SUBJECT_OPERATION)).and_then(|d| s.adapters.get(&d.id)),
+    };
     let Some(registered) = registered else {
+        if p.device.is_some() || p.resource.is_some() || p.allow_fallback || p.params.as_object().is_some_and(|m| !m.is_empty()) {
+            return Err(bad(SUBJECT, "adapter options were supplied but no select-subject adapter is registered"));
+        }
         return Ok(None);
     };
-
     let descriptor = registered.descriptor();
-    let operation = descriptor
-        .operations
-        .iter()
-        .find(|op| op.id == "select-subject")
-        .ok_or_else(|| bad("select.subject", "adapter does not advertise `select-subject`"))?;
-
+    let operation =
+        descriptor.operations.iter().find(|op| op.id == SUBJECT_OPERATION).ok_or_else(|| bad(SUBJECT, "adapter does not advertise `select-subject`"))?;
     if operation.output_kind != OutputKind::Mask {
-        return Err(bad("select.subject", "`select-subject` operation must produce a mask"));
+        return Err(bad(SUBJECT, "`select-subject` operation must produce a mask"));
     }
-
-    if let Some(device_id) = p.get("device").and_then(Value::as_str) {
-        let device =
-            descriptor.devices.iter().find(|d| d.id == device_id).ok_or_else(|| bad("select.subject", "adapter does not advertise the requested device"))?;
-        if !device.operations.iter().any(|o| o == "select-subject") {
-            return Err(bad("select.subject", "requested device does not advertise `select-subject`"));
+    if let Some(id) = &p.device {
+        let device = descriptor.devices.iter().find(|d| d.id == *id).ok_or_else(|| bad(SUBJECT, "adapter does not advertise the requested device"))?;
+        if !device.operations.iter().any(|o| o == SUBJECT_OPERATION) {
+            return Err(bad(SUBJECT, "requested device does not advertise `select-subject`"));
         }
     }
+    Ok(Some(registered))
+}
 
-    let bounds = doc.bounds();
-    let (width, height) = (bounds.width(), bounds.height());
-    if width == 0 || height == 0 {
-        return Ok(Some(None));
+fn subject_color_mode(mode: ColorMode) -> Result<&'static str> {
+    match mode {
+        ColorMode::Rgb => Ok("rgb"),
+        ColorMode::Grayscale => Ok("gray"),
+        ColorMode::Cmyk => Ok("cmyk"),
+        ColorMode::Lab => Ok("lab"),
+        _ => Err(bad(SUBJECT, "adapter subject selection supports native RGB, Gray, CMYK or Lab, not expanded palette/duotone/multichannel samples")),
     }
+}
 
-    let (channels, color_mode, alpha, data) = if !all_layers
-        && let Some(surf) = layer_id.and_then(|id| doc.layer(id)).and_then(Layer::surface)
-        && surf.format().mode == photocraft_color::ColorMode::Rgb
-    {
-        let ch = surf.channels();
-        let mut d = Vec::new();
-        surf.read_region_into(bounds, &mut d);
-        (u8::try_from(ch).unwrap_or(4), "rgb".to_string(), surf.format().alpha, d)
+fn subject_format(doc: &Document, layer: Option<LayerId>, all_layers: bool) -> Result<PixelFormat> {
+    if let Some(surface) = sampled_target(doc, layer, all_layers).and_then(|id| doc.layer(id)).and_then(Layer::surface) {
+        let format = surface.format();
+        subject_color_mode(format.mode)?;
+        if format.mode != doc.mode || format.sample != doc.depth {
+            return Err(bad(SUBJECT, "adapter input requires matching native document/layer color mode and depth"));
+        }
+        return Ok(format);
+    }
+    // The compositor emits RGB, not native CMYK/Lab/Gray. Never attach the original non-RGB
+    // ICC profile to that RGB buffer or silently sample a different layer instead.
+    if doc.mode != ColorMode::Rgb {
+        return Err(bad(SUBJECT, "non-RGB adapter composites are unsupported; use sampleAllLayers:false on a native pixel layer or forceClassical:true"));
+    }
+    Ok(PixelFormat::new(ColorMode::Rgb, doc.depth, true))
+}
+
+/// Bound every dense input allocation before reading pixels or constructing the canvas Rect.
+fn subject_canvas(doc: &Document, format: PixelFormat, limits: &Limits) -> Result<Rect> {
+    let (width, height) = (doc.size.width, doc.size.height);
+    let x1 = i32::try_from(width).map_err(|_| bad(SUBJECT, "canvas width exceeds adapter coordinate limits"))?;
+    let y1 = i32::try_from(height).map_err(|_| bad(SUBJECT, "canvas height exceeds adapter coordinate limits"))?;
+    let channels = u8::try_from(format.channels()).map_err(|_| bad(SUBJECT, "channel count exceeds adapter limits"))?;
+    let mut samples = limits.check_image_size(width, height, channels).map_err(adapter_error)?;
+    if let Some(selection) = &doc.selection {
+        if selection.format().mode != ColorMode::Grayscale || selection.format().alpha || selection.channels() != 1 {
+            return Err(bad(SUBJECT, "selection context must be a single grayscale coverage plane"));
+        }
+        samples = samples
+            .checked_add(limits.check_image_size(width, height, 1).map_err(adapter_error)?)
+            .ok_or_else(|| bad(SUBJECT, "canvas sample count overflow"))?;
+    }
+    if samples > limits.max_samples {
+        return Err(bad(SUBJECT, "canvas and selection exceed adapter sample limits"));
+    }
+    if doc.icc_profile.as_ref().is_some_and(|p| p.len() > limits.max_icc_bytes.min(adapter::MAX_ICC_BYTES)) {
+        return Err(bad(SUBJECT, "document ICC profile exceeds adapter limits"));
+    }
+    Ok(Rect::new(0, 0, x1, y1))
+}
+
+fn subject_request(doc: &Document, layer: Option<LayerId>, format: PixelFormat, bounds: Rect, p: SubjectParams, ctx: &crate::jobs::JobCtx) -> Result<Request> {
+    ctx.check()?;
+    let channels = u8::try_from(format.channels()).map_err(|_| bad(SUBJECT, "unsupported channel count"))?;
+    let data = if let Some(surface) = sampled_target(doc, layer, p.all_layers).and_then(|id| doc.layer(id)).and_then(Layer::surface) {
+        surface.try_read_region(bounds)?
     } else {
-        let rgba = CompositeSampler(doc).rgba(bounds);
-        let mut d = Vec::with_capacity(rgba.len() * 4);
-        for px in rgba {
-            d.extend_from_slice(&px);
-        }
-        (4, "rgb".to_string(), true, d)
+        let count = Limits::default().check_image_size(bounds.width(), bounds.height(), channels).map_err(adapter_error)?;
+        let mut data = crate::allocation::capacity(count, "subject adapter composite")?;
+        // One band of scratch, not an additional full-canvas RGBA allocation. Cancellation is
+        // observed between bands as well as inside the adapter.
+        photocraft_compose::render_bands(doc, bounds, 256, |band| -> Result<()> {
+            ctx.check()?;
+            for px in band.px {
+                data.extend_from_slice(&px);
+            }
+            Ok(())
+        })?;
+        data
     };
-
-    if !operation.color_modes.iter().any(|m| m == &color_mode) {
-        return Err(bad("select.subject", &format!("adapter does not advertise color mode `{color_mode}` for `select-subject`")));
+    ctx.check()?;
+    let mut profile = crate::allocation::capacity(doc.icc_profile.as_ref().map_or(0, |p| p.len()), "subject adapter ICC profile")?;
+    if let Some(bytes) = &doc.icc_profile {
+        profile.extend_from_slice(bytes);
     }
-
-    let input_image = Image {
+    let image = Image {
         x: bounds.x0,
         y: bounds.y0,
-        width,
-        height,
+        width: bounds.width(),
+        height: bounds.height(),
         channels,
-        color_mode,
-        source_depth: doc.depth.bits() as u8,
-        alpha,
-        icc_profile: doc.icc_profile.as_deref().cloned().unwrap_or_default(),
+        color_mode: subject_color_mode(format.mode)?.into(),
+        source_depth: format.sample.bits() as u8,
+        alpha: format.alpha,
+        icc_profile: profile,
         data,
     };
-
-    let limits = Limits::default();
-    input_image.validate(&limits).map_err(adapter_error)?;
-
-    let selection = doc.selection.as_ref().and_then(|surf| {
-        let mut d = Vec::new();
-        surf.read_region_into(bounds, &mut d);
-        let sel_img = Image {
-            x: bounds.x0,
-            y: bounds.y0,
-            width,
-            height,
-            channels: 1,
-            color_mode: "gray".into(),
-            source_depth: 32,
-            alpha: false,
-            icc_profile: Vec::new(),
-            data: d,
-        };
-        sel_img.validate(&limits).ok().map(|_| sel_img)
-    });
-
-    let request = Request {
-        operation: "select-subject".into(),
-        resource: p.get("resource").and_then(Value::as_str).map(String::from),
-        params: p.get("params").cloned().unwrap_or_else(|| json!({})),
-        device: p.get("device").and_then(Value::as_str).map(String::from),
-        allow_fallback: b(p, "allowFallback", false),
-        image: input_image,
+    let selection = doc
+        .selection
+        .as_ref()
+        .map(|surface| -> Result<Image> {
+            Ok(Image {
+                x: bounds.x0,
+                y: bounds.y0,
+                width: bounds.width(),
+                height: bounds.height(),
+                channels: 1,
+                color_mode: "gray".into(),
+                source_depth: 32,
+                alpha: false,
+                icc_profile: Vec::new(),
+                data: surface.try_read_region(bounds)?,
+            })
+        })
+        .transpose()?;
+    ctx.check()?;
+    Ok(Request {
+        operation: SUBJECT_OPERATION.into(),
+        resource: p.resource,
+        params: p.params,
+        device: p.device,
+        allow_fallback: p.allow_fallback,
+        image,
         selection,
-    };
+    })
+}
 
-    let response = registered.run(&request, &SubjectContext, &limits).map_err(adapter_error)?;
-
-    if response.output.kind != OutputKind::Mask {
-        return Err(bad("select.subject", "expected mask output from `select-subject`"));
-    }
-    let mask_image = response.output.image;
-
-    mask_image.validate(&limits).map_err(adapter_error)?;
-
-    if mask_image.width != width || mask_image.height != height {
-        return Err(bad("select.subject", "mask dimensions do not match document canvas bounds"));
-    }
-
-    let mut mask_u8 = Vec::with_capacity((width * height) as usize);
-    let mut any_positive = false;
-    for &sample in &mask_image.data {
-        let u = (sample.clamp(0.0, 1.0) * 255.0).round() as u8;
-        if u > 0 {
-            any_positive = true;
-        }
-        mask_u8.push(u);
-    }
-
-    if !any_positive {
-        return Ok(Some(None));
-    }
-
-    let region = Region { bbox: bounds, mask: mask_u8 };
-    let trimmed = photocraft_algo::segment::trim_region(region);
-
-    let final_region = if b(p, "enhanceEdge", false) {
-        let enhance = ENHANCE;
-        with_doc_sampler(doc, layer_id, all_layers, |smp, _| {
-            trimmed.and_then(|r| matting::refine_mask(smp, &matting::region_reader(&r), r.bbox, bounds, &enhance))
+fn enhance_subject(doc: &Document, layer: Option<LayerId>, all_layers: bool, region: Option<Region>, enhance: bool) -> Option<Region> {
+    if enhance {
+        with_doc_sampler(doc, layer, all_layers, |sampler, _| {
+            region.and_then(|r| matting::refine_mask(sampler, &matting::region_reader(&r), r.bbox, doc.bounds(), &ENHANCE))
         })
     } else {
-        trimmed
-    };
+        region
+    }
+}
 
-    Ok(Some(final_region))
+fn select_subject_adapter(s: &mut Session, p: SubjectParams, registered: std::sync::Arc<adapter::RegisteredAdapter>) -> Result<Value> {
+    // Automatic subject routing must not bypass the same capability gate as an explicit
+    // plugin.adapter.run (especially for installed adapters that launch native workers).
+    crate::jobs::authorize_render_command(
+        crate::adapter_cmds::RUN,
+        &json!({
+            "provider": registered.descriptor().id, "operation": SUBJECT_OPERATION, "output": "selection",
+            "device": p.device, "resource": p.resource, "params": p.params, "allowFallback": p.allow_fallback,
+        }),
+    )?;
+    let st = s.active().ok_or(EngineError::NoDocument)?;
+    let doc = std::sync::Arc::clone(&st.doc);
+    let layer = st.active_layer;
+    let format = subject_format(&doc, layer, p.all_layers)?;
+    let color_mode = subject_color_mode(format.mode)?;
+    if !registered.descriptor().operations.iter().any(|op| op.id == SUBJECT_OPERATION && op.color_modes.iter().any(|mode| mode == color_mode)) {
+        return Err(bad(SUBJECT, &format!("adapter does not advertise native color mode `{color_mode}` for `select-subject`")));
+    }
+    let limits = Limits::default();
+    let bounds = subject_canvas(&doc, format, &limits)?;
+    let worker_doc = std::sync::Arc::clone(&doc);
+    let (all_layers, enhance, mode) = (p.all_layers, p.enhance_edge, p.mode);
+    let provider = registered.descriptor().id.clone();
+    crate::jobs::run(
+        s,
+        "Select Subject",
+        true,
+        move |ctx| {
+            let request = subject_request(&worker_doc, layer, format, bounds, p, ctx)?;
+            let response = registered.run(&request, &SubjectContext(ctx), &limits);
+            // Cancellation wins even if the adapter ignores the flag or returns a generic error.
+            ctx.check()?;
+            let response = response.map_err(adapter_error)?;
+            // RegisteredAdapter has validated kind, exact geometry, scalar gray layout and range.
+            let mut mask = crate::allocation::capacity(response.output.image.data.len(), "subject adapter mask")?;
+            for (index, sample) in response.output.image.data.iter().enumerate() {
+                if index % 4096 == 0 {
+                    ctx.check()?;
+                }
+                mask.push((sample * 255.0).round() as u8);
+            }
+            let region = photocraft_algo::segment::trim_region(Region { bbox: bounds, mask });
+            ctx.check()?;
+            let region = enhance_subject(&worker_doc, layer, all_layers, region, enhance);
+            ctx.check()?;
+            Ok((region, response.execution, ctx.clone()))
+        },
+        move |s, (region, execution, ctx)| {
+            ctx.check()?;
+            if !std::sync::Arc::ptr_eq(&s.active().ok_or(EngineError::NoDocument)?.doc, &doc) {
+                return Err(bad(SUBJECT, "document changed while the adapter ran; result discarded"));
+            }
+            let mut out = apply(s, "Select Subject", region.as_ref(), mode)?;
+            out["provider"] = json!(provider);
+            out["execution"] = json!(execution);
+            Ok(out)
+        },
+    )
 }
 
 fn select_subject(s: &mut Session, p: &Value) -> Result<Value> {
-    let all_layers = b(p, "sampleAllLayers", true);
+    let p = SubjectParams::parse(p)?;
+    if s.active().ok_or(EngineError::NoDocument)?.floating.is_some() {
+        return Err(bad(SUBJECT, "unsupported floating selection: use select.drop or edit.undo before Select Subject"));
+    }
+    if let Some(registered) = subject_adapter(s, &p)? {
+        return select_subject_adapter(s, p, registered);
+    }
     let d = s.active().ok_or(EngineError::NoDocument)?;
-    // What `with_doc_sampler` samples: the active layer's pixels, else the composite.
-    let target = d.active_layer.filter(|id| !all_layers && d.doc.layer(*id).and_then(Layer::surface).is_some());
+    let target = sampled_target(&d.doc, d.active_layer, p.all_layers);
     let c = &s.subject_cache;
-    let hit = c.target == target && c.doc.upgrade().is_some_and(|old| crate::layer_multi_cmds::same_pixels(&old, &d.doc));
+    let hit = c.doc_id == Some(d.doc.id)
+        && c.target == target
+        && c.enhance_edge == p.enhance_edge
+        && c.doc.upgrade().is_some_and(|old| crate::layer_multi_cmds::same_pixels(&old, &d.doc));
     let region = if hit {
         c.region.clone()
     } else {
         let doc = std::sync::Arc::clone(&d.doc);
-        let region = match subject_from_adapter(s, &doc, d.active_layer, all_layers, p)? {
-            Some(r) => r.map(std::sync::Arc::new),
-            None => with_doc_sampler(&doc, d.active_layer, all_layers, |smp, doc| subject::select_subject(smp, doc.bounds())).map(std::sync::Arc::new),
-        };
-        s.subject_cache = SubjectCache { doc: std::sync::Arc::downgrade(&doc), doc_id: Some(doc.id), target, region: region.clone() };
+        let region = with_doc_sampler(&doc, d.active_layer, p.all_layers, |smp, doc| subject::select_subject(smp, doc.bounds()));
+        let region = enhance_subject(&doc, d.active_layer, p.all_layers, region, p.enhance_edge).map(std::sync::Arc::new);
+        s.subject_cache =
+            SubjectCache { doc: std::sync::Arc::downgrade(&doc), doc_id: Some(doc.id), target, enhance_edge: p.enhance_edge, region: region.clone() };
         region
     };
-    let out = apply(s, "Select Subject", region.as_deref(), mode(p, "replace"))?;
-    // Follow the document past the selection edit just made (same pixels), so a short history
-    // dropping the older state doesn't turn the next repeat into a miss.
+    let out = apply(s, "Select Subject", region.as_deref(), p.mode)?;
+    // Follow the document past selection-only edits so a short history does not evict a hot
+    // classical result. Adapter invocations never read or populate this cache.
     if let Some(d) = s.active()
         && s.subject_cache.doc_id == Some(d.doc.id)
         && s.subject_cache.doc.upgrade().is_some_and(|old| crate::layer_multi_cmds::same_pixels(&old, &d.doc))
@@ -686,7 +864,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "select.subject",
             "Subject",
             ["Select"],
-            r##"{"sampleAllLayers":bool=true,"mode":"replace|add|subtract|intersect"="replace","provider":text?,"device":text?,"resource":text?,"params":object={},"enhanceEdge":bool=false,"forceClassical":bool=false}"##,
+            r##"{"sampleAllLayers":bool=true,"mode":"replace|new|add|subtract|intersect"="replace","provider":text?,"device":text?,"resource":text?,"params":object={},"allowFallback":bool=false,"enhanceEdge":bool=false,"forceClassical":bool=false,"method":"auto|classical"="auto","target":"pixels"?} (trusted registered adapter first, otherwise classical; adapter results are not cached; non-RGB adapter inputs require sampleAllLayers:false on a native pixel layer)"##,
             has_doc,
             select_subject
         ),
@@ -1212,12 +1390,67 @@ mod tests {
         assert!(cov(&s, 30, 50) >= 0.5 && cov(&s, 130, 50) < 0.5);
     }
 
+    use std::sync::{Arc, Mutex, PoisonError};
+
     use photocraft_plugins::adapter::{Adapter, Context, Descriptor, Device, DeviceKind, Execution, Operation, Output, Response};
+
+    const CPU_DEVICE: &str = "cpu.synthetic.0";
+    const CPU_DEVICE_2: &str = "cpu.synthetic.1";
+    const CPU_BACKEND: &str = "synthetic-cpu";
+
+    #[derive(Clone, Copy)]
+    enum MockMask {
+        Disc(i32, i32, i32),
+        LeftHalf,
+        Selection,
+        Failure,
+        Canceled,
+        BadGeometry,
+        BadExecution,
+    }
 
     struct MockSubjectAdapter {
         descriptor: Descriptor,
-        center: (i32, i32),
-        radius: i32,
+        mask: MockMask,
+        seen: Mutex<Vec<Request>>,
+        cancel: Option<crate::jobs::JobCtx>,
+    }
+
+    impl MockSubjectAdapter {
+        fn new(id: &str, mask: MockMask) -> Self {
+            Self {
+                descriptor: Descriptor {
+                    api_version: adapter::API_VERSION,
+                    id: id.into(),
+                    name: "Synthetic CPU subject test (not AI)".into(),
+                    version: "1".into(),
+                    operations: vec![Operation {
+                        id: SUBJECT_OPERATION.into(),
+                        output_kind: OutputKind::Mask,
+                        color_modes: vec!["rgb".into(), "gray".into(), "cmyk".into(), "lab".into()],
+                    }],
+                    devices: [CPU_DEVICE, CPU_DEVICE_2]
+                        .into_iter()
+                        .map(|id| Device {
+                            id: id.into(),
+                            kind: DeviceKind::Cpu,
+                            backend: CPU_BACKEND.into(),
+                            name: "Synthetic CPU test".into(),
+                            operations: vec![SUBJECT_OPERATION.into()],
+                        })
+                        .collect(),
+                    resource_formats: Vec::new(),
+                    params_schema: json!({}),
+                },
+                mask,
+                seen: Mutex::new(Vec::new()),
+                cancel: None,
+            }
+        }
+
+        fn requests(&self) -> Vec<Request> {
+            self.seen.lock().unwrap_or_else(PoisonError::into_inner).clone()
+        }
     }
 
     impl Adapter for MockSubjectAdapter {
@@ -1225,22 +1458,31 @@ mod tests {
             self.descriptor.clone()
         }
 
-        fn run(&self, request: &Request, _ctx: &dyn Context) -> adapter::Result<Response> {
-            let limits = Limits::default();
-            request.image.validate(&limits)?;
+        fn run(&self, request: &Request, ctx: &dyn Context) -> adapter::Result<Response> {
+            self.seen.lock().unwrap_or_else(PoisonError::into_inner).push(request.clone());
+            ctx.progress(0.5);
+            if let Some(cancel) = &self.cancel {
+                cancel.cancel();
+            }
+            match self.mask {
+                MockMask::Failure => return Err(adapter::Error::Failed("synthetic failure".into())),
+                MockMask::Canceled => return Err(adapter::Error::Canceled),
+                _ => {}
+            }
             let (w, h) = (request.image.width, request.image.height);
-            let mut data = vec![0.0f32; (w * h) as usize];
+            let mut data = vec![0.0; Limits::default().check_image_size(w, h, 1)?];
             for y in 0..h as i32 {
                 for x in 0..w as i32 {
-                    let dx = x - self.center.0;
-                    let dy = y - self.center.1;
-                    if dx * dx + dy * dy <= self.radius * self.radius {
-                        data[(y as usize) * (w as usize) + (x as usize)] = 1.0;
-                    }
+                    let index = y as usize * w as usize + x as usize;
+                    data[index] = match self.mask {
+                        MockMask::Disc(cx, cy, radius) => f32::from((x - cx).pow(2) + (y - cy).pow(2) <= radius.pow(2)),
+                        MockMask::Selection => request.selection.as_ref().map_or(0.0, |s| s.data[index]),
+                        _ => f32::from(x < w as i32 / 2),
+                    };
                 }
             }
-            let mask = Image {
-                x: request.image.x,
+            let image = Image {
+                x: request.image.x + i32::from(matches!(self.mask, MockMask::BadGeometry)),
                 y: request.image.y,
                 width: w,
                 height: h,
@@ -1252,49 +1494,270 @@ mod tests {
                 data,
             };
             Ok(Response {
-                output: Output { kind: OutputKind::Mask, image: mask },
-                execution: Execution { devices: vec!["mock.npu".into()], backend: "mock-npu".into(), fallback_reason: None },
+                output: Output { kind: OutputKind::Mask, image },
+                execution: Execution {
+                    devices: vec![if matches!(self.mask, MockMask::BadExecution) {
+                        "cpu.unregistered".into()
+                    } else {
+                        request.device.clone().unwrap_or_else(|| CPU_DEVICE.into())
+                    }],
+                    backend: CPU_BACKEND.into(),
+                    fallback_reason: None,
+                },
             })
         }
     }
 
+    fn register_subject(s: &mut Session, id: &str, mask: MockMask) -> Arc<MockSubjectAdapter> {
+        let adapter = Arc::new(MockSubjectAdapter::new(id, mask));
+        s.register_adapter(adapter.clone()).unwrap();
+        adapter
+    }
+
     #[test]
     fn select_subject_dispatches_to_registered_adapter_and_undoes() {
-        use std::sync::Arc;
-        let mut s = session_with(100, 100, 8, |_, _| [0.5, 0.5, 0.5]);
-        let desc = Descriptor {
-            api_version: adapter::API_VERSION,
-            id: "org.photocraft.mock.npu".into(),
-            name: "Mock NPU Subject Selection".into(),
-            version: "1.0.0".into(),
-            operations: vec![Operation { id: "select-subject".into(), output_kind: OutputKind::Mask, color_modes: vec!["rgb".into()] }],
-            devices: vec![Device {
-                id: "npu.0".into(),
-                kind: DeviceKind::Npu,
-                backend: "mock-directml".into(),
-                name: "Hexagon NPU (Mock)".into(),
-                operations: vec!["select-subject".into()],
-            }],
-            resource_formats: Vec::new(),
-            params_schema: json!({}),
-        };
+        for depth in [8, 16, 32] {
+            let mut s = session_with(80, 40, depth, |_, _| [0.5; 3]);
+            let adapter = register_subject(&mut s, "test.subject", MockMask::Disc(40, 20, 10));
+            let before = Arc::clone(&s.active().unwrap().doc);
+            let res = s.execute(SUBJECT, json!({"device": CPU_DEVICE})).unwrap();
+            assert_eq!(res["selected"], true);
+            assert_eq!(res["changed"], true);
+            assert_eq!(res["provider"], "test.subject");
+            assert_eq!(res["execution"]["devices"], json!([CPU_DEVICE]));
+            assert_eq!(res["execution"]["backend"], CPU_BACKEND);
+            assert!(cov(&s, 40, 20) > 0.99 && cov(&s, 5, 5) < 0.01);
+            assert!(s.subject_cache.doc_id.is_none(), "adapter masks must not populate the classical cache");
+            s.execute("edit.undo", json!({})).unwrap();
+            assert_eq!(s.active().unwrap().doc.selection, before.selection);
+            assert_eq!(s.active().unwrap().doc.layers, before.layers);
+            let res = s.execute(SUBJECT, json!({"forceClassical": true})).unwrap();
+            assert_eq!(res["changed"], false, "a flat field has no classical subject");
+            assert_eq!(adapter.requests().len(), 1);
+        }
+    }
 
-        s.register_adapter(Arc::new(MockSubjectAdapter { descriptor: desc, center: (50, 50), radius: 20 })).unwrap();
-
-        // 1. Calling select.subject dispatches to the NPU adapter
-        let res = s.execute("select.subject", json!({})).unwrap();
-        assert_eq!(res["selected"], true);
-        assert_eq!(res["changed"], true);
-        assert!(cov(&s, 50, 50) > 0.9);
-        assert!(cov(&s, 10, 10) < 0.1);
-
-        // 2. Undo clears the selection
-        s.execute("edit.undo", json!({})).unwrap();
+    #[test]
+    fn select_subject_routes_before_classical_cache_and_registry_mutations() {
+        let mut s = session_with(80, 40, 8, |_, _| [0.5; 3]);
+        s.execute(SUBJECT, json!({})).unwrap(); // A cached empty classical result.
+        let a = register_subject(&mut s, "test.a", MockMask::LeftHalf);
+        s.execute(SUBJECT, json!({})).unwrap();
+        assert!(cov(&s, 5, 20) > 0.99 && cov(&s, 60, 20) < 0.01);
+        let b = register_subject(&mut s, "test.b", MockMask::Disc(60, 20, 10));
+        s.execute(SUBJECT, json!({"provider": "test.b"})).unwrap();
+        assert!(cov(&s, 60, 20) > 0.99 && cov(&s, 5, 20) < 0.01);
+        s.execute(SUBJECT, json!({"provider": "test.a"})).unwrap();
+        assert_eq!((a.requests().len(), b.requests().len()), (2, 1));
+        assert!(s.execute(SUBJECT, json!({"provider": "missing"})).is_err());
+        assert!(s.execute(SUBJECT, json!({"provider": "test.a", "device": "missing"})).is_err());
+        s.execute("select.deselect", json!({})).unwrap();
+        assert_eq!(s.execute(SUBJECT, json!({"forceClassical": true})).unwrap()["changed"], false);
         assert!(s.active().unwrap().doc.selection.is_none());
+        assert_eq!(a.requests().len(), 2);
+        assert_eq!(s.execute(SUBJECT, json!({"method": "classical"})).unwrap()["changed"], false);
+        assert!(s.unregister_adapter("test.a"));
+        // Automatic routing must observe removal, not the old provider's mask.
+        s.execute(SUBJECT, json!({})).unwrap();
+        assert!(cov(&s, 60, 20) > 0.99);
+        assert_eq!(b.requests().len(), 2);
+        assert!(s.unregister_adapter("test.b"));
+        let replacement = register_subject(&mut s, "test.a", MockMask::Disc(15, 20, 5));
+        s.execute(SUBJECT, json!({})).unwrap();
+        assert!(cov(&s, 15, 20) > 0.99 && cov(&s, 60, 20) < 0.01);
+        assert_eq!(replacement.requests().len(), 1);
+    }
 
-        // 3. forceClassical forces bypassing the adapter
-        let res_classical = s.execute("select.subject", json!({"forceClassical": true})).unwrap();
-        // Flat gray field has no salient subject in classical GrabCut
-        assert_eq!(res_classical["changed"], false);
+    #[test]
+    fn select_subject_adapter_forwards_options_and_current_selection_every_run() {
+        let mut s = session_with(80, 40, 16, |_, _| [0.5; 3]);
+        let adapter = register_subject(&mut s, "test.seed", MockMask::Selection);
+        for (device, resource, params, x) in
+            [(CPU_DEVICE, "  opaque:original/resource  ", json!({"threshold": 0.25}), 3), (CPU_DEVICE_2, "resource.two", json!({"threshold": 0.75}), 50)]
+        {
+            s.execute("select.rect", json!({"x": x, "y": 4, "width": 8, "height": 6})).unwrap();
+            s.execute(SUBJECT, json!({"provider": "test.seed", "device": device, "resource": resource, "params": params, "allowFallback": true})).unwrap();
+            assert!(cov(&s, x + 2, 6) > 0.99);
+            assert!(cov(&s, if x < 20 { 52 } else { 5 }, 6) < 0.01);
+            let seen = adapter.requests().pop().unwrap();
+            assert_eq!(seen.resource.as_deref(), Some(resource));
+            assert_eq!(seen.device.as_deref(), Some(device));
+            assert_eq!(seen.params, params);
+            assert!(seen.allow_fallback);
+            assert_eq!(seen.selection.as_ref().unwrap().data[(6 * 80 + x + 2) as usize], 1.0);
+        }
+        s.execute("select.deselect", json!({})).unwrap();
+        assert_eq!(s.execute(SUBJECT, json!({"provider": "test.seed"})).unwrap()["changed"], false);
+        assert_eq!(adapter.requests().len(), 3);
+        assert!(adapter.requests().last().unwrap().selection.is_none());
+    }
+
+    #[test]
+    fn select_subject_adapter_enhancement_refines_each_requested_mask() {
+        for depth in [8, 16, 32] {
+            let mut s = blurred_edge_selected_at(depth);
+            let adapter = register_subject(&mut s, "test.edge", MockMask::LeftHalf);
+            s.execute("select.deselect", json!({})).unwrap();
+            s.execute(SUBJECT, json!({"provider": "test.edge", "enhanceEdge": false})).unwrap();
+            assert_eq!(soft_count(s.active().unwrap().doc.selection.as_ref().unwrap(), 20), 0);
+            let doc = Arc::clone(&s.active().unwrap().doc);
+            let hard = Region { bbox: Rect::new(0, 0, 40, 40), mask: vec![255; 40 * 40] };
+            let expected = enhance_subject(&doc, None, true, Some(hard), true).unwrap();
+            s.execute(SUBJECT, json!({"provider": "test.edge", "enhanceEdge": true})).unwrap();
+            for x in 0..80 {
+                assert!((cov(&s, x, 20) - expected.at(x, 20)).abs() < 1.0 / 255.0, "depth {depth}, x {x}");
+            }
+            assert!(soft_count(s.active().unwrap().doc.selection.as_ref().unwrap(), 20) > 0);
+            assert_eq!(adapter.requests().len(), 2);
+            s.execute("edit.undo", json!({})).unwrap();
+            assert_eq!(soft_count(s.active().unwrap().doc.selection.as_ref().unwrap(), 20), 0);
+        }
+    }
+
+    #[test]
+    fn select_subject_classical_cache_distinguishes_enhancement() {
+        let (mut s, _) = disc(8);
+        s.execute(SUBJECT, json!({"forceClassical": true})).unwrap();
+        let plain = s.subject_cache.region.clone().unwrap();
+        s.execute(SUBJECT, json!({"forceClassical": true, "enhanceEdge": true})).unwrap();
+        let enhanced = s.subject_cache.region.clone().unwrap();
+        assert!(!Arc::ptr_eq(&plain, &enhanced));
+        assert!(s.subject_cache.enhance_edge);
+        s.execute("select.deselect", json!({})).unwrap();
+        s.execute(SUBJECT, json!({"enhanceEdge": true})).unwrap();
+        assert!(Arc::ptr_eq(&enhanced, s.subject_cache.region.as_ref().unwrap()));
+        s.execute(SUBJECT, json!({"enhanceEdge": false})).unwrap();
+        assert!(!s.subject_cache.enhance_edge);
+        assert!(!Arc::ptr_eq(&enhanced, s.subject_cache.region.as_ref().unwrap()));
+    }
+
+    #[test]
+    fn select_subject_adapter_failure_or_invalid_response_keeps_document_and_history() {
+        for mask in [MockMask::Failure, MockMask::Canceled, MockMask::BadGeometry, MockMask::BadExecution] {
+            let mut s = blurred_edge_selected();
+            register_subject(&mut s, "test.failure", mask);
+            let before = Arc::clone(&s.active().unwrap().doc);
+            let label = s.active().unwrap().history.undo_label().map(str::to_string);
+            assert!(s.execute(SUBJECT, json!({})).is_err());
+            assert!(Arc::ptr_eq(&before, &s.active().unwrap().doc));
+            assert_eq!(s.active().unwrap().history.undo_label(), label.as_deref());
+            assert!(s.subject_cache.doc_id.is_none());
+        }
+    }
+
+    #[test]
+    fn select_subject_adapter_honors_job_context_cancellation_before_and_after_run() {
+        for already_cancelled in [true, false] {
+            let mut s = blurred_edge_selected();
+            let ctx = crate::jobs::JobCtx::new();
+            let mut adapter = MockSubjectAdapter::new("test.cancel", MockMask::LeftHalf);
+            adapter.cancel = Some(ctx.clone());
+            let adapter = Arc::new(adapter);
+            s.register_adapter(adapter.clone()).unwrap();
+            let before = Arc::clone(&s.active().unwrap().doc);
+            if already_cancelled {
+                ctx.cancel();
+            }
+            s.set_inline_job_ctx(Some(ctx.clone()));
+            assert!(matches!(s.execute(SUBJECT, json!({})), Err(EngineError::Cancelled)));
+            assert!(Arc::ptr_eq(&before, &s.active().unwrap().doc));
+            assert_eq!(adapter.requests().len(), usize::from(!already_cancelled));
+            if !already_cancelled {
+                assert_eq!(ctx.fraction(), 0.5);
+            }
+            s.set_inline_job_ctx(None);
+        }
+    }
+
+    #[test]
+    fn select_subject_rejects_invalid_params_even_with_a_hot_classical_cache() {
+        let mut s = session_with(80, 40, 8, |_, _| [0.5; 3]);
+        s.execute(SUBJECT, json!({})).unwrap();
+        let adapter = register_subject(&mut s, "test.validation", MockMask::LeftHalf);
+        let before = Arc::clone(&s.active().unwrap().doc);
+        for p in [
+            Value::Null,
+            json!({"provider": 7}),
+            json!({"provider": ""}),
+            json!({"provider": "not an id"}),
+            json!({"device": false}),
+            json!({"device": ""}),
+            json!({"resource": []}),
+            json!({"params": []}),
+            json!({"params": null}),
+            json!({"sampleAllLayers": 1}),
+            json!({"enhanceEdge": "true"}),
+            json!({"forceClassical": "false"}),
+            json!({"allowFallback": 1}),
+            json!({"mode": "xor"}),
+            json!({"mode": 5}),
+            json!({"method": "npu"}),
+            json!({"method": false}),
+            json!({"target": "mask"}),
+            json!({"coalesce": []}),
+            json!({"provder": "test.validation"}),
+            json!({"provider": "x".repeat(129)}),
+            json!({"resource": "x".repeat(Limits::default().max_resource_bytes + 1)}),
+        ] {
+            assert!(s.execute(SUBJECT, p.clone()).is_err(), "accepted {p}");
+            assert!(Arc::ptr_eq(&before, &s.active().unwrap().doc), "mutated document for {p}");
+        }
+        assert!(adapter.requests().is_empty());
+        // Iterative preflight rejects a deep object without cloning it into a worker snapshot.
+        let mut nested = json!({});
+        for _ in 0..40 {
+            nested = json!({"nested": nested});
+        }
+        assert!(preflight(SUBJECT, &json!({"params": nested})).is_err());
+    }
+
+    #[test]
+    fn select_subject_adapter_native_color_contract_and_selection_context() {
+        use photocraft_color::SampleType;
+        use photocraft_doc::Size;
+        use photocraft_raster::Surface;
+        for mode in [ColorMode::Rgb, ColorMode::Grayscale, ColorMode::Cmyk, ColorMode::Lab] {
+            for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
+                let mut doc = Document::new("Native subject test", Size::new(8, 4), mode, depth);
+                doc.icc_profile = Some(Arc::new(vec![1, 2, 3, 4]));
+                let mut surface = Surface::new(doc.pixel_format());
+                surface.fill_rect(doc.bounds(), &vec![0.25; surface.channels()]);
+                let input = surface.read_region(doc.bounds());
+                doc.layers.push(Layer::new("Pixels", LayerContent::Raster(surface)));
+                let mut s = Session::new();
+                s.add_document(doc, None);
+                let adapter = register_subject(&mut s, "test.native", MockMask::LeftHalf);
+                s.execute("select.all", json!({})).unwrap();
+                s.execute(SUBJECT, json!({"sampleAllLayers": false})).unwrap();
+                let request = adapter.requests().pop().unwrap();
+                assert_eq!(request.image.color_mode, subject_color_mode(mode).unwrap());
+                assert_eq!(request.image.source_depth, depth.bits() as u8);
+                assert_eq!(request.image.icc_profile, vec![1, 2, 3, 4]);
+                assert_eq!(request.image.data, input);
+                assert_eq!(request.selection.unwrap().data, vec![1.0; 32]);
+                if mode != ColorMode::Rgb {
+                    let before = Arc::clone(&s.active().unwrap().doc);
+                    assert!(s.execute(SUBJECT, json!({"sampleAllLayers": true})).is_err());
+                    assert!(Arc::ptr_eq(&before, &s.active().unwrap().doc));
+                    assert_eq!(adapter.requests().len(), 1);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn select_subject_invalid_selection_context_is_not_silently_dropped() {
+        use photocraft_raster::Surface;
+        let mut s = session_with(8, 4, 8, |_, _| [0.5; 3]);
+        let adapter = register_subject(&mut s, "test.context", MockMask::LeftHalf);
+        s.edit("invalid selection format", |doc, _| {
+            doc.selection = Some(Surface::new(PixelFormat::RGBA8));
+            Ok(())
+        })
+        .unwrap();
+        let before = Arc::clone(&s.active().unwrap().doc);
+        assert!(s.execute(SUBJECT, json!({})).is_err());
+        assert!(Arc::ptr_eq(&before, &s.active().unwrap().doc));
+        assert!(adapter.requests().is_empty());
     }
 }

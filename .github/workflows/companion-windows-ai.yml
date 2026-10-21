@@ -1,0 +1,42 @@
+name: Build Windows AI Companion Package
+
+on:
+  push:
+    branches:
+      - main
+      - "compat/**"
+    paths:
+      - "examples/npu_subject_worker/**"
+      - ".github/workflows/companion-windows-ai.yml"
+  pull_request:
+    paths:
+      - "examples/npu_subject_worker/**"
+      - ".github/workflows/companion-windows-ai.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-companion:
+    name: Build & Package Windows AI Companion (ARM64)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Build and Package MSIX
+        shell: pwsh
+        run: |
+          ./examples/npu_subject_worker/Build-Package.ps1 -DevelopmentCertificate -OutputDirectory ./artifacts
+
+      - name: Upload Companion Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: photocraft-windows-ai-arm64
+          path: ./artifacts/*

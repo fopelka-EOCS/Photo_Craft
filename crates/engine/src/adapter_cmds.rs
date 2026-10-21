@@ -134,6 +134,9 @@ fn parse(p: &Value) -> Result<Params> {
 /// Validate adapter metadata before the generic dispatcher clones caller-built parameters.
 /// Other commands retain their existing admission path.
 pub(crate) fn preflight(id: &str, params: &Value) -> Result<()> {
+    crate::smartselect_cmds::preflight(id, params)?;
+    #[cfg(not(target_arch = "wasm32"))]
+    crate::adapter_packages::preflight(id, params)?;
     if id == RUN {
         parse(params)?;
     } else if id == LIST && params.as_object().is_none_or(|map| !map.is_empty()) {

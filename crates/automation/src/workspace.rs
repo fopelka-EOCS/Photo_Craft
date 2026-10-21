@@ -263,7 +263,7 @@ pub fn authorize_engine_command(id: &str, params: &Value) -> Result<(), Automati
     // workers or opaque resource references. Scanning parameters for a field named `path` cannot
     // confine those effects. Keep execution closed to automation until an adapter-specific,
     // capability-scoped policy exists; discovery remains safe and available.
-    if id == "plugin.adapter.run" {
+    if id.starts_with("plugin.adapter.") && !matches!(id, "plugin.adapter.list" | "plugin.adapter.packages") {
         return Err(AutomationError::BadRequest(
             "automation cannot execute trusted compatibility adapters; a capability-scoped adapter policy is required".into(),
         ));
@@ -817,6 +817,23 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("capability-scoped adapter policy"), "authorization must run before adapter dispatch: {error}");
+    }
+
+    #[test]
+    fn native_adapter_management_cannot_be_authorized_by_json_consent() {
+        for id in [
+            "plugin.adapter.inspectPackage",
+            "plugin.adapter.install",
+            "plugin.adapter.enable",
+            "plugin.adapter.remove",
+            "plugin.adapter.status",
+            "plugin.adapter.prepare",
+        ] {
+            let params = serde_json::json!({"path":"/outside/adapter.json","provider":"example","trust":true,"consent":true,"enabled":true});
+            assert!(authorize_engine_command(id, &params).is_err(), "{id}");
+            assert!(authorize_desktop_engine_command(id, &params).is_err(), "{id}");
+        }
+        assert!(authorize_engine_command("plugin.adapter.packages", &serde_json::json!({})).is_ok());
     }
 
     #[test]

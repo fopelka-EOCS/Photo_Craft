@@ -77,12 +77,59 @@ The descriptor contains `api_version`, `id`, `name`, `version`, `operations`, `d
 `kind` (`cpu`, `gpu`, `npu`), `backend`, display name and supported operation ids. Capabilities
 are adapter claims, not a substitute for querying the adapter's actual runtime/device status.
 
-The host does **not** discover native adapters by scanning the existing `.wasm` folder. Community
-work can supply a safe worker client or another trusted registration path without weakening the
-WASM no-imports sandbox. Packaging, installation, signatures and capability-scoped worker launch
-need their own design and tests before being exposed to untrusted requests.
+The host does **not** discover native adapters by scanning the existing `.wasm` folder.
+Native compatibility adapters run with user privileges and require explicit user trust:
+1. Manifest inspection via `plugin.adapter.inspectPackage`.
+2. Installation snapshot via `plugin.adapter.install` with explicit `trust: true`.
+3. Separate toggle via `plugin.adapter.enable`.
+4. Availability probe (`plugin.adapter.status`) without automatic downloads.
+5. Explicit model download/preparation (`plugin.adapter.prepare`) with `consent: true`.
+
+The desktop UI exposes this under **Filter › Plug-ins › Compatibility Adapters…**.
+
+### Worker IPC protocol
+
+Native out-of-process adapters use `photocraft_plugins::worker::WorkerAdapter`.
+The host launches the worker with fixed CLI arguments in an isolated temporary directory:
+`--action <probe|prepare|run> --request <request.bin> --response <response.bin>`
+
+Framing format:
+- Request magic: `PCADREQ1` (8 bytes), followed by LE u32 JSON header length (capped at 1 MiB), UTF-8 JSON metadata, and raw LE f32 samples.
+- Response magic: `PCADRES1` (8 bytes), followed by LE u32 JSON header length, UTF-8 JSON status/metadata, and raw LE f32 samples.
+- Actions:
+  - `probe`: checks worker and model readiness state without starting inference or downloads.
+  - `prepare`: explicitly downloads/configures models with user consent.
+  - `run`: performs inference and outputs the result buffer.
 
 ## Engine commands
+
+### `plugin.adapter.packages`
+
+Returns `{ "available": bool, "packages": [ ... ], "warnings": [ ... ] }` describing installed packages from local configuration storage.
+
+### `plugin.adapter.inspectPackage`
+
+```json
+{ "path": "path/to/adapter.json" }
+```
+
+Inspects an adapter manifest before installation without executing it.
+
+### `plugin.adapter.install`
+
+```json
+{ "path": "path/to/adapter.json", "trust": true }
+```
+
+Snapshots the manifest and its files into the managed adapter directory. The package remains disabled until explicitly enabled.
+
+### `plugin.adapter.enable`
+
+```json
+{ "provider": "org.example.adapter", "enabled": true }
+```
+
+Enables or disables an installed adapter. Enabling registers it in the session's adapter registry.
 
 ### `plugin.adapter.list`
 

@@ -25,6 +25,8 @@ mod apply;
 pub mod manifest;
 pub mod registry;
 mod runtime;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod worker;
 
 pub use apply::format_code;
 pub use manifest::{Area, Kind, Manifest, ParamSpec};

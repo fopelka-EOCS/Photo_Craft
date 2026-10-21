@@ -1,67 +1,143 @@
-﻿// Standalone Windows ARM64 NPU Worker for PhotoCraft
-// Connects to Windows 11 Copilot+ PC native NPU via Microsoft.Windows.AI.Imaging
-//
-// Build: dotnet publish -c Release -r win-arm64 --self-contained
-using System;
-using System.IO;
-using System.Threading.Tasks;
-using Windows.Graphics.Imaging;
+using System.Runtime.InteropServices;
 using Microsoft.Windows.AI;
 using Microsoft.Windows.AI.Imaging;
+using Windows.ApplicationModel;
+using Windows.Graphics.Imaging;
+using Windows.Storage.Streams;
 
-class Program
+namespace PhotoCraft.WindowsAI;
+
+internal static class Program
 {
-    static async Task<int> Main(string[] args)
+    [STAThread]
+    private static int Main(string[] args)
     {
-        // 1. Verify NPU ImageForegroundExtractor ready state
-        var readyState = ImageForegroundExtractor.GetReadyState();
-        if (readyState == AIFeatureReadyState.NotReady)
+        Arguments arguments;
+        try { arguments = Arguments.Parse(args); }
+        catch (Exception error)
         {
-            var op = await ImageForegroundExtractor.EnsureReadyAsync();
-            if (op.Status != AIFeatureReadyResultState.Success)
-            {
-                Console.Error.WriteLine("NPU ImageForegroundExtractor not ready: " + op.ExtendedError);
-                return 1;
-            }
-        }
-        else if (readyState != AIFeatureReadyState.Ready)
-        {
-            Console.Error.WriteLine("NPU ImageForegroundExtractor disabled or unsupported on this device.");
+            Console.Error.WriteLine(error is ProtocolException ? error.Message : "Invalid companion command line.");
             return 2;
         }
-
-        using var extractor = await ImageForegroundExtractor.CreateAsync();
-
-        // 2. Read dimensions from binary stream (stdin)
-        using var stdin = Console.OpenStandardInput();
-        using var reader = new BinaryReader(stdin);
-
-        int width = reader.ReadInt32();
-        int height = reader.ReadInt32();
-        byte[] bgraBytes = reader.ReadBytes(width * height * 4);
-
-        // 3. Create SoftwareBitmap and execute on NPU
-        var bitmap = SoftwareBitmap.CreateCopyFromBuffer(
-            bgraBytes.AsBuffer(),
-            BitmapPixelFormat.Bgra8,
-            width,
-            height,
-            BitmapAlphaMode.Premultiplied
-        );
-
-        using var maskBitmap = extractor.GetMaskFromSoftwareBitmap(bitmap);
-
-        // 4. Extract Gray8 mask bytes and stream back to PhotoCraft
-        byte[] maskBytes = new byte[width * height];
-        maskBitmap.CopyToBuffer(maskBytes.AsBuffer());
-
-        using var stdout = Console.OpenStandardOutput();
-        using var writer = new BinaryWriter(stdout);
-        writer.Write(width);
-        writer.Write(height);
-        writer.Write(maskBytes);
-        writer.Flush();
-
-        return 0;
+        ResponseHeader response;
+        byte[]? mask = null;
+        try
+        {
+            (response, mask) = ExecuteAsync(arguments).GetAwaiter().GetResult();
+        }
+        catch (Exception error)
+        {
+            // Do not echo file paths, arbitrary JSON or opaque OS error messages to the host.
+            string message = error is ProtocolException ? error.Message :
+                error is EndOfStreamException ? "Truncated request file." :
+                error is System.Text.Json.JsonException ? "Malformed request JSON or metadata types." :
+                $"Windows AI operation failed ({error.GetType().Name}, HRESULT 0x{error.HResult:X8}); no fallback was used.";
+            response = new(1, "error", message);
+        }
+        try
+        {
+            Protocol.WriteResponse(arguments.Response, response, mask);
+            // A framed unavailable/error response is still a completed protocol transaction.
+            return 0;
+        }
+        catch (Exception error)
+        {
+            Console.Error.WriteLine($"Cannot publish companion response (HRESULT 0x{error.HResult:X8}).");
+            return 3;
+        }
     }
+
+    private static async Task<(ResponseHeader, byte[]?)> ExecuteAsync(Arguments arguments)
+    {
+        using var request = Protocol.OpenRequest(arguments.Request);
+        var header = Protocol.ReadHeader(request);
+        if (arguments.Action != "run") Protocol.ValidateControlRequest(header, request);
+        if (RuntimeInformation.ProcessArchitecture != Architecture.Arm64)
+            return (new(1, "unavailable", "This companion build requires a native ARM64 Windows process."), null);
+        try { _ = Package.Current.Id.FamilyName; }
+        catch
+        {
+            return (new(1, "unavailable", "installRequired: install the signed MSIX and launch its registered execution alias; an unpackaged EXE has no systemAIModels identity."), null);
+        }
+
+        AIFeatureReadyState state;
+        try { state = ImageForegroundExtractor.GetReadyState(); }
+        catch (Exception error)
+        {
+            return (new(1, "unavailable", $"Windows AI activation is unavailable (HRESULT 0x{error.HResult:X8}); verify the installed MSIX, Windows build and Copilot+ NPU support."), null);
+        }
+        var readiness = DescribeState(state);
+        if (arguments.Action == "probe")
+        {
+            // Deliberately do NOT call EnsureReadyAsync or CreateAsync here.
+            return (readiness with { descriptor = AdapterDescriptor.Value }, null);
+        }
+        if (arguments.Action == "prepare")
+        {
+            if (state != AIFeatureReadyState.NotReady) return (readiness, null);
+            // This is the ONLY download/preparation entry point, invoked with user consent.
+            var result = await ImageForegroundExtractor.EnsureReadyAsync();
+            if (result.Status != AIFeatureReadyResultState.Success)
+            {
+                string code = result.ExtendedError is { } error ? $"0x{error.HResult:X8}" : "none";
+                return (new(1, "error", $"Explicit model preparation returned {result.Status} (extended HRESULT {code}); no inference was attempted.", ready_state: state.ToString()), null);
+            }
+            return (DescribeState(ImageForegroundExtractor.GetReadyState()), null);
+        }
+        if (state != AIFeatureReadyState.Ready) return (readiness, null);
+
+        var input = Protocol.ReadImage(header, request);
+        var metadata = header.image ?? throw new ProtocolException("Run requires image metadata.");
+        byte[] bgra = ColorConversion.ToSrgbBgra(input, Path.GetDirectoryName(arguments.Request)!);
+        using var writer = new DataWriter();
+        writer.WriteBytes(bgra);
+        var buffer = writer.DetachBuffer();
+        using var bitmap = SoftwareBitmap.CreateCopyFromBuffer(buffer, BitmapPixelFormat.Bgra8,
+            metadata.width, metadata.height, BitmapAlphaMode.Straight);
+        using var extractor = await ImageForegroundExtractor.CreateAsync();
+        using var nativeMask = extractor.GetMaskFromSoftwareBitmap(bitmap);
+        if (nativeMask.BitmapPixelFormat != BitmapPixelFormat.Gray8 ||
+            nativeMask.PixelWidth != metadata.width || nativeMask.PixelHeight != metadata.height)
+            throw new ProtocolException("Windows AI returned an unexpected mask format or geometry; no resampling/substitution was performed.");
+        int pixels = checked(metadata.width * metadata.height);
+        var maskBuffer = new Windows.Storage.Streams.Buffer((uint)pixels) { Length = (uint)pixels };
+        nativeMask.CopyToBuffer(maskBuffer);
+        var maskBytes = new byte[pixels];
+        using (var reader = DataReader.FromBuffer(maskBuffer)) reader.ReadBytes(maskBytes);
+        return (new(1, "ok", "Windows AI ImageForegroundExtractor completed; Gray8 coverage normalized to f32 [0,1].",
+            new MaskOutput("mask", Protocol.MaskMetadata(metadata)),
+            new Execution([Protocol.DeviceId], Protocol.Backend, null), state.ToString()), maskBytes);
+    }
+
+    private static ResponseHeader DescribeState(AIFeatureReadyState state)
+    {
+        string name = state.ToString();
+        return name switch
+        {
+            "Ready" => new(1, "ready", "Windows AI model reports Ready. Probe performs no model creation, preparation or download.", ready_state: name),
+            "NotReady" => new(1, "needs_model", "needsModelDownload: Windows AI reports NotReady; explicit prepare may download/install system-managed model components.", ready_state: name),
+            "CapabilityMissing" => new(1, "unavailable", "installRequired: package is missing effective systemAIModels capability; reinstall a correctly declared MSIX and check MaxVersionTested.", ready_state: name),
+            "DisabledByUser" => new(1, "unavailable", "Windows AI feature is disabled/removed by the user; this companion will not re-enable it.", ready_state: name),
+            "OSUpdateNeeded" => new(1, "unavailable", "Windows AI requires an OS update or major OS upgrade; this companion does not change update/channel policy.", ready_state: name),
+            "NotCompatibleWithSystemHardware" => new(1, "unavailable", "Windows AI model is incompatible with this hardware/NPU.", ready_state: name),
+            "NotSupportedOnCurrentSystem" => new(1, "unavailable", "Windows AI model is unsupported on this Windows build or hardware configuration.", ready_state: name),
+            _ => new(1, "unavailable", $"Windows AI readiness state {name} ({(int)state}) is not supported; no fallback was used.", ready_state: name),
+        };
+    }
+}
+
+internal static class AdapterDescriptor
+{
+    internal static readonly object Value = new
+    {
+        api_version = 1,
+        id = "org.photocraft.windows-ai.foreground",
+        name = "Windows AI Foreground Extraction (ARM64 companion)",
+        version = "0.1.0",
+        operations = new[] { new { id = Protocol.Operation, output_kind = "mask", color_modes = new[] { "rgb" } } },
+        devices = new[] { new { id = Protocol.DeviceId, kind = "npu", backend = Protocol.Backend,
+            name = "Windows AI (system-managed NPU)", operations = new[] { Protocol.Operation } } },
+        resource_formats = Array.Empty<string>(),
+        params_schema = new { type = "object", properties = new { colorPolicy = new { type = "string", @enum = new[] { "assume-srgb" } } }, additionalProperties = false },
+    };
 }
