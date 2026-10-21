@@ -134,9 +134,9 @@ note = "Save for Web settings survive a restart through the remembered dialog se
 [[item]]
 id = "FILE-215-19"
 target = "Save As JPEG opens a JPEG Options dialog (quality 0-12, format options)"
-status = "missing"
+status = "done"
 issue = 215
-note = "ExportSettings has jpeg_quality 1-100 only (lib.rs:118)"
+note = "Save As / Save a Copy to JPEG opens a JPEG Options dialog (jpeg_options_ui) with quality slider 0-12 and Low/Medium/High/Maximum tiers mapped to codec quality, Baseline Standard, Baseline Optimized, and Progressive format options with 3-5 scans; scripts and actions pass jpegQuality, jpegFormat, jpegScans."
 
 [[item]]
 id = "FILE-215-20"

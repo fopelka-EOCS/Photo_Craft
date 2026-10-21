@@ -293,6 +293,37 @@ fn dds_params_are_none_until_one_is_given() {
     assert_eq!(dds_param(&json!({"ddsCompression": "bc2"}), "file.saveAs").unwrap(), Some(DdsOptions { compression: DdsCompression::Bc2, mipmaps: false }));
 }
 
+#[test]
+fn jpeg_params_parse_valid_and_reject_bad() {
+    use photocraft_io::{JpegFormat, JpegOptions};
+    assert_eq!(jpeg_param(&json!({}), "file.saveAs").unwrap(), None);
+    assert_eq!(jpeg_param(&json!({"jpegQuality": null}), "file.saveAs").unwrap(), None);
+    assert_eq!(
+        jpeg_param(&json!({"jpegQuality": 10}), "file.saveAs").unwrap(),
+        Some(JpegOptions { quality: 90, format: JpegFormat::BaselineStandard })
+    );
+    assert_eq!(
+        jpeg_param(&json!({"quality": 85}), "file.saveAs").unwrap(),
+        Some(JpegOptions { quality: 85, format: JpegFormat::BaselineStandard })
+    );
+    assert_eq!(
+        jpeg_param(&json!({"jpegFormat": "progressive", "jpegScans": 4}), "file.saveAs").unwrap(),
+        Some(JpegOptions { quality: 90, format: JpegFormat::Progressive { scans: 4 } })
+    );
+    assert_eq!(
+        jpeg_param(&json!({"jpegFormat": "baselineOptimized"}), "file.saveAs").unwrap(),
+        Some(JpegOptions { quality: 90, format: JpegFormat::BaselineOptimized })
+    );
+    for bad in [
+        json!({"jpegQuality": "high"}),
+        json!({"jpegQuality": 150}),
+        json!({"jpegFormat": "webp"}),
+        json!({"jpegScans": 8}),
+    ] {
+        assert!(jpeg_param(&bad, "file.saveAs").is_err(), "{bad}");
+    }
+}
+
 /// A `tgaBits` other than 24 or 32 is a bad parameter, reported before anything is written.
 #[test]
 fn bad_targa_bits_are_refused_before_writing() {

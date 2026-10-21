@@ -1514,12 +1514,12 @@ mod multi_layer_formatting {
         let before = ids.map(|id| style(&app, id, 0));
         let mut h = controls(app, false);
         h.get_all_by_role(Role::ComboBox).next().unwrap().click();
-        h.run();
+        h.run_steps(2);
         h.get_by_role(Role::TextInput).type_text("JetBrains");
         h.key_press(egui::Key::ArrowDown);
-        h.run();
+        h.run_steps(2);
         h.key_press(egui::Key::Enter);
-        h.run();
+        h.run_steps(2);
         for i in 0..2 {
             let mut expected = before[i].clone();
             expected.font_family = "JetBrains Mono".into();
@@ -2285,4 +2285,41 @@ fn justify_buttons_are_greyed_on_point_text() {
     PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ALL[0]);
     h.run_steps(4);
     assert!(h.get_by_label("Justify all").accesskit_node().is_disabled(), "one of the formatted layers is point text");
+}
+
+#[test]
+fn paragraph_direction_buttons_toggle_direction() {
+    let mut app = new_app();
+    let id = app.run("type.create", json!({"text": "Hello world", "size": 24, "x": 100, "y": 100})).unwrap()["layer"].as_u64().unwrap();
+    let mut h = Harness::builder().with_size(vec2(320.0, 700.0)).build_ui_state(
+        |ui, app: &mut PhotocraftApp| {
+            if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                crate::type_tool::character_panel(app, ui, true);
+            }
+        },
+        app,
+    );
+    PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ALL[0]);
+    h.run_steps(4);
+    let rtl_btn = h.get_by_label("Right-to-Left paragraph direction");
+    rtl_btn.click();
+    h.run_steps(2);
+    let st = h.state().session.active().unwrap();
+    let layer = st.doc.layer(LayerId(id)).unwrap();
+    if let LayerContent::Text(t) = &layer.content {
+        assert_eq!(t.paragraphs[0].style.direction, photocraft_doc::text::TextDirection::Rtl);
+    } else {
+        panic!("not text layer");
+    }
+
+    let ltr_btn = h.get_by_label("Left-to-Right paragraph direction");
+    ltr_btn.click();
+    h.run_steps(2);
+    let st = h.state().session.active().unwrap();
+    let layer = st.doc.layer(LayerId(id)).unwrap();
+    if let LayerContent::Text(t) = &layer.content {
+        assert_eq!(t.paragraphs[0].style.direction, photocraft_doc::text::TextDirection::Ltr);
+    } else {
+        panic!("not text layer");
+    }
 }

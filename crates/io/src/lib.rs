@@ -73,7 +73,55 @@ pub mod vector_map;
 mod xcf;
 
 use photocraft_codecs::{CodecError, EncodeOptions};
-pub use photocraft_codecs::{DdsCompression, DdsOptions, DpxBits};
+pub use photocraft_codecs::{DdsCompression, DdsOptions, DpxBits, JpegFormat};
+
+/// What a JPEG file is written with from Save As / JPEG Options.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct JpegOptions {
+    /// Quality 1..=100.
+    pub quality: u8,
+    /// Format options (Baseline Standard, Baseline Optimized, Progressive).
+    pub format: JpegFormat,
+}
+
+impl Default for JpegOptions {
+    fn default() -> Self {
+        JpegOptions { quality: 90, format: JpegFormat::BaselineStandard }
+    }
+}
+
+/// Converts Photoshop JPEG quality 0..=12 to codec quality percentage 1..=100.
+pub fn quality_level_to_percent(level: u8) -> u8 {
+    const TABLE: [u8; 13] = [10, 20, 30, 40, 50, 60, 70, 75, 80, 85, 90, 95, 100];
+    let idx = (level as usize).min(12);
+    TABLE[idx]
+}
+
+/// Converts codec quality percentage 1..=100 to closest Photoshop JPEG quality 0..=12.
+pub fn percent_to_quality_level(percent: u8) -> u8 {
+    const TABLE: [u8; 13] = [10, 20, 30, 40, 50, 60, 70, 75, 80, 85, 90, 95, 100];
+    let p = percent.clamp(1, 100);
+    let mut best_level = 0;
+    let mut best_diff = u8::MAX;
+    for (i, &t) in TABLE.iter().enumerate() {
+        let diff = t.abs_diff(p);
+        if diff < best_diff {
+            best_diff = diff;
+            best_level = i as u8;
+        }
+    }
+    best_level
+}
+
+/// The descriptive tier for a 0..=12 Photoshop JPEG quality level.
+pub fn quality_tier_name(level: u8) -> &'static str {
+    match level {
+        0..=2 => "Low",
+        3..=5 => "Medium",
+        6..=7 => "High",
+        _ => "Maximum",
+    }
+}
 use photocraft_doc::{Adjustment, Document, Layer, LayerContent};
 use photocraft_psd::{PsdError, PsdFile};
 
@@ -594,5 +642,30 @@ mod tests {
         assert!(is_svg_input("drawing.svg", b"<?xml version=\"1.0\"?><svg/>"));
         assert!(is_svg_input("drawing.svgz", &[0x1f, 0x8b, 0, 0]));
         assert!(!is_svg_input("drawing.svgz", webp_header));
+    }
+
+    #[test]
+    fn jpeg_quality_tier_and_percent_mapping() {
+        use super::*;
+        assert_eq!(quality_level_to_percent(0), 10);
+        assert_eq!(quality_level_to_percent(3), 40);
+        assert_eq!(quality_level_to_percent(8), 80);
+        assert_eq!(quality_level_to_percent(10), 90);
+        assert_eq!(quality_level_to_percent(12), 100);
+        assert_eq!(quality_level_to_percent(99), 100);
+
+        assert_eq!(percent_to_quality_level(10), 0);
+        assert_eq!(percent_to_quality_level(80), 8);
+        assert_eq!(percent_to_quality_level(90), 10);
+        assert_eq!(percent_to_quality_level(100), 12);
+
+        assert_eq!(quality_tier_name(0), "Low");
+        assert_eq!(quality_tier_name(2), "Low");
+        assert_eq!(quality_tier_name(3), "Medium");
+        assert_eq!(quality_tier_name(5), "Medium");
+        assert_eq!(quality_tier_name(6), "High");
+        assert_eq!(quality_tier_name(7), "High");
+        assert_eq!(quality_tier_name(8), "Maximum");
+        assert_eq!(quality_tier_name(12), "Maximum");
     }
 }

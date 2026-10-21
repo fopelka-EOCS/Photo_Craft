@@ -18,7 +18,7 @@ use crate::Format;
 use crate::error::CodecError;
 use crate::fidelity::Plan;
 use crate::image::{ChannelLayout, DecodeWarning, Image, Metadata, SampleType};
-use crate::options::{EncodeOptions, Limits};
+use crate::options::{EncodeOptions, JpegFormat, Limits};
 use crate::resolution::{exif_resolution, export_exif, export_xmp, photoshop_resolution, xmp_resolution};
 
 const F: Format = Format::Jpeg;
@@ -261,6 +261,25 @@ pub(crate) fn encode(src: &Image, plan: Plan, opts: &EncodeOptions) -> Result<Ve
         jpeg_encoder::SamplingFactor::R_4_4_4
     };
     enc.set_sampling_factor(sampling);
+    match opts.jpeg_format {
+        JpegFormat::BaselineStandard => {
+            enc.set_progressive(false);
+            enc.set_optimized_huffman_tables(false);
+        }
+        JpegFormat::BaselineOptimized => {
+            enc.set_progressive(false);
+            // jpeg-encoder 0.6 writes corrupt baseline scans when optimised Huffman tables meet 4:2:0
+            // (both zune-jpeg and image-rs decode them green); progressive output is fine.
+            let opt = !opts.jpeg_chroma_subsampling || img.layout() != ChannelLayout::Rgb;
+            enc.set_optimized_huffman_tables(opt);
+        }
+        JpegFormat::Progressive { scans } => {
+            enc.set_progressive(true);
+            let s = scans.clamp(3, 5);
+            enc.set_progressive_scans(s);
+            enc.set_optimized_huffman_tables(true);
+        }
+    }
     let e = |e: jpeg_encoder::EncodingError| CodecError::encode(F, e);
     if opts.embed_metadata {
         if let Some((x, y)) = img.meta.dpi
