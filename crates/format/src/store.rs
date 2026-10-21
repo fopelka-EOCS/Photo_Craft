@@ -405,11 +405,18 @@ pub struct PcraftWriter {
     compressed: HashMap<String, Arc<Vec<u8>>>,
     verified_directory: Option<DirectoryVerificationCache>,
     reverify_budget: u64,
+    history_load_budget: u64,
 }
 
 impl Default for PcraftWriter {
     fn default() -> Self {
-        Self { hash_cache: HashMap::new(), compressed: HashMap::new(), verified_directory: None, reverify_budget: DEFAULT_REVERIFY_BUDGET }
+        Self {
+            hash_cache: HashMap::new(),
+            compressed: HashMap::new(),
+            verified_directory: None,
+            reverify_budget: DEFAULT_REVERIFY_BUDGET,
+            history_load_budget: crate::LoadOptions::default().max_total_bytes,
+        }
     }
 }
 
@@ -453,6 +460,14 @@ enum Object {
 }
 
 impl Object {
+    /// What loading this object charges to [`crate::LoadOptions::max_total_bytes`].
+    fn loaded_len(&self) -> u64 {
+        match self {
+            Object::Tile(tile, _) => tile.bytes().len() as u64,
+            Object::Blob(blob) => blob.len() as u64,
+        }
+    }
+
     fn compressed(&self) -> Vec<u8> {
         compress(&self.content())
     }
@@ -767,6 +782,19 @@ impl PcraftWriter {
         self.reverify_budget = bytes;
     }
 
+    /// The load budget ([`crate::LoadOptions::max_total_bytes`]) a saved undo history must fit in
+    /// beside the document's own pixels, so a loader with that budget reopens the file with its
+    /// history: states that would push past it are left out, oldest first. Defaults to the
+    /// default loader's budget.
+    pub fn set_history_load_budget(&mut self, bytes: u64) {
+        self.history_load_budget = bytes;
+    }
+
+    /// See [`Self::set_history_load_budget`].
+    pub fn history_load_budget(&self) -> u64 {
+        self.history_load_budget
+    }
+
     fn prepare(&mut self, doc: &Document, opts: &SaveOptions) -> Result<Prepared> {
         self.hash_cache.retain(|_, (w, _)| w.strong_count() > 0);
         convert::check_nesting(&doc.layers)?;
@@ -805,7 +833,9 @@ impl PcraftWriter {
         let history = doc.saved_history.as_deref().and_then(|h| {
             let has_tile = |hash: &str| objects.contains_key(&tile_path(hash));
             let has_blob = |hash: &str| objects.contains_key(&blob_path(hash));
-            crate::saved_history::prepare(h, &manifest, Some(&mut self.hash_cache), &has_tile, &has_blob)
+            // The loader charges the document's objects and the history's to one budget.
+            let room = self.history_load_budget.saturating_sub(objects.values().map(Object::loaded_len).fold(0u64, u64::saturating_add));
+            crate::saved_history::prepare(h, &manifest, room, Some(&mut self.hash_cache), &has_tile, &has_blob)
         });
         let history = history.map(|h| {
             for (hash, (t, s)) in h.tiles {
