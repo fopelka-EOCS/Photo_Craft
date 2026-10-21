@@ -4202,6 +4202,23 @@ navigator	Zoom	Zoom
 	Increase Brush Size	Aumentar tamaño del pincel
 	Decrease Brush Hardness	Reducir dureza del pincel
 	Increase Brush Hardness	Aumentar dureza del pincel
+# Software Updates (#2316)
+	Check for Updates…	Buscar actualizaciones…
+	Checking for updates…	Buscando actualizaciones…
+	Download Update	Descargar actualización
+	Software Updates	Actualizaciones de software
+	Automatically Check for Updates at Startup	Buscar actualizaciones automáticamente al iniciar
+	Automatic checks run at most once a day. Available updates appear after you close other dialogs.	Las comprobaciones automáticas se realizan como máximo una vez al día. Las actualizaciones disponibles aparecen al cerrar los demás diálogos.
+	Download the update and save your work before installing the new version.	Descargue la actualización y guarde su trabajo antes de instalar la nueva versión.
+	For package-managed installations, update PhotoCraft through your package manager. Other downloads are on the release page.	Para instalaciones gestionadas por paquetes, actualice PhotoCraft mediante su gestor de paquetes. Las demás descargas están en la página de la versión.
+	Install Update	Instalar actualización
+	Open Release Page on GitHub	Abrir la página de la versión en GitHub
+	View Downloads	Ver descargas
+	Web builds are always running the latest version.	Las compilaciones web siempre ejecutan la versión más reciente.
+	What's new in this release:	Novedades de esta versión:
+	You're up to date	Está actualizado
+	PhotoCraft downloads the update in the background and installs it when you quit, so your session is not interrupted. Save your work first.	PhotoCraft descarga la actualización en segundo plano y la instala al cerrar, para no interrumpir su trabajo. Guarde primero su trabajo.
+	PhotoCraft will install the update when you quit.	PhotoCraft instalará la actualización al cerrar.
 	Memory Usage	Uso de memoria
 	Per-document RAM limit (MB)	Límite de RAM por documento (MB)
 	Installed RAM: {ram} MB; this limit: {percent}%	RAM instalada: {ram} MB; este límite: {percent}%

@@ -3241,6 +3241,24 @@ curves	Smooth	Glätten
 	GPU Memory (MB, 0 = Automatic)	GPU-Speicher (MB, 0 = Automatisch)
 	{name} was changed by another app after it was opened or saved here.	{name} wurde von einer anderen App geändert, nachdem es hier geöffnet oder gespeichert wurde.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Ersetze die Datei durch dieses Dokument oder brich ab und nutze Datei › Speichern unter, um beide zu behalten.
+# Software Updates (#2316)
+	Check for Updates	Nach Updates suchen
+	Check for Updates…	Nach Updates suchen…
+	Checking for updates…	Updates werden gesucht…
+	Download Update	Update herunterladen
+	Software Updates	Software-Updates
+	Automatically Check for Updates at Startup	Beim Start automatisch nach Updates suchen
+	Automatic checks run at most once a day. Available updates appear after you close other dialogs.	Automatische Prüfungen erfolgen höchstens einmal täglich. Verfügbare Updates erscheinen, nachdem Sie andere Dialoge geschlossen haben.
+	Download the update and save your work before installing the new version.	Laden Sie das Update herunter und speichern Sie Ihre Arbeit, bevor Sie die neue Version installieren.
+	For package-managed installations, update PhotoCraft through your package manager. Other downloads are on the release page.	Bei paketverwalteten Installationen aktualisieren Sie PhotoCraft über Ihren Paketmanager. Weitere Downloads finden Sie auf der Versionsseite.
+	Install Update	Update installieren
+	Open Release Page on GitHub	Release-Seite auf GitHub öffnen
+	View Downloads	Downloads anzeigen
+	Web builds are always running the latest version.	Web-Builds verwenden immer die neueste Version.
+	What's new in this release:	Neu in dieser Version:
+	You're up to date	Sie sind auf dem neuesten Stand
+	PhotoCraft downloads the update in the background and installs it when you quit, so your session is not interrupted. Save your work first.	PhotoCraft lädt das Update im Hintergrund herunter und installiert es beim Beenden, damit Ihre Arbeit nicht unterbrochen wird. Speichern Sie zuerst Ihre Arbeit.
+	PhotoCraft will install the update when you quit.	PhotoCraft installiert das Update beim Beenden.
 	Memory Usage	Speichernutzung
 	Per-document RAM limit (MB)	RAM-Limit pro Dokument (MB)
 	Installed RAM: {ram} MB; this limit: {percent}%	Installierter RAM: {ram} MB; dieses Limit: {percent}%
