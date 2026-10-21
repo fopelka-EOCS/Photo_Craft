@@ -186,6 +186,12 @@ sync_github_name = true
 real_name = "Guillem Hermida"
 sync_github_name = true
 
+[people.fjamesprice]
+sync_github_name = true
+
+[people.ha1des]
+sync_github_name = true
+
 [people.goglesquirmintontheiii]
 display_name = "@carpfp"
 sync_github_name = false
