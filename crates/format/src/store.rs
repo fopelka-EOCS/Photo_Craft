@@ -44,38 +44,53 @@ fn new_compressor<'a>() -> Result<Compressor<'a>> {
     Ok(Default::default())
 }
 
-/// Decodes a zstd frame of at most `max` bytes (`LimitExceeded` beyond). With `exact`, the
-/// decoded length must be exactly that (`Corrupt` otherwise).
-fn decompress_bounded(data: &[u8], max: usize, exact: Option<usize>, what: &str) -> Result<Vec<u8>> {
-    let zstd = |e: &dyn std::fmt::Display| FormatError::corrupt(format!("{what}: zstd: {e}"));
+/// Decoder workspaces live for one document load, not across imports.
+#[derive(Default)]
+struct Decompressor {
     #[cfg(feature = "native-zstd")]
-    if exact.is_none() {
-        return photocraft_codecs::decode_zstd_bounded(data, max).map_err(|e| {
-            if e.kind() == std::io::ErrorKind::FileTooLarge { FormatError::LimitExceeded(format!("{what} exceeds {max} bytes")) } else { zstd(&e) }
-        });
-    }
-    let mut dec = ruzstd::decoding::StreamingDecoder::new(data).map_err(|e| zstd(&e))?;
-    let mut out = Vec::with_capacity(exact.unwrap_or(0).min(max).min(64 << 20));
-    // `max` may be `usize::MAX`: one byte past it must not overflow.
-    let limit = u64::try_from(max).unwrap_or(u64::MAX).saturating_add(1);
-    (&mut dec).take(limit).read_to_end(&mut out).map_err(|e| zstd(&e))?;
-    match exact {
-        Some(n) if out.len() != n => Err(FormatError::corrupt(format!("{what}: expected {n} bytes, got {}", out.len()))),
-        None if out.len() > max => Err(FormatError::LimitExceeded(format!("{what} exceeds {max} bytes"))),
-        _ => Ok(out),
+    native: Option<photocraft_codecs::ZstdDecoder>,
+    #[cfg(not(feature = "native-zstd"))]
+    rust: ruzstd::decoding::FrameDecoder,
+}
+
+impl Decompressor {
+    /// Decodes one frame, checking the output budget and optional exact length.
+    fn decode(&mut self, data: &[u8], max: usize, exact: Option<usize>, what: &str) -> Result<Vec<u8>> {
+        let zstd = |e: &dyn std::fmt::Display| FormatError::corrupt(format!("{what}: zstd: {e}"));
+        #[cfg(feature = "native-zstd")]
+        let out = {
+            let decoder = match &mut self.native {
+                Some(decoder) => decoder,
+                slot @ None => slot.insert(photocraft_codecs::ZstdDecoder::new()?),
+            };
+            let decoded = if exact.is_some() { decoder.decode(data, max) } else { decoder.decode_bounded(data, max) };
+            decoded.map_err(|e| {
+                if e.kind() == std::io::ErrorKind::FileTooLarge { FormatError::LimitExceeded(format!("{what} exceeds {max} bytes")) } else { zstd(&e) }
+            })?
+        };
+        #[cfg(not(feature = "native-zstd"))]
+        let out = {
+            let mut dec = ruzstd::decoding::StreamingDecoder::new_with_decoder(data, &mut self.rust).map_err(|e| zstd(&e))?;
+            let mut out = Vec::with_capacity(exact.unwrap_or(0).min(max).min(64 << 20));
+            // `max` may be `usize::MAX`: one byte past it must not overflow.
+            let limit = u64::try_from(max).unwrap_or(u64::MAX).saturating_add(1);
+            (&mut dec).take(limit).read_to_end(&mut out).map_err(|e| zstd(&e))?;
+            out
+        };
+        match exact {
+            Some(n) if out.len() != n => Err(FormatError::corrupt(format!("{what}: expected {n} bytes, got {}", out.len()))),
+            None if out.len() > max => Err(FormatError::LimitExceeded(format!("{what} exceeds {max} bytes"))),
+            _ => Ok(out),
+        }
     }
 }
 
+/// Decodes a standalone frame with an output budget and optional exact length.
+fn decompress_bounded(data: &[u8], max: usize, exact: Option<usize>, what: &str) -> Result<Vec<u8>> {
+    Decompressor::default().decode(data, max, exact, what)
+}
+
 fn decompress(data: &[u8], expected: usize, what: &str) -> Result<Vec<u8>> {
-    #[cfg(feature = "native-zstd")]
-    {
-        let out = photocraft_codecs::decode_zstd(data, expected).map_err(|e| FormatError::corrupt(format!("{what}: zstd: {e}")))?;
-        if out.len() != expected {
-            return Err(FormatError::corrupt(format!("{what}: expected {expected} bytes, got {}", out.len())));
-        }
-        Ok(out)
-    }
-    #[cfg(not(feature = "native-zstd"))]
     decompress_bounded(data, expected, Some(expected), what)
 }
 
@@ -259,6 +274,7 @@ struct LoadFetch<'a> {
     opts: LoadOptions,
     total: u64,
     blobs: HashMap<String, Arc<Vec<u8>>>,
+    decompressor: Decompressor,
 }
 
 impl LoadFetch<'_> {
@@ -279,7 +295,7 @@ impl Fetch for LoadFetch<'_> {
         self.account(len)?;
         let path = tile_path(hash);
         let z = self.src.get_cow(&path, len + len / 8 + 4096)?;
-        let data = decompress(&z, len, &path)?;
+        let data = self.decompressor.decode(&z, len, Some(len), &path)?;
         if blake3::hash(&data).to_hex().as_str() != hash {
             return Err(FormatError::corrupt(format!("{path}: content does not match its hash")));
         }
@@ -299,7 +315,7 @@ impl Fetch for LoadFetch<'_> {
         let z = self.src.get_cow(&path, max_compressed)?;
         // Blob length is not in the manifest; the frame header bounds it and
         // we cap at max_blob_bytes.
-        let data = decompress_bounded(&z, self.opts.max_blob_bytes, None, &path)?;
+        let data = self.decompressor.decode(&z, self.opts.max_blob_bytes, None, &path)?;
         self.account(data.len())?;
         if blake3::hash(&data).to_hex().as_str() != hash {
             return Err(FormatError::corrupt(format!("{path}: content does not match its hash")));
@@ -328,7 +344,7 @@ fn admit_canvas(size: photocraft_geom::Size, opts: &LoadOptions) -> Result<()> {
 pub(crate) fn load(src: &dyn ByteSource, opts: &LoadOptions) -> Result<Document> {
     let m = read_manifest(src, opts)?;
     admit_canvas(m.document.size, opts)?;
-    let mut fetch = LoadFetch { src, opts: *opts, total: 0, blobs: HashMap::new() };
+    let mut fetch = LoadFetch { src, opts: *opts, total: 0, blobs: HashMap::new(), decompressor: Decompressor::default() };
     let mut loader = Loader {
         fetch: &mut fetch,
         preserve_ids: opts.preserve_ids,
@@ -1121,6 +1137,24 @@ pub(crate) fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// Reuse must preserve independent objects and recover after a failed frame.
+#[test]
+fn decoder_reuse_preserves_independent_objects() {
+    let mut decoder = Decompressor::default();
+    for bytes in [vec![37; 262_147], vec![], vec![19; 131_072], vec![42; 17]] {
+        let encoded = Object::Blob(Arc::new(bytes.clone())).compressed(&mut new_compressor().unwrap()).unwrap();
+        let mut reference = ruzstd::decoding::StreamingDecoder::new(encoded.as_slice()).unwrap();
+        let mut expected = Vec::new();
+        reference.read_to_end(&mut expected).unwrap();
+        assert_eq!(decoder.decode(&encoded, bytes.len(), Some(bytes.len()), "tile").unwrap(), expected);
+        assert!(decoder.decode(&encoded[..encoded.len() - 1], bytes.len(), None, "blob").is_err());
+        assert_eq!(decoder.decode(&encoded, bytes.len(), None, "blob").unwrap(), bytes);
+        if !bytes.is_empty() {
+            assert!(matches!(decoder.decode(&encoded, bytes.len() - 1, None, "blob"), Err(FormatError::LimitExceeded(_))));
+        }
+    }
+}
+
 /// Blob limits apply to decoded bytes, including empty and expanding frames.
 #[test]
 fn blob_budget_allows_frame_overhead() {
@@ -1141,6 +1175,7 @@ fn blob_budget_allows_frame_overhead() {
                 opts: LoadOptions { max_blob_bytes: max, max_total_bytes: bytes.len() as u64, ..LoadOptions::default() },
                 total: 0,
                 blobs: HashMap::new(),
+                decompressor: Decompressor::default(),
             };
             if corrupt {
                 assert!(fetch(bytes.len()).blob(&hash).is_err());
@@ -1246,7 +1281,10 @@ mod tests {
             if !bytes.is_empty() {
                 assert!(matches!(decompress_bounded(&encoded, bytes.len() - 1, None, "blob"), Err(FormatError::LimitExceeded(_))));
             }
-            assert_eq!(decompress_bounded(&encoded, bytes.len(), Some(bytes.len()), "Rust decoder").unwrap(), **bytes);
+            let mut rust_reader = ruzstd::decoding::StreamingDecoder::new(encoded.as_slice()).unwrap();
+            let mut rust_bytes = Vec::new();
+            rust_reader.read_to_end(&mut rust_bytes).unwrap();
+            assert_eq!(rust_bytes, **bytes);
             let rust = ruzstd::encoding::compress_to_vec(bytes.as_slice(), ruzstd::encoding::CompressionLevel::Fastest);
             assert_eq!(decompress(&rust, bytes.len(), "Rust encoder").unwrap(), **bytes);
         }

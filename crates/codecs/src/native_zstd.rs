@@ -7,29 +7,49 @@ fn zstd_error(code: usize) -> std::io::Error {
 
 /// Decodes the first Zstandard frame into at most `max_bytes` of output.
 pub fn decode_zstd(bytes: &[u8], max_bytes: usize) -> std::io::Result<Vec<u8>> {
-    let size = zstd::zstd_safe::find_frame_compressed_size(bytes).map_err(zstd_error)?;
-    let frame = bytes.get(..size).ok_or_else(|| std::io::Error::other("invalid Zstandard frame size"))?;
-    let mut decoded = Vec::new();
-    decoded.try_reserve_exact(max_bytes).map_err(std::io::Error::other)?;
-    let mut decoder = zstd::zstd_safe::DCtx::try_create().ok_or_else(|| std::io::Error::other("cannot allocate Zstandard decoder"))?;
-    decoder.decompress(&mut decoded, frame).map_err(zstd_error)?;
-    Ok(decoded)
+    ZstdDecoder::new()?.decode(bytes, max_bytes)
 }
 
 /// Decodes the first frame under an output budget and a 128 MiB window limit.
 /// Unlike [`decode_zstd`], this does not reserve the output budget up front.
 pub fn decode_zstd_bounded(bytes: &[u8], max_bytes: usize) -> std::io::Result<Vec<u8>> {
-    use std::io::Read;
-    let mut context = zstd::zstd_safe::DCtx::try_create().ok_or_else(|| std::io::Error::other("cannot allocate Zstandard decoder"))?;
-    context.set_parameter(zstd::zstd_safe::DParameter::WindowLogMax(27)).map_err(zstd_error)?;
-    let decoder = zstd::stream::read::Decoder::with_context(bytes, &mut context).single_frame();
-    let limit = u64::try_from(max_bytes).unwrap_or(u64::MAX).saturating_add(1);
-    let mut decoded = Vec::new();
-    decoder.take(limit).read_to_end(&mut decoded)?;
-    if decoded.len() > max_bytes {
-        return Err(std::io::Error::new(std::io::ErrorKind::FileTooLarge, "Zstandard output exceeds its budget"));
+    ZstdDecoder::new()?.decode_bounded(bytes, max_bytes)
+}
+
+/// Decoder state reused within one import, without retaining decoded output.
+pub struct ZstdDecoder(zstd::zstd_safe::DCtx<'static>);
+
+impl ZstdDecoder {
+    /// Creates a decoder with the streaming reader's 128 MiB window limit.
+    pub fn new() -> std::io::Result<Self> {
+        let mut context = zstd::zstd_safe::DCtx::try_create().ok_or_else(|| std::io::Error::other("cannot allocate Zstandard decoder"))?;
+        context.set_parameter(zstd::zstd_safe::DParameter::WindowLogMax(27)).map_err(zstd_error)?;
+        Ok(Self(context))
     }
-    Ok(decoded)
+
+    /// Decodes the first frame into at most `max_bytes` of output.
+    pub fn decode(&mut self, bytes: &[u8], max_bytes: usize) -> std::io::Result<Vec<u8>> {
+        let size = zstd::zstd_safe::find_frame_compressed_size(bytes).map_err(zstd_error)?;
+        let frame = bytes.get(..size).ok_or_else(|| std::io::Error::other("invalid Zstandard frame size"))?;
+        let mut decoded = Vec::new();
+        decoded.try_reserve_exact(max_bytes).map_err(std::io::Error::other)?;
+        self.0.decompress(&mut decoded, frame).map_err(zstd_error)?;
+        Ok(decoded)
+    }
+
+    /// Streams the first frame under the output budget without reserving it up front.
+    pub fn decode_bounded(&mut self, bytes: &[u8], max_bytes: usize) -> std::io::Result<Vec<u8>> {
+        use std::io::Read;
+        self.0.reset(zstd::zstd_safe::ResetDirective::SessionOnly).map_err(zstd_error)?;
+        let decoder = zstd::stream::read::Decoder::with_context(bytes, &mut self.0).single_frame();
+        let limit = u64::try_from(max_bytes).unwrap_or(u64::MAX).saturating_add(1);
+        let mut decoded = Vec::new();
+        decoder.take(limit).read_to_end(&mut decoded)?;
+        if decoded.len() > max_bytes {
+            return Err(std::io::Error::new(std::io::ErrorKind::FileTooLarge, "Zstandard output exceeds its budget"));
+        }
+        Ok(decoded)
+    }
 }
 
 /// Compares the first decoded frame with `expected` without allocating its full output.
@@ -80,6 +100,30 @@ impl ZstdEncoder<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A failed or partial stream must not affect the next independent object.
+    #[test]
+    fn decoder_reuse_keeps_frames_limits_and_error_recovery() {
+        let mut decoder = ZstdDecoder::new().unwrap();
+        let mut encoder = ZstdEncoder::new().unwrap();
+        for bytes in [vec![37; 262_147], vec![], vec![19; 131_072], vec![42; 17]] {
+            let frame = encoder.compress(&bytes).unwrap();
+            assert_eq!(decoder.decode(&frame, bytes.len()).unwrap(), bytes);
+            assert_eq!(decoder.decode_bounded(&frame, usize::MAX).unwrap(), bytes);
+            assert!(decoder.decode_bounded(&frame[..frame.len() - 1], bytes.len()).is_err());
+            assert_eq!(decoder.decode(&frame, bytes.len()).unwrap(), bytes);
+            if !bytes.is_empty() {
+                assert_eq!(decoder.decode_bounded(&frame, bytes.len() - 1).unwrap_err().kind(), std::io::ErrorKind::FileTooLarge);
+            }
+            let mut corrupt = frame.clone();
+            *corrupt.last_mut().unwrap() ^= 1;
+            assert!(decoder.decode_bounded(&corrupt, bytes.len()).is_err());
+            let joined = [frame.as_slice(), frame.as_slice()].concat();
+            assert_eq!(decoder.decode_bounded(&joined, bytes.len()).unwrap(), bytes);
+            assert!(decoder.decode_bounded(&[0x28, 0xb5, 0x2f, 0xfd, 0, 0x90, 1, 0, 0], 0).is_err());
+            assert_eq!(decoder.decode_bounded(&frame, bytes.len()).unwrap(), bytes);
+        }
+    }
 
     #[test]
     fn streaming_decode_checks_bounds_frames_and_checksums() {

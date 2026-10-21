@@ -48,7 +48,7 @@ pub use crate::resolution::{exif_resolution, export_exif, export_xmp, photoshop_
 pub use crate::source_settings::{WebpEncoding, jpeg_quality, webp_encoding};
 pub use half::f16;
 #[cfg(feature = "native-zstd")]
-pub use native_zstd::{ZstdEncoder, decode_zstd, decode_zstd_bounded, zstd_matches};
+pub use native_zstd::{ZstdDecoder, ZstdEncoder, decode_zstd, decode_zstd_bounded, zstd_matches};
 
 use crate::codecs::{dds, dpx, exr, fits, heif, jpeg, pcx, png, pnm, tiff, via_image, webp, xpm};
 
