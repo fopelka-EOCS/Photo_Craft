@@ -119,7 +119,19 @@ fn a_cancelled_import_file_reports_cancelled() {
 fn hidden_layers_decode_when_first_used() {
     let dir = TempDir::new("lazy");
     for c in [photocraft_psd::Compression::Rle, photocraft_psd::Compression::Raw, photocraft_psd::Compression::Zip] {
+        // A ZIP channel is inflated whole when opened anyway, so its layer opens decoded.
+        let zip = c == photocraft_psd::Compression::Zip;
         let mut file = testgen::layered(photocraft_psd::Version::Psd, photocraft_psd::ColorMode::Rgb, 8, c);
+        // The generator stores transparency as ZIP whatever `c` is: store every channel as `c`.
+        for l in file.layers_mut() {
+            let rect = l.rect;
+            for ch in &mut l.channels {
+                if ch.id == -1 && ch.compression != Some(c) && let Ok((w, h)) = rect.size() {
+                    let plane = ch.decode(w, h, 8, photocraft_psd::Version::Psd).unwrap();
+                    ch.set_decoded(c, &plane, w, h, 8, photocraft_psd::Version::Psd).unwrap();
+                }
+            }
+        }
         let hidden = file.layers().iter().position(|l| l.channels.iter().any(|ch| ch.id == 0) && !l.rect.is_empty()).unwrap();
         file.layers_mut()[hidden].flags.0 |= 2;
         let bytes = file.to_bytes().unwrap();
@@ -127,6 +139,10 @@ fn hidden_layers_decode_when_first_used() {
         let eager = import("lazy.psd", &bytes).unwrap().document;
         let lazy = open("lazy.psd", &path).unwrap().document;
         let pending: Vec<_> = lazy.walk().into_iter().filter(|(_, _, l)| l.surface().is_some_and(|s| s.is_pending())).map(|(_, _, l)| l.name.clone()).collect();
+        if zip {
+            assert!(pending.is_empty(), "{pending:?}");
+            continue;
+        }
         let name = file.layers()[hidden].name();
         assert!(pending.contains(&name), "{c:?}: {name} not among {pending:?}");
         let hidden_count = file.layers().iter().filter(|l| !l.is_visible() && !l.rect.is_empty() && l.channels.iter().any(|ch| ch.id == 0)).count();

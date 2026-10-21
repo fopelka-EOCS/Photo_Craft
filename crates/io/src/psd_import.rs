@@ -355,7 +355,14 @@ impl Ctx<'_> {
         let shape = LayerShape { fmt: self.fmt, cc: self.cc, cmyk: self.cmyk };
         // A hidden layer opened from a file (`import_file`) is decoded when first used: until
         // then it holds no pixels, only a 64-pixel preview of sampled rows for its thumbnail.
-        if self.lazy_hidden && !rec.is_visible() && ids.iter().filter_map(|&id| rec.channel(id)).all(|c| c.stored.is_some() || c.compression.is_none()) {
+        // Raw and RLE channels only: a ZIP stream is inflated whole when its decoder is made
+        // (above), so deferring the layer would inflate it a second time and save nothing.
+        if self.lazy_hidden
+            && !rec.is_visible()
+            && ids.iter().filter_map(|&id| rec.channel(id)).all(|c| {
+                c.compression.is_none() || (c.stored.is_some() && matches!(c.compression, Some(photocraft_psd::Compression::Raw | photocraft_psd::Compression::Rle)))
+            })
+        {
             let refs: Vec<Option<&photocraft_psd::RowDecoder<'_>>> = decoders.iter().map(|d| d.as_ref().and_then(|d| d.as_ref().ok())).collect();
             match layer_preview(&refs, w, h, shape) {
                 Ok(preview) => {

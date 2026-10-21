@@ -156,6 +156,9 @@ pub struct Surface {
     ready: BTreeMap<TileCoord, Arc<Tile>>,
     /// Tiles decoded on first use (see [`Surface::lazy`]); shared by clones, so they decode once.
     lazy: Option<Arc<LazyTiles>>,
+    /// Why a lazy decode failed, kept once the surface holds its own (empty) tiles, and carried
+    /// to surfaces made from it (moved, converted): a save must still refuse it.
+    decode_error: Option<Arc<str>>,
 }
 
 /// Use stack storage when it fits, otherwise reuse a dynamically sized sample buffer.
@@ -367,7 +370,7 @@ impl Surface {
     /// surface empty and [`Self::lazy_error`] says why (callers saving it must check).
     pub fn lazy(format: PixelFormat, bounds: Rect, preview: Option<(u32, Surface)>, decode: LazyDecode) -> Self {
         let lazy = LazyTiles { tiles: std::sync::OnceLock::new(), decode: std::sync::Mutex::new(Some(decode)), bounds, preview };
-        Self { format, default_pixel: vec![0u8; format.bytes_per_pixel()].into_boxed_slice(), ready: BTreeMap::new(), lazy: Some(Arc::new(lazy)) }
+        Self { format, default_pixel: vec![0u8; format.bytes_per_pixel()].into_boxed_slice(), ready: BTreeMap::new(), lazy: Some(Arc::new(lazy)), decode_error: None }
     }
 
     /// The tiles, decoding a lazy surface's first.
@@ -384,6 +387,9 @@ impl Surface {
     fn map_mut(&mut self) -> &mut BTreeMap<TileCoord, Arc<Tile>> {
         if let Some(l) = self.lazy.take() {
             self.ready = l.force().clone();
+            if let Some(Err(e)) = l.tiles.get() {
+                self.decode_error = Some(Arc::from(e.as_str()));
+            }
         }
         &mut self.ready
     }
@@ -410,6 +416,9 @@ impl Surface {
 
     /// Why a lazy surface's decode failed, once it ran.
     pub fn lazy_error(&self) -> Option<&str> {
+        if let Some(e) = &self.decode_error {
+            return Some(e);
+        }
         match self.lazy.as_ref()?.tiles.get()? {
             Err(e) => Some(e),
             Ok(_) => None,
@@ -449,6 +458,12 @@ impl Surface {
         }
     }
 
+    /// An identity for the lazy tiles this surface reads (decoded or not; the same for its
+    /// clones): `None` once it holds tiles of its own.
+    pub fn lazy_identity(&self) -> Option<usize> {
+        self.lazy.as_ref().map(|l| Arc::as_ptr(l) as usize)
+    }
+
     /// An identity for a pending surface's tiles (the same for its clones), for caches keyed by
     /// content that must not decode it.
     pub fn pending_id(&self) -> Option<usize> {
@@ -457,7 +472,7 @@ impl Surface {
 
     /// Transparent/zero surface.
     pub fn new(format: PixelFormat) -> Self {
-        Self { format, default_pixel: vec![0u8; format.bytes_per_pixel()].into_boxed_slice(), ready: BTreeMap::new(), lazy: None }
+        Self { format, default_pixel: vec![0u8; format.bytes_per_pixel()].into_boxed_slice(), ready: BTreeMap::new(), lazy: None, decode_error: None }
     }
 
     /// Surface whose untouched pixels read as `pixel` (normalised channel values).
@@ -1039,7 +1054,7 @@ impl Surface {
     /// `content` must hold every pixel that isn't the default one (`content_bounds`, say): only
     /// tiles it reaches are kept.
     pub fn translated(&self, dx: i32, dy: i32, content: Rect) -> Surface {
-        let mut out = Surface { format: self.format, default_pixel: self.default_pixel.clone(), ready: BTreeMap::new(), lazy: None };
+        let mut out = Surface { format: self.format, default_pixel: self.default_pixel.clone(), ready: BTreeMap::new(), lazy: None, decode_error: None };
         let sources = || self.map().iter().filter(move |(c, _)| !c.rect().intersect(&content).is_empty());
         if dx % TILE_SIZE == 0 && dy % TILE_SIZE == 0 {
             let (tx, ty) = (dx / TILE_SIZE, dy / TILE_SIZE);
@@ -1174,6 +1189,7 @@ impl Surface {
         {
             out.ready = targets.into_iter().filter_map(build_target).collect();
         }
+        out.decode_error = self.lazy_error().map(Arc::from);
         out
     }
 
@@ -1241,6 +1257,7 @@ impl Surface {
                 done.insert(Arc::as_ptr(t), converted.clone());
             }
         }
+        out.decode_error = self.lazy_error().map(Arc::from);
         out
     }
 
@@ -1272,6 +1289,7 @@ impl Surface {
                 done.insert(Arc::as_ptr(t), converted.clone());
             }
         }
+        out.decode_error = self.lazy_error().map(Arc::from);
         Ok(out)
     }
 
@@ -1497,6 +1515,13 @@ mod tests {
         assert_eq!(failed.lazy_error(), None);
         assert_eq!(failed.tile_count(), 0);
         assert_eq!(failed.lazy_error(), Some("gone"));
+        // The failure stays with the surface once it holds its own tiles, and with surfaces
+        // made from it: a save must still refuse them.
+        let mut edited = failed.clone();
+        edited.write_pixel(300, 10, &[1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(edited.lazy_error(), Some("gone"));
+        assert_eq!(failed.translated(5, 0, r).lazy_error(), Some("gone"));
+        assert_eq!(failed.convert(PixelFormat::new(ColorMode::Grayscale, SampleType::U8, true)).lazy_error(), Some("gone"));
     }
 
     /// Uniform tiles written pixel by pixel end up as one shared tile per value, across
