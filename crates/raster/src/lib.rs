@@ -216,6 +216,8 @@ impl UniformTiles {
 
 /// Tiles a [`Surface::lazy`] surface decodes the first time anything reads or writes it.
 pub struct LazyTiles {
+    /// The format the decode must produce (the lazy surface's).
+    format: PixelFormat,
     tiles: std::sync::OnceLock<Result<BTreeMap<TileCoord, Arc<Tile>>, String>>,
     decode: std::sync::Mutex<Option<LazyDecode>>,
     bounds: Rect,
@@ -233,7 +235,14 @@ impl LazyTiles {
         let r = self.tiles.get_or_init(|| {
             let decode = self.decode.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
             match decode {
-                Some(f) => f().map(|mut s| std::mem::take(s.map_mut())),
+                // Tiles of another format (or read against another default pixel) would be read
+                // wrongly or out of bounds: such a decode fails instead.
+                Some(f) => f().and_then(|mut s| {
+                    if s.format != self.format || s.default_pixel.iter().any(|&b| b != 0) {
+                        return Err(format!("the decode gave {:?} pixels with a non-zero default or of the wrong format ({:?} expected)", s.format, self.format));
+                    }
+                    Ok(std::mem::take(s.map_mut()))
+                }),
                 None => Err("the decode was already taken".into()),
             }
         });
@@ -369,7 +378,7 @@ impl Surface {
     /// `(0, 0)` is `bounds`' corner, so a thumbnail needs no decode. A failed decode leaves the
     /// surface empty and [`Self::lazy_error`] says why (callers saving it must check).
     pub fn lazy(format: PixelFormat, bounds: Rect, preview: Option<(u32, Surface)>, decode: LazyDecode) -> Self {
-        let lazy = LazyTiles { tiles: std::sync::OnceLock::new(), decode: std::sync::Mutex::new(Some(decode)), bounds, preview };
+        let lazy = LazyTiles { format, tiles: std::sync::OnceLock::new(), decode: std::sync::Mutex::new(Some(decode)), bounds, preview };
         Self { format, default_pixel: vec![0u8; format.bytes_per_pixel()].into_boxed_slice(), ready: BTreeMap::new(), lazy: Some(Arc::new(lazy)), decode_error: None }
     }
 
@@ -1511,6 +1520,15 @@ mod tests {
         assert_eq!(edited.pixel(300, 10), vec![0.0, 0.0, 1.0, 1.0]);
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert!(!s.read_preview_pixel(300, 10, &mut px));
+
+        // A decode of another format or default pixel is refused, not read wrongly.
+        let gray = PixelFormat::new(ColorMode::Grayscale, SampleType::U8, false);
+        let wrong = Surface::lazy(PixelFormat::RGBA8, r, None, Box::new(move || Ok(Surface::new(gray))));
+        assert_eq!(wrong.tile_count(), 0);
+        assert!(wrong.lazy_error().is_some());
+        let white = Surface::lazy(PixelFormat::RGBA8, r, None, Box::new(|| Ok(Surface::with_default(PixelFormat::RGBA8, &[1.0; 4]))));
+        assert_eq!(white.pixel(0, 0), vec![0.0; 4]);
+        assert!(white.lazy_error().is_some());
 
         let failed = Surface::lazy(PixelFormat::RGBA8, r, None, Box::new(|| Err("gone".into())));
         assert_eq!(failed.lazy_error(), None);
