@@ -317,8 +317,7 @@ struct SubjectParams {
 
 impl SubjectParams {
     fn parse(p: &Value) -> Result<Self> {
-        let empty = serde_json::Map::new();
-        let map = if p.is_null() { &empty } else { p.as_object().ok_or_else(|| bad(SUBJECT, "params must be an object"))? };
+        let map = p.as_object().ok_or_else(|| bad(SUBJECT, "params must be an object"))?;
         for key in map.keys() {
             if !matches!(
                 key.as_str(),
@@ -395,7 +394,7 @@ impl SubjectParams {
 
 /// Called by the dispatcher's adapter preflight before it clones caller-built JSON.
 pub(crate) fn preflight(id: &str, params: &Value) -> Result<()> {
-    if id == SUBJECT {
+    if id == SUBJECT && !params.is_null() {
         SubjectParams::parse(params)?;
     }
     Ok(())
