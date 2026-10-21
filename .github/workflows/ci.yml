@@ -220,7 +220,7 @@ jobs:
         run: cargo test --workspace --locked --features heif --doc
 
       - name: Test reference Zstandard
-        if: needs.platforms.outputs.native-zstd == 'true' && (matrix.part == 'all' || matrix.part == 'unit')
+        if: runner.os == 'Linux' && needs.platforms.outputs.native-zstd == 'true' && (matrix.part == 'all' || matrix.part == 'unit')
         shell: bash
         env:
           PHOTOCRAFT_BACKEND_FIXTURES: ${{ runner.temp }}/native-zstd-fixtures
