@@ -410,7 +410,14 @@ fn drain(panel: &mut Panel, ctx: &HostCtx) -> Result<()> {
             }
         };
         for op in ops {
-            apply(panel, ctx, op)?;
+            // The ABI says a bad operation rejects the batch and stops the panel. Returning the
+            // error alone would leave the operations before it applied, the ones after it dropped,
+            // and the panel still running with a state it never asked for.
+            if let Err(error) = apply(panel, ctx, op) {
+                panel.instance.stop(PluginError::Ops(error.to_string()));
+                note_failure(panel.instance.plugin().id(), ctx.now);
+                return Err(error);
+            }
         }
     }
     panel.steps += pumped as u64;

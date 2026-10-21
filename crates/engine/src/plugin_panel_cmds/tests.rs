@@ -490,6 +490,27 @@ fn doc_info_answers_with_the_open_document() {
 }
 
 #[test]
+fn a_bad_operation_stops_the_panel_instead_of_leaving_half_the_batch_applied() {
+    let id = "test.panel.badop";
+    // The 33rd `timer.set` is one past the limit: the operations before it are carried out, this one
+    // is not. The ABI says the batch is rejected and the panel stopped, so nothing it armed survives.
+    let ops: Vec<String> =
+        (0..=photocraft_plugins::instance::MAX_TIMERS).map(|i| format!(r#"{{"op": "timer.set", "id": "t{i}", "ms": 100}}"#)).collect();
+    let reply = format!("[{}]", ops.join(","));
+    let mut s = app(id, &panel(id, &[VIEW, &reply]));
+    open(&mut s, id);
+    let error = click(&mut s, id, "go").expect_err("a reply with too many timers must fail");
+    assert!(error.to_string().contains("timers"), "{error}");
+    let st = inspect(&mut s, id);
+    assert_eq!(st["state"], "stopped", "{st}");
+    assert!(st["error"].as_str().unwrap_or_default().contains("timers"), "{st}");
+    assert_eq!(st["timers"], 0, "the timers the earlier operations armed went with the instance: {st}");
+    // And it stays stopped, as for any other failure.
+    assert!(click(&mut s, id, "go").is_err());
+    cleanup(&mut s, id);
+}
+
+#[test]
 fn a_panel_that_traps_stops_and_keeps_its_reason_until_restarted() {
     let id = "test.panel.trap";
     let mut s = app(id, &panel(id, &[VIEW, TRAP]));
