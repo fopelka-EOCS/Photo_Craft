@@ -692,8 +692,23 @@ fn main() -> eframe::Result {
     gpu_startup::configure(&mut options.wgpu_options.wgpu_setup, &plan, os, wanted_adapter, sentinel.clone(), gpu_note.clone());
     // Preferences › Performance › Low-Latency Drawing (#1343): without vsync a stroke shows about
     // 50 ms sooner; wgpu picks Immediate, else Mailbox, else Fifo by what the driver offers.
-    if gpu_startup::read_low_latency(services::prefs_file().as_deref()) {
+    let low_latency = gpu_startup::read_low_latency(services::prefs_file().as_deref());
+    if low_latency {
         options.wgpu_options.surface.present_mode = eframe::wgpu::PresentMode::AutoNoVsync;
+    }
+    // Preferences › Performance › Prevent G-SYNC/FreeSync Flicker: a transparent window on a DX12
+    // DirectComposition swapchain is always composed by DWM, so the driver never treats it as full
+    // screen. A flip swapchain (Vulkan, DX12 from the HWND) engaged G-SYNC even with "full screen
+    // only", and input-driven repaints then flickered VA/OLED panels [OBSERVED 2026-10-17].
+    let compose_window = gpu_startup::read_compose_window(services::prefs_file().as_deref()) && std::env::var_os(gpu_startup::NO_COMPOSE_ENV).is_none();
+    let composed = gpu_startup::composes_window(os, &plan, compose_window, low_latency);
+    if composed {
+        options.viewport = options.viewport.with_transparent(true);
+        if let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup {
+            create.instance_descriptor.backends = eframe::wgpu::Backends::DX12;
+            create.instance_descriptor.backend_options.dx12.presentation_system = eframe::wgpu::Dx12SwapchainKind::DxgiFromVisual;
+        }
+        log::info!("presenting through the desktop compositor (DX12 DirectComposition, transparent window)");
     }
     // Testers' present mode and frame latency overrides (#1343), after the preference.
     let present = presentation::Overrides::from_args_or_env(present_mode_arg.as_deref(), frame_latency_arg.as_deref());
@@ -928,15 +943,20 @@ fn main() -> eframe::Result {
             s.finish();
         }
         if let Ok(exe) = std::env::current_exe() {
-            let launched = std::process::Command::new(exe)
-                .args(std::env::args_os().skip(1))
-                .arg("--safe-gpu")
-                .env_remove("WGPU_BACKEND")
-                .env("PHOTOCRAFT_GPU_STARTUP_FAILURE", &reason)
-                .spawn();
-            match launched {
+            let mut command = std::process::Command::new(exe);
+            command.args(std::env::args_os().skip(1));
+            match gpu_startup::startup_retry(composed) {
+                gpu_startup::StartupRetry::WithoutCompositor => {
+                    log::warn!("presenting through the compositor failed ({reason}); restarting without it");
+                    command.env(gpu_startup::NO_COMPOSE_ENV, "1");
+                }
+                gpu_startup::StartupRetry::Cpu => {
+                    command.arg("--safe-gpu").env_remove("WGPU_BACKEND").env("PHOTOCRAFT_GPU_STARTUP_FAILURE", &reason);
+                }
+            }
+            match command.spawn() {
                 Ok(_) => return Ok(()),
-                Err(error) => log::error!("could not start CPU compatibility mode: {error}"),
+                Err(error) => log::error!("could not restart after the graphics start failed: {error}"),
             }
         }
     }
