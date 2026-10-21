@@ -597,8 +597,16 @@ mod tests {
         app.adapter_ui.open = true;
         app.adapter_ui.available = Some(true);
         let ctx = egui::Context::default();
+        PhotocraftApp::setup_context(&ctx, crate::theme::ThemeKind::ALL[0]);
         for _ in 0..3 {
-            ctx.run_ui(egui::RawInput::default(), |ui| show(&mut app, ui.ctx())).textures_delta.clear();
+            ctx.run_ui(egui::RawInput::default(), |ui| {
+                if !ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                    return;
+                }
+                show(&mut app, ui.ctx());
+            })
+            .textures_delta
+            .clear();
         }
         assert_eq!(calls.get(), 0);
     }
