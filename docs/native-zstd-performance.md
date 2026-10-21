@@ -106,6 +106,6 @@ PHOTOCRAFT_BACKEND_READ_OTHER=1 cargo test -p photocraft-format --locked --featu
 PHOTOCRAFT_BACKEND_READ_OTHER=1 cargo test -p photocraft-format --locked --test roundtrip cross_backend_documents -- --ignored --exact
 ```
 
-The decoder and directory-verification follow-up passed native decoder units, format units, corruption and round-trip tests, strict Clippy for codecs and format, and a native format WASM check. Focused tests also cover large verification, tampered-object repair and the default directory path. Tests reject truncation, wrong checksums, excessive output and oversized windows, and check concatenated-frame verification. This is not a full workspace test run.
+Decoder and format tests cover truncation, wrong checksums, excessive output, oversized windows, large-object verification and directory repair. Directory verification uses the same first-frame boundary as loading; Affinity reads concatenated frames.
 
 CI runs optional-backend checks only for relevant source, test, dependency and build-input changes; manual runs and `full-ci` force them. It includes decoder tests, an Affinity import, format tests, cross-backend fixtures, strict Clippy and WASM checks with Clang. Default builds keep their existing checks.

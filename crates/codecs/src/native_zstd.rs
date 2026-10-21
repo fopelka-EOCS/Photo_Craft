@@ -5,12 +5,14 @@ fn zstd_error(code: usize) -> std::io::Error {
     std::io::Error::other(zstd::zstd_safe::get_error_name(code))
 }
 
-/// Decode Zstandard frames into at most `max_bytes` of output.
+/// Decodes the first Zstandard frame into at most `max_bytes` of output.
 pub fn decode_zstd(bytes: &[u8], max_bytes: usize) -> std::io::Result<Vec<u8>> {
+    let size = zstd::zstd_safe::find_frame_compressed_size(bytes).map_err(zstd_error)?;
+    let frame = bytes.get(..size).ok_or_else(|| std::io::Error::other("invalid Zstandard frame size"))?;
     let mut decoded = Vec::new();
     decoded.try_reserve_exact(max_bytes).map_err(std::io::Error::other)?;
     let mut decoder = zstd::zstd_safe::DCtx::try_create().ok_or_else(|| std::io::Error::other("cannot allocate Zstandard decoder"))?;
-    decoder.decompress(&mut decoded, bytes).map_err(zstd_error)?;
+    decoder.decompress(&mut decoded, frame).map_err(zstd_error)?;
     Ok(decoded)
 }
 
@@ -30,13 +32,13 @@ pub fn decode_zstd_bounded(bytes: &[u8], max_bytes: usize) -> std::io::Result<Ve
     Ok(decoded)
 }
 
-/// Compares decoded frames with `expected` without allocating their full output.
+/// Compares the first decoded frame with `expected` without allocating its full output.
 /// Enforces the same 128 MiB window limit as [`decode_zstd_bounded`].
 pub fn zstd_matches(bytes: &[u8], mut expected: &[u8]) -> std::io::Result<bool> {
     use std::io::Read;
     let mut context = zstd::zstd_safe::DCtx::try_create().ok_or_else(|| std::io::Error::other("cannot allocate Zstandard decoder"))?;
     context.set_parameter(zstd::zstd_safe::DParameter::WindowLogMax(27)).map_err(zstd_error)?;
-    let mut decoder = zstd::stream::read::Decoder::with_context(bytes, &mut context);
+    let mut decoder = zstd::stream::read::Decoder::with_context(bytes, &mut context).single_frame();
     let mut buffer = [0; 64 << 10];
     loop {
         let n = decoder.read(&mut buffer)?;
@@ -102,12 +104,10 @@ mod tests {
             }
             let joined = [frame.as_slice(), frame.as_slice()].concat();
             assert_eq!(decode_zstd_bounded(&joined, bytes.len()).unwrap(), bytes);
-            assert!(!zstd_matches(&joined, &bytes).unwrap());
+            assert_eq!(decode_zstd(&joined, bytes.len()).unwrap(), bytes);
+            assert!(zstd_matches(&joined, &bytes).unwrap());
             let both = [bytes.as_slice(), bytes.as_slice()].concat();
-            assert!(zstd_matches(&joined, &both).unwrap());
-            let mut corrupt = joined;
-            *corrupt.last_mut().unwrap() ^= 1;
-            assert!(zstd_matches(&corrupt, &both).is_err());
+            assert!(!zstd_matches(&joined, &both).unwrap());
             *frame.last_mut().unwrap() ^= 1;
             assert!(decode_zstd_bounded(&frame, bytes.len()).is_err());
             assert!(zstd_matches(&frame, &bytes).is_err());
@@ -125,6 +125,7 @@ mod tests {
 
     #[test]
     fn frames_are_independent_and_checksummed() {
+        assert!(decode_zstd(&[], 0).is_err());
         let mut encoder = ZstdEncoder::new().unwrap();
         let mut reference = zstd::bulk::Compressor::new(0).unwrap();
         reference.include_checksum(true).unwrap();

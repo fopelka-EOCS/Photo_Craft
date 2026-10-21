@@ -242,6 +242,33 @@ fn directory_bundle_resave_repairs_tampered_objects() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// Reused blob content must be complete in its first frame, including empty content.
+#[test]
+fn directory_save_repairs_missing_and_split_blob_frames() {
+    for len in [0, 64, (2 << 20) + 1] {
+        let bytes = vec![37; len];
+        let damaged: Vec<u8> = if len == 0 {
+            Vec::new()
+        } else {
+            [&bytes[..len / 2], &bytes[len / 2..]]
+                .into_iter()
+                .flat_map(|b| ruzstd::encoding::compress_to_vec(b, ruzstd::encoding::CompressionLevel::Fastest))
+                .collect()
+        };
+        let mut doc = photocraft_doc::Document::new("blob frames", photocraft_geom::Size::new(1, 1), ColorMode::Rgb, SampleType::U8);
+        doc.icc_profile = Some(std::sync::Arc::new(bytes));
+        let dir = temp_dir("blob-frames");
+        let mut writer = PcraftWriter::new();
+        writer.save_dir(&doc, &dir, &SaveOptions::default()).unwrap();
+        let blob = std::fs::read_dir(dir.join("blobs")).unwrap().next().unwrap().unwrap().path();
+        std::fs::write(&blob, damaged).unwrap();
+        assert!(load_path(&dir).is_err());
+        assert_eq!(writer.save_dir(&doc, &dir, &SaveOptions::default()).unwrap().blobs_written, 1, "{len} bytes");
+        assert_eq!(load_path(&dir).unwrap(), doc);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
 /// Damages one object in place without changing its length or modification time, the case a
 /// size-and-mtime cache alone would trust. Returns the damaged file's path.
 fn damage_in_place_keeping_size_and_mtime(dir: &std::path::Path) -> std::path::PathBuf {
