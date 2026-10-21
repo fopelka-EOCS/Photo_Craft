@@ -2989,6 +2989,7 @@ fontWeight	Italic	Miring
 	Appearance Settings…	Pengaturan Tampilan…
 	Add to favorites	Tambahkan ke favorit
 	Remove from favorites	Hapus dari favorit
+	Favorites	Favorit
 # File Info ▸ Camera Data (read-only EXIF fields; "Make" is the camera maker, not the verb).
 cameraData	Make	Merek
 cameraData	Model	Model

@@ -2930,6 +2930,7 @@ fontWeight	Italic	Курсив
 	Appearance Settings…	Настройки оформления…
 	Add to favorites	Добавить в избранное
 	Remove from favorites	Удалить из избранного
+	Favorites	Избранное
 # File Info ▸ Camera Data (read-only EXIF fields; "Make" is the camera maker, not the verb).
 cameraData	Make	Производитель
 cameraData	Model	Модель
