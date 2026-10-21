@@ -1607,7 +1607,20 @@ pub fn build_tysh(layer: &TextLayer, dpi: f32, ink: Option<[f32; 4]>) -> Vec<u8>
         Some(D::Text(s)) => s.to_string_lossy().replace('\r', "\n") != current,
         _ => false,
     });
-    let template = if text_changed { None } else { old.as_ref().and_then(|t| engine_data(&t.text)) };
+    let template = old.as_ref().and_then(|t| engine_data(&t.text)).map(|data| {
+        if text_changed {
+            let mut resources = E::dict();
+            for key in ["ResourceDict", "DocumentResources"] {
+                if let Some(rd) = data.get(key) {
+                    resources.set(key, rd.clone());
+                }
+            }
+            resources.set("EngineDict", E::dict());
+            resources
+        } else {
+            data
+        }
+    });
     let e = build_engine_data(layer, template, dpi);
     let mut text = if text_changed { Descriptor::new("TxLr") } else { old.as_ref().map(|t| t.text.clone()).unwrap_or_else(|| Descriptor::new("TxLr")) };
     let set = |d: &mut Descriptor, key: &str, v: D| match d.items.iter_mut().find(|(k, _)| k.is(key)) {

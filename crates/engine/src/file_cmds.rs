@@ -406,6 +406,67 @@ pub fn dds_param(p: &Value, cmd: &str) -> Result<Option<photocraft_io::DdsOption
     Ok(Some(photocraft_io::DdsOptions { compression: compression.unwrap_or_default(), mipmaps: mipmaps.unwrap_or(false) }))
 }
 
+/// The JPEG options in `p`: `"jpegQuality"` (or `"quality"`: 0..=12 or 1..=100),
+/// `"jpegFormat"` (`"baselineStandard"`, `"baselineOptimized"`, `"progressive"`),
+/// and optional `"jpegScans"` (3, 4, 5).
+/// `None` when none are provided.
+pub fn jpeg_param(p: &Value, cmd: &str) -> Result<Option<photocraft_io::JpegOptions>> {
+    let bad = |msg: String| EngineError::BadParams { cmd: cmd.into(), msg };
+    let q_val = p.get("jpegQuality").or_else(|| p.get("quality")).filter(|v| !v.is_null());
+    let fmt_val = p.get("jpegFormat").filter(|v| !v.is_null());
+    let scans_val = p.get("jpegScans").or_else(|| p.get("scans")).filter(|v| !v.is_null());
+
+    if q_val.is_none() && fmt_val.is_none() && scans_val.is_none() {
+        return Ok(None);
+    }
+
+    let quality = match q_val {
+        None | Some(Value::Null) => 90,
+        Some(v) => {
+            let n = v.as_u64().or_else(|| v.as_f64().map(|f| f.round() as u64)).ok_or_else(|| bad(format!("`jpegQuality` must be a positive integer, got {v}")))?;
+            if n <= 12 {
+                photocraft_io::quality_level_to_percent(n as u8)
+            } else if n <= 100 {
+                n as u8
+            } else {
+                return Err(bad(format!("`jpegQuality` must be 0..=12 or 1..=100, got {n}")));
+            }
+        }
+    };
+
+    let scans = match scans_val {
+        None | Some(Value::Null) => 3,
+        Some(v) => {
+            let s = v.as_u64().ok_or_else(|| bad(format!("`jpegScans` must be 3, 4 or 5, got {v}")))?;
+            if !(3..=5).contains(&s) {
+                return Err(bad(format!("`jpegScans` must be 3, 4 or 5, got {s}")));
+            }
+            s as u8
+        }
+    };
+
+    let format = match fmt_val {
+        None | Some(Value::Null) => {
+            if scans_val.is_some() {
+                photocraft_io::JpegFormat::Progressive { scans }
+            } else {
+                photocraft_io::JpegFormat::BaselineStandard
+            }
+        }
+        Some(v) => {
+            let s = v.as_str().ok_or_else(|| bad(format!("`jpegFormat` must be a string, got {v}")))?;
+            match s {
+                "baselineStandard" | "standard" | "baseline" => photocraft_io::JpegFormat::BaselineStandard,
+                "baselineOptimized" | "optimized" => photocraft_io::JpegFormat::BaselineOptimized,
+                "progressive" => photocraft_io::JpegFormat::Progressive { scans },
+                _ => return Err(bad(format!("`jpegFormat` must be \"baselineStandard\", \"baselineOptimized\" or \"progressive\", got {s}"))),
+            }
+        }
+    };
+
+    Ok(Some(photocraft_io::JpegOptions { quality, format }))
+}
+
 /// Encodes `doc` for `path`'s extension.
 pub(crate) fn encode(doc: &Document, path: &str, save: impl Into<SaveOpts>) -> Result<(Vec<u8>, Vec<String>)> {
     crate::allocation::checkpoint("saving document")?;

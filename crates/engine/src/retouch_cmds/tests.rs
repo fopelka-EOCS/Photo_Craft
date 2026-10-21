@@ -685,14 +685,14 @@ fn art_history_brush_paints_stylized_marks_from_history() {
 
     let r = s.execute(
         "paint.artHistoryBrush",
-        json!({"points": [[20, 20]], "size": 8, "style": "tightMedium", "area": 10, "state": 1}),
+        json!({"points": [[20, 20]], "size": 8, "style": "tightMedium", "area": 10, "state": 2}),
     );
     assert!(r.is_ok(), "{r:?}");
     let p = rgba(&s, 20, 20);
     assert!(p[0] > 0.4, "art history brush restored red: {p:?}");
 
     for style in ["tightShort", "tightMedium", "tightLong", "looseMedium", "looseLong", "dab", "tightCurl", "looseCurl"] {
-        let res = s.execute("paint.artHistoryBrush", json!({"points": [[20, 20]], "size": 6, "style": style, "area": 5, "state": 1}));
+        let res = s.execute("paint.artHistoryBrush", json!({"points": [[20, 20]], "size": 6, "style": style, "area": 5, "state": 2}));
         assert!(res.is_ok(), "style {style} failed: {res:?}");
     }
 

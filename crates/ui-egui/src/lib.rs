@@ -110,6 +110,7 @@ pub mod hold_keys;
 pub mod i18n;
 mod icon_data;
 pub mod icons;
+pub mod jpeg_options_ui;
 pub mod jobs_ui;
 pub mod kys_import;
 pub mod lasso_ui;
@@ -260,6 +261,8 @@ pub type ImportFn = Box<dyn Fn(&str, &[u8], usize) -> Result<(Document, Vec<Stri
 pub struct ExportSettings {
     /// JPEG quality 1–100 (None = codec default).
     pub jpeg_quality: Option<u8>,
+    /// JPEG format options (Baseline Standard, Baseline Optimized, Progressive).
+    pub jpeg_format: Option<photocraft_codecs::JpegFormat>,
     /// WebP: lossless (VP8L) rather than lossy (VP8 at [`Self::webp_quality`]).
     pub webp_lossless: bool,
     /// Lossy WebP quality 1–100 (None = codec default).
@@ -297,6 +300,7 @@ impl Default for ExportSettings {
     fn default() -> Self {
         ExportSettings {
             jpeg_quality: None,
+            jpeg_format: None,
             webp_lossless: true,
             webp_quality: None,
             tiff_layers: true,
@@ -320,6 +324,9 @@ impl ExportSettings {
         if let Some(q) = self.jpeg_quality {
             opts.encode.jpeg_quality = q;
         }
+        if let Some(fmt) = self.jpeg_format {
+            opts.encode.jpeg_format = fmt;
+        }
         opts.encode.webp_lossless = self.webp_lossless;
         if let Some(q) = self.webp_quality {
             opts.encode.webp_quality = q;
@@ -337,24 +344,36 @@ impl ExportSettings {
     }
 }
 
-/// The format answers a save takes instead of asking: the Targa bits per pixel and the DDS options
-/// (`"tgaBits"`, `"ddsCompression"`, `"ddsMipmaps"`). `None` asks in Save As and takes the
-/// default in automation saves, which never prompt.
+/// The format answers a save takes instead of asking: the Targa bits per pixel, the DDS options
+/// (`"tgaBits"`, `"ddsCompression"`, `"ddsMipmaps"`) and JPEG options (`"jpegQuality"`,
+/// `"jpegFormat"`, `"jpegScans"`). `None` asks in Save As and takes the default in automation
+/// saves, which never prompt.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FormatChoices {
     pub tga_bits: Option<photocraft_io::TgaBits>,
     pub dds: Option<photocraft_io::DdsOptions>,
+    pub jpeg: Option<photocraft_io::JpegOptions>,
 }
 
 impl FormatChoices {
     /// The answers in command `cmd`'s params; a bad value is an error.
     pub fn from_params(params: &Value, cmd: &str) -> Result<Self, String> {
-        Ok(FormatChoices { tga_bits: targa_options_ui::bits_param(params, cmd)?, dds: dds_options_ui::options_param(params, cmd)? })
+        Ok(FormatChoices {
+            tga_bits: targa_options_ui::bits_param(params, cmd)?,
+            dds: dds_options_ui::options_param(params, cmd)?,
+            jpeg: jpeg_options_ui::options_param(params, cmd)?,
+        })
     }
 
     /// The export settings with these answers applied.
     pub(crate) fn apply(self, settings: ExportSettings) -> ExportSettings {
-        ExportSettings { tga_bits: self.tga_bits, dds: self.dds.unwrap_or(settings.dds), ..settings }
+        ExportSettings {
+            tga_bits: self.tga_bits,
+            dds: self.dds.unwrap_or(settings.dds),
+            jpeg_quality: self.jpeg.map(|j| j.quality).or(settings.jpeg_quality),
+            jpeg_format: self.jpeg.map(|j| j.format).or(settings.jpeg_format),
+            ..settings
+        }
     }
 
     /// Adds the answers to a recorded save step.
@@ -364,6 +383,9 @@ impl FormatChoices {
         }
         if let Some(dds) = self.dds {
             dds_options_ui::record(dds, step);
+        }
+        if let Some(jpeg) = self.jpeg {
+            jpeg_options_ui::record(jpeg, step);
         }
     }
 }
@@ -887,6 +909,8 @@ pub struct PhotocraftApp {
     pub(crate) targa_options: Option<targa_options_ui::Prompt>,
     /// A save to a DDS texture parked behind the DDS Options prompt (see `dds_options_ui`).
     pub(crate) dds_options: Option<dds_options_ui::Prompt>,
+    /// A save to a JPEG image parked behind the JPEG Options prompt (see `jpeg_options_ui`).
+    pub(crate) jpeg_options: Option<jpeg_options_ui::Prompt>,
     /// Files read but not opened yet: the first waits on its profile prompt, the rest behind it
     /// (see `open_prompt`).
     pub(crate) held_opens: std::collections::VecDeque<open_prompt::Held>,
@@ -1040,6 +1064,7 @@ impl PhotocraftApp {
             disk_stamps: HashMap::new(),
             targa_options: None,
             dds_options: None,
+            jpeg_options: None,
             held_opens: Default::default(),
             allow_close: false,
             stylus: Default::default(),
@@ -1601,6 +1626,11 @@ impl PhotocraftApp {
             dds_options_ui::park(self, path.clone(), copy, "file.saveAs")?;
             return Ok(serde_json::json!({"path": path, "warnings": []}));
         }
+        if choices.jpeg.is_none() && jpeg_options_ui::wants_prompt(&path) {
+            let copy = self.saves_copy(&path, None)?;
+            jpeg_options_ui::park(self, path.clone(), copy, "file.saveAs")?;
+            return Ok(serde_json::json!({"path": path, "warnings": []}));
+        }
         // A layered TIFF asks about its layers first (Preferences › File Handling); the save
         // continues from the prompt, which records the step once answered.
         if tiff_options_ui::wants_prompt(self, &path) {
@@ -1838,9 +1868,9 @@ impl PhotocraftApp {
         own == path && self.services.file_stamp.as_ref().and_then(|stamp| stamp(path)).is_some_and(|now| now != *then)
     }
 
-    /// TIFF, Targa or DDS Options is waiting on an answer before a save is written.
+    /// TIFF, Targa, DDS or JPEG Options is waiting on an answer before a save is written.
     pub(crate) fn save_options_open(&self) -> bool {
-        self.tiff_options.is_some() || self.targa_options.is_some() || self.dds_options.is_some()
+        self.tiff_options.is_some() || self.targa_options.is_some() || self.dds_options.is_some() || self.jpeg_options.is_some()
     }
 
     /// A print worker may still be handing a job to the system queue.
@@ -2187,6 +2217,7 @@ impl eframe::App for PhotocraftApp {
         tiff_options_ui::show(self, &ctx);
         targa_options_ui::show(self, &ctx);
         dds_options_ui::show(self, &ctx);
+        jpeg_options_ui::show(self, &ctx);
         distort_ui::show(self, &ctx);
         camera_raw_ui::show(self, &ctx);
         wide_angle_ui::show(self, &ctx);

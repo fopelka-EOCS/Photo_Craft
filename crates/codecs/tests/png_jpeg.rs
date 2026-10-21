@@ -159,6 +159,24 @@ fn jpeg_progressive_from_other_encoder_decodes() {
     assert!(psnr(&img, &back) > 25.0);
 }
 
+#[test]
+fn jpeg_format_options_encode_and_decode() {
+    let img = test_image(ChannelLayout::Rgb, SampleType::U8);
+    for format in [
+        JpegFormat::BaselineStandard,
+        JpegFormat::BaselineOptimized,
+        JpegFormat::Progressive { scans: 3 },
+        JpegFormat::Progressive { scans: 4 },
+        JpegFormat::Progressive { scans: 5 },
+    ] {
+        let opts = EncodeOptions { jpeg_format: format, ..Default::default() };
+        let bytes = encode(&img, Format::Jpeg, &opts).unwrap();
+        let back = decode(&bytes).unwrap();
+        let score = psnr(&img, &back);
+        assert!(score > 20.0, "format {format:?} should decode accurately: {score}");
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Oracle: files we write are readable by the image crate
 // ---------------------------------------------------------------------------

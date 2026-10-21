@@ -233,6 +233,8 @@ pub struct TextLayout {
     pub px_per_pt: f32,
     /// Vertical type: line space is turned 90° clockwise into text space.
     pub vertical: bool,
+    /// Direction of each paragraph in the layout.
+    pub paragraph_directions: Vec<photocraft_doc::text::TextDirection>,
 }
 
 impl TextLayout {
@@ -341,6 +343,30 @@ impl TextLayout {
             }
             None => (0.0, 0.0, 0.0),
         }
+    }
+
+    /// True when the caret at byte `offset` is in a right-to-left context (visual RTL caret).
+    pub fn caret_is_rtl(&self, offset: usize) -> bool {
+        for c in &self.clusters {
+            if c.range.start == offset {
+                return c.rtl;
+            }
+        }
+        let li = self.lines.iter().position(|l| offset >= l.range.start && offset <= l.range.end).unwrap_or(self.lines.len().saturating_sub(1));
+        if let Some(l) = self.lines.get(li) {
+            if let Some(c) = self.clusters.iter().find(|c| c.line == li && c.range.end == offset) {
+                return c.rtl;
+            }
+            if let Some(dir) = self.paragraph_directions.get(l.paragraph)
+                && *dir == photocraft_doc::text::TextDirection::Rtl
+            {
+                return true;
+            }
+            if let Some(c) = self.clusters.iter().find(|c| c.line == li) {
+                return c.rtl;
+            }
+        }
+        false
     }
 }
 
@@ -544,6 +570,7 @@ impl Layouter {
                 break;
             }
             let ps = para_style_at(prange.start).clone();
+            out.paragraph_directions.push(ps.direction);
             let content_end = strip_break(text, &prange);
             let content = &text[prange.start..content_end];
             let prefix = match ps.direction {
@@ -1535,5 +1562,32 @@ mod tests {
         assert!(feature_list(&style, real).iter().any(|feature| feature == "\"smcp\" 1"));
         assert_eq!(synthetic, SmallCapsMode::Synthetic);
         assert!(!feature_list(&style, synthetic).iter().any(|feature| feature == "\"smcp\" 1"));
+    }
+
+    #[test]
+    fn caret_is_rtl_reflects_paragraph_direction_and_script() {
+        use photocraft_doc::text::{ParagraphRun, ParagraphStyle, TextDirection};
+
+        let mut engine = crate::TextEngine::new();
+        // LTR paragraph
+        let ltr_layer = TextLayer {
+            text: "Hello world".into(),
+            runs: vec![TextRun { len: 11, style: CharStyle::default() }],
+            paragraphs: vec![ParagraphRun { len: 11, style: ParagraphStyle { direction: TextDirection::Ltr, ..Default::default() } }],
+            ..Default::default()
+        };
+        let ltr_layout = engine.layout(&ltr_layer, 72.0);
+        assert!(!ltr_layout.caret_is_rtl(0));
+        assert!(!ltr_layout.caret_is_rtl(5));
+
+        // RTL paragraph
+        let rtl_layer = TextLayer {
+            text: "שלום עולם".into(),
+            runs: vec![TextRun { len: "שלום עולם".len(), style: CharStyle::default() }],
+            paragraphs: vec![ParagraphRun { len: "שלום עולם".len(), style: ParagraphStyle { direction: TextDirection::Rtl, ..Default::default() } }],
+            ..Default::default()
+        };
+        let rtl_layout = engine.layout(&rtl_layer, 72.0);
+        assert!(rtl_layout.caret_is_rtl(0));
     }
 }

@@ -424,10 +424,10 @@ impl Ctx<'_> {
             if let Some(txt2) = &self.txt2 {
                 photocraft_text::psd::apply_txt2(&mut t, &data, txt2);
                 photocraft_text::psd::apply_txt2_frame(&mut t, &data, txt2);
-            } else if let Some(index) = photocraft_text::psd::text_index(&data) {
-                if let Some((_, runs)) = self.kerning_sidecar.iter().find(|(i, _)| *i == index) {
-                    apply_kerning_sidecar(&mut t, runs);
-                }
+            } else if let Some(index) = photocraft_text::psd::text_index(&data)
+                && let Some((_, runs)) = self.kerning_sidecar.iter().find(|(i, _)| *i == index)
+            {
+                apply_kerning_sidecar(&mut t, runs);
             }
             // Photoshop's pixels are the cache only when the file has some: ag-psd, GIMP and
             // other writers leave type layers without image data (Photoshop re-renders them on

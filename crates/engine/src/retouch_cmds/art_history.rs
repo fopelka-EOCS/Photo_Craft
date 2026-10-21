@@ -123,10 +123,10 @@ fn paint_art_history(
     let pad = (area + reach + 4.0).ceil() as i32;
     let base_bounds = ds.iter().fold(Rect::EMPTY, |acc, d| {
         let r = Rect::new(
-            (d.center.x - d.radius).floor() as i32,
-            (d.center.y - d.radius).floor() as i32,
-            (d.center.x + d.radius).ceil() as i32,
-            (d.center.y + d.radius).ceil() as i32,
+            (d.center.x - d.radius as f64).floor() as i32,
+            (d.center.y - d.radius as f64).floor() as i32,
+            (d.center.x + d.radius as f64).ceil() as i32,
+            (d.center.y + d.radius as f64).ceil() as i32,
         );
         acc.union(&r)
     });
@@ -161,14 +161,15 @@ fn paint_art_history(
 
     for (i, d) in ds.iter().enumerate() {
         let idx = (d.index ^ (i as u64)).wrapping_add(1);
-        let jx = photocraft_paint::rng::rand_signed(seed, idx, STREAM_DX) * area;
-        let jy = photocraft_paint::rng::rand_signed(seed, idx, STREAM_DY) * area;
+        let scatter = (area * 0.1).min(brush_radius * 0.35);
+        let jx = photocraft_paint::rng::rand_signed(seed, idx, STREAM_DX) * scatter;
+        let jy = photocraft_paint::rng::rand_signed(seed, idx, STREAM_DY) * scatter;
 
         let cx = d.center.x as f32 + jx;
         let cy = d.center.y as f32 + jy;
 
-        let ix = cx.round() as i32;
-        let iy = cy.round() as i32;
+        let ix = d.center.x.round() as i32;
+        let iy = d.center.y.round() as i32;
 
         if !work.rect.contains(ix, iy) {
             continue;
@@ -398,6 +399,7 @@ fn brush_falloff(dist: f32, radius: f32, hardness: f32) -> f32 {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 #[inline]
 fn blend_pixel(
     work: &mut Region,
@@ -410,8 +412,8 @@ fn blend_pixel(
     lock_transparency: bool,
     a_idx: Option<usize>,
 ) {
-    let px = work.px_mut(x, y);
     let n = work.ch;
+    let px = work.px_mut(x, y);
     if lock_transparency && a_idx.is_some_and(|a| px.get(a).copied().unwrap_or(0.0) <= 0.0) {
         return;
     }
@@ -431,10 +433,10 @@ fn blend_pixel(
             if lock_transparency && Some(c) == a_idx {
                 continue;
             }
-            if let Some(dst) = px.get_mut(c) {
-                if let Some(val) = enc.get(c) {
-                    *dst = *val;
-                }
+            if let Some(dst) = px.get_mut(c)
+                && let Some(val) = enc.get(c)
+            {
+                *dst = *val;
             }
         }
     }

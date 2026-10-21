@@ -237,6 +237,39 @@ pub struct DdsOptions {
     pub mipmaps: bool,
 }
 
+/// JPEG format options matching Photoshop's JPEG Options dialog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum JpegFormat {
+    /// Baseline ("Standard")
+    #[default]
+    BaselineStandard,
+    /// Baseline Optimized (optimised Huffman tables)
+    BaselineOptimized,
+    /// Progressive scans (3, 4, or 5 scans; default 3)
+    Progressive { scans: u8 },
+}
+
+impl JpegFormat {
+    pub const ALL_NAMES: [&'static str; 3] = ["baselineStandard", "baselineOptimized", "progressive"];
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            JpegFormat::BaselineStandard => "baselineStandard",
+            JpegFormat::BaselineOptimized => "baselineOptimized",
+            JpegFormat::Progressive { .. } => "progressive",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "baselineStandard" | "standard" | "baseline" => Some(JpegFormat::BaselineStandard),
+            "baselineOptimized" | "optimized" => Some(JpegFormat::BaselineOptimized),
+            "progressive" => Some(JpegFormat::Progressive { scans: 3 }),
+            _ => None,
+        }
+    }
+}
+
 /// Options for [`crate::encode`].
 #[derive(Debug, Clone)]
 pub struct EncodeOptions {
@@ -244,6 +277,8 @@ pub struct EncodeOptions {
     pub jpeg_quality: u8,
     /// JPEG 4:2:0 chroma subsampling (`false` = 4:4:4).
     pub jpeg_chroma_subsampling: bool,
+    /// JPEG format options (Baseline Standard, Baseline Optimized, Progressive).
+    pub jpeg_format: JpegFormat,
     pub png_compression: PngCompression,
     /// Write Adam7-interlaced PNG.
     pub png_interlaced: bool,
@@ -275,6 +310,7 @@ impl Default for EncodeOptions {
         EncodeOptions {
             jpeg_quality: 90,
             jpeg_chroma_subsampling: true,
+            jpeg_format: JpegFormat::default(),
             png_compression: PngCompression::Default,
             png_interlaced: false,
             png_stereo: None,

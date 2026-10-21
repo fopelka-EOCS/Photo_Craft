@@ -329,6 +329,7 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
         "fontStyle": o.type_style,
         "size": o.type_size,
         "align": o.type_align,
+        "direction": o.type_direction,
         "color": hex(app.session.tools.foreground),
     });
     if w >= min && h >= min {
@@ -1110,8 +1111,13 @@ pub fn draw_overlay(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewX
         if ed.dragging || (elapsed * 1000.0 / 530.0) as i64 % 2 == 0 {
             let (x, top, bot) = l.caret(a);
             let (x, top, bot) = if l.lines.is_empty() { (0.0, -(12.0 * l.px_per_pt.max(1.0)), 3.0) } else { (x, top, bot) };
+            let rtl = l.caret_is_rtl(a);
             for stroke in CARET_STROKES {
                 painter.line_segment([scr(x, top), scr(x, bot)], stroke);
+                if rtl {
+                    let flag_len = 3.5 * l.px_per_pt.clamp(1.0, 2.0);
+                    painter.line_segment([scr(x, top), scr(x - flag_len, top)], stroke);
+                }
             }
         }
     }
@@ -1848,6 +1854,31 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             apply(app, ui.ctx(), json!({"align": align}));
         }
     }
+    let curr_dir = styles_at(app).map_or_else(|| o.type_direction.as_str(), |(_, p)| match p.direction {
+        photocraft_doc::text::TextDirection::Ltr => "ltr",
+        photocraft_doc::text::TextDirection::Rtl => "rtl",
+        photocraft_doc::text::TextDirection::Auto => "auto",
+    });
+    for (dir, tip, d) in [
+        ("ltr", tl!("Left-to-Right paragraph direction"), photocraft_doc::text::TextDirection::Ltr),
+        ("rtl", tl!("Right-to-Left paragraph direction"), photocraft_doc::text::TextDirection::Rtl),
+    ] {
+        let on = curr_dir == dir;
+        let (r, resp) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::click());
+        let bg = if on { t.accent_soft } else if resp.hovered() { t.hover } else { Color32::TRANSPARENT };
+        ui.painter().rect_filled(r, t.radius_sm, bg);
+        if on {
+            ui.painter().rect_stroke(r, t.radius_sm, Stroke::new(1.0, t.accent_border), egui::StrokeKind::Inside);
+        }
+        let col = if on { t.text } else { t.icon };
+        let g = egui::Rect::from_center_size(r.center(), egui::vec2(14.0, 14.0));
+        direction_glyph(ui.painter(), g, d, col);
+        if resp.on_hover_text(tip).clicked() {
+            let next = if on { "auto" } else { dir };
+            app.ui.tool_options.type_direction = next.into();
+            apply(app, ui.ctx(), json!({"direction": next}));
+        }
+    }
     ui.spacing_mut().item_spacing.x = 8.0;
     crate::widgets::vline(ui, 22.0);
     // Text colour swatch with a picker popup.
@@ -2050,6 +2081,37 @@ fn align_glyph(p: &egui::Painter, r: egui::Rect, a: photocraft_doc::text::TextAl
             _ => (full * 0.55, r.right() - full * 0.55),
         };
         p.line_segment([egui::pos2(x0, y), egui::pos2(x0 + len, y)], Stroke::new(1.5, c));
+    }
+}
+
+/// Paragraph direction glyphs (LTR / RTL paragraph direction arrows with lines).
+fn direction_glyph(p: &egui::Painter, r: egui::Rect, d: photocraft_doc::text::TextDirection, c: Color32) {
+    use photocraft_doc::text::TextDirection as D;
+    let s = Stroke::new(1.3, c);
+    let y0 = r.top() + 3.0;
+    let y1 = r.top() + 7.0;
+    let y2 = r.top() + 11.0;
+    match d {
+        D::Ltr => {
+            p.line_segment([egui::pos2(r.left() + 2.0, y0), egui::pos2(r.right() - 2.0, y0)], s);
+            p.line_segment([egui::pos2(r.left() + 2.0, y1), egui::pos2(r.right() - 5.0, y1)], s);
+            p.line_segment([egui::pos2(r.left() + 2.0, y2), egui::pos2(r.right() - 2.0, y2)], s);
+            p.line_segment([egui::pos2(r.right() - 5.0, y2 - 2.5), egui::pos2(r.right() - 2.0, y2)], s);
+            p.line_segment([egui::pos2(r.right() - 5.0, y2 + 2.5), egui::pos2(r.right() - 2.0, y2)], s);
+        }
+        D::Rtl => {
+            p.line_segment([egui::pos2(r.left() + 2.0, y0), egui::pos2(r.right() - 2.0, y0)], s);
+            p.line_segment([egui::pos2(r.left() + 5.0, y1), egui::pos2(r.right() - 2.0, y1)], s);
+            p.line_segment([egui::pos2(r.left() + 2.0, y2), egui::pos2(r.right() - 2.0, y2)], s);
+            p.line_segment([egui::pos2(r.left() + 5.0, y2 - 2.5), egui::pos2(r.left() + 2.0, y2)], s);
+            p.line_segment([egui::pos2(r.left() + 5.0, y2 + 2.5), egui::pos2(r.left() + 2.0, y2)], s);
+        }
+        D::Auto => {
+            let font = egui::FontId::proportional(9.0);
+            let g = p.layout_no_wrap("Auto".into(), font, c);
+            let pos = r.center() - g.size() / 2.0;
+            p.galley(pos, g, c);
+        }
     }
 }
 
@@ -2402,6 +2464,26 @@ fn type_sections(app: &mut PhotocraftApp, ui: &mut egui::Ui, character: bool, pa
                     .inner;
                 if clicked {
                     apply(app, ui.ctx(), json!({"align": key}));
+                }
+            }
+        });
+        ui.add_space(ROW_GAP);
+        let dirs = [
+            ("ltr", tl!("Left-to-Right paragraph direction"), photocraft_doc::text::TextDirection::Ltr),
+            ("rtl", tl!("Right-to-Left paragraph direction"), photocraft_doc::text::TextDirection::Rtl),
+        ];
+        let dw = cell_width(full, 2);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            for (key, tip, d) in dirs {
+                let on = para.direction == d;
+                let clicked = toggle_cell(ui, dw, on, tip, |ui, r, col| {
+                    let g = egui::Rect::from_center_size(r.center(), egui::vec2(14.0, 14.0));
+                    direction_glyph(ui.painter(), g, d, col);
+                });
+                if clicked {
+                    let next = if on { "auto" } else { key };
+                    apply(app, ui.ctx(), json!({"direction": next}));
                 }
             }
         });

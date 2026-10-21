@@ -1518,16 +1518,13 @@ pub(crate) fn estimate_psd_size(doc: &Document) -> Option<u64> {
 /// the stub Photoshop rejects. An unchanged stub with an empty resource dict and no glyph
 /// positions (`/21`) is the same stub, so an unedited re-save of one of our old files drops it.
 fn keep_txt2(previous: &[u8], built: &[u8]) -> bool {
-    if built != previous {
-        return false;
-    }
-    let Some(v) = photocraft_text::psd::parse_txt2(previous) else { return false };
+    let Some(v) = photocraft_text::psd::parse_txt2(built) else { return false };
     let empty_resources = match v.get("0") {
         Some(photocraft_text::engine_data::Value::Dict(items)) => items.is_empty(),
         None => true,
         Some(_) => false,
     };
-    !empty_resources || has_glyph_positions(&v, 0)
+    !empty_resources || (built == previous && has_glyph_positions(&v, 0))
 }
 
 fn has_glyph_positions(v: &photocraft_text::engine_data::Value, depth: usize) -> bool {
