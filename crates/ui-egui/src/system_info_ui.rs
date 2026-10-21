@@ -66,8 +66,9 @@ pub fn body(app: &PhotocraftApp, ui: &mut egui::Ui, interactive: bool, id: egui:
 /// Facts about the machine that don't change while PhotoCraft runs, read once.
 #[derive(Debug, Default)]
 pub struct Host {
-    /// Operating system name and version ("macOS 26.5.1"), or just the OS family.
-    pub os: String,
+    /// Operating system name and version ("macOS 26.5.1"), `None` where the platform doesn't
+    /// report a version (the report then names just the OS family).
+    pub os: Option<String>,
     /// Processor name as the OS reports it ("Apple M5 Pro").
     pub cpu: Option<String>,
     /// Logical processors (hardware threads) available to PhotoCraft.
@@ -78,7 +79,7 @@ pub struct Host {
 pub fn host() -> &'static Host {
     static HOST: std::sync::OnceLock<Host> = std::sync::OnceLock::new();
     HOST.get_or_init(|| Host {
-        os: os_version().unwrap_or_else(|| std::env::consts::OS.to_string()),
+        os: os_version().filter(|s| !s.is_empty()),
         cpu: cpu_name().filter(|s| !s.is_empty()),
         threads: if cfg!(target_arch = "wasm32") { None } else { std::thread::available_parallelism().ok().map(|n| n.get()) },
     })
@@ -89,7 +90,7 @@ pub fn host() -> &'static Host {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Machine {
     /// See [`Host::os`].
-    pub os: String,
+    pub os: Option<String>,
     /// See [`Host::cpu`].
     pub cpu: Option<String>,
     /// See [`Host::threads`].
@@ -349,7 +350,9 @@ mod tests {
     #[test]
     fn host_names_an_os_and_counts_processors() {
         let h = host();
-        assert!(!h.os.is_empty());
+        if cfg!(any(target_os = "macos", windows)) {
+            assert!(h.os.as_ref().is_some_and(|s| !s.is_empty()), "{h:?}");
+        }
         if cfg!(not(target_arch = "wasm32")) {
             assert!(h.threads.is_some_and(|n| n >= 1));
         }

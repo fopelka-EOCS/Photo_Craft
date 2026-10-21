@@ -87,7 +87,7 @@ pub(crate) fn report(app: &PhotocraftApp, machine: &crate::system_info_ui::Machi
     };
     let mut v = vec![
         line("PhotoCraft version: {value}", &photocraft_engine::build_info::long_version()),
-        line("Operating system: {value}", &machine.os),
+        line("Operating system: {value}", machine.os.as_deref().unwrap_or(std::env::consts::OS)),
         line("System architecture: {value}", &arch),
     ];
     if let Some(n) = machine.threads {
@@ -200,7 +200,7 @@ mod tests {
     /// A machine with every fact known, so the report is fixed.
     fn known() -> Machine {
         Machine {
-            os: "macOS 26.5.1".into(),
+            os: Some("macOS 26.5.1".into()),
             cpu: Some("Apple M5 Pro".into()),
             threads: Some(18),
             installed_memory: Some(48 << 30),
@@ -285,9 +285,8 @@ mod tests {
     #[test]
     fn system_info_leaves_out_what_the_platform_does_not_report() {
         let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
-        let unknown = Machine { os: "windows".into(), ..Machine::default() };
-        let lines = crate::i18n::with_language(crate::i18n::Lang::EN, || report(&app, &unknown));
-        assert_eq!(lines.get(1).map(String::as_str), Some("Operating system: windows"));
+        let lines = crate::i18n::with_language(crate::i18n::Lang::EN, || report(&app, &Machine::default()));
+        assert_eq!(lines.get(1), Some(&format!("Operating system: {}", std::env::consts::OS)), "no version names the OS family");
         assert_eq!(lines.get(2), Some(&format!("System architecture: {}", std::env::consts::ARCH)));
         for gone in ["Logical processor count:", "Built-in memory:", "Memory used by PhotoCraft:"] {
             assert!(!lines.iter().any(|l| l.starts_with(gone)), "{gone} {lines:#?}");
@@ -316,13 +315,14 @@ mod tests {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         let result = crate::menus::invoke(&mut app, &egui::Context::default(), "help.systemInfo", json!({})).unwrap();
         let info = &result["info"];
-        assert!(info["osVersion"].as_str().is_some_and(|s| !s.is_empty()), "{info}");
+        assert!(info["osVersion"].as_str().is_some_and(|s| !s.is_empty()) || info["osVersion"].is_null(), "{info}");
         assert!(info["cpu"].is_string() || info["cpu"].is_null(), "{info}");
         for key in ["logicalProcessors", "physicalMemory", "processMemory"] {
             assert!(info[key].is_u64() || info[key].is_null(), "{key}: {info}");
         }
         let lines: Vec<String> = serde_json::from_value(info["lines"].clone()).unwrap();
-        assert_eq!(lines.get(1), Some(&format!("Operating system: {}", info["osVersion"].as_str().unwrap_or_default())));
+        let os = info["osVersion"].as_str().unwrap_or(std::env::consts::OS);
+        assert_eq!(lines.get(1), Some(&format!("Operating system: {os}")));
         if let Some(bytes) = info["processMemory"].as_u64() {
             let line = format!("Memory used by PhotoCraft: {} MB", bytes >> 20);
             assert!(lines.contains(&line), "the lines and the fields are one reading: {line} {lines:#?}");
