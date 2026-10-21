@@ -66,6 +66,7 @@ const OPEN_FILTERS: &[(&str, &[&str])] = &[
     ("Radiance HDR", &["hdr"]),
     ("FITS", &["fits", "fit", "fts"]),
     ("DPX and Cineon", &["dpx", "cin"]),
+    ("Pixar", &["pxr"]),
     ("Camera Raw", &["dng", "cr2", "cr3", "nef", "nrw", "arw", "pef", "orf", "rw2", "raf"]),
     ("Brushes", &["abr"]),
     ("Gradients", &["grd"]),

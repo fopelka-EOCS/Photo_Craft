@@ -47,25 +47,34 @@ pub(crate) fn decode(b: &[u8], limits: &Limits) -> Result<Image, CodecError> {
     if b.len() < HEADER {
         return Err(bad("the header is truncated"));
     }
-    // Version 0 is the only one that was ever written.
-    if le16(b, 4) != Some(0) {
+    // Photoshop 2.5/3.0 and KDE samples write version 1. Version 0 is the synthetic layout.
+    let version = le16(b, 4).ok_or_else(|| bad("format version"))?;
+    if version > 1 {
         return Err(unsupported("an unknown Pixar format version"));
     }
+    // Header offsets match Pillow PixarImagePlugin and KDE kimageformats pxr.cpp:
+    // height 416, width 418, tile size 420/422, storage 424, sample encoding 426.
     let height = u32::from(le16(b, 416).ok_or_else(|| bad("picture height"))?);
     let width = u32::from(le16(b, 418).ok_or_else(|| bad("picture width"))?);
     let tile_h = u32::from(le16(b, 420).ok_or_else(|| bad("tile height"))?);
     let tile_w = u32::from(le16(b, 422).ok_or_else(|| bad("tile width"))?);
-    let format = le16(b, 424).ok_or_else(|| bad("picture format"))? & 0xF;
+    let storage = le16(b, 424).ok_or_else(|| bad("picture format"))?;
+    let depth = le16(b, 426).unwrap_or(0);
     if width == 0 || height == 0 || tile_w == 0 || tile_h == 0 {
         return Err(bad("zero-sized picture or tile"));
     }
-    // The low four bits name the channels present: R=1, G=2, B=4, A=8.
-    let (layout, color) = match (format & 0x7, format & 0x8 != 0) {
-        (0x7, false) => (ChannelLayout::Rgb, 3),
-        (0x7, true) => (ChannelLayout::Rgba, 4),
-        (0x0, false) => (ChannelLayout::Gray, 1),
-        (0x0, true) => (ChannelLayout::GrayA, 2),
-        (rgb, _) => return Err(unsupported(format!("channel bitmask {rgb:#x} (colour needs R, G and B)"))),
+    // Real files store a PIC type (8 = grey, 14 = RGB) with depth 2 (8-bit). Synthetic files
+    // use a channel bitmask in the low nibble: R=1, G=2, B=4, A=8.
+    let (layout, color) = match (storage, depth) {
+        (8, 2) => (ChannelLayout::Gray, 1),
+        (14, 2) => (ChannelLayout::Rgb, 3),
+        (s, _) => match (s & 0x7, s & 0x8 != 0) {
+            (0x7, false) => (ChannelLayout::Rgb, 3),
+            (0x7, true) => (ChannelLayout::Rgba, 4),
+            (0x0, false) => (ChannelLayout::Gray, 1),
+            (0x0, true) => (ChannelLayout::GrayA, 2),
+            (rgb, _) => return Err(unsupported(format!("channel bitmask {rgb:#x} (colour needs R, G and B)"))),
+        },
     };
     limits.check(width, height, layout, SampleType::U8)?;
 
@@ -185,5 +194,17 @@ mod tests {
         short[n - 3..].fill(0);
         short[HEADER + 4..HEADER + 8].copy_from_slice(&1u32.to_le_bytes()); // lie: length 1
         assert!(decode(&short, &Limits::default()).is_err());
+    }
+
+    #[test]
+    fn reads_a_real_pixar_grey_file() {
+        // KDE kimageformats autotests/read/pxr/testcard_gray.pxr (LGPL-2.0-or-later).
+        let b = include_bytes!("testdata/pixar_testcard_gray.pxr");
+        assert!(looks_like_pixar(b));
+        let img = decode(b, &Limits::default()).unwrap();
+        assert_eq!((img.width(), img.height(), img.layout()), (256, 256, ChannelLayout::Gray));
+        let d = img.data();
+        assert_eq!(d[0], 255);
+        assert_eq!(d[8], 0);
     }
 }
