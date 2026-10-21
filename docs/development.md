@@ -92,6 +92,47 @@ On Linux, on a machine with several GPUs (say an eGPU, a discrete laptop GPU and
 
 On DX12 the shader compiler is FXC (`d3dcompiler_47.dll`, part of Windows), or a `dxcompiler.dll` placed beside `photocraft.exe`, loaded by its full path. wgpu's default looks `dxcompiler.dll` up by name, which reaches the current directory and `PATH` and loaded other programs' incompatible builds (#712).
 
+### Choosing a graphics backend
+
+Preferences › Performance › Graphics shows **GPU Backend** without opening Advanced, with a
+**Reset GPU Backend** button to return to Automatic. Save the preference and restart to try another
+backend; Rendering Mode also applies at next launch. Help › System Info reports the adapter and
+backend actually in use, separately from the saved preference. CPU / Compatibility rendering mode
+and `--safe-gpu` still select software rendering where available. To test hardware acceleration,
+set Rendering Mode to Automatic or GPU as well as choosing the backend. `WGPU_BACKEND` takes
+precedence over the saved backend outside CPU mode.
+
+The backend list follows the desktop platform: Windows offers Automatic, Vulkan, DirectX 12 and
+OpenGL; macOS offers Automatic and Metal; Linux offers Automatic, Vulkan and OpenGL. CPU rendering
+is selected through Rendering Mode. Changing or resetting the backend preserves that mode,
+including profiles that used the older `gpuBackend: cpu` setting. The browser selects its own
+backend and does not show this desktop-only control.
+
+On Windows, Automatic keeps GL hardware ahead of WARP (the DirectX software rasterizer), so an
+older GPU without DX12 or Vulkan can still accelerate the window. The exception is VMware's GL
+renderer: SVGA3D rendered a black window in #1788, while WARP displayed correctly. Only VMware GL
+is ranked after WARP; working VMware DX12 adapters keep their normal rank. GL reports can carry
+Mesa's vendor id or zero, so the check uses the renderer name as well as VMware's PCI vendor id.
+System Info explains automatic hardware GL selection and when the VMware exception selects
+software graphics. An explicit OpenGL backend
+bypasses it; that can restore the black-window problem on the affected VM. When it is the only
+adapter that can present, VMware GL remains a last resort. Intel's Windows Vulkan avoidance and
+the crash-startup fallback remain in effect.
+
+If a backend draws a black window, close PhotoCraft and start once with `--safe-gpu` to reach
+Preferences. On Windows, `WGPU_BACKEND=dx12` is another one-launch diagnostic override (it can use
+WARP if no hardware DX12 adapter is available). A black window can still present frames, so it
+does not necessarily activate the crash-startup fallback.
+
+This uses egui's existing [native adapter selector](https://docs.rs/egui-wgpu/0.36.2/egui_wgpu/struct.WgpuSetupCreateNew.html),
+without a dependency upgrade or a second UI renderer. Upstream egui logs a warning for CPU
+adapters; successful initialization alone does not establish that a driver presents correct pixels.
+[Rerun](https://rerun.io/docs/getting-started/install-rerun/troubleshooting#graphics-issues) similarly
+offers explicit backend overrides for driver problems. The older
+[egui_backend_selector](https://docs.rs/crate/egui_backend_selector/0.0.2/source/README.md) illustrates
+targeted VM/remote-session exceptions, but uses a separate software renderer and older egui;
+it is research context, not a dependency or a claim of compatibility with our compositor.
+
 Handled windowing and app initialization errors clear this launch's startup marker, restoring any
 prior crash evidence. For example, a Linux launch without `DISPLAY` or `WAYLAND_DISPLAY` does not
 change the next launch's graphics backend. Renderer initialization errors and driver crashes still
