@@ -1300,6 +1300,20 @@ mod tests {
         }
     }
 
+    /// The web build's notices (apps/photocraft-web) are posted from outside this crate, so the
+    /// tl! scanner never sees them: every `notices::post(app, "…"` title there is checked here.
+    #[test]
+    fn web_notice_titles_are_translated() {
+        let code = include_str!("../../../../apps/photocraft-web/src/embed.rs");
+        let titles: Vec<&str> = code.split("notices::post(app, \"").skip(1).map(|tail| tail.split('"').next().unwrap()).collect();
+        assert!(!titles.is_empty(), "no notice titles found in the web build");
+        for l in LANGUAGES.iter().filter(|l| l.complete_menus) {
+            let cat = l.catalog();
+            let missing: Vec<_> = titles.iter().filter(|t| cat.plain(t).is_none()).collect();
+            assert!(missing.is_empty(), "{}: untranslated web notice titles: {missing:?}", l.code);
+        }
+    }
+
     /// Camera Raw includes dynamic colour-band labels and contextual labels that the generic
     /// tl! scanner cannot see. Cover the partial catalog too, without claiming whole-app coverage.
     #[test]
