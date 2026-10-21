@@ -223,9 +223,16 @@ impl Manager {
             }
             busy.push(id.to_string());
         }
-        let r = self.convert_model(id, &ckpt, report);
-        BUSY.lock().unwrap_or_else(PoisonError::into_inner).retain(|b| b != id);
-        r
+        // Cleared however the conversion ends, a panic caught further up included, so the model
+        // is never left "already being prepared".
+        struct Done<'a>(&'a str);
+        impl Drop for Done<'_> {
+            fn drop(&mut self) {
+                BUSY.lock().unwrap_or_else(PoisonError::into_inner).retain(|b| b != self.0);
+            }
+        }
+        let _done = Done(id);
+        self.convert_model(id, &ckpt, report)
     }
 
     fn convert_model(&self, id: &str, ckpt: &Path, report: &mut dyn FnMut(f32) -> bool) -> Result<Vec<PathBuf>> {
@@ -755,6 +762,27 @@ mod tests {
         assert!(!dir.join("Models").join(&installed[0].id).join("tiny.safetensors").exists());
         // Already prepared: nothing more to do.
         assert_eq!(m.prepare(&installed[0].id, &mut |_| true).unwrap().len(), files.len());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A preparation that panics (caught further up) doesn't leave the model "already being
+    /// prepared": the next try runs.
+    #[test]
+    fn a_panic_while_preparing_doesnt_leave_the_model_busy() {
+        let dir = temp("ckpt-panic");
+        let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tiny_sd1_ckpt.safetensors");
+        let copy = dir.join("tiny.safetensors");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::copy(&src, &copy).unwrap();
+        let m = Manager::open(&dir.join("Models")).unwrap();
+        // Not for prompted fills, so it isn't prepared while importing.
+        let job = wait(&m, m.import_files(&[copy], &[ModelKind::Other], None).unwrap());
+        assert_eq!(job.state, JobState::Done, "{job:?}");
+        let id = m.installed()[0].id.clone();
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| m.prepare(&id, &mut |_| panic!("cancelled the hard way"))));
+        assert!(panicked.is_err());
+        let files = m.prepare(&id, &mut |_| true).unwrap();
+        assert!(files.iter().any(|f| f.ends_with("unet/model.onnx") || f.to_string_lossy().contains("unet")), "{files:?}");
         let _ = std::fs::remove_dir_all(dir);
     }
 
