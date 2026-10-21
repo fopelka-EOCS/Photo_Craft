@@ -3349,7 +3349,6 @@ curves	Smooth	Glätten
 	Variation {n} · seed {seed}	Variante {n} · Startwert {seed}
 	Variations	Varianten
 	What to avoid, e.g. blurry, text	Was vermieden werden soll, z. B. unscharf, Text
-	Stop	Anhalten
 
 # Generative Sharpen, Object Selection Brush, AI model device
 	Generative Sharpen…	Generatives Scharfzeichnen…

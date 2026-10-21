@@ -3530,7 +3530,6 @@ curves	Smooth	매끄럽게
 	Variation {n} · seed {seed}	변형 {n} · 시드 {seed}
 	Variations	변형
 	What to avoid, e.g. blurry, text	피할 것, 예: 흐림, 텍스트
-	Stop	중지
 
 # Generative Sharpen, Object Selection Brush, AI model device
 	Generative Sharpen…	생성형 선명하게…

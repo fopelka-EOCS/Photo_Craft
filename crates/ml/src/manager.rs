@@ -213,25 +213,28 @@ impl Manager {
     /// model's files. A model that needs nothing done returns at once. `report` gets 0–1 and
     /// returns false to cancel.
     pub fn prepare(&self, id: &str, report: &mut dyn FnMut(f32) -> bool) -> Result<Vec<PathBuf>> {
-        static BUSY: Mutex<Vec<String>> = Mutex::new(Vec::new());
+        // The model folders being prepared (a folder, not an id: two managers on different
+        // models folders don't block each other).
+        static BUSY: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
         let files = self.files_of(id).ok_or_else(|| Error::NotFound("That model isn't installed.".into()))?;
         let Some(ckpt) = crate::convert::checkpoint_to_convert(&files).cloned() else { return Ok(files) };
+        let key = self.lock().store.model_dir(id);
         {
             let mut busy = BUSY.lock().unwrap_or_else(PoisonError::into_inner);
-            if busy.iter().any(|b| b == id) {
+            if busy.contains(&key) {
                 return Err(Error::Invalid("This model is already being prepared; try again when it's done.".into()));
             }
-            busy.push(id.to_string());
+            busy.push(key.clone());
         }
         // Cleared however the conversion ends, a panic caught further up included, so the model
         // is never left "already being prepared".
-        struct Done<'a>(&'a str);
-        impl Drop for Done<'_> {
+        struct Done(PathBuf);
+        impl Drop for Done {
             fn drop(&mut self) {
-                BUSY.lock().unwrap_or_else(PoisonError::into_inner).retain(|b| b != self.0);
+                BUSY.lock().unwrap_or_else(PoisonError::into_inner).retain(|b| *b != self.0);
             }
         }
-        let _done = Done(id);
+        let _done = Done(key);
         self.convert_model(id, &ckpt, report)
     }
 
