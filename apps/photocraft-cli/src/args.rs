@@ -1,12 +1,15 @@
 //! The command line, as clap types. Values stay strings: the handlers check them, with their own
 //! messages (#7071). A flag a subcommand doesn't take is a usage error, so a typo such as
-//! `--fromat` can't be silently ignored (#423).
+//! `--fromat` can't be silently ignored (#423), and so is a repeated one: `--quality 80 --quality
+//! 60` is more likely a mistake than a choice. A value starting with `-` is written
+//! `--out=-image.png` (or `./-image.png`), so a value flag never takes the next flag as its value;
+//! negative numbers are kept where they mean something.
 
 use clap::{ArgAction, ArgMatches, Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 
 /// photocraft-cli: headless PhotoCraft
 #[derive(Parser)]
-#[command(name = "photocraft-cli", arg_required_else_help = true, args_override_self = true)]
+#[command(name = "photocraft-cli", version = photocraft_engine::build_info::long_version_static(), arg_required_else_help = true)]
 pub(crate) struct Cli {
     #[command(subcommand)]
     pub(crate) command: Command,
@@ -28,27 +31,27 @@ pub(crate) enum Command {
 #[derive(Args)]
 pub(crate) struct ExportArgs {
     /// Output format, overriding the output's extension (png, jpg, tif, webp, …)
-    #[arg(long, value_name = "EXT", allow_hyphen_values = true)]
+    #[arg(long, value_name = "EXT")]
     pub(crate) format: Option<String>,
     /// JPEG or WebP quality, 1-100. A WebP written with a quality is lossy, without one lossless
-    #[arg(long, value_name = "1-100", allow_hyphen_values = true)]
+    #[arg(long, value_name = "1-100", allow_negative_numbers = true)]
     pub(crate) quality: Option<String>,
     /// Keep the layers in TIFF output (Photoshop layer data); TIFF output is flat without it
     #[arg(long)]
     pub(crate) tiff_layers: bool,
     /// Compress TIFF output: none (the default), lzw or zip
-    #[arg(long, value_name = "none|lzw|zip", allow_hyphen_values = true)]
+    #[arg(long, value_name = "none|lzw|zip")]
     pub(crate) tiff_compression: Option<String>,
     /// A TGA's bits per pixel: 32 writes the alpha channel (or else the transparency) as its
     /// alpha, 24 none. Without it: 32 with an alpha channel or transparency, else 24
-    #[arg(long, value_name = "24|32", allow_hyphen_values = true)]
+    #[arg(long, value_name = "24|32")]
     pub(crate) tga_bits: Option<String>,
     /// A DPX's bits per sample. Without it: 8 for an 8-bit document, else 16
-    #[arg(long, value_name = "8|10|12|16", allow_hyphen_values = true)]
+    #[arg(long, value_name = "8|10|12|16")]
     pub(crate) dpx_bits: Option<String>,
     /// A DDS texture's compression: none (uncompressed, the default), bc1 (DXT1: alpha on or
     /// off), bc2 (DXT3) or bc3 (DXT5)
-    #[arg(long, value_name = "none|bc1|bc2|bc3", allow_hyphen_values = true)]
+    #[arg(long, value_name = "none|bc1|bc2|bc3")]
     pub(crate) dds_compression: Option<String>,
     /// Also write a DDS texture's full mip chain
     #[arg(long)]
@@ -56,7 +59,7 @@ pub(crate) struct ExportArgs {
     /// A JPEG's scans, as JPEG Options picks them: baseline (the default), optimized (Huffman
     /// tables fitted to the image; RGB is written 4:2:0 and keeps the standard tables, so only Gray
     /// and CMYK shrink) or progressive
-    #[arg(long, value_name = "baseline|optimized|progressive", allow_hyphen_values = true)]
+    #[arg(long, value_name = "baseline|optimized|progressive")]
     pub(crate) jpeg_format: Option<String>,
 }
 
@@ -96,16 +99,16 @@ pub(crate) struct RunArgs {
     /// The document to open
     pub(crate) file: Option<String>,
     /// Start from a new document with these JSON parameters instead of opening a file
-    #[arg(long, value_name = "JSON", allow_hyphen_values = true)]
+    #[arg(long, value_name = "JSON")]
     pub(crate) new: Option<String>,
     /// An engine command to run; repeat for several, run in order
-    #[arg(long, value_name = "ID", action = ArgAction::Append, allow_hyphen_values = true)]
+    #[arg(long, value_name = "ID", action = ArgAction::Append)]
     pub(crate) cmd: Vec<String>,
     /// JSON parameters for the --cmd before it (default {})
-    #[arg(long, value_name = "JSON", action = ArgAction::Append, allow_hyphen_values = true)]
+    #[arg(long, value_name = "JSON", action = ArgAction::Append)]
     pub(crate) params: Vec<String>,
     /// Save the result to this file
-    #[arg(long, value_name = "FILE", allow_hyphen_values = true)]
+    #[arg(long, value_name = "FILE")]
     pub(crate) out: Option<String>,
     #[command(flatten)]
     pub(crate) export: ExportArgs,
@@ -125,16 +128,16 @@ pub(crate) struct RunArgs {
 #[derive(Args)]
 pub(crate) struct BatchArgs {
     /// The action list: actions.json, a droplet, or a Photoshop Actions file (.atn)
-    #[arg(long, value_name = "FILE", allow_hyphen_values = true)]
+    #[arg(long, value_name = "FILE")]
     pub(crate) actions: Option<String>,
     /// Which action of an Actions set to play
-    #[arg(long, value_name = "NAME", allow_hyphen_values = true)]
+    #[arg(long, value_name = "NAME")]
     pub(crate) action: Option<String>,
     /// The folder of images to process
-    #[arg(long = "in", value_name = "DIR", allow_hyphen_values = true)]
+    #[arg(long = "in", value_name = "DIR")]
     pub(crate) in_dir: Option<String>,
     /// The folder to write the results to, as <stem>.<ext>
-    #[arg(long, value_name = "DIR", allow_hyphen_values = true)]
+    #[arg(long, value_name = "DIR")]
     pub(crate) out: Option<String>,
     /// An --out folder that is the --in folder is refused, as the results would replace the
     /// originals; --in-place allows it
@@ -154,7 +157,7 @@ pub(crate) struct DropletArgs {
     #[arg(value_name = "FILE-OR-DIR", required = true)]
     pub(crate) inputs: Vec<String>,
     /// The folder to write the results to
-    #[arg(long, value_name = "DIR", allow_hyphen_values = true)]
+    #[arg(long, value_name = "DIR")]
     pub(crate) out: Option<String>,
 }
 
@@ -165,7 +168,7 @@ pub(crate) struct CommandsArgs {
     #[arg(long)]
     pub(crate) json: bool,
     /// Only the commands matching this text
-    #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+    #[arg(long, value_name = "TEXT", allow_negative_numbers = true)]
     pub(crate) filter: Option<String>,
 }
 
@@ -173,17 +176,17 @@ pub(crate) struct CommandsArgs {
 #[derive(Args)]
 pub(crate) struct ControlArgs {
     /// The control token (64 hex digits)
-    #[arg(long, value_name = "64-HEX", allow_hyphen_values = true)]
+    #[arg(long, value_name = "64-HEX")]
     pub(crate) control_token: Option<String>,
     /// A file holding the control token, used instead of --control-token (a server creates it
     /// when missing)
-    #[arg(long, value_name = "PATH", allow_hyphen_values = true)]
+    #[arg(long, value_name = "PATH")]
     pub(crate) control_token_file: Option<String>,
     /// The folder automation may read from (none without it)
-    #[arg(long, value_name = "DIR", allow_hyphen_values = true)]
+    #[arg(long, value_name = "DIR")]
     pub(crate) automation_read_root: Option<String>,
     /// The folder automation may write to (none without it)
-    #[arg(long, value_name = "DIR", allow_hyphen_values = true)]
+    #[arg(long, value_name = "DIR")]
     pub(crate) automation_write_root: Option<String>,
 }
 
@@ -191,7 +194,7 @@ pub(crate) struct ControlArgs {
 #[derive(Args)]
 pub(crate) struct McpArgs {
     /// Bridge to the PhotoCraft app listening here instead of a headless engine
-    #[arg(long, value_name = "127.0.0.1:PORT", allow_hyphen_values = true)]
+    #[arg(long, value_name = "127.0.0.1:PORT")]
     pub(crate) bridge: Option<String>,
     #[command(flatten)]
     pub(crate) control: ControlArgs,
@@ -206,7 +209,7 @@ pub(crate) struct McpArgs {
 #[derive(Args)]
 pub(crate) struct ServeArgs {
     /// Listen on 127.0.0.1:<PORT> instead of stdio
-    #[arg(long, value_name = "PORT", allow_hyphen_values = true)]
+    #[arg(long, value_name = "PORT")]
     pub(crate) port: Option<String>,
     #[command(flatten)]
     pub(crate) control: ControlArgs,
