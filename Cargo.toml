@@ -39,7 +39,7 @@ photocraft-tablet = { path = "crates/tablet" }
 photocraft-ipp = { path = "crates/ipp" }
 
 # external
-craft-blitter = { git = "https://github.com/storytold/craft-libs", rev = "f9d12bc3db8e4b4474d81af8928e1e9ebb436098" }
+craft-blitter = { git = "https://github.com/storytold/craft-libs", rev = "759520ced7dc28dd829a479780b8a33ec7f977de" }
 craft-print = { git = "https://github.com/storytold/craft-libs", rev = "3d37da389a3618ab9b76109da11416e9ca4ea719" }
 craft-docpath = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "82a24b006eefa036b43c09a67fb9a3fbd17ffe63" }
 thiserror = "2"
