@@ -199,6 +199,56 @@ fn save_round_trips_through_photoshop_events() {
     assert_eq!(r["set"], "Ours");
 }
 
+/// Photoshop's integer fields cannot hold a fractional setting. Rounding one into the file wrote
+/// an edit the user never recorded -- `cellSize: 5.4` as `ClSz 5`, `amount: 81.4` as `Amnt 81` --
+/// and replay then changed the image with `skipped` empty and nothing in the file to say so
+/// (#7669, #7670). Such a step is refused, as a step with no equivalent event already is.
+///
+/// Only for the fields whose command uses the setting as written: `edit.stroke` ceils its width,
+/// so 2.4 renders as 3 and the integer field holds it faithfully -- that one belongs in #7696,
+/// not here (#7742 review).
+#[test]
+fn a_fractional_setting_an_integer_field_cannot_hold_is_refused_not_rounded() {
+    for (id, params) in [("filter.pixelate.crystallize", json!({"cellSize": 5.4})), ("filter.distort.ripple", json!({"amount": 81.4, "size": "small"}))] {
+        let mut s = Session::new();
+        s.actions.list.push(Action::new("A", vec![(id.into(), params)]));
+        let e = s.execute("actions.save", json!({"action": "A"})).unwrap_err().to_string();
+        assert!(e.contains(id), "{id}: {e}");
+        let r = s.execute("actions.save", json!({"action": "A", "skipUnsupported": true})).unwrap();
+        assert_eq!(r["skipped"], json!([{"action": "A", "step": 0, "id": id}]), "{id}");
+    }
+}
+
+/// The whole numbers those fields were made for are written and come back as themselves: the
+/// refusal above is for the settings Photoshop's event cannot hold, not for the ones it can.
+#[test]
+fn whole_number_settings_for_integer_fields_still_round_trip() {
+    for (id, params) in [
+        ("filter.pixelate.crystallize", json!({"cellSize": 5})),
+        ("filter.distort.ripple", json!({"amount": 81, "size": "small"})),
+        ("edit.stroke", json!({"width": 2, "color": "#d03060", "location": "inside"})),
+    ] {
+        let mut s = Session::new();
+        s.actions.list.push(Action::new("A", vec![(id.into(), params.clone())]));
+        let r = s.execute("actions.save", json!({"action": "A"})).unwrap();
+        assert_eq!(r["skipped"], json!([]), "{id}");
+        let imported = import(&photocraft_paint::tile::b64_decode(r["data"].as_str().unwrap()).unwrap()).unwrap();
+        let (back_id, back) = &imported.actions[0].steps[0];
+        assert_eq!(back_id, id);
+        for (key, want) in params.as_object().unwrap() {
+            let got = back.get(key);
+            match want.as_f64() {
+                // A number can come back as an integer where it went out as a float, so these are
+                // compared by value. Anything else is compared as it is: `as_f64` is `None` for a
+                // string on both sides, so `size`, `color` and `location` went unchecked
+                // (#7742 review).
+                Some(n) => assert_eq!(got.and_then(Value::as_f64), Some(n), "{id}: {key} is {got:?}"),
+                None => assert_eq!(got, Some(want), "{id}: {key} is {got:?}"),
+            }
+        }
+    }
+}
+
 #[test]
 fn every_mapped_command_exports_and_imports_back() {
     let cases: Vec<(&str, Value)> = vec![
