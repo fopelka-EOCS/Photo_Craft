@@ -195,6 +195,7 @@ Triangle and Curvature Pen (minus legacy Rounded Rectangle and Targeted Adjustme
 | Layer and selection keys: ⌘, toggles visibility, ⌘\ targets the mask, / locks transparency, ⌘⌥2 loads luminosity, ⌘⌥⌫ fills from history, Tab / ⇧Tab rename the next layer, ⌥-click a thumbnail fits the layer | done (2026-10-11) | |
 | Tool keys: ← / → turn the brush tip (1°, ⇧ 15°), ⇧-click with Type starts new text over old, Space+F / ⇧Space+F cycle the pasteboard colour | done (2026-10-11) | |
 | Type formatting keys while editing text | done: ⇧⌘K, U, B, I and / toggle All Caps, Underline, Faux Bold, Faux Italic, Strikethrough (off when every selected character has it, else on); ⌥↑/↓ leading ∓2 pt, ⇧⌥↑/↓ baseline shift ±2 pt (10 with ⌘); ⌥←/→ tracking ±20 over a selection (100 with ⌘; a collapsed caret still kerns); ⌥⇧⌘H toggles Hyphenate for the touched paragraphs. One `type.setStyle` step per press (new `leadingBy`/`baselineShiftBy`/`trackingBy`; auto leading starts from its laid-out value); the global ⇧⌘K/U/B/I never fire while typing. Differs: a collapsed caret in non-empty text changes nothing, since the model can't hold a pending style for the next characters typed (empty text takes it as its typing style) (`type_tool.rs`, `input_tests.rs` `type_tool_format_keys_*`) | |
+| Paragraph box overflow port: text past the box shows the mark under the caret's ⌘-frame | done (2026-10-21): text a box can't hold (dropped layout lines) draws a red “+” port on the box's bottom edge near its right corner, with the cursor-outline white rim; hovering it for the tooltip delay explains the fix; the tooltip preferences turn it off; agents read `ui.type_box_overflow` without a screen. Photoshop marks a boxed overflow the same way (its port's click-and-drag to thread a linked box isn't in). Differs: our port shows while the inline edit session is on the box | `text::TextLayout::overflows`, `type_tool::overflow_port`, `tests/type_overflow_port.rs` |
 | Guides: click selects, Delete deletes, right-click menu, ⌥-click turns a guide, double-click opens Guides, Grid & Slices | done (2026-10-12) | |
 
 ## Panels and workspace
@@ -228,6 +229,7 @@ Paragraph; the rest open as in-app floating windows.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | Paragraph box overflow port: text a box can't hold draws a red “+” port on its bottom edge (hover explains; `ui.type_box_overflow` for automation); not a new command, so no parity-checklist bump |
 | 2026-10-15 | minor | Shape Density and Feather row added as done (TOOL-214-12, #5846) |
 | 2026-10-13 | minor | Menu bar from the keyboard: Alt / F10 focus, Alt+letter, underlined mnemonics (#4988) |
 | 2026-10-13 | minor | Layers panel filter row: Kind is a real dropdown with Kind, Name and Mode filters, drivable by `ui.set {layerFilter}` (#5048); row added as partial |
