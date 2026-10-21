@@ -51,6 +51,8 @@ pub fn tick(app: &mut crate::PhotocraftApp, ctx: &egui::Context) {
             app.global_menu_hosted = false;
             app.ui.global_menu_hosted = false;
         }
+        // Turning the preference back on is a deliberate retry, also after a failed start.
+        app.global_menu_unavailable = false;
         return;
     }
     if app.global_menu.is_none() && !app.global_menu_unavailable {
@@ -70,6 +72,9 @@ pub fn tick(app: &mut crate::PhotocraftApp, ctx: &egui::Context) {
                 Ok(menu) => {
                     log::debug!("AppMenu: global menu exporting");
                     app.global_menu = Some(menu);
+                    // A fresh exporter gets its first model at once, not after what is left of
+                    // the previous exporter's duty cycle.
+                    app.global_menu_last = None;
                 }
                 Err(e) => {
                     app.global_menu_unavailable = true;
@@ -106,6 +111,11 @@ pub fn tick(app: &mut crate::PhotocraftApp, ctx: &egui::Context) {
         let items = crate::menus::menu_items(app);
         menu.replace(&model(&items));
         app.global_menu_last = Some(Instant::now());
+    } else if let (Some(last), true) = (app.global_menu_last, app.global_menu.is_some()) {
+        // The app is reactive: without this a state change made inside the cycle would stay
+        // unpublished until the next input event. One repaint at the deadline publishes it;
+        // that frame is due and schedules nothing more, so an idle app stays idle.
+        ctx.request_repaint_after(REFRESH.saturating_sub(last.elapsed()));
     }
     // The activations come in a batch (the exporter queues while the frame runs); collect one
     // before dispatching, because dispatch takes the app mutably.
@@ -113,6 +123,12 @@ pub fn tick(app: &mut crate::PhotocraftApp, ctx: &egui::Context) {
         Some(menu) => std::iter::from_fn(|| menu.try_event()).collect(),
         None => return,
     };
+    if !events.is_empty() {
+        // The clicks below may change enablement or check marks that were published a moment
+        // ago in this very frame: publish again on the next one.
+        app.global_menu_last = None;
+        ctx.request_repaint();
+    }
     for ev in events {
         let photocraft_appmenu::MenuEvent::Activated { action, .. } = ev;
         // The behaviour path is the one an in-window click takes, so a global-menu
