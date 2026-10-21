@@ -22,6 +22,7 @@ pub mod adjust_ui;
 mod alt_grab;
 pub mod analysis_ui;
 pub mod anchor_tools;
+pub mod appmenu;
 pub mod artboard_tool;
 pub mod artboard_ui;
 pub(crate) mod background_redraw;
@@ -912,6 +913,23 @@ pub struct PhotocraftApp {
     last_frame_start_ms: f64,
     /// Background job bookkeeping: opening tabs, control replies waiting on a job.
     pub jobs: jobs_ui::JobsUi,
+    /// The Linux global-menu exporter, started once on the first frame (`appmenu`; `None`
+    /// everywhere else, when there is no D-Bus session, or when opted out). Only the
+    /// exporter's platforms declare these (the web build's frame loop must not touch an
+    /// `Instant`, whose `now()` panics on wasm32-unknown-unknown).
+    #[cfg(all(unix, not(target_os = "macos"), not(target_arch = "wasm32")))]
+    global_menu: Option<photocraft_appmenu::AppMenu>,
+    /// The global-menu start was already tried and failed (no session bus, or opted out):
+    /// don't retry every frame.
+    #[cfg(all(unix, not(target_os = "macos"), not(target_arch = "wasm32")))]
+    global_menu_unavailable: bool,
+    /// When the global menu was last published (a 1 Hz duty cycle, `appmenu`).
+    #[cfg(all(unix, not(target_os = "macos"), not(target_arch = "wasm32")))]
+    global_menu_last: Option<std::time::Instant>,
+    /// A registrar is actually serving the global menu for this app's windows (`appmenu`
+    /// mirrors this every frame from the exporter): the in-window menu bar then hides, be
+    /// cause the shells menu bar owns the menus.
+    global_menu_hosted: bool,
     #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
     live_tokens: theme::live::LiveTokens,
 }
@@ -1054,6 +1072,13 @@ impl PhotocraftApp {
             min_frame_ms: None,
             last_frame_start_ms: 0.0,
             jobs: Default::default(),
+            #[cfg(all(unix, not(target_os = "macos"), not(target_arch = "wasm32")))]
+            global_menu: None,
+            #[cfg(all(unix, not(target_os = "macos"), not(target_arch = "wasm32")))]
+            global_menu_unavailable: false,
+            #[cfg(all(unix, not(target_os = "macos"), not(target_arch = "wasm32")))]
+            global_menu_last: None,
+            global_menu_hosted: false,
             #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
             live_tokens: theme::live::LiveTokens::from_env(),
         };
@@ -2020,6 +2045,9 @@ impl eframe::App for PhotocraftApp {
         }
         self.drain_control(ctx);
         native_menu::run(self, ctx);
+        // The Linux global menu: publish deferred model refreshes and drain menu activations
+        // (each activation dispatches like an in-window menu click).
+        appmenu::tick(self, ctx);
         // Switching tools commits, also between the Type and Type Mask tools.
         if self.ui.text_edit.as_ref().is_some_and(|ed| !self.ui.tool.is_type() || ed.mask != self.ui.tool.is_type_mask()) {
             type_tool::commit(self);

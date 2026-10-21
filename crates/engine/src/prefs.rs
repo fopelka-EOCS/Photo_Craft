@@ -295,6 +295,11 @@ pub struct Interface {
     pub notification_auto_hide: bool,
     /// Seconds a notice stays on screen before it hides itself (Auto Hide Notifications).
     pub notification_duration_seconds: u32,
+    /// Linux: while a global-menu host (Canonical AppMenu/dbusmenu registrar) serves the
+    /// menus, the in-window menu bar hides — except in full-screen modes, where the shell's
+    /// bar may be hidden too (the OS window is fullscreen). Off, PhotoCraft keeps its
+    /// in-window menu bar and exports nothing (Interface › Use Global Menu Bar).
+    pub global_menu_bar: bool,
 }
 
 impl Default for Interface {
@@ -324,6 +329,7 @@ impl Default for Interface {
             show_file_name_in_title: true,
             notification_auto_hide: true,
             notification_duration_seconds: 6,
+            global_menu_bar: true,
         }
     }
 }
@@ -1071,7 +1077,9 @@ pub const HIDDEN_UNTIL_IMPLEMENTED: &[&str] = &[
 
 /// Is the preference at `path` (`"section.key"`) hidden from the Preferences dialog?
 pub fn is_hidden(path: &str) -> bool {
-    HIDDEN_UNTIL_IMPLEMENTED.contains(&path) || (!cfg!(target_os = "linux") && LINUX_ONLY.contains(&path))
+    HIDDEN_UNTIL_IMPLEMENTED.contains(&path)
+        || (!cfg!(target_os = "linux") && LINUX_ONLY.contains(&path))
+        || (!cfg!(all(unix, not(target_os = "macos"))) && X11_DESKTOP_ONLY.contains(&path))
 }
 
 /// Preferences that only do something on Linux; the dialog doesn't show them elsewhere. They
@@ -1086,6 +1094,10 @@ pub fn gpu_adapter_matches(name: &str, wanted: &str) -> bool {
     let mut words = wanted.split_whitespace().peekable();
     words.peek().is_some() && words.all(|w| name.contains(&w.to_lowercase()))
 }
+
+/// Preferences that only do something on Linux and the BSDs (every unix but macOS); hidden on
+/// macOS and Windows, where they would be dead settings.
+pub const X11_DESKTOP_ONLY: &[&str] = &["interface.globalMenuBar"];
 
 /// Choices of an enumerated preference (dotted path, e.g. `"cursors.painting"`).
 pub fn choices(path: &str) -> Option<&'static [&'static str]> {
