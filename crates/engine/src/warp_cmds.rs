@@ -9,10 +9,10 @@
 //! what the Free Transform warp UI uses) or the active smart object's stored warp (a history step).
 
 use photocraft_algo::transform::{Homography, Interp};
-use photocraft_algo::warp::{warp_mesh_gray, warp_mesh_surface};
+use photocraft_algo::warp::{warp_mesh_gray, warp_mesh_surface_with};
 use photocraft_doc::{Document, Layer, LayerContent, LayerId, Locks, Rect};
 use photocraft_geom::warp::{BezierMesh, Warp, WarpStyle};
-use photocraft_raster::Surface;
+use photocraft_raster::{Interrupt, Surface};
 use serde_json::{Value, json};
 
 use crate::commands::CommandSpec;
@@ -112,8 +112,25 @@ pub fn warp_from_params(cmd: &str, p: &Value, rect: [f64; 4]) -> Result<Warp> {
 
 /// A Background is turned into a normal layer by the caller first
 /// ([`crate::extra_cmds::background_to_layer`]).
+/// `Err(Cancelled)` once `ctl` is cancelled: between the steps of a warp that don't check it.
+fn cancelled(ctl: &Interrupt) -> Result<()> {
+    if ctl.cancelled() { Err(EngineError::Cancelled) } else { Ok(()) }
+}
+
 /// Warp a whole layer, carrying its linked masks without the isolated-channel area cap.
-fn warp_layer(doc_sel: Option<&Surface>, group: Locks, l: &mut Layer, w: &Warp, rect: Rect, interp: Interp, frames: Option<&Frames>) -> Result<()> {
+/// `ctl` reports progress and cancels (`Err(Cancelled)`, the layer left half-done for the caller
+/// to discard).
+#[allow(clippy::too_many_arguments)]
+fn warp_layer(
+    doc_sel: Option<&Surface>,
+    group: Locks,
+    l: &mut Layer,
+    w: &Warp,
+    rect: Rect,
+    interp: Interp,
+    frames: Option<&Frames>,
+    ctl: &Interrupt,
+) -> Result<()> {
     let locks = l.locks.union(group);
     if locks.position || locks.all {
         return Err(EngineError::Other(format!("layer \"{}\" is locked", l.name)));
@@ -128,7 +145,7 @@ fn warp_layer(doc_sel: Option<&Surface>, group: Locks, l: &mut Layer, w: &Warp, 
     match &mut l.content {
         LayerContent::Group(g) => {
             for c in g.children.iter_mut() {
-                warp_layer(None, locks, c, w, rect, interp, frames)?;
+                warp_layer(None, locks, c, w, rect, interp, frames, ctl)?;
             }
         }
         LayerContent::Text(_) => return Err(EngineError::Other("Warp needs rasterized type (or use Type › Warp Text)".into())),
@@ -155,7 +172,7 @@ fn warp_layer(doc_sel: Option<&Surface>, group: Locks, l: &mut Layer, w: &Warp, 
             sm.warp = src_warp.filter(|w| !w.is_identity());
             // Fallback appearance for sources that can't be re-rendered.
             if let Some(c) = &mut sm.cache {
-                *c = warp_mesh_surface(c, rect, &map, interp);
+                *c = warp_mesh_surface_with(c, rect, &map, interp, ctl).ok_or(EngineError::Cancelled)?;
             }
             if let Some(m) = &mut sm.filter_mask {
                 m.surface = warp_mesh_gray(&m.surface, &map, interp);
@@ -166,7 +183,8 @@ fn warp_layer(doc_sel: Option<&Surface>, group: Locks, l: &mut Layer, w: &Warp, 
                 *surf = match doc_sel {
                     Some(sel) => {
                         let (lifted, mut rest) = crate::transform_cmds::split_selected(surf, sel)?;
-                        let moved = warp_mesh_surface(&lifted, rect, &map, interp);
+                        let moved = warp_mesh_surface_with(&lifted, rect, &map, interp, ctl).ok_or(EngineError::Cancelled)?;
+                        cancelled(ctl)?;
                         crate::transform_cmds::composite_over(&mut rest, &moved);
                         rest.prune();
                         rest
@@ -174,12 +192,20 @@ fn warp_layer(doc_sel: Option<&Surface>, group: Locks, l: &mut Layer, w: &Warp, 
                     None => {
                         // Content outside the warp box stays where it is.
                         let fmt = surf.format();
-                        let warped = warp_mesh_surface(surf, rect, &map, interp);
-                        let mut rest = surf.convert(photocraft_color::PixelFormat::new(fmt.mode, fmt.sample, true));
+                        let warped = warp_mesh_surface_with(surf, rect, &map, interp, ctl).ok_or(EngineError::Cancelled)?;
+                        cancelled(ctl)?;
+                        // Tiles are shared, so a surface that has alpha already costs nothing to copy.
+                        let mut rest = if fmt.alpha { surf.clone() } else { surf.convert(photocraft_color::PixelFormat::new(fmt.mode, fmt.sample, true)) };
                         crate::pixels::try_clear_surface(&mut rest, rect, None)?;
-                        crate::transform_cmds::composite_over(&mut rest, &warped);
-                        rest.prune();
-                        rest
+                        if rest.content_bounds().is_empty() {
+                            // The box held all of the layer: the warp is the whole result.
+                            warped
+                        } else {
+                            cancelled(ctl)?;
+                            crate::transform_cmds::composite_over(&mut rest, &warped);
+                            rest.prune();
+                            rest
+                        }
                     }
                 };
             }
@@ -191,12 +217,13 @@ fn warp_layer(doc_sel: Option<&Surface>, group: Locks, l: &mut Layer, w: &Warp, 
         m.surface = match mask_sel {
             // Use the selection directly when its frame fits the warp box. An explicit
             // smaller box still needs the clipped coverage built by `warp_scalar`.
-            Some(sel) if sel.content_bounds().intersect(&rect) == sel.content_bounds() => {
-                crate::transform_cmds::move_gray_selected(&m.surface, sel, &|lifted, src| Ok(warp_mesh_surface(lifted, src, &map, interp)), &|s| {
-                    Ok(warp_mesh_gray(s, &map, interp))
-                })?
-            }
-            Some(sel) => warp_scalar(&m.surface, Some(sel), rect, w, interp)?,
+            Some(sel) if sel.content_bounds().intersect(&rect) == sel.content_bounds() => crate::transform_cmds::move_gray_selected(
+                &m.surface,
+                sel,
+                &|lifted, src| warp_mesh_surface_with(lifted, src, &map, interp, ctl).ok_or(EngineError::Cancelled),
+                &|s| Ok(warp_mesh_gray(s, &map, interp)),
+            )?,
+            Some(sel) => warp_scalar(&m.surface, Some(sel), rect, w, interp, ctl)?,
             // Whole-layer transforms carry the complete linked mask, whose content can
             // extend beyond the layer's pixel bounds (or the explicit warp frame). The
             // scalar-channel working-area cap must not reject an ordinary layer warp.
@@ -350,10 +377,11 @@ fn warp_type_layer(s: &mut Session, cmd: &str, id: LayerId, w: &Warp) -> Result<
 
 /// Lift only scalar samples inside the source frame, leaving all other samples in place.
 /// Coverage also includes default-valued samples, which must move with a selected mask.
-fn warp_scalar(s: &Surface, selection: Option<&Surface>, frame: Rect, w: &Warp, interp: Interp) -> Result<Surface> {
+fn warp_scalar(s: &Surface, selection: Option<&Surface>, frame: Rect, w: &Warp, interp: Interp, ctl: &Interrupt) -> Result<Surface> {
     let area = selection.map_or(frame, |sel| frame.intersect(&sel.content_bounds()));
     let mut coverage = Surface::new(photocraft_color::PixelFormat::new(photocraft_color::ColorMode::Grayscale, photocraft_color::SampleType::F32, false));
     for tile in area.tiles() {
+        cancelled(ctl)?;
         let r = tile.rect().intersect(&area);
         let values = match selection {
             Some(sel) => crate::allocation::read_region(sel, r, "clipping a Warp selection")?,
@@ -362,9 +390,12 @@ fn warp_scalar(s: &Surface, selection: Option<&Surface>, frame: Rect, w: &Warp, 
         coverage.try_write_region(r, &values)?;
     }
     let map = |x, y| w.map(x, y);
-    crate::transform_cmds::move_gray_selected(s, &coverage, &|src, bounds| Ok(warp_mesh_surface(src, bounds, &map, interp)), &|_| {
-        Err(bad("edit.transform.warp", "expected a scalar channel"))
-    })
+    crate::transform_cmds::move_gray_selected(
+        s,
+        &coverage,
+        &|src, bounds| warp_mesh_surface_with(src, bounds, &map, interp, ctl).ok_or(EngineError::Cancelled),
+        &|_| Err(bad("edit.transform.warp", "expected a scalar channel")),
+    )
 }
 
 fn apply(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
@@ -420,10 +451,10 @@ fn apply(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
         }
         let interp = Interp::parse(p.get("interpolation").and_then(Value::as_str).unwrap_or("bicubic"));
         s.edit("Warp", |doc, _| {
-            let moved = warp_scalar(&plane, doc.selection.as_ref(), frame, &w, interp)?;
+            let moved = warp_scalar(&plane, doc.selection.as_ref(), frame, &w, interp, &Interrupt::NONE)?;
             crate::channel_transform::write_plane(doc, layer, p, moved)?;
             if let Some(sel) = &doc.selection {
-                doc.selection = Some(warp_scalar(sel, None, frame, &w, Interp::Bilinear)?).filter(|s| !s.content_bounds().is_empty());
+                doc.selection = Some(warp_scalar(sel, None, frame, &w, Interp::Bilinear, &Interrupt::NONE)?).filter(|s| !s.content_bounds().is_empty());
             }
             Ok(())
         })?;
@@ -440,30 +471,39 @@ fn apply(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     }
     let interp = Interp::parse(p.get("interpolation").and_then(Value::as_str).unwrap_or("bicubic"));
     let content_knots = p.get("mesh").is_some() && p.get("warp").is_none();
-    s.edit("Warp", |doc, _| {
-        let sel = doc.selection.clone();
-        let frames = content_knots.then(|| {
-            let mut f = Frames::new();
-            if let Some(l) = doc.layer(id) {
-                source_frames(doc, l, &mut f);
-            }
-            f
-        });
-        let is_group = doc.layer(id).is_some_and(Layer::is_group);
-        let group = crate::transform_cmds::group_locks(doc, id);
-        crate::extra_cmds::background_to_layer(doc, id);
-        let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
-        warp_layer(if is_group { None } else { sel.as_ref() }, group, l, &w, rect, interp, frames.as_ref())?;
-        let snapshot = doc.clone();
-        if let Some(l) = doc.layer_mut(id) {
-            crate::transform_cmds::refresh_text(&snapshot, l);
+    // A background job when started with `Session::start` (as Free Transform, #4218): the warp of
+    // a large layer runs on a worker with progress, and can be cancelled.
+    crate::jobs::edit_job(
+        s,
+        "Warp",
+        move |doc, _, ctx| ctx.stage(0.0, 1.0, "Warping", |ctl| warp_doc(doc, id, &w, rect, interp, content_knots, ctl)),
+        move |()| json!({"layer": id.0, "changed": true, "rect": [rect.x0, rect.y0, rect.x1, rect.y1]}),
+    )
+}
+
+/// The edit of [`apply`]: the layer and the selection outline.
+fn warp_doc(doc: &mut Document, id: LayerId, w: &Warp, rect: Rect, interp: Interp, content_knots: bool, ctl: &Interrupt) -> Result<()> {
+    let sel = doc.selection.clone();
+    let frames = content_knots.then(|| {
+        let mut f = Frames::new();
+        if let Some(l) = doc.layer(id) {
+            source_frames(doc, l, &mut f);
         }
-        if let Some(sel) = &doc.selection {
-            doc.selection = Some(warp_mesh_gray(sel, &|x, y| w.map(x, y), Interp::Bilinear)).filter(|s| !s.content_bounds().is_empty());
-        }
-        Ok(())
-    })?;
-    Ok(json!({"layer": id.0, "changed": true, "rect": [rect.x0, rect.y0, rect.x1, rect.y1]}))
+        f
+    });
+    let is_group = doc.layer(id).is_some_and(Layer::is_group);
+    let group = crate::transform_cmds::group_locks(doc, id);
+    crate::extra_cmds::background_to_layer(doc, id);
+    let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
+    warp_layer(if is_group { None } else { sel.as_ref() }, group, l, w, rect, interp, frames.as_ref(), ctl)?;
+    let snapshot = doc.clone();
+    if let Some(l) = doc.layer_mut(id) {
+        crate::transform_cmds::refresh_text(&snapshot, l);
+    }
+    if let Some(sel) = &doc.selection {
+        doc.selection = Some(warp_mesh_gray(sel, &|x, y| w.map(x, y), Interp::Bilinear)).filter(|s| !s.content_bounds().is_empty());
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy)]
@@ -732,6 +772,36 @@ pub fn specs() -> Vec<CommandSpec> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_warp_box_holding_the_whole_layer_gives_what_compositing_over_the_cleared_layer_did() {
+        for depth in [8, 16, 32] {
+            let s = session(depth);
+            let st = s.active().unwrap();
+            let l = st.doc.layer(st.active_layer.unwrap()).unwrap().clone();
+            let surf = l.surface().unwrap().clone();
+            let rect = surf.content_bounds();
+            let w = Warp::preset(WarpStyle::Flag, 35.0, rect_f(rect));
+            // What the warp built before the shortcut: the warp composited over the cleared layer.
+            let map = |x: f64, y: f64| w.map(x, y);
+            let warped = warp_mesh_surface_with(&surf, rect, &map, Interp::Bicubic, &Interrupt::NONE).unwrap();
+            let mut want = surf.clone();
+            crate::pixels::try_clear_surface(&mut want, rect, None).unwrap();
+            crate::transform_cmds::composite_over(&mut want, &warped);
+            want.prune();
+            let mut got = l.clone();
+            warp_layer(None, Locks::default(), &mut got, &w, rect, Interp::Bicubic, None, &Interrupt::NONE).unwrap();
+            let got = got.surface().unwrap();
+            let b = want.content_bounds();
+            assert_eq!(got.content_bounds(), b, "depth {depth}");
+            let (g, wv) = (got.read_region(b), want.read_region(b));
+            // Exact at 8 and 16 bits. At 32 the composite's `t·a / a` rounds a few values by an
+            // ulp; the shortcut keeps the warp's own.
+            let tol = if depth == 32 { 1e-6 } else { 0.0 };
+            let worst = g.iter().zip(&wv).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
+            assert!(worst <= tol, "depth {depth}: off by {worst}");
+        }
+    }
+
     fn session(depth: u64) -> Session {
         let mut s = Session::new();
         s.execute("file.new", json!({"width": 80, "height": 60, "depth": depth})).unwrap();
@@ -995,5 +1065,28 @@ mod tests {
             let want = if x < 15 { 0.0 } else { 1.0 };
             assert!((mask_at(&s, x, y) - want).abs() < 0.01, "({x},{y}): {}", mask_at(&s, x, y));
         }
+    }
+
+    /// Esc stops the warp of a selected linked mask too, not only of the pixels. A fill layer has
+    /// no pixels to warp, so the mask is the only part that can see the cancel.
+    #[test]
+    fn a_cancelled_warp_stops_in_a_selected_linked_mask() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 100, "height": 100})).unwrap();
+        s.execute("layer.newFillLayer.solidColor", json!({})).unwrap();
+        s.execute("layer.layerMask.revealAll", json!({})).unwrap();
+        s.edit("link", |doc, active| {
+            doc.layer_mut(active.unwrap()).unwrap().mask.as_mut().unwrap().linked = true;
+            Ok(())
+        })
+        .unwrap();
+        s.execute("select.rect", json!({"x": 10, "y": 10, "width": 10, "height": 10})).unwrap();
+        let st = s.active().unwrap();
+        let (sel, mut l) = (st.doc.selection.clone().unwrap(), st.doc.layer(st.active_layer.unwrap()).unwrap().clone());
+        let rect = Rect::new(10, 10, 20, 20);
+        let w = Warp::preset(WarpStyle::Flag, 35.0, rect_f(rect));
+        let ctl = Interrupt::cancel_only(&|| true);
+        let r = warp_layer(Some(&sel), Locks::default(), &mut l, &w, rect, Interp::Bicubic, None, &ctl);
+        assert!(matches!(r, Err(EngineError::Cancelled)), "{r:?}");
     }
 }
