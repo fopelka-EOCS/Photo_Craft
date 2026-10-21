@@ -50,9 +50,21 @@ pub fn is_selection_tool(tool: Tool) -> bool {
     )
 }
 
+/// Quick Selection: the options-bar New button was pressed — the next `select.quick` stroke
+/// replaces, then later strokes in New mode add (#7302). Not an engine combine mode (those are
+/// 0–3); stored in [`crate::state::UiState::selection_mode`].
+pub const QUICK_SELECTION_REPLACE_NEXT: u8 = 4;
+
+/// Options-bar combine mode 0–3; strips [`QUICK_SELECTION_REPLACE_NEXT`].
+#[inline]
+pub fn selection_bar_index(bar: u8) -> u8 {
+    bar & 3
+}
+
 /// The effective selection mode of `tool` for the options-bar mode `bar` (0 New, 1 Add,
 /// 2 Subtract, 3 Intersect) and the held modifiers: exactly what the tool's gesture will use.
 pub fn selection_mode(tool: Tool, bar: u8, m: egui::Modifiers) -> &'static str {
+    let bar = selection_bar_index(bar);
     // `select.quick` has no intersect mode; the options bar omits that button for this tool.
     if tool == Tool::QuickSelection {
         if m.shift {

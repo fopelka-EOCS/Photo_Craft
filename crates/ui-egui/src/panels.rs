@@ -4453,13 +4453,17 @@ pub(crate) fn selection_mode_buttons(app: &mut PhotocraftApp, ui: &mut egui::Ui,
     ];
     let n = if intersect { modes.len() } else { modes.len() - 1 };
     for (i, (icon, tip)) in modes.iter().take(n).enumerate() {
-        let active = app.ui.selection_mode == i as u8 || (!intersect && i + 1 == n && app.ui.selection_mode >= n as u8);
+        let sm = app.ui.selection_mode;
+        let active = if quick_selection_new && sm == crate::tool_feedback::QUICK_SELECTION_REPLACE_NEXT {
+            i == 0
+        } else {
+            sm == i as u8 || (!intersect && i + 1 == n && sm >= n as u8)
+        };
         if icons::button(ui, icon, 24.0, active, tip).clicked() {
-            app.ui.selection_mode = i as u8;
             if quick_selection_new && i == 0 {
-                app.ui.polygon_mode = "qs-replace".into();
-            } else if quick_selection_new {
-                app.ui.polygon_mode.clear();
+                app.ui.selection_mode = crate::tool_feedback::QUICK_SELECTION_REPLACE_NEXT;
+            } else {
+                app.ui.selection_mode = i as u8;
             }
         }
     }

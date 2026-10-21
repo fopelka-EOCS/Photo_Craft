@@ -360,8 +360,8 @@ pub fn content_aware_move_params(app: &PhotocraftApp, offset: [i64; 2]) -> Value
 
 /// `select.quick` mode: no intersect (the engine treats it as add), and bar New replaces once then adds (#7302).
 fn select_quick_mode(app: &mut PhotocraftApp, mods: egui::Modifiers) -> &'static str {
-    if app.ui.polygon_mode == "qs-replace" {
-        app.ui.polygon_mode.clear();
+    if app.ui.selection_mode == crate::tool_feedback::QUICK_SELECTION_REPLACE_NEXT {
+        app.ui.selection_mode = 0;
         return "replace";
     }
     let mode = crate::tool_feedback::document_selection_mode(app, Tool::QuickSelection, mods);
