@@ -1,6 +1,6 @@
 # Brush and painting parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** minor (dragged preset tip preview; Hue Jitter amount track; Brush Settings minimum fields follow their Control; checkbox-only rows and non-destructive Smoothing switch; shaped-tip cursor follows the view; Color Replacement is a live toolbar tool; no brush-feel estimate changed) · **Target:** Adobe Photoshop 2026
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** minor (dragged preset tip preview; Hue Jitter amount track; Brush Settings minimum fields follow their Control; checkbox-only rows and non-destructive Smoothing switch; shaped-tip cursor follows the view; Color Replacement is a live toolbar tool; no brush-feel estimate changed; 2026-10-11: Pattern Stamp and Background Eraser draw live, TOOL-213-7) · **Target:** Adobe Photoshop 2026
 
 Painting is where Photoshop users notice differences first, so it gets its own checklist: the
 brush engine (`crates/paint/src/brush.rs`), the Brush Settings UI
@@ -61,7 +61,7 @@ tablets against Photoshop side by side.
 | Latency: dab to screen within a frame | partial | budgets P13/P16/P33 over (scorecard); big-brush lag #2619, #1994; cursor lag #2566, #1343 |
 | No hitch at mouse-up on a long stroke | not measurable | P32 needs a frame harness |
 | Live stroke for Brush and Eraser | done | |
-| Live stroke for every brush-based retouch tool | missing | TOOL-213-7 |
+| Live stroke for every brush-based retouch tool | partial | TOOL-213-7: all live but the Mixer Brush (PR #3627); Spot Healing shows the area it heals and heals on release, as Photoshop does |
 | No OS arrow cursor over the canvas with a pen | partial | TOOL-213-14 |
 
 ## Gestures and cursors
@@ -91,8 +91,8 @@ tablets against Photoshop side by side.
 | Tool | Status | Notes |
 |---|---|---|
 | Brush, Pencil (aliased, Auto Erase), Eraser (Brush/Pencil/Block) | done | Pencil 1 px quality #2139 |
-| Mixer Brush (Wet, Load, Mix, Flow, Sample All Layers) | partial | "incomplete" (#2247) |
-| Clone Stamp (opacity, flow, aligned, sample, overlay) | partial | Clone Source W/H link done (#3298, #3310); custom-tip clipping of the overlay missing (TOOL-213-8) |
+| Mixer Brush (Wet, Load, Mix, Flow, Sample All Layers, Current Brush Load with Load Brush and Clean Brush, automatic Load and Clean) | partial | No live result while dragging, no Alt-click loading (#2247) |
+| Clone Stamp (opacity, flow, aligned, sample, overlay) | partial | Clone Source W/H link and Alt target cursor (TOOL-213-8) |
 | Pattern Stamp (aligned, impressionist) | done | |
 | History Brush | done | Art History Brush missing |
 | Spot Healing, Healing | partial | grain on flat colour kept by Create Texture (#2104, #2762); "horrible in general" (#1092), stops responding after switching (#1751) |
@@ -116,12 +116,13 @@ tablets against Photoshop side by side.
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-13 | minor | Stale "missing tool" row corrected against main: Color Replacement (`paint.colorReplacement`) is a live toolbar tool; no brush-feel estimate changed |
 | 2026-10-10 | major | First version, from a source audit and the open issues |
+| 2026-10-11 | minor | Pattern Stamp and Background Eraser draw live (#3754); live retouch row now partial (Mixer Brush left) |
 | 2026-10-11 | minor | `~` held with the Brush or Pencil erases with that tool's brush, and Clear joins their Mode menus (#3439) |
 | 2026-10-12 | minor | Five Brush Settings switch rows toggle without selecting a properties pane; Smoothing has a default-on switch and retains its settings while disabled (#4283). No brush-feel estimate changed. |
 | 2026-10-12 | minor | A shaped tip's cursor outline turns and flips with a rotated or flipped view, and follows pixel aspect correction |
+| 2026-10-12 | minor | Rows refreshed against main: quick taps, pressure-ramp stair-steps, macOS right-click, round Pencil cursor, Clone Source W/H link, Spot Healing grain, brush-folder drag; the symmetry row no longer cites #2659 as the tracker |
+| 2026-10-13 | minor | Stale "missing tool" row corrected against main: Color Replacement (`paint.colorReplacement`) is a live toolbar tool; no brush-feel estimate changed |
 | 2026-10-13 | minor | Shape Dynamics and Transfer minimum inputs follow their Control and retain their values while disabled (#3825, partial). No brush-feel estimate changed. |
 | 2026-10-13 | minor | Hue Jitter uses the same themed amount slider as other jitter controls (#3825, partial). No brush-feel estimate changed. |
-| 2026-10-12 | minor | Rows refreshed against main: quick taps, pressure-ramp stair-steps, macOS right-click, round Pencil cursor, Clone Source W/H link, Spot Healing grain, brush-folder drag; the symmetry row no longer cites #2659 as the tracker |
 | 2026-10-13 | minor | Dragging a brush preset shows its cached tip thumbnail and name in the Brushes panel and preset picker (#4225, partial). No brush-feel estimate changed. |
