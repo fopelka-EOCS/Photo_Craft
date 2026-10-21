@@ -361,7 +361,9 @@ fn crop_doc(doc: &mut Document, cmd: &str, r: Rect, delete_pixels: bool, extensi
         let old = old_canvas.translate(dx, dy);
         let fmt = surf.format();
         let px = photocraft_raster::from_rgba(&fmt, [extension[0], extension[1], extension[2], 1.0]);
-        let keep = surf.content_bounds().intersect(&old);
+        // Without Delete Cropped Pixels the Background still holds what earlier crops hid: growing
+        // the frame again reveals it rather than painting the extension colour over it (#8060).
+        let keep = if delete_pixels { surf.content_bounds().intersect(&old) } else { surf.content_bounds() };
         let saved = surf.to_interleaved(keep);
         surf.fill_rect(Rect::from_xywh(0, 0, r.width(), r.height()), &px);
         if !keep.is_empty() {
@@ -1426,6 +1428,37 @@ mod tests {
                 let layer = a.layers[1].surface().unwrap();
                 assert!(canvas.contains_rect(&layer.content_bounds()), "{depth} {angle}: {:?}", layer.content_bounds());
             }
+        }
+    }
+
+    /// #8060: with Delete Cropped Pixels off, adjusting the crop (shrinking, then growing it back)
+    /// reveals the Background's hidden pixels instead of filling them with the background colour.
+    #[test]
+    fn recropping_larger_without_deleting_reveals_hidden_background_pixels() {
+        for depth in [8, 16, 32] {
+            let mut s = marked("rgb", depth);
+            let red = layer_rgba(&s, 1, 12, 8);
+            s.edit("paint", |doc, _| {
+                let bg = doc.background_mut().unwrap().surface_mut().unwrap();
+                let fmt = bg.format();
+                bg.fill_rect(Rect::new(5, 5, 9, 9), &photocraft_raster::from_rgba(&fmt, [0.0, 1.0, 0.0, 1.0]));
+                Ok(())
+            })
+            .unwrap();
+            s.execute("tools.setColors", json!({"background": "#ff00ff"})).unwrap();
+            s.execute("image.crop", json!({"x": 10, "y": 5, "width": 10, "height": 10, "deleteCroppedPixels": false})).unwrap();
+            // Grow back to the original canvas: the hidden area is the original picture, not magenta.
+            s.execute("image.crop", json!({"x": -10, "y": -5, "width": 40, "height": 20, "deleteCroppedPixels": false})).unwrap();
+            assert_eq!(doc(&s).size, Size::new(40, 20), "{depth}");
+            let bg = doc(&s).layers[0].surface().unwrap();
+            assert_eq!(bg.rgba(6, 6), [0.0, 1.0, 0.0, 1.0], "{depth}: the hidden green square comes back");
+            assert_eq!(bg.rgba(0, 0), [1.0, 1.0, 1.0, 1.0], "{depth}: the hidden white comes back, not the background colour");
+            assert_eq!(layer_rgba(&s, 1, 12, 8), red, "{depth}");
+            // Growing past the original picture still fills with the background colour.
+            s.execute("image.crop", json!({"x": -5, "y": 0, "width": 50, "height": 20, "deleteCroppedPixels": false})).unwrap();
+            let bg = doc(&s).layers[0].surface().unwrap();
+            assert_eq!(bg.rgba(0, 0), [1.0, 0.0, 1.0, 1.0], "{depth}: new canvas takes the background colour");
+            assert_eq!(bg.rgba(11, 6), [0.0, 1.0, 0.0, 1.0], "{depth}");
         }
     }
 
