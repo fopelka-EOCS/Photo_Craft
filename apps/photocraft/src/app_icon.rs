@@ -34,6 +34,14 @@ pub fn sets_runtime_icon(exe: Option<&std::path::Path>) -> bool {
     !(cfg!(target_os = "macos") && exe.is_some_and(in_app_bundle))
 }
 
+/// The icon for the main window's `ViewportBuilder`: [`window_icon`] where [`sets_runtime_icon`],
+/// else an empty `IconData`. Leaving the icon unset is not enough inside a macOS bundle: eframe
+/// then sets its own egui logo on the Dock at launch, over the .icns. It treats an empty icon as
+/// none and leaves the Dock alone.
+pub fn viewport_icon(exe: Option<&std::path::Path>) -> egui::IconData {
+    if sets_runtime_icon(exe) { window_icon() } else { egui::IconData::default() }
+}
+
 /// Whether `exe` is an app bundle's executable: `…/Name.app/Contents/MacOS/binary`.
 fn in_app_bundle(exe: &std::path::Path) -> bool {
     let name = |p: Option<&std::path::Path>| p.and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned());
@@ -78,6 +86,10 @@ mod tests {
         assert!(sets_runtime_icon(None));
         assert!(sets_runtime_icon(Some(Path::new("/usr/bin/photocraft"))));
         assert_eq!(sets_runtime_icon(Some(Path::new("/Applications/PhotoCraft.app/Contents/MacOS/photocraft"))), !cfg!(target_os = "macos"));
+        // The bundle gets an empty icon, not none: eframe would put its egui logo in the Dock.
+        let bundled = viewport_icon(Some(Path::new("/Applications/PhotoCraft.app/Contents/MacOS/photocraft")));
+        assert_eq!(bundled == egui::IconData::default(), cfg!(target_os = "macos"));
+        assert_ne!(viewport_icon(Some(Path::new("/usr/bin/photocraft"))), egui::IconData::default());
     }
 
     #[test]
