@@ -59,6 +59,12 @@ const VIEW: &str = r#"[{"op": "ui.view", "view": {"type": "column", "children": 
     {"type": "text", "id": "script", "value": "", "multiline": true},
     {"type": "button", "id": "go", "label": "Go", "primary": true}]}}]"#;
 
+/// A view whose inputs declare values: what `values` must carry before anything is set or typed.
+const VIEW_WITH_VALUES: &str = r#"[{"op": "ui.view", "view": {"type": "column", "children": [
+    {"type": "text", "id": "script", "value": "declared line", "multiline": true},
+    {"type": "toggle", "id": "bold", "value": true, "label": "Bold"},
+    {"type": "button", "id": "go", "label": "Go", "primary": true}]}}]"#;
+
 fn escape(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
 }
@@ -112,7 +118,7 @@ fn panel_with(manifest: &str, replies: &[&str]) -> Vec<u8> {
     // The first reply is the view the panel sends on `init`, and it is also what a tick is answered
     // with (see [`tick_guard`]) — so it is not one of the scripted answers below, and it is never a
     // trap.
-    assert_eq!(replies.first(), Some(&VIEW), "a fixture's script starts with the view its panel sends");
+    assert!(replies.first().is_some_and(|r| r.contains("ui.view")), "a fixture's script starts with the view its panel sends");
     let mut data = String::new();
     for (i, reply) in replies.iter().enumerate() {
         if *reply != TRAP {
@@ -350,6 +356,50 @@ fn a_click_reaches_the_panel_and_its_operations_are_carried_out() {
     assert!(click(&mut s, id, "not-a-widget").is_ok());
     let error = s.execute("plugin.panel.event", json!({"id": id, "event": {"type": "ui.poke"}})).expect_err("unknown event");
     assert!(error.to_string().contains("ui.poke"), "{error}");
+    cleanup(&mut s, id);
+}
+
+#[test]
+fn a_click_carries_the_values_the_view_declares() {
+    let _tick = ticking();
+    let id = "test.panel.declaredvalues";
+    let mut s = app(id, &panel_with(&panel_manifest(id), &[VIEW_WITH_VALUES]));
+    open(&mut s, id);
+    click(&mut s, id, "go").unwrap();
+    let event = last_event(&mut s, id);
+    assert_eq!(event["type"], "ui.click", "{event}");
+    assert_eq!(event["values"]["script"], "declared line", "`values` is every input's current value: {event}");
+    assert_eq!(event["values"]["bold"], true);
+    cleanup(&mut s, id);
+}
+
+#[test]
+fn a_committed_change_is_the_value_the_next_click_carries() {
+    let _tick = ticking();
+    let id = "test.panel.change";
+    let mut s = app(id, &panel_with(&panel_manifest(id), &[VIEW_WITH_VALUES]));
+    open(&mut s, id);
+    s.execute("plugin.panel.event", json!({"id": id, "event": {"type": "ui.change", "id": "script", "value": "typed"}})).unwrap();
+    click(&mut s, id, "go").unwrap();
+    let event = last_event(&mut s, id);
+    assert_eq!(event["type"], "ui.click", "{event}");
+    assert_eq!(event["values"]["script"], "typed", "what the user typed is the input's current value: {event}");
+    cleanup(&mut s, id);
+}
+
+#[test]
+fn input_values_are_capped_and_a_panel_that_overflows_them_is_stopped() {
+    let id = "test.panel.valuecap";
+    // One `ui.set` with more keys than the host keeps: the operation is refused, the batch with it.
+    let keys: Vec<String> = (0..=MAX_VALUE_KEYS).map(|i| format!(r#""k{i}": {i}"#)).collect();
+    let reply = format!(r#"[{{"op": "ui.set", "values": {{{}}}}}]"#, keys.join(","));
+    let mut s = app(id, &panel(id, &[VIEW, &reply]));
+    open(&mut s, id);
+    let error = click(&mut s, id, "go").expect_err("a panel may keep only so many input values");
+    assert!(error.to_string().contains("input values"), "{error}");
+    let st = inspect(&mut s, id);
+    assert_eq!(st["state"], "stopped", "{st}");
+    assert_eq!(st["values"].as_object().map(serde_json::Map::len), Some(MAX_VALUE_KEYS), "nothing past the cap was kept: {st}");
     cleanup(&mut s, id);
 }
 
@@ -788,5 +838,31 @@ fn the_example_panel_plug_in_works_end_to_end() {
     s.execute("plugin.remove", json!({"id": id})).unwrap();
     s.execute("plugin.install", json!({"data": b64(EXAMPLE)})).unwrap();
     assert_eq!(open(&mut s, id)["view"]["children"][1]["value"], "");
+    cleanup(&mut s, id);
+}
+
+#[test]
+fn the_store_is_capped_at_one_mib_and_a_refused_value_is_not_kept() {
+    let id = "test.panel.storagecap";
+    let mut s = app(id, &panel(id, &[VIEW]));
+    open(&mut s, id);
+    let ctx = HostCtx { now: now_ms(), doc: None };
+    {
+        let mut all = panels();
+        let panel = all.get_mut(id).unwrap();
+        // Each value is under the 1 MiB reply cap, so the store's own cap is what refuses the second.
+        let big = "x".repeat(600 * 1024);
+        apply(panel, &ctx, Operation::StorageSet { key: "a".into(), value: Value::String(big.clone()) }).unwrap();
+        let e = apply(panel, &ctx, Operation::StorageSet { key: "b".into(), value: Value::String(big) }).unwrap_err();
+        assert!(e.to_string().contains("stored values"), "{e}");
+        assert_eq!(panel.storage.len(), 1, "the refused value was not kept");
+        assert_eq!(storages().get(id).map(Map::len), Some(1), "and the written-through store matches");
+        // Replacing a key is measured by the difference, not by the sum of old and new.
+        apply(panel, &ctx, Operation::StorageSet { key: "a".into(), value: Value::String("small".into()) }).unwrap();
+        assert_eq!(storages().get(id).unwrap().get("a"), Some(&json!("small")));
+        apply(panel, &ctx, Operation::StorageSet { key: "a".into(), value: Value::Null }).unwrap();
+        assert!(panel.storage.is_empty());
+        assert!(storages().get(id).is_none_or(|m| !m.contains_key("a")), "a delete reaches the store too");
+    }
     cleanup(&mut s, id);
 }

@@ -37,7 +37,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use photocraft_plugins::instance::{Failures, Instance};
 use photocraft_plugins::ops::{self, NoticeLevel, OpId, Operation};
-use photocraft_plugins::view::Widget;
+use photocraft_plugins::view::{self, Widget};
 use photocraft_plugins::{Capabilities, DocumentCap, Error as PluginError, Plugin, registry};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -52,6 +52,18 @@ const MAX_PUMP_STEPS: usize = 64;
 const MAX_NOTICES: usize = 32;
 /// Stored values one panel may keep.
 const MAX_STORAGE_KEYS: usize = 256;
+/// Total bytes of those stored values, written as JSON: the ABI documents a 1 MiB store per
+/// plug-in (see `docs/plugins-v2.md`), and without a byte cap 256 keys could hold 256 MiB.
+const MAX_STORAGE_BYTES: usize = 1 << 20;
+/// Input values one panel may keep for the UI and its events.
+///
+/// A `ui.set` may arrive in reply after reply, each within the 1 MiB reply cap, so the map needs a
+/// bound of its own: without one a panel could grow host memory far past the sandbox's limits. One
+/// key per possible widget is plenty ([`photocraft_plugins::view::MAX_WIDGETS`]).
+const MAX_VALUE_KEYS: usize = 512;
+/// Total bytes of those values, written as JSON — generous beside the 1 MiB reply cap, small beside
+/// the 512 MiB a panel's own linear memory is allowed.
+const MAX_VALUE_BYTES: usize = 4 << 20;
 /// The locale the host reports in `init` (PhotoCraft's UI is English).
 const LOCALE: &str = "en-US";
 
@@ -203,12 +215,17 @@ struct Panel {
     steps: u64,
     /// Commands the panel asked for that the host has not run yet (see [`Ask`]).
     asked: Vec<Ask>,
+    /// Total bytes of [`PanelView::values`], kept as it changes so the cap costs no rescan.
+    value_bytes: usize,
+    /// Total bytes of [`Panel::storage`], likewise.
+    storage_bytes: usize,
 }
 
 impl Panel {
     fn new(plugin: Arc<Plugin>) -> Result<Panel> {
         // Whatever this plug-in stored last time, including in an instance that has since stopped.
         let storage = storages().get(plugin.id()).cloned().unwrap_or_default();
+        let storage_bytes = storage.values().map(json_bytes).sum();
         Ok(Panel {
             instance: Instance::start(plugin).map_err(err)?,
             view: PanelView::default(),
@@ -217,6 +234,8 @@ impl Panel {
             seen: None,
             steps: 0,
             asked: Vec::new(),
+            value_bytes: 0,
+            storage_bytes,
         })
     }
 
@@ -313,6 +332,60 @@ fn queue_result(panel: &mut Panel, ctx: &HostCtx, id: &OpId, outcome: std::resul
     panel.instance.queue_mut().push(event);
 }
 
+/// Bytes a value takes as JSON: what [`MAX_VALUE_BYTES`] counts.
+fn json_bytes(value: &Value) -> usize {
+    serde_json::to_vec(value).map(|b| b.len()).unwrap_or(0)
+}
+
+/// Records one input value, refusing a map that would grow past the caps.
+fn insert_value(panel: &mut Panel, key: String, value: Value) -> Result<()> {
+    if !panel.view.values.contains_key(&key) && panel.view.values.len() >= MAX_VALUE_KEYS {
+        return Err(err(PluginError::Limit(format!("a panel may keep {MAX_VALUE_KEYS} input values"))));
+    }
+    let old = panel.view.values.get(&key).map(json_bytes).unwrap_or(0);
+    let total = panel.value_bytes.saturating_sub(old).saturating_add(json_bytes(&value));
+    if total > MAX_VALUE_BYTES {
+        return Err(err(PluginError::Limit(format!("a panel may keep {MAX_VALUE_BYTES} bytes of input values"))));
+    }
+    panel.value_bytes = total;
+    panel.view.values.insert(key, value);
+    Ok(())
+}
+
+/// Stores one value for the plug-in, refusing one that would grow the store past the caps, and
+/// writes through only that key.
+///
+/// The clone-and-replace this replaces copied the whole map on every operation: a reply of 64
+/// `storage.set`s copied a 1 MiB store 64 times, and the copies were thrown away.
+fn set_storage(panel: &mut Panel, key: String, value: Value) -> Result<()> {
+    let id = panel.instance.plugin().id().to_string();
+    if value.is_null() {
+        // The ABI's delete (see `ops::Operation::StorageSet`). Without it a panel could only ever add
+        // keys, and its 256 would be a one-way door.
+        if let Some(old) = panel.storage.remove(&key) {
+            panel.storage_bytes = panel.storage_bytes.saturating_sub(json_bytes(&old));
+        }
+        if let Some(store) = storages().get_mut(&id) {
+            store.remove(&key);
+        }
+        return Ok(());
+    }
+    if !panel.storage.contains_key(&key) && panel.storage.len() >= MAX_STORAGE_KEYS {
+        return Err(err(PluginError::Limit(format!("a panel may keep {MAX_STORAGE_KEYS} stored values"))));
+    }
+    let old = panel.storage.get(&key).map(json_bytes).unwrap_or(0);
+    let total = panel.storage_bytes.saturating_sub(old).saturating_add(json_bytes(&value));
+    if total > MAX_STORAGE_BYTES {
+        return Err(err(PluginError::Limit(format!("a panel may keep {MAX_STORAGE_BYTES} bytes of stored values"))));
+    }
+    panel.storage_bytes = total;
+    // Written through, so the next instance of this plug-in — a restart after a failure, or the
+    // panel reopened after `stop` — reads back what this one stored.
+    storages().entry(id).or_default().insert(key.clone(), value.clone());
+    panel.storage.insert(key, value);
+    Ok(())
+}
+
 /// Carries out one operation.
 ///
 /// The match is exhaustive on purpose: a new operation in the ABI must be decided here, not fall
@@ -320,10 +393,22 @@ fn queue_result(panel: &mut Panel, ctx: &HostCtx, id: &OpId, outcome: std::resul
 fn apply(panel: &mut Panel, ctx: &HostCtx, op: Operation) -> Result<()> {
     match op {
         // What the panel asks the UI to show.
-        Operation::UiView { view } => panel.view.view = Some(view),
+        Operation::UiView { view } => {
+            // `ui.click` and `ui.change` carry "every input's current value", and a value the view
+            // declares is as current as one set with `ui.set`. Seeding leaves an explicit value in
+            // place, so a panel that patched one field keeps it across a view declaring the rest.
+            for (key, value) in view::input_values(&view) {
+                if !panel.view.values.contains_key(&key) {
+                    // Best effort: a view that alone fills the cap still draws. The UI falls back to
+                    // the declared value for rendering, so the map is a convenience, not the source.
+                    let _ = insert_value(panel, key, value);
+                }
+            }
+            panel.view.view = Some(view);
+        }
         Operation::UiSet { values } => {
             for (key, value) in values {
-                panel.view.values.insert(key, value);
+                insert_value(panel, key, value)?;
             }
         }
         // `done` retires the bar rather than showing a full one.
@@ -341,21 +426,7 @@ fn apply(panel: &mut Panel, ctx: &HostCtx, op: Operation) -> Result<()> {
         Operation::TimerClear { id } => {
             panel.instance.timers_mut().clear(&id);
         }
-        Operation::StorageSet { key, value } => {
-            if value.is_null() {
-                // The ABI's delete (see `ops::Operation::StorageSet`). Without it a panel could only
-                // ever add keys, and its 256 would be a one-way door.
-                panel.storage.remove(&key);
-            } else {
-                if !panel.storage.contains_key(&key) && panel.storage.len() >= MAX_STORAGE_KEYS {
-                    return Err(err(PluginError::Limit(format!("a panel may keep {MAX_STORAGE_KEYS} stored values"))));
-                }
-                panel.storage.insert(key, value);
-            }
-            // Written through, so the next instance of this plug-in — a restart after a failure, or
-            // the panel reopened after `stop` — reads back what this one stored.
-            storages().insert(panel.instance.plugin().id().to_string(), panel.storage.clone());
-        }
+        Operation::StorageSet { key, value } => set_storage(panel, key, value)?,
         Operation::BlobFree { blob } => {
             panel.instance.blobs_mut().free(&blob);
         }
@@ -671,10 +742,18 @@ fn event(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(reason) = panel.stopped() {
             return Err(EngineError::Other(format!("plug-in {id:?} is stopped ({reason}); start it again with plugin.panel.restart")));
         }
-        let values = panel.view.values.clone();
         let event = match kind {
-            "ui.click" => ops::ui_click(ctx.now, widget("ui.click")?, &values),
-            "ui.change" => ops::ui_change(ctx.now, widget("ui.change")?, event.get("value").unwrap_or(&Value::Null), &values),
+            "ui.click" => ops::ui_click(ctx.now, widget("ui.click")?, &panel.view.values),
+            "ui.change" => {
+                // The committed value is the input's current value from now on: this event's own
+                // `values` and the next click carry what the user typed, not what was there before.
+                // A value past the cap is still delivered to the panel; only the map stays capped.
+                if let Some(w) = event.get("id").and_then(Value::as_str) {
+                    let value = event.get("value").cloned().unwrap_or(Value::Null);
+                    let _ = insert_value(panel, w.to_string(), value);
+                }
+                ops::ui_change(ctx.now, widget("ui.change")?, event.get("value").unwrap_or(&Value::Null), &panel.view.values)
+            }
             "cancel" => ops::cancel(ctx.now),
             other => return Err(bad(CMD, format!("`{other}` is not a panel event (`ui.click`, `ui.change` or `cancel`)"))),
         };
