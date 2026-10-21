@@ -1373,7 +1373,7 @@ fn gpu_status_rows(ui: &mut egui::Ui, info: Option<&Value>, adapters: Option<&Va
                 })
                 .collect();
             let pairs: Vec<(String, &str)> = options.iter().map(|o| o.to_string()).zip(labels.iter().map(String::as_str)).collect();
-            if crate::widgets::dropdown_literal(ui, "graphics-backend", &mut current, &pairs, 220.0) {
+            if crate::widgets::dropdown_literal(ui, "graphics-backend", &mut current, &pairs, 220.0) && current != saved {
                 set_graphics_backend(obj, &current);
             }
         });
@@ -2668,7 +2668,7 @@ mod tests {
         use egui::accesskit::Role;
         use egui_kittest::{Harness, kittest::Queryable};
         let foreign_backend = if cfg!(target_os = "macos") { "vulkan" } else { "metal" };
-        for backend in ["cpu", foreign_backend, "future-backend"] {
+        for (backend, choose_auto) in ["cpu", foreign_backend, "future-backend"].into_iter().flat_map(|backend| [(backend, false), (backend, true)]) {
             let values = json!({"gpuBackend":backend, "useGpu":true, "memoryUsageMb":2048}).as_object().unwrap().clone();
             let original = values.clone();
             let mut fonts_installed = false;
@@ -2691,12 +2691,24 @@ mod tests {
             h.run();
             h.get_by_label(&label);
             assert_eq!(*h.state(), original, "opening the dropdown must preserve the entire profile");
+            h.get_by_label(&label).click();
+            h.run();
+            assert_eq!(*h.state(), original, "reselecting the saved backend must preserve the entire profile");
             h.key_press(egui::Key::Escape);
             h.run();
-            h.get_by_label("Reset GPU Backend").click();
+            if choose_auto {
+                h.get_by_role(Role::ComboBox).click();
+                h.run();
+                h.get_by_label("Auto").click();
+            } else {
+                h.get_by_label("Reset GPU Backend").click();
+            }
             h.run();
             assert_eq!(h.state()["gpuBackend"], "auto");
             assert_eq!(h.state()["renderingMode"], if backend == "cpu" { "cpu" } else { "auto" });
+            h.get_by_role(Role::ComboBox).click();
+            h.run();
+            assert!(h.query_by_label(&label).is_none(), "a replaced legacy/unavailable backend is no longer offered");
         }
     }
 
