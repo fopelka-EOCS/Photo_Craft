@@ -69,6 +69,9 @@ impl Bridge {
         }));
         let bridge = self.clone();
         services.write = Some(Box::new(move |path: &str, bytes: &[u8]| bridge.post_save(path, bytes)));
+        // Unlike a browser download (#4962), what the parent is handed it stores, reporting a
+        // failure itself: a save to it counts as done.
+        services.write_unconfirmed = false;
     }
 
     pub fn post_ready(&self) {
