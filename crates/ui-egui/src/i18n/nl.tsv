@@ -4016,3 +4016,8 @@ curves	Smooth	Vloeiend maken
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	GPU-adapter
+
+# Hue Curves (#6241)
+	Hue Curves	Kleurtooncurven
+	Hue Curves…	Kleurtooncurven…
+	Curve:	Curve:

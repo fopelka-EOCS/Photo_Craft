@@ -3934,3 +3934,8 @@ curves	Smooth	スムーズ
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	GPU アダプター
+
+# Hue Curves (#6241)
+	Hue Curves	色相カーブ
+	Hue Curves…	色相カーブ…
+	Curve:	カーブ:

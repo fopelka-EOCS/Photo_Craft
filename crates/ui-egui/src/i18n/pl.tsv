@@ -3856,3 +3856,8 @@ curves	Smooth	Wygładź
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Karta GPU
+
+# Hue Curves (#6241)
+	Hue Curves	Krzywe odcienia
+	Hue Curves…	Krzywe odcienia…
+	Curve:	Krzywa:

@@ -3864,3 +3864,8 @@ navigator	Zoom	Zvětšení
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Adaptér GPU
+
+# Hue Curves (#6241)
+	Hue Curves	Křivky odstínu
+	Hue Curves…	Křivky odstínu…
+	Curve:	Křivka:

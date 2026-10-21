@@ -3252,3 +3252,8 @@ curves	Smooth	Haluskan
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Adaptor GPU
+
+# Hue Curves (#6241)
+	Hue Curves	Kurva Hue
+	Hue Curves…	Kurva Hue…
+	Curve:	Kurva:

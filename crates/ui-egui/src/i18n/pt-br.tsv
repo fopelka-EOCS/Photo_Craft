@@ -4046,3 +4046,8 @@ layerLabel	No Color	Sem cor
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Adaptador de GPU
+
+# Hue Curves (#6241)
+	Hue Curves	Curvas de matiz
+	Hue Curves…	Curvas de matiz…
+	Curve:	Curva:

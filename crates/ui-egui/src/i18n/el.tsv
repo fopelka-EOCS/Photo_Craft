@@ -3956,3 +3956,8 @@ curves	Smooth	Εξομάλυνση
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Προσαρμογέας GPU
+
+# Hue Curves (#6241)
+	Hue Curves	Καμπύλες απόχρωσης
+	Hue Curves…	Καμπύλες απόχρωσης…
+	Curve:	Καμπύλη:

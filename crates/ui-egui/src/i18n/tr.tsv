@@ -3986,3 +3986,8 @@ cameraData	Lens	Lens
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	GPU bağdaştırıcısı
+
+# Hue Curves (#6241)
+	Hue Curves	Renk Tonu Eğrileri
+	Hue Curves…	Renk Tonu Eğrileri…
+	Curve:	Eğri:
