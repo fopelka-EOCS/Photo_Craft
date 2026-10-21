@@ -2143,7 +2143,19 @@ fn composite_atop_any(layer: &Layer, base: &mut Buffer, cx: &Ctx) {
     let gamma = text_gamma(layer);
     let bmode = to_blitter_blend_mode(layer.blend);
     let hdr = psblend::HDR.with(|h| h.get());
-    craft_blitter::blit_rgba32f_opts(&mut base.px, &content.px, bmode, opacity, 1.0, gamma, hdr, craft_blitter::AlphaMode::Straight, true);
+    if psblend::LAB_MIX.with(|l| l.get()) {
+        for (i, p) in base.px.iter_mut().enumerate() {
+            let alpha = p[3];
+            if alpha <= 0.0 {
+                continue;
+            }
+            let s = content.px[i];
+            let r = blend::composite_gamma(layer.blend, [p[0], p[1], p[2], 1.0], s, opacity, gamma);
+            *p = [r[0], r[1], r[2], alpha];
+        }
+    } else {
+        craft_blitter::blit_rgba32f_opts(&mut base.px, &content.px, bmode, opacity, 1.0, gamma, hdr, craft_blitter::AlphaMode::Straight, true);
+    }
 }
 
 /// Blend an isolated layer buffer into the backdrop.

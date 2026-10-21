@@ -1225,6 +1225,7 @@ dependencies = [
 [[package]]
 name = "craft-blitter"
 version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=f9d12bc3db8e4b4474d81af8928e1e9ebb436098#f9d12bc3db8e4b4474d81af8928e1e9ebb436098"
 dependencies = [
  "rayon",
 ]

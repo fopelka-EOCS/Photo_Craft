@@ -72,8 +72,8 @@ fn test_empirical_rapid_layer_creation_mutation_deletion_cycles() {
         assert_eq!(session.active().unwrap().doc.layers.len(), initial_count, "All created layers must be cleaned up after cycle {cycle}");
 
         // 5. Purge history periodically to verify memory reclaim
-        if cycle % 5 == 0 {
-            let _ = session.execute("edit.purge.history", json!({}));
+        if cycle % 5 == 0 && session.is_enabled("edit.purge.histories") {
+            session.execute("edit.purge.histories", json!({})).unwrap();
         }
     }
 }

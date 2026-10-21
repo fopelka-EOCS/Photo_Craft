@@ -59,7 +59,7 @@ async fn call_err(client: &Conn, name: &str, args: Value) -> String {
             assert_eq!(r.is_error, Some(true), "tool {name} unexpectedly succeeded: {}", text(&r));
             text(&r)
         }
-        Err(e) => format!("{e:?}"),
+        Err(e) => e.to_string(),
     }
 }
 
@@ -104,24 +104,25 @@ impl TestHarness {
 async fn test_tier5_boundary_unknown_tools_and_commands() {
     let h = TestHarness::new("boundary_unknown").await;
 
-    // 1. Unknown tool name -> should return error (either transport or tool error)
-    let err_tool = call_err(&h.client, "nonexistent_tool_name_xyz", json!({})).await;
-    assert!(!err_tool.is_empty(), "Unknown tool must produce an error");
+    // 1. Unknown tool name -> should fail at protocol level
+    let p = CallToolRequestParams::new("nonexistent_tool_name_xyz".to_owned());
+    let res = h.client.call_tool(p).await;
+    assert!(res.is_err(), "Unknown tool must fail protocol call");
 
     // 2. Open a document first
     call_ok(&h.client, "doc_new", json!({"width": 32, "height": 32, "background": "white"})).await;
 
     // 3. Unknown command id inside command_run
     let err_cmd = call_err(&h.client, "command_run", json!({"id": "completely.fake.command.id"})).await;
-    assert!(err_cmd.contains("unknown") || err_cmd.contains("not recognized") || !err_cmd.is_empty());
+    assert!(err_cmd.contains("unknown") || err_cmd.contains("not recognized"), "unexpected error: {err_cmd}");
 
     // 4. Out-of-bounds document index in doc_inspect
     let err_inspect = call_err(&h.client, "doc_inspect", json!({"index": 999999})).await;
-    assert!(err_inspect.contains("index") || err_inspect.contains("out of bounds") || !err_inspect.is_empty());
+    assert!(err_inspect.contains("index") || err_inspect.contains("out of bounds") || err_inspect.contains("no document"), "unexpected error: {err_inspect}");
 
     // 5. Out-of-bounds document index in doc_close
     let err_close = call_err(&h.client, "doc_close", json!({"index": 999999})).await;
-    assert!(err_close.contains("index") || err_close.contains("out of bounds") || !err_close.is_empty());
+    assert!(err_close.contains("index") || err_close.contains("out of bounds") || err_close.contains("no document"), "unexpected error: {err_close}");
 
     h.shutdown().await;
 }
@@ -136,15 +137,22 @@ async fn test_tier5_malformed_parameters_rejection() {
 
     // 1. Extra parameter on deny_unknown_fields (doc_new)
     let err_extra = call_err(&h.client, "doc_new", json!({"width": 32, "height": 32, "unrecognized_extra_key": true})).await;
-    assert!(!err_extra.is_empty(), "Extra field should be rejected");
+    assert!(err_extra.contains("unknown argument") || err_extra.contains("unrecognized_extra_key"), "Unexpected extra field error: {err_extra}");
 
     // 2. Wrong parameter type (string instead of integer for width)
     let err_type = call_err(&h.client, "doc_new", json!({"width": "thirty-two", "height": 32})).await;
-    assert!(!err_type.is_empty(), "Wrong type should be rejected");
+    assert!(err_type.contains("invalid") || err_type.contains("type") || err_type.contains("width"), "Unexpected wrong type error: {err_type}");
 
     // 3. Zero or negative width
     let err_zero = call_err(&h.client, "doc_new", json!({"width": 0, "height": 32})).await;
-    assert!(!err_zero.is_empty(), "Zero width should be rejected");
+    assert!(
+        err_zero.contains("invalid")
+            || err_zero.contains("width")
+            || err_zero.contains("zero")
+            || err_zero.contains("greater than")
+            || err_zero.contains("fail"),
+        "Unexpected zero width error: {err_zero}"
+    );
 
     // 4. Valid doc_new to test command parameter errors
     call_ok(&h.client, "doc_new", json!({"width": 32, "height": 32, "background": "white"})).await;
@@ -198,18 +206,21 @@ async fn test_tier5_concurrent_mcp_request_sequences() {
         }));
     }
 
-    // Spawn 5 concurrent tasks generating previews
+    // Spawn 3 concurrent tasks generating previews
     for side in [16, 32, 64] {
         let client = Arc::clone(&h.client);
         handles.push(tokio::spawn(async move {
-            let prev = call_ok(&client, "doc_render_preview", json!({"max_side": side})).await;
-            assert!(prev.is_object() || prev.is_string());
+            let mut p = CallToolRequestParams::new("doc_render_preview".to_owned());
+            p = p.with_arguments(json!({"max_side": side}).as_object().unwrap().clone());
+            let r = client.call_tool(p).await.expect("doc_render_preview transport failed");
+            assert_ne!(r.is_error, Some(true), "doc_render_preview returned error");
+            assert!(!r.content.is_empty(), "doc_render_preview returned empty content");
         }));
     }
 
-    // Await all concurrent tasks
+    // Await all concurrent tasks with a 30s timeout to detect any deadlock
     for handle in handles {
-        handle.await.expect("task panicked or deadlocked");
+        tokio::time::timeout(std::time::Duration::from_secs(30), handle).await.expect("concurrent task deadlocked (timeout)").expect("task panicked");
     }
 
     // Final integrity check: inspect document
