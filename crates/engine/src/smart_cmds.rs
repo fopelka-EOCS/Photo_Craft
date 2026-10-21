@@ -814,11 +814,20 @@ fn set_source(s: &mut Session, p: &Value, label: &str, keep_psd: bool, make: imp
 
 // Keep the shared-instance transaction out of the per-command source-builder instantiations.
 fn set_shared_source(s: &mut Session, id: LayerId, label: &str, keep_psd: bool, new: SmartSource) -> Result<Value> {
+    set_shared_source_moved(s, id, label, keep_psd, new, None)
+}
+
+/// [`set_shared_source`], moving each instance's placement by `shift` (in source pixels) first.
+fn set_shared_source_moved(s: &mut Session, id: LayerId, label: &str, keep_psd: bool, new: SmartSource, shift: Option<(f64, f64)>) -> Result<Value> {
     let (parent, contents_id, changed) = s.edit(label, |doc, _| {
         let contents_id = smart(doc, id)?.contents_id;
         let changed = instances(doc, contents_id);
         for &instance in &changed {
-            smart_mut(doc, instance)?.source = new.clone();
+            let sm = smart_mut(doc, instance)?;
+            sm.source = new.clone();
+            if let Some((dx, dy)) = shift {
+                move_in_source(sm, dx, dy);
+            }
             if !keep_psd {
                 detach_psd(doc.layer_mut(instance).ok_or(EngineError::NoLayer(instance))?);
             }
@@ -842,9 +851,47 @@ fn replace_contents(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Replace Contents from a file's name and bytes: what the desktop and web file pickers hand over.
+///
+/// As in Photoshop, contents of another size keep the placement's centre (the transform's
+/// reference point) and its scale, so they grow or shrink around the middle (#7844).
 pub fn replace_contents_bytes(s: &mut Session, id: LayerId, file_name: &str, bytes: Vec<u8>) -> Result<Value> {
     decode_source(file_name, &bytes)?; // fail before touching the document
-    set_shared_source(s, id, "Replace Contents", false, SmartSource::Embedded { file_name: file_name.to_string(), bytes: Arc::new(bytes) })
+    let doc = &s.active().ok_or(EngineError::NoDocument)?.doc;
+    let fmt = doc.pixel_format();
+    // The old contents' size, read through the same authorization a command reading the linked
+    // file would need: a denied path just leaves the placement where it is.
+    let old = authorized_source_bytes(s, "layer.smartObjects.replaceContents", &doc.metadata, &smart(doc, id)?.source)
+        .ok()
+        .flatten()
+        .and_then(|(name, old)| source_image(&name, &old, fmt).ok());
+    let shift = match (old, source_image(file_name, &bytes, fmt).ok()) {
+        (Some(old), Some(new)) => {
+            let centre = |r: Rect| (f64::from(r.x0) + f64::from(r.width()) / 2.0, f64::from(r.y0) + f64::from(r.height()) / 2.0);
+            let ((ox, oy), (nx, ny)) = (centre(old.bounds), centre(new.bounds));
+            Some((ox - nx, oy - ny)).filter(|(dx, dy)| *dx != 0.0 || *dy != 0.0)
+        }
+        // Either size unknown (unavailable old contents): the placement is kept as it is.
+        _ => None,
+    };
+    let new = SmartSource::Embedded { file_name: file_name.to_string(), bytes: Arc::new(bytes) };
+    set_shared_source_moved(s, id, "Replace Contents", false, new, shift)
+}
+
+/// Moves a placement by (`dx`, `dy`) source pixels: the source point that lands where its old
+/// point (`dx`, `dy`) away landed. A warped or stacked instance is left as it is: its mesh or
+/// stack is laid out over the old contents' box.
+fn move_in_source(sm: &mut SmartObject, dx: f64, dy: f64) {
+    if sm.warp.is_some() || sm.stack_mode.is_some() {
+        return;
+    }
+    // `mul` applies its argument first: the translation in source space, then the placement.
+    let shift = Affine::translate(dx, dy);
+    match sm.perspective {
+        None => sm.transform = sm.transform.mul(&shift),
+        // H · T(dx, dy), with the affine part derived from it again, as any perspective
+        // placement's is (SVG contents rasterize at that affine's scale).
+        Some(_) => set_placement(sm, placement(sm).mul(&affine_homography(&shift))),
+    }
 }
 
 /// The file name and bytes of smart object `id`'s contents.

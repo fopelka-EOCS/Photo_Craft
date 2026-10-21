@@ -582,9 +582,14 @@ fn export_replace_and_linked_contents() {
     );
     let png = dir.join("yellow.png");
     std::fs::write(&png, photocraft_io::export(&png_doc, "png", &Default::default()).unwrap().bytes).unwrap();
+    let centre = |r: Rect| (f64::from(r.x0 + r.x1) / 2.0, f64::from(r.y0 + r.y1) / 2.0);
+    let before = centre(active_smart(&s).cache.unwrap().content_bounds());
     s.execute("layer.smartObjects.replaceContents", json!({"path": png.to_str().unwrap()})).unwrap();
     let sm = active_smart(&s);
-    assert_eq!(sm.cache.as_ref().unwrap().content_bounds(), Rect::new(-6, 5, -2, 9), "transform kept");
+    let after = sm.cache.as_ref().unwrap().content_bounds();
+    assert!(after.width() >= 4 && after.height() >= 4, "scale kept: {after:?}");
+    let after = centre(after);
+    assert!((after.0 - before.0).abs() <= 1.0 && (after.1 - before.1).abs() <= 1.0, "centre kept (#7844): {before:?} -> {after:?}");
     assert!(s.execute("layer.smartObjects.replaceContents", json!({})).is_err());
     // Linked: write out, edit the file, update.
     let linked = dir.join("linked.png");
@@ -595,7 +600,9 @@ fn export_replace_and_linked_contents() {
     red.layers[0].surface_mut().unwrap().fill_rect(rb, &[1.0, 0.0, 0.0, 1.0]);
     std::fs::write(&linked, photocraft_io::export(&red, "png", &Default::default()).unwrap().bytes).unwrap();
     s.execute("layer.smartObjects.updateAllModifiedContent", json!({})).unwrap();
-    assert_eq!(active_smart(&s).cache.unwrap().rgba(-5, 6), [1.0, 0.0, 0.0, 1.0]);
+    let cache = active_smart(&s).cache.unwrap();
+    let b = cache.content_bounds();
+    assert_eq!(cache.rgba(b.x0 + 1, b.y0 + 1), [1.0, 0.0, 0.0, 1.0]);
     s.execute("layer.smartObjects.convertToEmbedded", json!({})).unwrap();
     std::fs::remove_dir_all(&dir).ok();
     // Missing linked file: re-rendering fails cleanly and changes nothing.
@@ -1138,4 +1145,101 @@ fn displace_smart_filter_reads_its_map_path_on_re_render() {
         assert!(max_diff(&before, &flat(&s)) > 0.1, "shown again at {depth}-bit");
     }
     std::fs::remove_dir_all(&dir).ok();
+}
+
+/// #7844: contents of another size keep the placement's centre and scale, as Photoshop's
+/// Replace Contents does, instead of its top-left corner. The issue's case: a 20 × 20 placement
+/// at the canvas centre replaced by 40 × 20 contents, at 100 % and at 150 %.
+#[test]
+fn replaced_contents_of_another_size_keep_the_placement_centre() {
+    let png = |w: u32, h: u32, c: photocraft_color::Color| {
+        let d = Document::with_background("p", Size::new(w, h), photocraft_color::ColorMode::Rgb, photocraft_color::SampleType::U8, c);
+        photocraft_io::export(&d, "png", &Default::default()).unwrap().bytes
+    };
+    let red = png(20, 20, photocraft_color::Color::rgba(1.0, 0.0, 0.0, 1.0));
+    let blue = png(40, 20, photocraft_color::Color::rgba(0.0, 0.0, 1.0, 1.0));
+    // At 150 % resampling softens one edge pixel on each side of the 60 × 30 contents (the issue's
+    // own expected width, 601 for 600, shows the same); the bounds stay centred on (50, 50).
+    for (scale, placed, replaced) in
+        [(100.0, Rect::new(40, 40, 60, 60), Rect::new(30, 40, 70, 60)), (150.0, Rect::new(35, 35, 65, 65), Rect::new(19, 34, 81, 66))]
+    {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 100, "height": 100})).unwrap();
+        let params = json!({"smartObject": true, "fit": false, "scale": scale, "center": [50, 50]});
+        let id = LayerId(crate::file_cmds::place_bytes(&mut s, "red.png", red.clone(), None, &params).unwrap()["layer"].as_u64().unwrap());
+        assert_eq!(active_smart(&s).cache.unwrap().content_bounds(), placed, "{scale} %");
+        replace_contents_bytes(&mut s, id, "blue.png", blue.clone()).unwrap();
+        assert_eq!(active_smart(&s).cache.unwrap().content_bounds(), replaced, "{scale} %: centre (50, 50) kept");
+        // The same size again changes nothing.
+        replace_contents_bytes(&mut s, id, "blue.png", blue.clone()).unwrap();
+        assert_eq!(active_smart(&s).cache.unwrap().content_bounds(), replaced, "{scale} %");
+    }
+}
+
+/// The centring reads the old contents' size, and for linked contents that means reading their
+/// file: it goes through the session's authorization like any read of the path. A denied path is
+/// not read, and the placement then stays where it is (no centre shift).
+#[test]
+fn replace_contents_reads_a_linked_old_source_only_when_authorized() {
+    let png = |w: u32, h: u32| {
+        let d = Document::with_background(
+            "p",
+            Size::new(w, h),
+            photocraft_color::ColorMode::Rgb,
+            photocraft_color::SampleType::U8,
+            photocraft_color::Color::rgba(1.0, 0.0, 0.0, 1.0),
+        );
+        photocraft_io::export(&d, "png", &Default::default()).unwrap().bytes
+    };
+    let dir = std::env::temp_dir().join(format!("pc-replace-auth-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let linked = dir.join("old.png");
+    for (deny, want) in [(false, Rect::new(30, 40, 70, 60)), (true, Rect::new(40, 40, 80, 60))] {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 100, "height": 100})).unwrap();
+        let params = json!({"smartObject": true, "fit": false, "scale": 100.0, "center": [50, 50]});
+        let id = LayerId(crate::file_cmds::place_bytes(&mut s, "red.png", png(20, 20), None, &params).unwrap()["layer"].as_u64().unwrap());
+        s.execute("layer.smartObjects.convertToLinked", json!({"path": linked.to_str().unwrap()})).unwrap();
+        if deny {
+            s.authorize = Some(|_, p| if p.get("path").is_some() { Err(EngineError::Other("denied".into())) } else { Ok(()) });
+        }
+        replace_contents_bytes(&mut s, id, "blue.png", png(40, 20)).unwrap();
+        assert_eq!(active_smart(&s).cache.unwrap().content_bounds(), want, "denied: {deny}");
+    }
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// A perspective placement (Distort, Perspective) keeps its affine part in step with its
+/// homography when Replace Contents moves it: the affine is what SVG contents rasterize at, and
+/// it is always derived from the homography (`set_placement`).
+#[test]
+fn replaced_contents_keep_a_perspective_placement_consistent() {
+    let png = |w: u32, h: u32| {
+        let d = Document::with_background(
+            "p",
+            Size::new(w, h),
+            photocraft_color::ColorMode::Rgb,
+            photocraft_color::SampleType::U8,
+            photocraft_color::Color::rgba(1.0, 0.0, 0.0, 1.0),
+        );
+        photocraft_io::export(&d, "png", &Default::default()).unwrap().bytes
+    };
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 100, "height": 100})).unwrap();
+    let params = json!({"smartObject": true, "fit": false, "scale": 100.0, "center": [50, 50]});
+    let id = LayerId(crate::file_cmds::place_bytes(&mut s, "red.png", png(20, 20), None, &params).unwrap()["layer"].as_u64().unwrap());
+    s.edit("Perspective", |doc, _| {
+        let sm = smart_mut(doc, id)?;
+        set_placement(sm, Homography([1.2, 0.1, 40.0, 0.05, 1.1, 40.0, 0.004, 0.002, 1.0]));
+        Ok(())
+    })
+    .unwrap();
+    replace_contents_bytes(&mut s, id, "blue.png", png(40, 20)).unwrap();
+    let sm = active_smart(&s);
+    let h = sm.perspective.expect("still a perspective placement");
+    let mut derived = sm.clone();
+    set_placement(&mut derived, Homography(h));
+    for (got, want) in sm.transform.m.iter().zip(derived.transform.m) {
+        assert!((got - want).abs() < 1e-9, "affine {:?} vs derived {:?}", sm.transform.m, derived.transform.m);
+    }
 }
