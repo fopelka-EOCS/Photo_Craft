@@ -3684,6 +3684,7 @@ cameraRaw	Masking	Маскування
 	Appearance Settings…	Налаштування вигляду…
 	Add to favorites	Додати до вибраного
 	Remove from favorites	Видалити з вибраного
+	Favorites	Вибране
 # File Info ▸ Camera Data (read-only EXIF fields; "Make" is the camera maker, not the verb).
 cameraData	Make	Виробник
 cameraData	Model	Модель

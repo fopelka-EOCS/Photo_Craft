@@ -3747,6 +3747,7 @@ cameraRaw	Whites	Witten
 	Appearance Settings…	Weergave-instellingen…
 	Add to favorites	Toevoegen aan favorieten
 	Remove from favorites	Verwijderen uit favorieten
+	Favorites	Favorieten
 # File Info ▸ Camera Data (read-only EXIF fields; "Make" is the camera maker, not the verb).
 cameraData	Make	Merk
 cameraData	Model	Model

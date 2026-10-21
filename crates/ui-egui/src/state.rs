@@ -1122,6 +1122,12 @@ pub struct UiState {
     /// Recently opened file paths, most-recent first (File › Open Recent). Capped; de-duplicated.
     #[serde(default)]
     pub recent_files: Vec<String>,
+    /// Recently used font families, most-recent first (font picker). Capped at 3; de-duplicated.
+    #[serde(default)]
+    pub recent_font_families: Vec<String>,
+    /// Favorite font families (font picker), user-toggled.
+    #[serde(default)]
+    pub favorite_font_families: Vec<String>,
     /// Inline type editing session, if any.
     #[serde(default)]
     pub text_edit: Option<TextEdit>,
@@ -1361,6 +1367,8 @@ impl Default for UiState {
             group_tools: Vec::new(),
             spring: None,
             recent_files: Vec::new(),
+            recent_font_families: Vec::new(),
+            favorite_font_families: Vec::new(),
             text_edit: None,
             caret_blink_time: 0.0,
             text_edit_return_tool: None,

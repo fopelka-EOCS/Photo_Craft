@@ -1216,6 +1216,67 @@ pub fn families() -> Arc<Vec<String>> {
     v
 }
 
+/// Push a family to the front of the recently-used list, capped at 3 and de-duplicated.
+pub(crate) fn push_recent_font(list: &mut Vec<String>, family: &str) {
+    list.retain(|f| f != family);
+    list.insert(0, family.to_string());
+    if list.len() > 3 {
+        list.truncate(3);
+    }
+}
+
+/// Toggle a family in the favourites list.
+pub(crate) fn toggle_favorite(list: &mut Vec<String>, family: &str) {
+    if let Some(i) = list.iter().position(|f| f == family) {
+        list.remove(i);
+    } else {
+        list.push(family.to_string());
+    }
+}
+
+/// Whether a family is a favourite.
+pub(crate) fn is_favorite(list: &[String], family: &str) -> bool {
+    list.iter().any(|f| f == family)
+}
+
+/// The font lists the picker keeps, stored in the egui memory: the app persists that (in `ui.ron`
+/// on the desktop, the browser's storage on the web), so the lists survive a restart.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+struct FontLists {
+    /// The recently used families, most recent first.
+    recent: Vec<String>,
+    /// The favourite families.
+    favorites: Vec<String>,
+}
+
+/// Where the font lists live between launches.
+fn font_lists_id() -> egui::Id {
+    egui::Id::new("photocraft-font-lists")
+}
+
+/// Move the font lists between the app's state and the persisted egui memory: the lists the last
+/// launch stored come back on the first frame, and a list the picker changed is stored again.
+pub(crate) fn sync_font_lists(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    let id = font_lists_id();
+    let lists = FontLists { recent: app.ui.recent_font_families.clone(), favorites: app.ui.favorite_font_families.clone() };
+    let stored = ctx.memory_mut(|m| m.data.get_persisted::<FontLists>(id));
+    match stored {
+        // The first frame: take back the lists the last launch stored.
+        Some(stored) if app.frame == 0 => {
+            app.ui.recent_font_families = stored.recent;
+            app.ui.favorite_font_families = stored.favorites;
+        }
+        // After that the app's copy is the truth: store it when the picker changed it.
+        Some(stored) if stored != lists => {
+            ctx.memory_mut(|m| m.data.insert_persisted(id, lists));
+        }
+        None => {
+            ctx.memory_mut(|m| m.data.insert_persisted(id, lists));
+        }
+        Some(_) => {}
+    }
+}
+
 /// Where [`sync_font_names`] leaves the font menus' localized labels for this frame.
 fn font_labels_id() -> egui::Id {
     egui::Id::new("photocraft-font-menu-localized-names")
@@ -1251,14 +1312,19 @@ fn localized_families() -> Arc<HashMap<String, String>> {
     v
 }
 
-/// The font menu's rows: each family with the label it shows (its localized name when `labels`
-/// has one, else the family), matching `query` (lowercase) by either name. With localized labels
-/// the rows sort by label, so the menu stays alphabetical as shown.
+/// The label a family shows in the menus: its localized name when `labels` has one, else the
+/// family itself.
+fn font_label<'a>(labels: Option<&'a HashMap<String, String>>, family: &'a String) -> &'a str {
+    labels.and_then(|l| l.get(family)).map_or(family.as_str(), String::as_str)
+}
+
+/// The font menu's rows: each family with the label it shows, matching `query` (lowercase) by
+/// either name. With localized labels the rows sort by label, so the menu stays alphabetical as
+/// shown.
 fn font_menu_rows<'a>(families: &'a [String], labels: Option<&'a HashMap<String, String>>, query: &str) -> Vec<(&'a String, &'a str)> {
-    let label = |f: &'a String| labels.and_then(|l| l.get(f)).map_or(f.as_str(), String::as_str);
     let mut rows: Vec<(&String, &str)> = families
         .iter()
-        .map(|f| (f, label(f)))
+        .map(|f| (f, font_label(labels, f)))
         .filter(|(f, l)| query.is_empty() || f.to_lowercase().contains(query) || l.to_lowercase().contains(query))
         .collect();
     if labels.is_some_and(|l| !l.is_empty()) {
@@ -1438,21 +1504,132 @@ pub(crate) fn fonts_ready(ui: &mut egui::Ui, width: f32) -> bool {
 }
 
 /// Searchable font-family combo box.
-fn font_picker(ui: &mut egui::Ui, current: &mut String, width: f32, preview: photocraft_engine::prefs::FontPreview) -> bool {
-    family_picker_in(ui, "type-font", current, width, &families(), preview)
+fn font_picker(
+    ui: &mut egui::Ui,
+    current: &mut String,
+    width: f32,
+    preview: photocraft_engine::prefs::FontPreview,
+    recent: &mut Vec<String>,
+    favorites: &mut Vec<String>,
+) -> bool {
+    family_picker_in(ui, "type-font", current, width, &families(), preview, recent, favorites)
 }
 
 /// Maximum height of the font menu.
 const FONT_MENU_HEIGHT: f32 = 460.0;
+/// The font menu's row width: every row is this wide, so the list reads as one column.
+const FONT_ROW_WIDTH: f32 = 330.0;
+/// The favourite star's icon size in a row.
+const STAR_SIZE: f32 = 13.0;
+/// The favourite star's colour.
+fn favorite_color() -> egui::Color32 {
+    egui::Color32::from_rgb(255, 200, 0)
+}
+
+/// Whether the pointer that chose `response` was on its star (the left-hand atom of the row).
+fn on_the_star(ui: &egui::Ui, response: &egui::Response) -> bool {
+    let star_right = response.rect.left() + ui.spacing().button_padding.x + STAR_SIZE;
+    response.hover_pos().is_some_and(|p| p.x <= star_right)
+}
+
+/// The font menu's state while it is open: the family the field shows, the recent and favourite
+/// lists, and the per-frame settings every row shares.
+struct FontMenu<'a> {
+    /// The family the field shows.
+    current: &'a mut String,
+    /// The recently used families, most recent first.
+    recent: &'a mut Vec<String>,
+    /// The favourite families.
+    favorites: &'a mut Vec<String>,
+    /// Set when the family changed.
+    changed: &'a mut bool,
+    /// Set when a family was picked (the field keeps the focus).
+    picked: &'a mut bool,
+    /// The family the pointer is over, previewed on the canvas.
+    hovered: &'a mut Option<String>,
+    /// The press gesture that picks a row.
+    press: &'a crate::press_menu::PressCombo,
+    /// The arrow keys that scroll to the selected family.
+    arrows: (bool, bool),
+    /// The sample's size and box, if the preview is on.
+    preview: Option<(f32, [f32; 2])>,
+    /// The row height.
+    row_h: f32,
+    /// The search field's id, cleared when a family is picked.
+    search_id: egui::Id,
+}
+
+impl FontMenu<'_> {
+    /// One font row: the family name, its sample and the favourite star, in a single button, as
+    /// the font menu has always drawn it. The star toggles the favourite (the menu stays open);
+    /// the name picks the family, which closes the menu.
+    fn row(&mut self, ui: &mut egui::Ui, family: &str, label: &str, remember: bool) {
+        let is_fav = is_favorite(self.favorites.as_slice(), family);
+        let star_color = if is_fav { favorite_color() } else { crate::theme::Tokens::get(ui.ctx()).text_faint };
+        // The favourite star is drawn from the project's own SVG icon (not a text atom), so it
+        // does not pollute the row's accessible name, which stays the family label.
+        let star = crate::icons::image(if is_fav { "star-filled" } else { "star" }, STAR_SIZE, star_color);
+        let star = egui::AtomExt::atom_size(egui::Atom::from(star), egui::vec2(STAR_SIZE, STAR_SIZE));
+        // Highlighted by its fill alone, as Photoshop's font menu is. A selectable button lays
+        // out its frame's stroke only once hovered or selected, so with the theme's stroke the
+        // row under the pointer (and the selected one) grew and pushed the rows below down:
+        // the list jumped as the pointer moved (#7406).
+        let mut button = egui::Button::selectable(family == self.current.as_str(), (star, label)).truncate().stroke(egui::Stroke::NONE);
+        if let Some((size, [_, h])) = self.preview {
+            button = button
+                .right_text(egui::Atom::custom(ui.id().with(("font-sample", family)), egui::vec2(crate::font_preview::slot_width(ui.ctx(), family, size), h)));
+        }
+        let response = ui.add_sized([FONT_ROW_WIDTH, self.row_h], button);
+        let (down, up) = self.arrows;
+        if (down || up) && family == self.current.as_str() {
+            response.scroll_to_me(Some(egui::Align::Center));
+        }
+        if let Some((size, _)) = self.preview
+            && ui.is_rect_visible(response.rect)
+        {
+            crate::font_preview::paint(ui, family, response.rect, size);
+        }
+        if response.hovered() {
+            *self.hovered = Some(family.to_string());
+        }
+        if !self.press.chosen(ui, &response) {
+            return;
+        }
+        if on_the_star(ui, &response) {
+            toggle_favorite(&mut *self.favorites, family);
+            return;
+        }
+        *self.current = family.to_string();
+        // A served family not fetched yet: start now, before any text needs it.
+        photocraft_text::served::request(family);
+        if remember {
+            push_recent_font(&mut *self.recent, family);
+        }
+        *self.changed = true;
+        *self.picked = true;
+        ui.data_mut(|d| d.remove::<String>(self.search_id));
+        *self.hovered = None;
+        ui.close();
+    }
+}
 
 /// [`font_picker`] over a given family list (tests pass their own).
 #[cfg(test)]
-fn font_picker_in(ui: &mut egui::Ui, current: &mut String, width: f32, families: &[String], preview: photocraft_engine::prefs::FontPreview) -> bool {
-    family_picker_in(ui, "type-font", current, width, families, preview)
+fn font_picker_in(
+    ui: &mut egui::Ui,
+    current: &mut String,
+    width: f32,
+    families: &[String],
+    preview: photocraft_engine::prefs::FontPreview,
+    recent: &mut Vec<String>,
+    favorites: &mut Vec<String>,
+) -> bool {
+    family_picker_in(ui, "type-font", current, width, families, preview, recent, favorites)
 }
 
 /// Shared by the Type options, Character, style and Glyphs panels. Selection changes still
 /// flow through each caller's existing engine command.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn family_picker_in(
     ui: &mut egui::Ui,
     salt: &str,
@@ -1460,6 +1637,8 @@ pub(crate) fn family_picker_in(
     width: f32,
     families: &[String],
     preview: photocraft_engine::prefs::FontPreview,
+    recent: &mut Vec<String>,
+    favorites: &mut Vec<String>,
 ) -> bool {
     let mut changed = false;
     // A font picked from the open menu (click or Enter): the field keeps the focus afterwards.
@@ -1530,37 +1709,48 @@ pub(crate) fn family_picker_in(
         let row_h = preview.map_or(28.0, |(_, [_, h])| (h + 4.0).max(28.0));
 
         let mut hovered: Option<String> = None;
-        for (f, label) in rows {
-            // Highlighted by its fill alone, as Photoshop's font menu is. A selectable button lays
-            // out its frame's stroke only once hovered or selected, so with the theme's stroke the
-            // row under the pointer (and the selected one) grew and pushed the rows below down:
-            // the list jumped as the pointer moved (#7406).
-            let mut button = egui::Button::selectable(f == current, label).truncate().stroke(egui::Stroke::NONE);
-            if let Some((size, [_, h])) = preview {
-                button =
-                    button.right_text(egui::Atom::custom(ui.id().with(("font-sample", f)), egui::vec2(crate::font_preview::slot_width(ui.ctx(), f, size), h)));
+
+        // The rows: favourites, then the recently used, then every other family.
+        // The favourite and recent sections only appear when the search field is empty.
+        let favourite_families: Vec<String> = if ql.is_empty() { favorites.iter().filter(|&f| families.contains(f)).cloned().collect() } else { Vec::new() };
+        let favourite_rows = font_menu_rows(&favourite_families, labels, "");
+        let recent_families: Vec<String> =
+            if ql.is_empty() { recent.iter().filter(|&f| families.contains(f) && !favorites.contains(f)).cloned().collect() } else { Vec::new() };
+        // The recently used keep the list's own order (most recent first), not the menu's
+        // alphabetical one.
+        let recent_rows: Vec<(&String, &str)> = recent_families.iter().map(|f| (f, font_label(labels, f))).collect();
+        let main_rows: Vec<(&String, &str)> = rows.into_iter().filter(|(f, _)| !favourite_families.contains(f) && !recent_families.contains(f)).collect();
+
+        {
+            let mut menu = FontMenu {
+                current: &mut *current,
+                recent: &mut *recent,
+                favorites: &mut *favorites,
+                changed: &mut changed,
+                picked: &mut picked,
+                hovered: &mut hovered,
+                preview,
+                row_h,
+                press: &press,
+                arrows: (down, up),
+                search_id,
+            };
+            if !favourite_rows.is_empty() {
+                ui.label(egui::RichText::new(tl!("Favorites")).size(11.0).color(crate::theme::Tokens::get(ui.ctx()).text_faint));
+                for (f, label) in favourite_rows {
+                    menu.row(ui, f.as_str(), label, false);
+                }
+                ui.separator();
             }
-            let response = ui.add_sized([330.0, row_h], button);
-            if (down || up) && f == current {
-                response.scroll_to_me(Some(egui::Align::Center));
+            if !recent_rows.is_empty() {
+                ui.label(egui::RichText::new(tl!("Recently Used")).size(11.0).color(crate::theme::Tokens::get(ui.ctx()).text_faint));
+                for (f, label) in recent_rows {
+                    menu.row(ui, f.as_str(), label, true);
+                }
+                ui.separator();
             }
-            if let Some((size, _)) = preview
-                && ui.is_rect_visible(response.rect)
-            {
-                crate::font_preview::paint(ui, f, response.rect, size);
-            }
-            if response.hovered() {
-                hovered = Some(f.clone());
-            }
-            if press.chosen(ui, &response) {
-                *current = f.clone();
-                // A served family not fetched yet: start now, before any text needs it.
-                photocraft_text::served::request(f);
-                changed = true;
-                picked = true;
-                ui.data_mut(|d| d.remove::<String>(search_id));
-                hovered = None;
-                ui.close();
+            for (f, label) in main_rows {
+                menu.row(ui, f.as_str(), label, true);
             }
         }
         // egui measures a popup only when it opens and never lets it grow back, so a filtered
@@ -1798,7 +1988,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
     // Font family and style menus (one placeholder in their place while the fonts load).
     if fonts_ready(ui, 170.0 + ui.spacing().item_spacing.x + 110.0) {
-        if font_picker(ui, &mut fam, 170.0, app.session.prefs().type_.font_preview) {
+        if font_picker(ui, &mut fam, 170.0, app.session.prefs().type_.font_preview, &mut app.ui.recent_font_families, &mut app.ui.favorite_font_families) {
             app.ui.tool_options.type_font = fam.clone();
             let st = styles(&fam);
             style = if st.contains(&style) { style } else { st.first().cloned().unwrap_or_else(|| "Regular".into()) };
@@ -2229,7 +2419,9 @@ fn type_sections(app: &mut PhotocraftApp, ui: &mut egui::Ui, character: bool, pa
         let mut ready = true;
         row(ui, &mut |ui| {
             ready = fonts_ready(ui, full);
-            if ready && font_picker(ui, &mut fam, full, app.session.prefs().type_.font_preview) {
+            if ready
+                && font_picker(ui, &mut fam, full, app.session.prefs().type_.font_preview, &mut app.ui.recent_font_families, &mut app.ui.favorite_font_families)
+            {
                 app.ui.tool_options.type_font = fam.clone();
                 apply(app, ui.ctx(), json!({"font": fam}));
             }

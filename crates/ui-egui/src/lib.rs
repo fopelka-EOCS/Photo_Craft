@@ -2004,6 +2004,9 @@ impl eframe::App for PhotocraftApp {
         } else {
             self.fonts_ready = true;
         }
+        // The font lists the picker keeps: restored from the last launch on the first frame,
+        // and stored again when the picker changes them. Before `self.frame` is counted.
+        type_tool::sync_font_lists(self, ctx);
         self.frame += 1;
         let now = ctx.input(|i| i.time);
         let dt = (now - self.last_frame_time) as f32;

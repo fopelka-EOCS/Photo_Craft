@@ -3681,6 +3681,7 @@ fontWeight	Thin	Πολύ λεπτά
 	Appearance Settings…	Ρυθμίσεις εμφάνισης…
 	Add to favorites	Προσθήκη στα αγαπημένα
 	Remove from favorites	Αφαίρεση από τα αγαπημένα
+	Favorites	Αγαπημένα
 # File Info ▸ Camera Data (read-only EXIF fields; "Make" is the camera maker, not the verb).
 cameraData	Make	Κατασκευαστής
 cameraData	Model	Μοντέλο

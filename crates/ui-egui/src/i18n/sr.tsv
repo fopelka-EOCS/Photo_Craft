@@ -2981,6 +2981,7 @@ fontWeight	Italic	Kurziv
 	Appearance Settings…	Podešavanja izgleda…
 	Add to favorites	Dodaj u omiljene
 	Remove from favorites	Ukloni iz omiljenih
+	Favorites	Omiljeni
 # File Info ▸ Camera Data (read-only EXIF fields; "Make" is the camera maker, not the verb).
 cameraData	Make	Proizvođač
 cameraData	Model	Model

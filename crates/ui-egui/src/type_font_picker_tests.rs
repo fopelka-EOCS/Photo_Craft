@@ -29,10 +29,11 @@ fn harness_with(preview: FontPreview) -> Harness<'static, State> {
             s.button = ui.make_persistent_id(egui::IdSalt::new("type-font"));
             s.popup = s.button.with("popup");
             let fams = s.families.clone();
-            font_picker_in(ui, &mut s.current, 170.0, &fams, s.preview);
+            font_picker_in(ui, &mut s.current, 170.0, &fams, s.preview, &mut Vec::new(), &mut Vec::new());
         },
         state,
     );
+    egui_extras::install_image_loaders(&h.ctx);
     h.run();
     h
 }
@@ -43,7 +44,7 @@ fn popup_rect(h: &Harness<'static, State>) -> Option<Rect> {
     if open { h.ctx.memory(|m| m.area_rect(id)) } else { None }
 }
 
-fn open(h: &mut Harness<'static, State>) {
+fn open<S>(h: &mut Harness<'static, S>) {
     h.query_all_by_role(Role::ComboBox).next().unwrap().click();
     h.run();
 }
@@ -291,7 +292,7 @@ fn the_first_arrow_after_a_pick_keeps_the_focus_between_neighbours() {
                 s.button = ui.make_persistent_id(egui::IdSalt::new("type-font"));
                 s.popup = s.button.with("popup");
                 let fams = s.families.clone();
-                font_picker_in(ui, &mut s.current, 170.0, &fams, s.preview);
+                font_picker_in(ui, &mut s.current, 170.0, &fams, s.preview, &mut Vec::new(), &mut Vec::new());
                 let _ = ui.button("Below");
             },
             state,
@@ -603,7 +604,7 @@ fn localized_font_names_label_the_menu_but_pick_the_family() {
         |ui, s: &mut State| {
             s.popup = ui.make_persistent_id(egui::IdSalt::new("type-font")).with("popup");
             let fams = s.families.clone();
-            font_picker_in(ui, &mut s.current, 170.0, &fams, s.preview);
+            font_picker_in(ui, &mut s.current, 170.0, &fams, s.preview, &mut Vec::new(), &mut Vec::new());
         },
         state,
     );
@@ -629,6 +630,68 @@ fn localized_font_names_label_the_menu_but_pick_the_family() {
     open(&mut h);
     assert!(h.query_by_label("MS Gothic").is_some());
     assert!(h.query_by_label("ＭＳ ゴシック").is_none());
+}
+
+/// The menu's two sections: the favourites come first, and the recently used keep their own
+/// most-recent-first order even when the menu shows localized names (which sort the other rows
+/// alphabetically).
+#[test]
+fn the_favourite_and_recently_used_sections_keep_their_order() {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    struct Sections {
+        current: String,
+        families: Vec<String>,
+        recent: Vec<String>,
+        favorites: Vec<String>,
+    }
+    let state = Sections {
+        current: "Arial".into(),
+        families: vec!["Arial".into(), "MS Gothic".into(), "Zeta Sans".into()],
+        // Most recent first: Zeta Sans, then Arial.
+        recent: vec!["Zeta Sans".into(), "Arial".into()],
+        favorites: vec!["MS Gothic".into()],
+    };
+    let mut h = Harness::builder().with_size(vec2(600.0, 900.0)).build_ui_state(
+        |ui, s: &mut Sections| {
+            let fams = s.families.clone();
+            font_picker_in(ui, &mut s.current, 170.0, &fams, FontPreview::Medium, &mut s.recent, &mut s.favorites);
+        },
+        state,
+    );
+    // Localized names: "Arial" sorts before the Japanese ones, so a sorted list would put the
+    // recently used the other way round.
+    let labels: HashMap<String, String> =
+        [("Arial", "Arial"), ("MS Gothic", "ＭＳ ゴシック"), ("Zeta Sans", "ゼタ・サンズ")].iter().map(|(a, b)| (a.to_string(), b.to_string())).collect();
+    h.ctx.data_mut(|d| d.insert_temp(super::font_labels_id(), Arc::new(labels)));
+    h.run();
+    open(&mut h);
+    assert!(h.query_by_label("Favorites").is_some(), "the favourites section is titled");
+    assert!(h.query_by_label("Recently Used").is_some(), "the recently used section is titled");
+    let top = |h: &Harness<'_, Sections>, label: &str| h.get_by_label(label).rect().top();
+    let favourite = top(&h, "ＭＳ ゴシック");
+    let recent = top(&h, "ゼタ・サンズ");
+    let older = top(&h, "Arial");
+    assert!(favourite < recent && recent < older, "favourites first, then the recently used most recent first: {favourite} {recent} {older}");
+}
+
+/// The font lists the picker keeps survive a restart: they are stored in the persisted egui
+/// memory and read back on the next launch.
+#[test]
+fn the_favourite_and_recent_font_lists_survive_a_restart() {
+    let mut app = crate::PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    let ctx = egui::Context::default();
+    app.ui.recent_font_families = vec!["Arial".to_string()];
+    app.ui.favorite_font_families = vec!["MS Gothic".to_string()];
+    super::sync_font_lists(&mut app, &ctx);
+    // A new app instance (a restart) with the same persisted memory gets the lists back.
+    let memory = ctx.memory(|m| m.clone());
+    let ctx2 = egui::Context::default();
+    ctx2.memory_mut(|m| *m = memory);
+    let mut app2 = crate::PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    super::sync_font_lists(&mut app2, &ctx2);
+    assert_eq!(app2.ui.recent_font_families, vec!["Arial".to_string()]);
+    assert_eq!(app2.ui.favorite_font_families, vec!["MS Gothic".to_string()]);
 }
 
 #[test]
