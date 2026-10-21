@@ -248,6 +248,10 @@ pub struct DocState {
     /// The snapshot set as the History Brush's source (`history.setSource {snapshot}`); `None`:
     /// the source is a state, kept by the history ([`photocraft_ops::History::brush_source`]).
     pub(crate) source_snapshot: Option<u64>,
+    /// The layer the last canvas click picked, and the document revision it happened at
+    /// (#7914): a second click on the same group drills into it, as in Photoshop. View state,
+    /// not history. A selection change or an edit moves the revision on and ends the drill.
+    pub last_pick: Option<(LayerId, u64)>,
 }
 
 impl DocState {
@@ -293,6 +297,7 @@ impl DocState {
             snapshots: Vec::new(),
             next_snapshot: 1,
             source_snapshot: None,
+            last_pick: None,
         }
     }
     /// The selected layers in bottom-to-top document order, always including the active layer.

@@ -195,6 +195,8 @@ what an agent can't finish alone.
 - **Missing:** fixes for 579 open issues (2026-10-10), filed mostly by 0.5/0.6 users. By title:
   ~150 UI/panels/menus/shortcuts, 94 file/format, 87 layers, 54 painting, 54 selection,
   46 type, 41 performance, 34 transform/move, 25 Linux/Wayland, 24 Windows, 20 macOS.
+- **Fixed (2026-10-21):** the Move tool reaches a layer inside a group by clicking again on it
+  (#7914): a click takes the group, the next click the layer inside it, one level per click.
 - **Impact:** each is a place where a Photoshop user hits something different from what they
   expect; together they are why ready-for-real-work is ~45% while breadth is ~76%.
 - **Estimate:** 250–400 h (many overlap with other gaps; count each fix once).
@@ -357,6 +359,7 @@ what an agent can't finish alone.
 | 2026-10-15 | minor | G10: Cineon write landed (10-bit log gray/RGB, Save As `.cin`) |
 | 2026-10-14 | minor | G1: 32-bit Hue/Saturation unclipped (slider on whole levels) and Colorize's saturation scaled by 1 − \|Lightness\|; photoshop rgb32 hue-saturation and hue-saturation-colorize pass |
 | 2026-10-14 | minor | G1: Lab adjustment layers' results are whole samples (native Lab path); photoshop lab8 curves passes |
+| 2026-10-21 | minor | G3: the Move tool drills into the group a click hits, one level per click, so a layer inside a group is reachable with the pointer (#7914); no percentage or estimate changed |
 | 2026-10-15 | minor | G1 / #5972 A1: render only provably constant-RGB `GdFl` noise fills; variable noise synthesis remains open |
 | 2026-10-18 | minor | G9: with no selection, Copy takes fill and adjustment layers whole and Paste recreates them (#2344); UI-217-23 stays partial (a single pixel layer copies its pixels only); estimate unchanged |
 | 2026-10-17 | minor | G11: `.atn` Apply Layer Comp imports, plays and exports by comp name (#7101); other reference forms remain unsupported |

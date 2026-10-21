@@ -107,6 +107,23 @@ fn group_mode_picks_and_moves_the_outermost_group() {
 }
 
 #[test]
+fn a_click_drills_into_the_group_it_hits() {
+    // #7914: clicking grouped content took the group and never the layer inside it, so a layer
+    // in a group could not be reached with the pointer at all.
+    let (mut app, a, _b) = app();
+    app.session.execute("layer.select", json!({"layer": a.0})).unwrap();
+    let group = LayerId(app.session.execute("layer.new.groupFromLayers", json!({"name": "G"})).unwrap()["layer"].as_u64().unwrap());
+    // The first click takes the group.
+    drag(&mut app, [16.0, 16.0], [0.0, 0.0], egui::Modifiers::NONE);
+    assert_eq!(active(&app), Some(group));
+    // The next click on the same spot takes the layer inside it.
+    drag(&mut app, [16.0, 16.0], [0.0, 0.0], egui::Modifiers::NONE);
+    assert_eq!(active(&app), Some(a));
+    // The rollover outline names the layer the next click would take.
+    assert_eq!(crate::move_hover::target(&mut app, Some([16.0, 16.0]), false, false), Some(Rect::new(8, 8, 24, 24)));
+}
+
+#[test]
 fn dragging_one_of_several_selected_layers_moves_them_all() {
     let (mut app, a, b) = app();
     app.session.execute("layer.select", json!({"layer": a.0})).unwrap();

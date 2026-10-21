@@ -97,6 +97,7 @@ pub(crate) struct Cache {
     at: [i32; 2],
     group: bool,
     selected: Vec<LayerId>,
+    drilled: Option<LayerId>,
     boxes: Option<([f64; 4], [f64; 4])>,
 }
 
@@ -111,18 +112,21 @@ fn boxes(app: &mut PhotocraftApp, at: [f64; 2]) -> Option<([f64; 4], [f64; 4])> 
     let st = app.session.active()?;
     let selected = st.selected_layers();
     let (doc, revision) = (st.doc.id, st.revision);
-    if let Some(c) = app.move_distance.as_ref().filter(|c| c.doc == doc && c.revision == revision && c.at == at && c.group == group && c.selected == selected) {
+    // How deep a click reaches: the group the last canvas click picked, as long as nothing has
+    // changed since (#7914).
+    let drilled = st.last_pick.filter(|(_, rev)| *rev == revision).map(|(id, _)| id);
+    if let Some(c) = app.move_distance.as_ref().filter(|c| c.doc == doc && c.revision == revision && c.at == at && c.group == group && c.selected == selected && c.drilled == drilled) {
         return c.boxes;
     }
     let d = &st.doc;
     let a = union(selected.iter().filter(|id| !d.is_background(**id)).filter_map(|id| tree_rect(d, *id)));
     let canvas = [0.0, 0.0, d.size.width as f64, d.size.height as f64];
-    let hovered = photocraft_engine::pick_cmds::auto_select_target(d, at[0], at[1], group).filter(|id| {
+    let hovered = photocraft_engine::pick_cmds::auto_select_target(d, at[0], at[1], group, drilled).filter(|id| {
         // The selection itself (or a layer in a selected group) isn't another layer.
         !d.is_background(*id) && !selected.iter().any(|s| *s == *id || d.path_of(*id).zip(d.path_of(*s)).is_some_and(|(p, q)| p.starts_with(&q)))
     });
     let boxes = a.map(|a| (a, hovered.and_then(|id| tree_rect(d, id)).unwrap_or(canvas)));
-    app.move_distance = Some(Cache { doc, revision, at, group, selected, boxes });
+    app.move_distance = Some(Cache { doc, revision, at, group, selected, drilled, boxes });
     boxes
 }
 

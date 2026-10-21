@@ -19,6 +19,9 @@ pub(crate) struct Hover {
     revision: u64,
     at: [i32; 2],
     group: bool,
+    /// The layer the last canvas click picked, which says how deep a click reaches (#7914);
+    /// part of the key, since a click does not move the document's revision.
+    drilled: Option<LayerId>,
     target_layer: Option<LayerId>,
     bounds: Option<Rect>,
 }
@@ -48,14 +51,17 @@ pub(crate) fn target(app: &mut PhotocraftApp, at: Option<[f64; 2]>, command: boo
     let group = app.ui.tool_options.move_target == "group";
     let st = app.session.active()?;
     let (doc, revision) = (st.doc.id, st.revision);
-    if let Some(h) = app.move_hover.as_ref().filter(|h| h.doc == doc && h.revision == revision && h.at == at && h.group == group) {
+    // How deep a click reaches: the group the last canvas click picked, as long as nothing has
+    // changed since (#7914).
+    let drilled = st.last_pick.filter(|(_, rev)| *rev == revision).map(|(id, _)| id);
+    if let Some(h) = app.move_hover.as_ref().filter(|h| h.doc == doc && h.revision == revision && h.at == at && h.group == group && h.drilled == drilled) {
         app.canvas_hover_layer = h.target_layer;
         return h.bounds;
     }
-    let target_layer = photocraft_engine::pick_cmds::auto_select_target(&st.doc, at[0], at[1], group);
+    let target_layer = photocraft_engine::pick_cmds::auto_select_target(&st.doc, at[0], at[1], group, drilled);
     let bounds = target_layer.and_then(|id| outline(&st.doc, id));
     let target_layer = if bounds.is_some() { target_layer } else { None };
-    app.move_hover = Some(Hover { doc, revision, at, group, target_layer, bounds });
+    app.move_hover = Some(Hover { doc, revision, at, group, drilled, target_layer, bounds });
     app.canvas_hover_layer = target_layer;
     bounds
 }
