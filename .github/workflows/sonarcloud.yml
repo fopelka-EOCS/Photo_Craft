@@ -15,6 +15,18 @@ concurrency:
 
 jobs:
   sonarcloud:
+    # Upstream only: the project belongs to the storytold organisation, and forks don't have
+    # SONAR_TOKEN. PRs from forks run in the base repo but get no secrets either, so they skip
+    # instead of failing at workflow evaluation ("Secret SONAR_TOKEN is required, but not
+    # provided while calling").
+    if: >-
+      github.repository == 'storytold/photocraft'
+      && (github.event_name != 'pull_request'
+      || github.event.pull_request.head.repo.full_name == github.repository)
     # Tracked at @main so org-wide CI improvements propagate without PR churn.
     uses: storytold/craft-common-actions/.github/workflows/sonarcloud.yml@main
-    secrets: inherit
+    secrets:
+      # The shared workflow declares SONAR_TOKEN required, so pass a non-empty fallback: the
+      # secret may be absent when GitHub withholds it, but the call must still validate. The
+      # `if` above keeps the job from actually running there.
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN || 'unused' }}
