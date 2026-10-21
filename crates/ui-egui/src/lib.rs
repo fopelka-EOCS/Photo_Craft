@@ -163,6 +163,7 @@ pub mod parity;
 pub mod patch_preview;
 pub(crate) mod pattern_fill_ui;
 pub mod pattern_preview;
+pub mod pdf_import_ui;
 pub mod perspective_crop_ui;
 pub mod perspective_ui;
 pub mod pixel_grid;
@@ -258,7 +259,7 @@ pub use file_open::OsEvent;
 pub use state::{Tool, UiState};
 
 /// Decode a file: (document, warnings about anything approximated or dropped).
-pub type ImportFn = Box<dyn Fn(&str, &[u8], usize) -> Result<(Document, Vec<String>), String>>;
+pub type ImportFn = Box<dyn Fn(&str, &[u8], &photocraft_io::ImportOptions) -> Result<(Document, Vec<String>), String>>;
 /// Encoder settings chosen in Export As (the file format comes from the name's extension).
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExportSettings {
@@ -417,6 +418,15 @@ pub type SaveFileFn = std::sync::Arc<dyn Fn(&Document, &str, &ExportSettings, &j
 /// unsaved. A browser download is only a request the user can cancel (#4962).
 pub(crate) fn saved_revision_after_write(confirmed: bool, written: u64, previous: u64) -> u64 {
     if confirmed { written } else { previous }
+}
+
+/// Whether a document opened from `name`'s `bytes` with `opts` must stay untitled rather than
+/// take the PDF as its file, as Photoshop leaves it: a rasterised page, or anything Import PDF
+/// opened (a page or an embedded image). Only a one-image PDF opened directly, like a picture,
+/// keeps the PDF. (The importer says the same through `source_read_only`, which the import hook
+/// doesn't pass on.)
+fn pdf_untitled(name: &str, bytes: &[u8], opts: &photocraft_io::ImportOptions) -> bool {
+    photocraft_io::is_pdf_input(name, bytes) && (opts.pdf.is_some() || !photocraft_io::pdf_import::opens_as_image(bytes, None))
 }
 
 /// Who a finished save serves.
@@ -775,6 +785,8 @@ pub struct PhotocraftApp {
     pub(crate) redraws: std::collections::HashMap<photocraft_doc::DocId, background_redraw::Redraw>,
     /// Select › Color Range dialog preview (proxy document + mask / image textures).
     pub(crate) color_range: Option<color_range_ui::Preview>,
+    /// The PDFs whose Import PDF dialogs are up, one per dialog (`pdf_import_ui`).
+    pub(crate) pdf_import: Vec<pdf_import_ui::PdfImport>,
     /// Image › Adjustments dialog preview through a temporary clipped adjustment layer.
     pub(crate) adjust_preview: Option<adjust_preview::AdjustPreview>,
     /// The Properties panel's live adjustment-layer drag: its damage region and coverage
@@ -993,6 +1005,7 @@ impl PhotocraftApp {
             filter_preview_worker: Default::default(),
             redraws: Default::default(),
             color_range: None,
+            pdf_import: Vec::new(),
             adjust_preview: None,
             live_adjust_preview: None,
             synthetic: Vec::new(),
@@ -1446,16 +1459,26 @@ impl PhotocraftApp {
         if let Some(r) = preset_files_ui::open(self, name, bytes) {
             return r.map(|()| Vec::new());
         }
+        // A PDF asks how to open first (Import PDF), as Photoshop does.
+        if pdf_import_ui::wants_dialog(name, bytes) {
+            return pdf_import_ui::open(self, name, path, bytes).map(|_| Vec::new());
+        }
+        let opts = photocraft_engine::jobs::import_options(self.session.prefs());
+        self.open_bytes_with(name, bytes, path, opts)
+    }
+
+    /// [`Self::open_bytes_from`] with explicit import settings (a PDF page's Import PDF answers).
+    pub(crate) fn open_bytes_with(&mut self, name: &str, bytes: &[u8], path: Option<&str>, opts: photocraft_io::ImportOptions) -> Result<Vec<String>, String> {
         let name = &self.open_name(name);
         // Decoded on a worker: a tab with progress appears now, the document when it's ready
         // (warnings are shown then).
         if self.background_jobs {
-            jobs_ui::start_open(self, name, path.map(str::to_string), jobs_ui::bytes(bytes))?;
+            jobs_ui::start_open_with(self, name, path.map(str::to_string), jobs_ui::bytes(bytes), opts)?;
             return Ok(Vec::new());
         }
         let import = self.services.import.as_ref().ok_or("no importer configured")?;
-        let max_svg_group_depth = self.session.prefs().file_handling.rasterize_svg_groups_deeper_than as usize;
-        let (doc, warnings) = import(name, bytes, max_svg_group_depth)?;
+        let (doc, warnings) = import(name, bytes, &opts)?;
+        let pdf_page = pdf_untitled(name, bytes, &opts);
         // Edit › Color Settings policies apply on open; Ask When Opening holds the file back
         // until its prompt is answered, and later files wait behind it (`open_prompt`).
         // Missing fonts are read from the document itself: it may not be open yet (#4559).
@@ -1468,7 +1491,7 @@ impl PhotocraftApp {
             self,
             open_prompt::Held {
                 doc,
-                read_only: photocraft_io::affinity::is_affinity(bytes),
+                read_only: photocraft_io::affinity::is_affinity(bytes) || pdf_page,
                 name: name.to_string(),
                 path: path.map(str::to_string),
                 warnings: warnings.clone(),
@@ -1504,12 +1527,12 @@ impl PhotocraftApp {
     /// events and no Color Settings policy (which may read user-configured profile paths).
     fn import_automation_document(&mut self, name: &str, bytes: &[u8]) -> Result<Vec<String>, String> {
         let import = self.services.import.as_ref().ok_or("no importer configured")?;
-        let max_svg_group_depth = self.session.prefs().file_handling.rasterize_svg_groups_deeper_than as usize;
-        let (doc, warnings) = import(name, bytes, max_svg_group_depth)?;
+        let opts = photocraft_engine::jobs::import_options(self.session.prefs());
+        let (doc, warnings) = import(name, bytes, &opts)?;
         // The caller records the path it read from.
         self.session.add_document(doc, None);
         if let Some(st) = self.session.active_mut() {
-            st.source_read_only = photocraft_io::affinity::is_affinity(bytes);
+            st.source_read_only = photocraft_io::affinity::is_affinity(bytes) || pdf_untitled(name, bytes, &opts);
         }
         self.sync_views();
         self.ui.status = crate::i18n::fmt(tl!("Opened {name}"), &[("name", name)]);
