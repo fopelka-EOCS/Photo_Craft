@@ -1059,8 +1059,12 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
             }
             crate::crop_ui::set_space(app, space);
             for (ev, x, y, pr, pen) in events {
+                let (down, up) = (matches!(ev, ToolEvent::Down { .. }), matches!(ev, ToolEvent::Up { .. }));
+                // A press that reached the tool before a dialog opened keeps its moves and release
+                // there, whichever dialog opened since: only a new press goes to the dialog.
+                let to_dialog = !app.control_press || down;
                 // With the Color Picker on top the image is its eyedropper, as for the mouse.
-                if crate::color_picker_ui::top(app).is_some() {
+                if to_dialog && crate::color_picker_ui::top(app).is_some() {
                     if !matches!(ev, ToolEvent::Up { .. }) {
                         crate::color_picker_ui::sample_at(app, x, y);
                     }
@@ -1068,21 +1072,21 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                 }
                 // Curves' modal eyedroppers use document coordinates here, matching the native
                 // canvas path after its ViewXform conversion. Sample on press only.
-                if !secondary && crate::adjust_dialog::picker_armed(app) {
+                if to_dialog && !secondary && crate::adjust_dialog::picker_armed(app) {
                     if matches!(ev, ToolEvent::Down { .. }) {
                         crate::adjust_dialog::sample_at(app, x, y);
                     }
                     continue;
                 }
                 // ⌘/Ctrl-click with Curves open adds a point at the pixel's tone, on press only (#7325).
-                if free && mods.command && crate::adjust_dialog::curves_on_top(app) {
+                if to_dialog && free && mods.command && crate::adjust_dialog::curves_on_top(app) {
                     if matches!(ev, ToolEvent::Down { .. }) {
                         crate::adjust_dialog::add_point_at(app, ctx, x, y, mods.shift);
                     }
                     continue;
                 }
                 // Replace Color's eyedropper, the same way.
-                if !secondary && crate::filter_dialog::color_eyedropper_armed(app) {
+                if to_dialog && !secondary && crate::filter_dialog::color_eyedropper_armed(app) {
                     if matches!(ev, ToolEvent::Down { .. }) {
                         crate::filter_dialog::color_eyedropper_sample(app, x, y);
                     }
@@ -1090,7 +1094,7 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                 }
                 // The dialog owns all pointer events, including Up: no underlying brush stroke
                 // or context menu may leak through while inspecting a Color Range preview.
-                if app.ui.dialogs.last().is_some_and(|d| crate::color_range_ui::owns(&d.fields)) {
+                if to_dialog && app.ui.dialogs.last().is_some_and(|d| crate::color_range_ui::owns(&d.fields)) {
                     let down = matches!(ev, ToolEvent::Down { .. });
                     let up = matches!(ev, ToolEvent::Up { .. });
                     let held = app.ui.dialogs.last().and_then(|d| d.fields.get("__pointerDown")).and_then(Value::as_bool).unwrap_or(false);
@@ -1102,9 +1106,8 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                     }
                     continue;
                 }
-                let (down, up) = (matches!(ev, ToolEvent::Down { .. }), matches!(ev, ToolEvent::Up { .. }));
                 // Select and Mask's Refine Edge Brush paints from the press, ⌥ in the other mode.
-                if free && app.ui.dialogs.last().is_some_and(refine_brushing) {
+                if to_dialog && free && app.ui.dialogs.last().is_some_and(refine_brushing) {
                     if let Some(d) = app.ui.dialogs.last_mut() {
                         let held = !up && (down || d.fields.get("__pointerDown").and_then(Value::as_bool).unwrap_or(false));
                         if held {
@@ -1117,7 +1120,7 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                 }
                 // The Blur Gallery's pins are placed and dragged on the image, hit-tested on screen
                 // as the canvas does (`blur_pins`).
-                if free && app.ui.dialogs.last().is_some_and(|d| crate::blur_pins::owns(&d.fields)) {
+                if to_dialog && free && app.ui.dialogs.last().is_some_and(|d| crate::blur_pins::owns(&d.fields)) {
                     if let Some(xf) = crate::canvas::ViewXform::active(app)
                         && let Some(d) = app.ui.dialogs.last_mut()
                     {
@@ -1127,7 +1130,7 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                     continue;
                 }
                 // Layer Style's shadow follows the pointer's movement since the press (#5701).
-                if free && app.ui.dialogs.last().is_some_and(shadow_dragging) {
+                if to_dialog && free && app.ui.dialogs.last().is_some_and(shadow_dragging) {
                     if let Some(d) = app.ui.dialogs.last_mut() {
                         let from = d.fields.get("__pointerFrom").and_then(Value::as_array).and_then(|a| Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?]));
                         if down {
@@ -3305,6 +3308,26 @@ mod tests {
         assert_eq!(call(&mut app, &ctx, "ui.pointer", json!({"events": [{"kind": "move", "x": 60, "y": 60}]}))["ok"], true);
         assert_eq!(shadow(&app), (180.0, 20.0), "a move after the release leaves the shadow");
         assert_eq!(past_len(&app), steps, "the Brush did not paint");
+    }
+
+    /// A stroke pressed before a Color Picker opened still finishes on the Brush, its moves and
+    /// release not taken by the picker's eyedropper; a new press then is.
+    #[test]
+    fn ui_pointer_finishes_a_held_stroke_under_a_color_picker_opened_since() {
+        let (mut app, ctx) = pointer_app(64);
+        let steps = past_len(&app);
+        let pressed = call(&mut app, &ctx, "ui.pointer", json!({"events": [{"kind": "down", "x": 5, "y": 5}, {"kind": "move", "x": 20, "y": 20}]}));
+        assert_eq!(pressed["ok"], true, "{pressed}");
+        assert_eq!(call(&mut app, &ctx, "ui.dialog.open", json!({"kind": "colorPicker"}))["ok"], true);
+        let picker = app.ui.dialogs.last().unwrap().fields.clone();
+        let released = call(&mut app, &ctx, "ui.pointer", json!({"events": [{"kind": "move", "x": 30, "y": 30}, {"kind": "up", "x": 30, "y": 30}]}));
+        assert_eq!(released["ok"], true, "{released}");
+        assert_eq!(past_len(&app), steps + 1, "the stroke is committed once");
+        assert_eq!(app.ui.dialogs.last().unwrap().fields, picker, "the eyedropper sampled nothing");
+        let sampled = call(&mut app, &ctx, "ui.pointer", json!({"events": [{"kind": "down", "x": 60, "y": 4}, {"kind": "up", "x": 60, "y": 4}]}));
+        assert_eq!(sampled["ok"], true, "{sampled}");
+        assert_ne!(app.ui.dialogs.last().unwrap().fields, picker, "a new press samples the green");
+        assert_eq!(past_len(&app), steps + 1);
     }
 
     /// A Properties Levels/Curves eyedropper isn't modal, but the save prompt over it is.
