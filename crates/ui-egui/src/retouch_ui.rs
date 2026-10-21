@@ -132,7 +132,7 @@ pub fn finish_stroke(app: &mut PhotocraftApp, tool: Tool, points: &[[f64; 3]], m
         },
         Tool::QuickSelection => {
             let size = app.session.tools.brush.size;
-            let mode = if mods.alt { "subtract" } else { "add" };
+            let mode = select_quick_mode(app, mods);
             let xy: Vec<[f64; 2]> = points.iter().map(|q| [q[0], q[1]]).collect();
             let (sample_all, enhance) = (o.sample_all.quick_selection, o.enhance_edge);
             let r = app.run("select.quick", json!({"points": xy, "size": size, "mode": mode, "enhanceEdge": enhance, "sampleAllLayers": sample_all}));
@@ -358,6 +358,25 @@ pub fn content_aware_move_params(app: &PhotocraftApp, offset: [i64; 2]) -> Value
     })
 }
 
+/// `select.quick` mode: no intersect (the engine treats it as add), and bar New replaces once then adds (#7302).
+fn select_quick_mode(app: &mut PhotocraftApp, mods: egui::Modifiers) -> &'static str {
+    if app.ui.selection_mode == crate::tool_feedback::QUICK_SELECTION_REPLACE_NEXT {
+        app.ui.selection_mode = 0;
+        return "replace";
+    }
+    let mode = crate::tool_feedback::document_selection_mode(app, Tool::QuickSelection, mods);
+    if mode == "intersect" {
+        return "add";
+    }
+    if mode == "replace" && app.ui.selection_mode == 0 && !mods.shift && !mods.alt {
+        let has_sel = app.session.active().and_then(|st| st.doc.selection.as_ref()).is_some_and(|s| !s.content_bounds().is_empty());
+        if has_sel && app.session.journal.last().is_some_and(|(id, _)| id == "select.quick") {
+            return "add";
+        }
+    }
+    mode
+}
+
 /// Object Selection: the dragged rectangle. A click (or a sub-2 px nudge) cannot be a
 /// rectangle: with Object Finder on it selects the object under the pointer, the one hovering
 /// highlighted (#4087; ⇧ adds, ⌥ subtracts, ⇧⌥ intersects, otherwise replaces). With it off it
@@ -370,12 +389,7 @@ pub fn finish_object_selection(app: &mut PhotocraftApp, start: [f64; 2], end: [f
     let sample_all = app.ui.tool_options.sample_all.object_selection;
     if (w < 2.0 || h < 2.0) && app.ui.tool_options.object_finder {
         // Object Finder (#4087): the object under the click, as hovering highlighted it.
-        let mode = match (mods.shift, mods.alt) {
-            (true, true) => "intersect",
-            (true, false) => "add",
-            (false, true) => "subtract",
-            (false, false) => "replace",
-        };
+        let mode = crate::tool_feedback::document_selection_mode(app, Tool::ObjectSelection, mods);
         let r = app.run("select.object", json!({"point": [end[0], end[1]], "mode": mode, "sampleAllLayers": sample_all}));
         crate::object_finder::clear(app);
         report_smart_result(app, r, tl!("No object found there — drag a rectangle around it"));
@@ -383,18 +397,14 @@ pub fn finish_object_selection(app: &mut PhotocraftApp, start: [f64; 2], end: [f
     }
     if w < 2.0 || h < 2.0 {
         let size = app.session.tools.brush.size;
-        let mode = if mods.alt { "subtract" } else { "add" };
-        let r = app.run("select.quick", json!({"points": [[end[0], end[1]]], "size": size, "mode": mode, "sampleAllLayers": sample_all}));
+        let mode = select_quick_mode(app, mods);
+        let enhance = app.ui.tool_options.enhance_edge;
+        let r =
+            app.run("select.quick", json!({"points": [[end[0], end[1]]], "size": size, "mode": mode, "enhanceEdge": enhance, "sampleAllLayers": sample_all}));
         report_smart_result(app, r, tl!("Quick Selection found nothing there"));
         return;
     }
-    let mode = if mods.alt {
-        "subtract"
-    } else if mods.shift {
-        "add"
-    } else {
-        "replace"
-    };
+    let mode = crate::tool_feedback::document_selection_mode(app, Tool::ObjectSelection, mods);
     let r = app.run("select.object", json!({"rect": [x.round(), y.round(), w.round(), h.round()], "mode": mode, "sampleAllLayers": sample_all}));
     report_smart_result(app, r, tl!("Object Selection found nothing there — try a tighter rectangle"));
 }
@@ -460,6 +470,39 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: Tool) -> bo
         || matches!(tool, Tool::Brush | Tool::Pencil | Tool::MixerBrush | Tool::Eraser)
     {
         return false;
+    }
+    if tool == Tool::QuickSelection {
+        crate::panels::selection_mode_buttons(app, ui, false, true);
+        crate::widgets::vline(ui, 22.0);
+        let o = &mut app.ui.tool_options;
+        crate::widgets::checkbox(ui, &mut o.sample_all.quick_selection, tl!("Sample All Layers"));
+        crate::widgets::checkbox(ui, &mut o.enhance_edge, tl!("Enhance Edge"));
+        crate::widgets::vline(ui, 22.0);
+        if crate::widgets::secondary_button(ui, tl!("Select Subject"), 0.0).clicked() {
+            let r = app.run("select.subject", json!({}));
+            report_smart_result(app, r, tl!("No subject found — try Object Selection or the Lasso"));
+        }
+        if crate::widgets::secondary_button(ui, tl!("Select and Mask…"), 0.0).clicked() {
+            let _ = crate::menus::invoke(app, ui.ctx(), "select.selectAndMask", json!({}));
+        }
+        return true;
+    }
+    if tool == Tool::ObjectSelection {
+        crate::panels::selection_mode_buttons(app, ui, true, false);
+        crate::widgets::vline(ui, 22.0);
+        let o = &mut app.ui.tool_options;
+        crate::widgets::checkbox(ui, &mut o.object_finder, tl!("Object Finder"));
+        crate::widgets::checkbox(ui, &mut o.sample_all.object_selection, tl!("Sample All Layers"));
+        crate::widgets::checkbox(ui, &mut o.enhance_edge, tl!("Enhance Edge"));
+        crate::widgets::vline(ui, 22.0);
+        if crate::widgets::secondary_button(ui, tl!("Select Subject"), 0.0).clicked() {
+            let r = app.run("select.subject", json!({}));
+            report_smart_result(app, r, tl!("No subject found — try a rectangle around the object"));
+        }
+        if crate::widgets::secondary_button(ui, tl!("Select and Mask…"), 0.0).clicked() {
+            let _ = crate::menus::invoke(app, ui.ctx(), "select.selectAndMask", json!({}));
+        }
+        return true;
     }
     let o = &mut app.ui.tool_options;
     match tool {
@@ -623,26 +666,6 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: Tool) -> bo
             crate::widgets::checkbox(ui, &mut o.cr_anti_alias, tl!("Anti-alias"));
         }
         Tool::HistoryBrush => opt(ui, "Paints from the document's opening state"),
-        Tool::QuickSelection => {
-            crate::widgets::checkbox(ui, &mut o.sample_all.quick_selection, tl!("Sample All Layers"));
-            crate::widgets::checkbox(ui, &mut o.enhance_edge, tl!("Enhance Edge"));
-            opt(ui, &crate::i18n::fmt(tl!("{key} to subtract"), &[("key", &crate::shortcuts::pretty("Alt"))]));
-            crate::widgets::vline(ui, 22.0);
-            if crate::widgets::secondary_button(ui, tl!("Select Subject"), 0.0).clicked() {
-                let r = app.run("select.subject", json!({}));
-                report_smart_result(app, r, tl!("No subject found — try Object Selection or the Lasso"));
-            }
-        }
-        Tool::ObjectSelection => {
-            crate::widgets::checkbox(ui, &mut o.object_finder, tl!("Object Finder"));
-            crate::widgets::checkbox(ui, &mut o.sample_all.object_selection, tl!("Sample All Layers"));
-            opt(ui, tl!("Drag a rectangle around the object"));
-            crate::widgets::vline(ui, 22.0);
-            if crate::widgets::secondary_button(ui, tl!("Select Subject"), 0.0).clicked() {
-                let r = app.run("select.subject", json!({}));
-                report_smart_result(app, r, tl!("No subject found — try a rectangle around the object"));
-            }
-        }
         Tool::RedEye => {
             opt(ui, tl!("Pupil Size"));
             crate::widgets::value_field(ui, &mut o.red_eye_pupil_size, 1.0..=100.0, "", 50.0);
@@ -828,6 +851,42 @@ mod tests {
                 assert_eq!(a > 0.0, all, "{tool:?} sampleAllLayers={all}: alpha {a}");
             }
         }
+    }
+
+    #[test]
+    fn quick_selection_options_bar_subtract_mode() {
+        let mut app = app();
+        app.run("select.rect", json!({"x": 5, "y": 5, "width": 20, "height": 20})).unwrap();
+        app.ui.tool = Tool::QuickSelection;
+        app.ui.selection_mode = 2;
+        assert!(finish_stroke(&mut app, Tool::QuickSelection, &[[50.0, 30.0, 1.0]], egui::Modifiers::NONE));
+        let (id, params) = app.session.journal.last().unwrap();
+        assert_eq!(id, "select.quick");
+        assert_eq!(params["mode"], "subtract");
+    }
+
+    #[test]
+    fn quick_selection_new_mode_accumulates_strokes() {
+        let mut app = app();
+        app.ui.tool = Tool::QuickSelection;
+        app.ui.selection_mode = 0;
+        assert!(finish_stroke(&mut app, Tool::QuickSelection, &[[30.0, 30.0, 1.0]], egui::Modifiers::NONE));
+        let (_, p0) = app.session.journal.last().unwrap();
+        assert_eq!(p0["mode"], "replace");
+        assert!(finish_stroke(&mut app, Tool::QuickSelection, &[[50.0, 30.0, 1.0]], egui::Modifiers::NONE));
+        let (_, p1) = app.session.journal.last().unwrap();
+        assert_eq!(p1["mode"], "add");
+    }
+
+    #[test]
+    fn quick_selection_never_sends_intersect_to_select_quick() {
+        let mut app = app();
+        app.run("select.rect", json!({"x": 5, "y": 5, "width": 20, "height": 20})).unwrap();
+        app.ui.tool = Tool::QuickSelection;
+        app.ui.selection_mode = 3;
+        assert!(finish_stroke(&mut app, Tool::QuickSelection, &[[50.0, 30.0, 1.0]], egui::Modifiers::NONE));
+        let (_, params) = app.session.journal.last().unwrap();
+        assert_ne!(params["mode"], "intersect");
     }
 
     #[test]

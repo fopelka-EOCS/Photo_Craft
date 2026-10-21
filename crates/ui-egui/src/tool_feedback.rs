@@ -50,39 +50,38 @@ pub fn is_selection_tool(tool: Tool) -> bool {
     )
 }
 
+/// Quick Selection: the options-bar New button was pressed — the next `select.quick` stroke
+/// replaces, then later strokes in New mode add (#7302). Not an engine combine mode (those are
+/// 0–3); stored in [`crate::state::UiState::selection_mode`].
+pub const QUICK_SELECTION_REPLACE_NEXT: u8 = 4;
+
+/// Options-bar combine mode 0–3; strips [`QUICK_SELECTION_REPLACE_NEXT`].
+#[inline]
+pub fn selection_bar_index(bar: u8) -> u8 {
+    bar & 3
+}
+
 /// The effective selection mode of `tool` for the options-bar mode `bar` (0 New, 1 Add,
 /// 2 Subtract, 3 Intersect) and the held modifiers: exactly what the tool's gesture will use.
 pub fn selection_mode(tool: Tool, bar: u8, m: egui::Modifiers) -> &'static str {
-    match tool {
-        // Quick Selection always adds (⌥ subtracts), like Photoshop's after the first stroke.
-        Tool::QuickSelection => {
-            if m.alt {
-                "subtract"
-            } else {
-                "add"
-            }
+    let bar = selection_bar_index(bar);
+    // `select.quick` has no intersect mode; the options bar omits that button for this tool.
+    if tool == Tool::QuickSelection {
+        if m.shift {
+            "add"
+        } else if m.alt {
+            "subtract"
+        } else {
+            ["replace", "add", "subtract"][bar.min(2) as usize]
         }
-        // Object Selection: ⌥ subtracts, ⇧ adds (see `retouch_ui::finish_object_selection`).
-        Tool::ObjectSelection => {
-            if m.alt {
-                "subtract"
-            } else if m.shift {
-                "add"
-            } else {
-                "replace"
-            }
-        }
-        _ => {
-            if m.shift && m.alt {
-                "intersect"
-            } else if m.shift {
-                "add"
-            } else if m.alt {
-                "subtract"
-            } else {
-                ["replace", "add", "subtract", "intersect"][bar.min(3) as usize]
-            }
-        }
+    } else if m.shift && m.alt {
+        "intersect"
+    } else if m.shift {
+        "add"
+    } else if m.alt {
+        "subtract"
+    } else {
+        ["replace", "add", "subtract", "intersect"][bar.min(3) as usize]
     }
 }
 
@@ -278,9 +277,14 @@ mod tests {
         assert_eq!(badge(&app, Tool::Lasso, shift), Some(Badge::Add));
         app.ui.selection_mode = 3;
         assert_eq!(badge(&app, Tool::RectMarquee, none), Some(Badge::Intersect));
-        // Smart selection tools.
-        assert_eq!(badge(&app, Tool::QuickSelection, none), Some(Badge::Add));
+        // Smart selection tools honour the options bar like the marquees.
+        app.ui.selection_mode = 0;
+        assert_eq!(badge(&app, Tool::QuickSelection, none), None);
         assert_eq!(badge(&app, Tool::QuickSelection, alt), Some(Badge::Subtract));
+        app.ui.selection_mode = 1;
+        assert_eq!(badge(&app, Tool::QuickSelection, none), Some(Badge::Add));
+        assert_eq!(badge(&app, Tool::QuickSelection, both), Some(Badge::Add));
+        app.ui.selection_mode = 0;
         assert_eq!(badge(&app, Tool::ObjectSelection, none), None);
         assert_eq!(badge(&app, Tool::ObjectSelection, shift), Some(Badge::Add));
         // Other tools never show one.
