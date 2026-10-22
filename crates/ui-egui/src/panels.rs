@@ -563,13 +563,13 @@ fn color_chips(app: &mut PhotocraftApp, ui: &mut egui::Ui, two_columns: bool, co
         p.rect_stroke(b, 1.0, Stroke::new(1.0, ink(d)), StrokeKind::Inside);
     }
     if let Some(d) = &d {
-        d.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Default colours (D)")));
+        d.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Default Foreground and Background Colors (D)")));
     }
-    s.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Swap colours (X)")));
-    if s.on_hover_text(tl!("Swap colours (X)")).clicked() {
+    s.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Switch Foreground and Background Colors (X)")));
+    if s.on_hover_text(tl!("Switch Foreground and Background Colors (X)")).clicked() {
         chip_command(app, "tools.swapColors");
     }
-    if d.is_some_and(|d| d.on_hover_text(tl!("Default colours (D)")).clicked()) {
+    if d.is_some_and(|d| d.on_hover_text(tl!("Default Foreground and Background Colors (D)")).clicked()) {
         chip_command(app, "tools.defaultColors");
     }
 }
@@ -1538,7 +1538,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         }
                     }
                     Tool::RotateView => {
-                        hint(ui, tl!("Drag around the centre to rotate the view  ·  Shift constrains to 15°"));
+                        hint(ui, tl!("Drag around the center to rotate the view  ·  Shift constrains to 15°"));
                         if let Some(i) = app.session.active_index() {
                             ui.label(tl!("Angle"));
                             let mut angle = app.ui.views.get(i).map(|v| v.rotation).unwrap_or(0.0);
@@ -1593,7 +1593,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     Tool::Crop => hint(
                         ui,
                         &crate::i18n::fmt(
-                            tl!("Drag a crop box · drag inside to move · edges resize ({ratio} ratio, {centre} centre) · Space moves while drawing · arrows nudge · X swaps orientation · {commit} commits · Esc cancels"),
+                            tl!("Drag a crop box · drag inside to move · edges resize ({ratio} ratio, {centre} center) · Space moves while drawing · arrows nudge · X swaps orientation · {commit} commits · Esc cancels"),
                             &[
                                 ("ratio", &crate::shortcuts::pretty("Shift")),
                                 ("centre", &crate::shortcuts::pretty("Alt")),
@@ -1608,7 +1608,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                             &[("commit", &crate::shortcuts::pretty("Enter"))],
                         ),
                     ),
-                    Tool::PaintBucket => hint(ui, tl!("Click to fill similar colours")),
+                    Tool::PaintBucket => hint(ui, tl!("Click to fill similar colors")),
                     // Retouching and smart-selection tools draw their bar in `retouch_ui::options_bar`.
                     _ => {}
                 }
@@ -4874,11 +4874,11 @@ mod color_tests {
             );
             PhotocraftApp::setup_context(&h.ctx, kind);
             h.run_steps(2);
-            h.get_by_label("Swap colours (X)").click();
+            h.get_by_label("Switch Foreground and Background Colors (X)").click();
             h.run_steps(2);
             assert_eq!(h.state().session.tools.foreground, [0.0, 0.0, 1.0, 1.0], "{kind:?}");
             assert_eq!(h.state().session.tools.background, [1.0, 0.0, 0.0, 1.0], "{kind:?}");
-            h.get_by_label("Default colours (D)").click();
+            h.get_by_label("Default Foreground and Background Colors (D)").click();
             h.run_steps(2);
             assert_eq!(h.state().session.tools.foreground, [0.0, 0.0, 0.0, 1.0], "{kind:?}");
             assert_eq!(h.state().session.tools.background, [1.0, 1.0, 1.0, 1.0], "{kind:?}");
@@ -4933,7 +4933,7 @@ mod color_tests {
             );
             PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::Studio);
             h.run_steps(2);
-            h.get_by_label("Swap colours (X)").click();
+            h.get_by_label("Switch Foreground and Background Colors (X)").click();
             h.run_steps(2);
             assert_eq!(h.state().session.tools.foreground, [0.0, 0.0, 1.0, 1.0]);
             assert_eq!(h.state().session.tools.background, [1.0, 0.0, 0.0, 1.0]);
@@ -4942,7 +4942,7 @@ mod color_tests {
             assert_eq!((rgb(h.state(), id, 6), rgb(h.state(), id, 10)), (blue, blue), "selected: {selected}");
             // Default Colors: the selection takes black, the new foreground.
             h.state_mut().run("tools.setColors", json!({"foreground": "#00ff00"})).unwrap();
-            h.get_by_label("Default colours (D)").click();
+            h.get_by_label("Default Foreground and Background Colors (D)").click();
             h.run_steps(2);
             assert_eq!(h.state().session.tools.foreground, [0.0, 0.0, 0.0, 1.0]);
             assert_eq!(rgb(h.state(), id, 6), [0, 0, 0, 255], "selected: {selected}");
@@ -6700,7 +6700,7 @@ mod compact_visual_regressions {
         for kind in theme::ThemeKind::ALL {
             let harness = toolbar_harness_sized(kind, 1.0, 1600.0);
             let last = harness.get_by_label("Edit Toolbar…").rect();
-            let swap = harness.get_by_label("Swap colours (X)").rect();
+            let swap = harness.get_by_label("Switch Foreground and Background Colors (X)").rect();
             assert!(swap.top() - last.bottom() < 80.0, "{kind:?}: the chips {swap:?} sit far below the last tool {last:?}");
         }
     }

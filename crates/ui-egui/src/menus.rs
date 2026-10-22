@@ -927,8 +927,8 @@ pub fn is_live(id: &str) -> bool {
 }
 
 /// Commands outside the catalogue that belong right after a catalogue item: `(id, after)`.
-/// The command takes that item's submenu path, so it joins Photoshop's submenu even where the
-/// catalogue spells it differently (Filter › "Other…").
+/// The command takes that item's submenu path, so it joins the catalogue's submenu rather than
+/// opening a second one spelled from its own id (Filter › Other).
 const PLACE_AFTER: &[(&str, &str)] = &[
     ("file.newFromClipboard", "file.new"),
     ("filter.render.relight", "filter.render.lightingEffects"),
@@ -1715,7 +1715,8 @@ mod tests {
         assert_eq!(items[c2a].label, "Color to Alpha…");
         assert!(items[c2a].enabled, "the Background becomes a layer when the filter runs");
         let others: Vec<_> = items.iter().filter(|i| i.path.first().is_some_and(|p| p == "Filter") && i.path.len() == 2).map(|i| &i.path[1]).collect();
-        assert!(!others.iter().any(|p| p.as_str() == "Other"), "no duplicate Other submenu: {others:?}");
+        assert!(others.iter().any(|p| p.as_str() == "Other"), "the catalogue's Other submenu: {others:?}");
+        assert!(!others.iter().any(|p| p.as_str() == "Other…"), "no second submenu spelled Other…: {others:?}");
     }
 
     #[test]
