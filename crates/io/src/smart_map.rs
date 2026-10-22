@@ -150,7 +150,7 @@ const fn code(c: &[u8; 4]) -> i32 {
     i32::from_be_bytes(*c)
 }
 
-const KNOWN: [Known; 45] = [
+const KNOWN: [Known; 48] = [
     Known { class: "GsnB", filter_id: code(b"GsnB"), name: "Gaussian Blur...", command: "filter.blur.gaussianBlur" },
     Known { class: "boxblur", filter_id: 840, name: "Box Blur...", command: "filter.blur.boxBlur" },
     Known { class: "MtnB", filter_id: code(b"MtnB"), name: "Motion Blur...", command: "filter.blur.motionBlur" },
@@ -182,6 +182,10 @@ const KNOWN: [Known; 45] = [
     Known { class: "Crvs", filter_id: code(b"Crvs"), name: "Curves...", command: "image.adjustments.curves" },
     // Shadows/Highlights at its defaults stores no `Fltr` (`hasoptions` false).
     Known { class: "adaptCorrect", filter_id: 781, name: "Shado&ws/Highlights...", command: "image.adjustments.shadowsHighlights" },
+    // Desaturate and Equalize have no dialog; Photoshop writes them without `Fltr`.
+    Known { class: "Dstt", filter_id: code(b"Dstt"), name: "Desaturate", command: "image.adjustments.desaturate" },
+    Known { class: "Eqlz", filter_id: code(b"Eqlz"), name: "Equalize", command: "image.adjustments.equalize" },
+    Known { class: "Rplc", filter_id: code(b"Rplc"), name: "Replace Color...", command: "image.adjustments.replaceColor" },
     // Filters without options (measured in Photoshop): `hasoptions` false, no `Fltr`, only the
     // four-char `filterID`. The class is that code; see `NO_OPTIONS`.
     Known { class: "Blr ", filter_id: code(b"Blr "), name: "Blur", command: "filter.blur.blur" },
@@ -210,7 +214,7 @@ const KNOWN: [Known; 45] = [
 const LENSES: [(&[u8; 4], &str); 4] = [(b"Zm  ", "zoom"), (b"Nkn ", "prime35"), (b"Nkn1", "prime105"), (b"PnVs", "moviePrime")];
 
 /// Classes of the filters that have no options: Photoshop stores them without a `Fltr`.
-const NO_OPTIONS: [&str; 11] = ["Blr ", "BlrM", "Avrg", "Dspc", "FndE", "Fct ", "Frgm", "Shrp", "ShrM", "ShrE", "Slrz"];
+const NO_OPTIONS: [&str; 13] = ["Blr ", "BlrM", "Avrg", "Dspc", "FndE", "Fct ", "Frgm", "Shrp", "ShrM", "ShrE", "Slrz", "Dstt", "Eqlz"];
 
 // ---------- Smart Sharpen and Dust & Scratches ----------
 //
@@ -459,6 +463,17 @@ fn curves_params(f: &Descriptor) -> Option<J> {
     Some(J::Object(out))
 }
 
+fn replace_color_params(f: &Descriptor) -> Option<J> {
+    let color = get_desc(f, "Clr ").and_then(rgbc_colour)?;
+    Some(json!({
+        "color": color,
+        "fuzziness": int(f, "Fzns").or_else(|| px(f, "Fzns").map(|v| v.round() as i32))?,
+        "hue": int(f, "Hue ").or_else(|| px(f, "Hue ").map(|v| v.round() as i32)).unwrap_or(0),
+        "saturation": int(f, "Strt").or_else(|| px(f, "Strt").map(|v| v.round() as i32)).unwrap_or(0),
+        "lightness": int(f, "Lght").or_else(|| px(f, "Lght").map(|v| v.round() as i32)).unwrap_or(0),
+    }))
+}
+
 /// Diffuse's `Md  ` (`DfsM` enum, measured in Photoshop) ↔ our `mode`.
 const DIFFUSE_MODES: [(&str, &str); 4] = [("Nrml", "normal"), ("DrkO", "darkenOnly"), ("LghO", "lightenOnly"), ("anisotropic", "anisotropic")];
 
@@ -555,6 +570,7 @@ fn known_params(class: &str, f: Option<&Descriptor>, item: &Descriptor) -> Optio
     let params = match (class, f) {
         ("adaptCorrect", None) => json!({}),
         (c, None) if NO_OPTIONS.contains(&c) => json!({}),
+        ("Dstt" | "Eqlz", Some(_)) => json!({}),
         (_, None) => return None,
         ("GsnB" | "boxblur" | "Mdn " | "HghP" | "Mxm " | "Mnm ", Some(f)) => json!({"radius": px(f, "Rds ")?}),
         ("MtnB", Some(f)) => json!({"angle": int(f, "Angl")?, "distance": px(f, "Dstn")?}),
@@ -634,6 +650,7 @@ fn known_params(class: &str, f: Option<&Descriptor>, item: &Descriptor) -> Optio
         }
         ("Lvls", Some(f)) => levels_params(f)?,
         ("Crvs", Some(f)) => curves_params(f)?,
+        ("Rplc", Some(f)) => replace_color_params(f)?,
         _ => return None,
     };
     Some((k.command, params))
@@ -1116,6 +1133,18 @@ fn fltr_for(k: &Known, p: &J) -> Result<Option<Descriptor>, String> {
                 return Err("only default Shadows/Highlights settings are written to PSD".into());
             }
             return Ok(None);
+        }
+        "Rplc" => {
+            let obj = p.as_object().ok_or("parameters are not an object")?;
+            const ALLOWED: &[&str] = &["color", "fuzziness", "hue", "saturation", "lightness"];
+            if let Some(key) = obj.keys().find(|k| !is_meta(k) && !ALLOWED.contains(&k.as_str())) {
+                return Err(format!("setting `{key}` has no PSD equivalent"));
+            }
+            d.with("Clr ", colour_rgbc(p.get("color"), 0.0)?)
+                .with("Fzns", pi(p, "fuzziness", 40.0))
+                .with("Hue ", pi(p, "hue", 0.0))
+                .with("Strt", pi(p, "saturation", 0.0))
+                .with("Lght", pi(p, "lightness", 0.0))
         }
         // No settings to write; any parameter keys an old record carries have no effect on the
         // filter either, so nothing is lost.
@@ -1731,6 +1760,9 @@ mod tests {
             sf("image.adjustments.levels", json!({"inBlack": 20, "inWhite": 220, "gamma": 1.4, "red": {"inBlack": 0, "inWhite": 255, "gamma": 0.8}})),
             sf("image.adjustments.curves", json!({"points": [[0.0, 0.0], [64.0, 40.0], [255.0, 255.0]], "blue": [[0.0, 20.0], [255.0, 235.0]]})),
             sf("image.adjustments.shadowsHighlights", json!({})),
+            sf("image.adjustments.desaturate", json!({})),
+            sf("image.adjustments.equalize", json!({})),
+            sf("image.adjustments.replaceColor", json!({"color": [0.4, 0.5, 0.8, 1.0], "fuzziness": 180, "hue": 40, "saturation": 10, "lightness": -5})),
             // A pencil-drawn curve: 256 output levels (`Mpng`).
             sf("image.adjustments.curves", json!({"pencil": true, "points": (0..256).rev().collect::<Vec<i32>>()})),
         ];
@@ -3102,12 +3134,13 @@ mod tests {
                 sf(UNSUPPORTED_FILTER, json!({"psd": "zz"})),
                 sf("image.adjustments.levels", json!({"cyan": {"gamma": 2.0}})),
                 sf("image.adjustments.shadowsHighlights", json!({"shadowAmount": 50})),
+                sf("image.adjustments.replaceColor", json!({"localized": true, "color": [1.0, 0.0, 0.0, 1.0]})),
             ],
             ..Default::default()
         };
         let mut w = Vec::new();
         let d = filter_fx(&stack, "L", &mut w);
-        assert_eq!(w.len(), 4, "{w:?}");
+        assert_eq!(w.len(), 5, "{w:?}");
         let back = filter_stack(&d);
         assert_eq!(back.filters, vec![stack.filters[1].clone()]);
     }

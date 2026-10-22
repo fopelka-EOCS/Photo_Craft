@@ -1164,7 +1164,10 @@ fn build() -> Vec<CommandSpec> {
         cmd!("image.imageRotation.90ccw", "90° Counter Clockwise", ["Image", "Image Rotation"], None, "{}", has_doc, |s, _| {
             turn(s, "Rotate Canvas", crate::canvas_geom::Turn::Ccw90)
         }),
-        cmd!("image.adjustments.desaturate", "Desaturate", ["Image", "Adjustments"], Some("Cmd+Shift+U"), "{}", has_pixel_layer, |s, _| {
+        cmd!("image.adjustments.desaturate", "Desaturate", ["Image", "Adjustments"], Some("Cmd+Shift+U"), "{}", crate::adjust_cmds::has_adjustable, |s, p| {
+            if crate::adjust_cmds::adjust_as_smart_filter(s, "desaturate", "Desaturate", p)? {
+                return Ok(Value::Null);
+            }
             destructive_adjust(
                 s,
                 "Desaturate",
@@ -1175,7 +1178,7 @@ fn build() -> Vec<CommandSpec> {
                     colorize: false,
                     ranges: photocraft_doc::adjust::HueRange::defaults(),
                 },
-                &Value::Null,
+                p,
             )
         }),
         // Paint
