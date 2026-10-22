@@ -694,6 +694,87 @@ fn the_favourite_and_recent_font_lists_survive_a_restart() {
     assert_eq!(app2.ui.favorite_font_families, vec!["MS Gothic".to_string()]);
 }
 
+/// The picker's own state: the family it shows, the list of families and the two lists it
+/// keeps (the recently used and the favourites).
+struct Lists {
+    current: String,
+    families: Vec<String>,
+    recent: Vec<String>,
+    favorites: Vec<String>,
+}
+
+/// A picker that keeps its recently used and favourite lists.
+fn harness_with_lists(current: &str, families: &[&str], recent: &[&str], favorites: &[&str]) -> Harness<'static, Lists> {
+    let state = Lists {
+        current: current.to_string(),
+        families: families.iter().map(|s| s.to_string()).collect(),
+        recent: recent.iter().map(|s| s.to_string()).collect(),
+        favorites: favorites.iter().map(|s| s.to_string()).collect(),
+    };
+    let mut h = Harness::builder().with_size(vec2(600.0, 900.0)).build_ui_state(
+        |ui, s: &mut Lists| {
+            let fams = s.families.clone();
+            font_picker_in(ui, &mut s.current, 170.0, &fams, FontPreview::Off, &mut s.recent, &mut s.favorites);
+        },
+        state,
+    );
+    h.run();
+    h
+}
+
+/// The arrow keys walk the rows as they are shown: the favourites first, then the recently used,
+/// then the rest. They used to walk the plain list, so the selection left the visible order.
+#[test]
+fn the_arrow_keys_walk_the_rows_as_they_are_shown() {
+    let mut h = harness_with_lists("Arial", &["Arial", "MS Gothic", "Zeta Sans"], &["Zeta Sans"], &["MS Gothic"]);
+    open(&mut h);
+    // The rows as they are shown: MS Gothic (favourite), Zeta Sans (recently used), Arial.
+    h.key_press(Key::ArrowDown);
+    h.run();
+    assert_eq!(h.state().current, "Arial", "↓ stays on the last row shown");
+    h.key_press(Key::ArrowUp);
+    h.run();
+    assert_eq!(h.state().current, "Zeta Sans", "↑ goes to the row just above, the recently used one");
+    h.key_press(Key::ArrowUp);
+    h.run();
+    assert_eq!(h.state().current, "MS Gothic", "↑ again reaches the favourite");
+    h.key_press(Key::ArrowUp);
+    h.run();
+    assert_eq!(h.state().current, "MS Gothic", "↑ stops at the first row shown");
+}
+
+/// Every way of picking a font puts it in the recently used, not only a click on a row.
+#[test]
+fn every_way_of_picking_a_font_is_remembered() {
+    let mut h = harness_with_lists("Arial", &["Arial", "MS Gothic", "Zeta Sans"], &[], &[]);
+    open(&mut h);
+    // The arrow keys in the open menu.
+    h.key_press(Key::ArrowDown);
+    h.run();
+    assert_eq!(h.state().current, "MS Gothic");
+    assert_eq!(h.state().recent, vec!["MS Gothic".to_string()], "the arrow in the open menu is a pick");
+    // Enter accepts the family under the cursor and closes the menu.
+    h.key_press(Key::Enter);
+    h.run();
+    assert_eq!(h.state().recent, vec!["MS Gothic".to_string()], "Enter is a pick too");
+    // A click on a row.
+    open(&mut h);
+    h.get_by_label("Arial").click();
+    h.run();
+    assert_eq!(h.state().recent, vec!["Arial".to_string(), "MS Gothic".to_string()], "the click is the most recent");
+    // The arrows on the closed field.
+    h.key_press(Key::ArrowDown);
+    h.run();
+    assert_eq!(h.state().current, "MS Gothic");
+    assert_eq!(h.state().recent, vec!["MS Gothic".to_string(), "Arial".to_string()], "the arrow on the closed field is a pick");
+    // A favourite has its own section: it does not take a slot in the recently used.
+    let mut h = harness_with_lists("Arial", &["Arial", "MS Gothic"], &[], &["MS Gothic"]);
+    open(&mut h);
+    h.get_by_label("MS Gothic").click();
+    h.run();
+    assert!(h.state().recent.is_empty(), "the favourite is not in the recently used: {:?}", h.state().recent);
+}
+
 #[test]
 fn font_menu_rows_search_both_names_and_sort_by_label() {
     use std::collections::HashMap;

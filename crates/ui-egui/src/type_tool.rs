@@ -1532,13 +1532,11 @@ fn on_the_star(ui: &egui::Ui, response: &egui::Response) -> bool {
     response.hover_pos().is_some_and(|p| p.x <= star_right)
 }
 
-/// The font menu's state while it is open: the family the field shows, the recent and favourite
-/// lists, and the per-frame settings every row shares.
+/// The font menu's state while it is open: the family the field shows, the favourite list and
+/// the per-frame settings every row shares.
 struct FontMenu<'a> {
     /// The family the field shows.
     current: &'a mut String,
-    /// The recently used families, most recent first.
-    recent: &'a mut Vec<String>,
     /// The favourite families.
     favorites: &'a mut Vec<String>,
     /// Set when the family changed.
@@ -1563,7 +1561,7 @@ impl FontMenu<'_> {
     /// One font row: the family name, its sample and the favourite star, in a single button, as
     /// the font menu has always drawn it. The star toggles the favourite (the menu stays open);
     /// the name picks the family, which closes the menu.
-    fn row(&mut self, ui: &mut egui::Ui, family: &str, label: &str, remember: bool) {
+    fn row(&mut self, ui: &mut egui::Ui, family: &str, label: &str) {
         let is_fav = is_favorite(self.favorites.as_slice(), family);
         let star_color = if is_fav { favorite_color() } else { crate::theme::Tokens::get(ui.ctx()).text_faint };
         // The favourite star is drawn from the project's own SVG icon (not a text atom), so it
@@ -1602,9 +1600,6 @@ impl FontMenu<'_> {
         *self.current = family.to_string();
         // A served family not fetched yet: start now, before any text needs it.
         photocraft_text::served::request(family);
-        if remember {
-            push_recent_font(&mut *self.recent, family);
-        }
         *self.changed = true;
         *self.picked = true;
         ui.data_mut(|d| d.remove::<String>(self.search_id));
@@ -1684,15 +1679,31 @@ pub(crate) fn family_picker_in(
         });
         let ql = q.to_lowercase();
         let rows = font_menu_rows(families, labels, &ql);
+
+        // The rows as they are shown: favourites, then the recently used, then every other
+        // family. The favourite and recent sections only appear when the search field is empty.
+        let favourite_families: Vec<String> = if ql.is_empty() { favorites.iter().filter(|&f| families.contains(f)).cloned().collect() } else { Vec::new() };
+        let favourite_rows = font_menu_rows(&favourite_families, labels, "");
+        let recent_families: Vec<String> =
+            if ql.is_empty() { recent.iter().filter(|&f| families.contains(f) && !favorites.contains(f)).cloned().collect() } else { Vec::new() };
+        // The recently used keep the list's own order (most recent first), not the menu's
+        // alphabetical one.
+        let recent_rows: Vec<(&String, &str)> = recent_families.iter().map(|f| (f, font_label(labels, f))).collect();
+        let main_rows: Vec<(&String, &str)> = rows.iter().filter(|(f, _)| !favourite_families.contains(f) && !recent_families.contains(f)).copied().collect();
+        // The families in the order they are shown. While searching there are no sections, so this
+        // is the whole matching list. The arrow keys walk it, so the selection follows what the
+        // user sees.
+        let shown: Vec<&String> = favourite_rows.iter().chain(&recent_rows).chain(&main_rows).map(|(f, _)| *f).collect();
+
         if down || up {
-            let index = rows.iter().position(|(f, _)| *f == current);
+            let index = shown.iter().position(|f| *f == current);
             let next = match index {
-                Some(i) if down => i.saturating_add(1).min(rows.len().saturating_sub(1)),
+                Some(i) if down => i.saturating_add(1).min(shown.len().saturating_sub(1)),
                 Some(i) => i.saturating_sub(1),
                 None if down => 0,
-                None => rows.len().saturating_sub(1),
+                None => shown.len().saturating_sub(1),
             };
-            if let Some((f, _)) = rows.get(next) {
+            if let Some(f) = shown.get(next) {
                 changed = **f != *current;
                 current.clone_from(f);
                 // A served family not fetched yet: start now, as a click does.
@@ -1710,21 +1721,9 @@ pub(crate) fn family_picker_in(
 
         let mut hovered: Option<String> = None;
 
-        // The rows: favourites, then the recently used, then every other family.
-        // The favourite and recent sections only appear when the search field is empty.
-        let favourite_families: Vec<String> = if ql.is_empty() { favorites.iter().filter(|&f| families.contains(f)).cloned().collect() } else { Vec::new() };
-        let favourite_rows = font_menu_rows(&favourite_families, labels, "");
-        let recent_families: Vec<String> =
-            if ql.is_empty() { recent.iter().filter(|&f| families.contains(f) && !favorites.contains(f)).cloned().collect() } else { Vec::new() };
-        // The recently used keep the list's own order (most recent first), not the menu's
-        // alphabetical one.
-        let recent_rows: Vec<(&String, &str)> = recent_families.iter().map(|f| (f, font_label(labels, f))).collect();
-        let main_rows: Vec<(&String, &str)> = rows.into_iter().filter(|(f, _)| !favourite_families.contains(f) && !recent_families.contains(f)).collect();
-
         {
             let mut menu = FontMenu {
                 current: &mut *current,
-                recent: &mut *recent,
                 favorites: &mut *favorites,
                 changed: &mut changed,
                 picked: &mut picked,
@@ -1738,19 +1737,19 @@ pub(crate) fn family_picker_in(
             if !favourite_rows.is_empty() {
                 ui.label(egui::RichText::new(tl!("Favorites")).size(11.0).color(crate::theme::Tokens::get(ui.ctx()).text_faint));
                 for (f, label) in favourite_rows {
-                    menu.row(ui, f.as_str(), label, false);
+                    menu.row(ui, f.as_str(), label);
                 }
                 ui.separator();
             }
             if !recent_rows.is_empty() {
                 ui.label(egui::RichText::new(tl!("Recently Used")).size(11.0).color(crate::theme::Tokens::get(ui.ctx()).text_faint));
                 for (f, label) in recent_rows {
-                    menu.row(ui, f.as_str(), label, true);
+                    menu.row(ui, f.as_str(), label);
                 }
                 ui.separator();
             }
             for (f, label) in main_rows {
-                menu.row(ui, f.as_str(), label, true);
+                menu.row(ui, f.as_str(), label);
             }
         }
         // egui measures a popup only when it opens and never lets it grow back, so a filtered
@@ -1831,6 +1830,13 @@ pub(crate) fn family_picker_in(
             // this picker, and the closed one must not wipe the other's hover (#5152).
             ui.ctx().data_mut(|d| d.remove::<String>(hover_id));
         }
+    }
+
+    // Every family the user just chose is one they will want again, however they chose it: a row
+    // click, Enter, the arrow keys in the open menu, the arrows and the wheel on the closed field.
+    // A favourite has its own section, so it does not take a slot in the recently used.
+    if (changed || picked) && !is_favorite(favorites.as_slice(), current) {
+        push_recent_font(recent, current);
     }
 
     changed
