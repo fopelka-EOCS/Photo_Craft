@@ -1,5 +1,5 @@
 //! Free Transform with the whole app: picking another tool or layer, or New Layer, while the box
-//! is open applies the transform as it stands, as Photoshop does (#5441, #5665, #5667).
+//! is open applies the transform as it stands, as Photoshop does (#5441, #5665, #5667, #8211).
 
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
@@ -115,6 +115,59 @@ fn picking_another_layer_in_the_panel_applies_the_transform() {
         assert_eq!(h.state().session.active().unwrap().doc.layers.len(), 2, "placed {placed}");
         assert_eq!(red_bounds(&h), photocraft_geom::Rect::new(150, 140, 250, 200), "placed {placed}");
     }
+}
+
+/// #8211: the desktop app runs transforms as background jobs. Selecting another layer started
+/// the commit and then immediately cancelled that job as a "refused" transform, so the resize was
+/// lost. The commit must be allowed to land.
+#[test]
+fn picking_another_layer_applies_a_resize_that_runs_in_the_background() {
+    let mut h = app();
+    h.state_mut().background_jobs = true;
+    // Resize the box 1.5× wider and 2× taller about its top-left corner, as a handle drag does.
+    let ctx = h.ctx.clone();
+    crate::menus::invoke(h.state_mut(), &ctx, "edit.freeTransform", json!({})).unwrap();
+    h.run_steps(2);
+    let t = h.state_mut().ui.transform.as_mut().expect("Free Transform is open");
+    for p in &mut t.quad {
+        p[0] = 100.0 + (p[0] - 100.0) * 1.5;
+        p[1] = 100.0 + (p[1] - 100.0) * 2.0;
+    }
+    h.run_steps(2);
+    h.get_by_label("Background").click();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while h.state().ui.transform.is_some() {
+        assert!(std::time::Instant::now() < deadline, "the background commit never finished");
+        h.run_steps(1);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert_eq!(red_bounds(&h), photocraft_geom::Rect::new(100, 100, 250, 220), "the resize was applied, not cancelled");
+}
+
+/// A commit the engine refuses in the background (#3773) must not be retried after the user picks
+/// another layer: the displaced session ends, as it does inline, instead of starting another job
+/// every frame (#8211).
+#[test]
+fn a_failed_background_commit_is_not_retried_after_a_layer_switch() {
+    let mut h = app();
+    h.state_mut().background_jobs = true;
+    let ctx = h.ctx.clone();
+    crate::menus::invoke(h.state_mut(), &ctx, "edit.freeTransform", json!({})).unwrap();
+    h.run_steps(2);
+    // Far over the pixel budget: the background commit fails.
+    let t = h.state_mut().ui.transform.as_mut().expect("Free Transform is open");
+    t.quad = [[0.0, 0.0], [4.0e6, 0.0], [4.0e6, 4.0e6], [0.0, 4.0e6]];
+    h.run_steps(2);
+    h.get_by_label("Background").click();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while h.state().ui.transform.is_some() {
+        assert!(std::time::Instant::now() < deadline, "the failed background commit was retried");
+        h.run_steps(1);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert_eq!(red_bounds(&h), photocraft_geom::Rect::new(100, 100, 200, 160), "the refused transform was not applied");
+    let retried = h.state().session.jobs_with_recent().iter().filter(|j| j.command == "edit.transform").count();
+    assert_eq!(retried, 1, "the failed commit ran once, not once per frame");
 }
 
 #[test]
