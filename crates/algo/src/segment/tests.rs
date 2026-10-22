@@ -849,34 +849,30 @@ fn select_subject_leaves_a_background_coloured_gap_open() {
     assert!(v > 0.9, "IoU {v}");
 }
 
-/// The pixel-by-pixel anti-aliasing `antialias_u8` replaced with uniform-run skipping.
-fn antialias_reference(mask: &mut [u8], w: usize, h: usize) {
-    let src = mask.to_vec();
-    let at = |x: i32, y: i32, v: u8| if x < 0 || y < 0 || x >= w as i32 || y >= h as i32 { v } else { src[y as usize * w + x as usize] };
-    for y in 0..h {
-        for x in 0..w {
-            let v = src[y * w + x];
-            let (mut sum, mut edge) = (0u32, false);
-            for dy in -1..=1 {
-                for dx in -1..=1 {
-                    let n = at(x as i32 + dx, y as i32 + dy, v);
-                    edge |= n != v;
-                    sum += n as u32;
-                }
-            }
-            if edge {
-                let avg = sum as f32 / (9.0 * 255.0);
-                let f = if v > 127 { 0.5 + 0.5 * avg } else { 0.5 * avg };
-                mask[y * w + x] = (f * 255.0).round() as u8;
-            }
-        }
-    }
+#[test]
+fn antialias_blends_edge_pixels_with_their_neighbourhood() {
+    // A lone selected pixel keeps most of its coverage and its neighbours get half of a ninth;
+    // neighbours outside the mask count as the pixel itself.
+    let mut m = vec![0, 0, 0, 0, 255, 0, 0, 0, 0];
+    antialias_u8(&mut m, 3, 3);
+    assert_eq!(m, [14, 14, 14, 14, 142, 14, 14, 14, 14]);
 }
 
 #[test]
-fn antialias_matches_the_per_pixel_rule() {
+fn antialias_skips_only_spans_without_edge_pixels() {
+    // Every pixel through the per-pixel rule, no span skipped.
+    let every_pixel = |mask: &mut [u8], w: usize, h: usize| {
+        let src = mask.to_vec();
+        for y in 0..h {
+            for x in 0..w {
+                if let Some(v) = edge_value(&src, w, h, x, y) {
+                    mask[y * w + x] = v;
+                }
+            }
+        }
+    };
     let mut rng = Rng::new(11);
-    // Widths around the 64-pixel run, single rows and columns, discs, noise and stripes.
+    // Widths around the 64-pixel span, single rows and columns, discs, noise and stripes.
     for (w, h) in [(1usize, 1usize), (1, 9), (9, 1), (63, 4), (64, 3), (65, 5), (127, 2), (129, 70), (300, 200)] {
         let (cx, cy, r) = (w as f32 * 0.6, h as f32 * 0.4, w.min(h) as f32 / 3.0);
         let masks: Vec<Vec<u8>> = vec![
@@ -891,7 +887,7 @@ fn antialias_matches_the_per_pixel_rule() {
         for (k, m) in masks.into_iter().enumerate() {
             let (mut fast, mut slow) = (m.clone(), m);
             antialias_u8(&mut fast, w, h);
-            antialias_reference(&mut slow, w, h);
+            every_pixel(&mut slow, w, h);
             assert!(fast == slow, "{w}×{h} mask {k}");
         }
     }
