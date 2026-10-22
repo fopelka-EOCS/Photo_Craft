@@ -63,17 +63,19 @@ fn production(text: &str) -> String {
             out.push_str(line);
             continue;
         }
-        // Further attributes, then the item: one line (`mod x;`) or a block up to `}` (or a
-        // multi-line `use`'s `};`) at column 0.
+        // Further attributes, blank and comment-only lines (Rust ignores them, so the attribute
+        // still applies to what follows), then the item: one line (`mod x;`) or a block up to
+        // its closing line at column 0 (`}`, a multi-line `use`'s `};`, a constant's `];`).
         for item in lines.by_ref() {
             let item = code(item);
-            if item.starts_with("#[") {
+            if item.is_empty() || item.starts_with("#[") {
                 continue;
             }
             // `mod x;` and a one-line `mod tests {}` end on their own line.
             if !item.ends_with([';', '}']) {
                 for l in lines.by_ref() {
-                    if matches!(code(l).as_str(), "}" | "};") {
+                    let l = code(l);
+                    if !l.is_empty() && l.trim_end_matches(';').chars().all(|c| matches!(c, '}' | ']' | ')')) {
                         break;
                     }
                 }
@@ -222,6 +224,10 @@ fn production_keeps_code_after_an_inline_test_module() {
     assert_eq!(production(multiline_use), "fn b() { p.x.read }\n");
     let commented_item = "#[cfg(test)]\nmod more; // helpers\nfn b() { p.x.read }\n}\n";
     assert_eq!(production(commented_item), "fn b() { p.x.read }\n}\n");
+    let comment_before_item = "#[cfg(test)]\n// helpers\n\nmod tests {}\nfn b() { p.x.read }\n";
+    assert_eq!(production(comment_before_item), "fn b() { p.x.read }\n");
+    let constant = "#[cfg(test)]\nconst CASES: [&str; 2] = [\n    \"p.x.hidden\",\n    \"a\",\n];\nfn b() { p.x.read }\n";
+    assert_eq!(production(constant), "fn b() { p.x.read }\n");
     for newline in ["\n", "\r\n"] {
         let source = format!(
             "fn a() {{}}{newline}#[cfg(test)]{newline}#[allow(dead_code)]{newline}mod inline_tests {{{newline}    fn t() {{ p.x.hidden }}{newline}}}{newline}{newline}fn b() {{ p.x.read }}{newline}#[cfg(test)]{newline}mod more;{newline}fn c() {{}}{newline}"
