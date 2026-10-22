@@ -168,6 +168,19 @@ fn reserved_document_and_slice_names_export_with_portable_names() {
 }
 
 #[test]
+fn a_dotted_device_file_name_exports_without_the_device_stem() {
+    // `nul.v2_` would still be the NUL device on Windows; `nul_.v2` is a file.
+    let dir = tmp("reserved-dotted-name");
+    let mut s = session(8);
+    s.execute("slice.new", json!({"rect": [0, 0, 16, 16], "name": "logo"})).unwrap();
+    let path = format!("{dir}/nul.v2.png");
+    let result = s.execute("file.export.saveForWebLegacy", json!({"path": path, "slices": "all", "format": "png24", "html": true})).unwrap();
+    let html = result["html"].as_str().unwrap();
+    assert!(html.ends_with("/nul_.v2.html"), "{html}");
+    assert!(std::path::Path::new(html).is_file());
+}
+
+#[test]
 fn platform_writer_failure_stops_export_and_preserves_saved_settings() {
     let mut s = session(8);
     let saved = json!({"format": "png24", "path": "saved.png"});
@@ -474,7 +487,13 @@ fn quick_export_writes_the_format_its_path_names() {
     let dir = tmp("quick_ext");
     let mut s = session(8);
     s.execute("file.export.exportPreferences", json!({"quickExportFormat": "png"})).unwrap();
-    for (name, format, magic) in [("a.jpeg", "jpg", &b"\xFF\xD8\xFF"[..]), ("b.JPG", "jpg", b"\xFF\xD8\xFF"), ("c.gif", "gif", b"GIF8"), ("d.webp", "webp", b"RIFF"), ("e", "png", b"\x89PNG")] {
+    for (name, format, magic) in [
+        ("a.jpeg", "jpg", &b"\xFF\xD8\xFF"[..]),
+        ("b.JPG", "jpg", b"\xFF\xD8\xFF"),
+        ("c.gif", "gif", b"GIF8"),
+        ("d.webp", "webp", b"RIFF"),
+        ("e", "png", b"\x89PNG"),
+    ] {
         let path = format!("{dir}/{name}");
         let r = s.execute("file.export.quickExport", json!({"path": path})).unwrap();
         assert_eq!(r["format"], json!(format), "{name}");
