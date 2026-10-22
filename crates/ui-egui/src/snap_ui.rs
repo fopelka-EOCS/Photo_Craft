@@ -325,8 +325,10 @@ fn apply(app: &mut PhotocraftApp, p: [f64; 2], mods: egui::Modifiers) -> [f64; 2
             ([p[0] + adj[0], p[1] + adj[1]], lines)
         }
         Gesture::CropImage => {
-            let set = if snap.targets.is_empty() { &snap.smart } else { &snap.targets };
-            crop_image(app, p, set, tol).unwrap_or((p, Vec::new()))
+            // Smart guides still snap when nothing in View › Snap To is within reach: the
+            // document's bounds alone keep `targets` from ever being empty.
+            let snapped = |set| crop_image(app, p, set, tol).filter(|(_, lines)| !lines.is_empty());
+            snapped(&snap.targets).or_else(|| snapped(&snap.smart)).unwrap_or((p, Vec::new()))
         }
     };
     app.prefs_rt.snap_lines = lines;

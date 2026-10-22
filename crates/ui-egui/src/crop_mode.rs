@@ -498,6 +498,28 @@ mod tests {
         tool_event(&mut app, ToolEvent::Up { x: p[0], y: p[1] }, NONE);
     }
 
+    /// With View › Snap To › Layers off, smart guides still centre the box on a layer, although
+    /// the document's bounds are snap targets that aren't within reach.
+    #[test]
+    fn moving_the_image_snaps_to_smart_guides_beside_out_of_reach_targets() {
+        for smart in [false, true] {
+            let mut app = app();
+            app.ui.extras.snap = true;
+            app.ui.view.snap_to.layers = false;
+            app.ui.view.show.smart_guides = smart;
+            app.run("layer.new.layer", json!({"name": "logo"})).unwrap();
+            app.run("select.rect", json!({"x": 20, "y": 20, "width": 40, "height": 40})).unwrap();
+            app.run("edit.fill", json!({"color": "#ff0000"})).unwrap();
+            app.run("select.deselect", json!({})).unwrap();
+            crate::crop_ui::ensure_frame(&mut app);
+            app.ui.crop_rect = Some([-40.0, -60.0, 140.0, 120.0]);
+            app.crop.default_frame = false;
+            image_drag(&mut app, [50.0, 30.0], [8.0, -8.0], smart.then_some((false, 40.0)));
+            let want = if smart { [-50.0, -50.0, 130.0, 130.0] } else { [-48.0, -52.0, 132.0, 128.0] };
+            assert_frame(&app, want, &format!("smart guides {smart}"));
+        }
+    }
+
     /// #7088: the box's own Undo/Redo of a move (or a turn) in default mode puts the frame back
     /// and moves the image, not the box: it stays put on screen (Auto Center Preview off) or goes
     /// to the middle of the canvas (on).
