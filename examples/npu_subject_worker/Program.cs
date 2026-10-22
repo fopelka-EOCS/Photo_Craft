@@ -71,7 +71,7 @@ internal static class Program
         if (arguments.Action == "probe")
         {
             // Deliberately do NOT call EnsureReadyAsync or CreateAsync here.
-            return (readiness with { descriptor = AdapterDescriptor.Value }, null);
+            return (readiness, null);
         }
         if (arguments.Action == "prepare")
         {
@@ -81,7 +81,7 @@ internal static class Program
             if (result.Status != AIFeatureReadyResultState.Success)
             {
                 string code = result.ExtendedError is { } error ? $"0x{error.HResult:X8}" : "none";
-                return (new(1, "error", $"Explicit model preparation returned {result.Status} (extended HRESULT {code}); no inference was attempted.", ready_state: state.ToString()), null);
+                return (new(1, "error", $"Explicit model preparation returned {result.Status} (extended HRESULT {code}); no inference was attempted."), null);
             }
             return (DescribeState(ImageForegroundExtractor.GetReadyState()), null);
         }
@@ -107,7 +107,7 @@ internal static class Program
         using (var reader = DataReader.FromBuffer(maskBuffer)) reader.ReadBytes(maskBytes);
         return (new(1, "ok", "Windows AI ImageForegroundExtractor completed; Gray8 coverage normalized to f32 [0,1].",
             new MaskOutput("mask", Protocol.MaskMetadata(metadata)),
-            new Execution([Protocol.DeviceId], Protocol.Backend, null), state.ToString()), maskBytes);
+            new Execution([Protocol.DeviceId], Protocol.Backend, null)), maskBytes);
     }
 
     private static ResponseHeader DescribeState(AIFeatureReadyState state)
@@ -115,30 +115,14 @@ internal static class Program
         string name = state.ToString();
         return name switch
         {
-            "Ready" => new(1, "ready", "Windows AI model reports Ready. Probe performs no model creation, preparation or download.", ready_state: name),
-            "NotReady" => new(1, "needs_model", "needsModelDownload: Windows AI reports NotReady; explicit prepare may download/install system-managed model components.", ready_state: name),
-            "CapabilityMissing" => new(1, "unavailable", "installRequired: package is missing effective systemAIModels capability; reinstall a correctly declared MSIX and check MaxVersionTested.", ready_state: name),
-            "DisabledByUser" => new(1, "unavailable", "Windows AI feature is disabled/removed by the user; this companion will not re-enable it.", ready_state: name),
-            "OSUpdateNeeded" => new(1, "unavailable", "Windows AI requires an OS update or major OS upgrade; this companion does not change update/channel policy.", ready_state: name),
-            "NotCompatibleWithSystemHardware" => new(1, "unavailable", "Windows AI model is incompatible with this hardware/NPU.", ready_state: name),
-            "NotSupportedOnCurrentSystem" => new(1, "unavailable", "Windows AI model is unsupported on this Windows build or hardware configuration.", ready_state: name),
-            _ => new(1, "unavailable", $"Windows AI readiness state {name} ({(int)state}) is not supported; no fallback was used.", ready_state: name),
+            "Ready" => new(1, "ready", "Windows AI model reports Ready. Probe performs no model creation, preparation or download."),
+            "NotReady" => new(1, "needs_model", "needsModelDownload: Windows AI reports NotReady; explicit prepare may download/install system-managed model components."),
+            "CapabilityMissing" => new(1, "unavailable", "installRequired: package is missing effective systemAIModels capability; reinstall a correctly declared MSIX and check MaxVersionTested."),
+            "DisabledByUser" => new(1, "unavailable", "Windows AI feature is disabled/removed by the user; this companion will not re-enable it."),
+            "OSUpdateNeeded" => new(1, "unavailable", "Windows AI requires an OS update or major OS upgrade; this companion does not change update/channel policy."),
+            "NotCompatibleWithSystemHardware" => new(1, "unavailable", "Windows AI model is incompatible with this hardware/NPU."),
+            "NotSupportedOnCurrentSystem" => new(1, "unavailable", "Windows AI model is unsupported on this Windows build or hardware configuration."),
+            _ => new(1, "unavailable", $"Windows AI readiness state {name} ({(int)state}) is not supported; no fallback was used."),
         };
     }
-}
-
-internal static class AdapterDescriptor
-{
-    internal static readonly object Value = new
-    {
-        api_version = 1,
-        id = "org.photocraft.windows-ai.foreground",
-        name = "Windows AI Foreground Extraction (ARM64 companion)",
-        version = "0.1.0",
-        operations = new[] { new { id = Protocol.Operation, output_kind = "mask", color_modes = new[] { "rgb" } } },
-        devices = new[] { new { id = Protocol.DeviceId, kind = "npu", backend = Protocol.Backend,
-            name = "Windows AI (system-managed NPU)", operations = new[] { Protocol.Operation } } },
-        resource_formats = Array.Empty<string>(),
-        params_schema = new { type = "object", properties = new { colorPolicy = new { type = "string", @enum = new[] { "assume-srgb" } } }, additionalProperties = false },
-    };
 }

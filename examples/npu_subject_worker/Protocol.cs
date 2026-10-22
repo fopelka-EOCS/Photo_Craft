@@ -16,9 +16,11 @@ internal sealed record RequestHeader(
 
 internal sealed record MaskOutput(string kind, ImageMetadata image);
 internal sealed record Execution(string[] devices, string backend, string? fallback_reason);
+// Protocol 1 deliberately has exactly these five wire keys. The host rejects unknown
+// fields, even when null; readiness details belong in message, not extra properties.
 internal sealed record ResponseHeader(
     int protocol, string status, string message, MaskOutput? output = null,
-    Execution? execution = null, string? ready_state = null, object? descriptor = null);
+    Execution? execution = null);
 
 internal sealed record InputImage(RequestHeader Header, ushort[] Rgba64);
 internal sealed class ProtocolException(string message) : Exception(message);
@@ -39,6 +41,7 @@ internal static class Protocol
     {
         MaxDepth = 32,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
     };
     // Required null-valued fields must still be serialized in responses.
     private static readonly JsonSerializerOptions ResponseOptions = new() { MaxDepth = 32 };
@@ -58,7 +61,19 @@ internal static class Protocol
         byte[] headerBytes = new byte[(int)size];
         input.ReadExactly(headerBytes);
         using var document = JsonDocument.Parse(headerBytes, new JsonDocumentOptions { MaxDepth = 32 });
-        ValidateUniqueKeys(document.RootElement);
+        var root = document.RootElement;
+        ValidateUniqueKeys(root);
+        if (root.ValueKind != JsonValueKind.Object) throw new ProtocolException("Request header must be an object.");
+        RequireFields(root, "protocol");
+        if (root.TryGetProperty("operation", out _))
+        {
+            RequireFields(root, "operation", "params", "allow_fallback", "image");
+            ValidateImageFields(root.GetProperty("image"));
+            if (root.TryGetProperty("selection", out var selection) && selection.ValueKind != JsonValueKind.Null)
+                ValidateImageFields(selection);
+        }
+        else if (root.EnumerateObject().Count() != 1)
+            throw new ProtocolException("Probe/prepare requests must contain only {\"protocol\":1}.");
         var header = JsonSerializer.Deserialize<RequestHeader>(headerBytes, JsonOptions)
             ?? throw new ProtocolException("Request header is null.");
         if (header.protocol != 1)
@@ -188,6 +203,16 @@ internal static class Protocol
     {
         if (input.ReadByte() != -1) throw new ProtocolException("Unexpected trailing request bytes.");
     }
+
+    private static void RequireFields(JsonElement element, params string[] names)
+    {
+        if (element.ValueKind != JsonValueKind.Object) throw new ProtocolException("Expected JSON object metadata.");
+        foreach (string name in names)
+            if (!element.TryGetProperty(name, out _)) throw new ProtocolException($"Missing required field: {name}.");
+    }
+
+    private static void ValidateImageFields(JsonElement element) =>
+        RequireFields(element, "x", "y", "width", "height", "channels", "color_mode", "source_depth", "alpha", "icc_profile");
 
     private static void ValidateUniqueKeys(JsonElement element)
     {

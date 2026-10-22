@@ -30,6 +30,8 @@
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="[2.0.0-experimental7]" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="[10.0.28000.2705]" PrivateAssets="all" GeneratePathProperty="true" />
     <Compile Remove="tests\**\*.cs" />
+    <!-- The host-neutral fixture executable links Protocol.cs; do not compile its entry point here. -->
+    <Compile Remove="ProtocolTests/**/*.cs" />
   </ItemGroup>
   <Target Name="RecordPackageFragments" AfterTargets="Publish">
     <WriteLinesToFile File="$(PublishDir)windowsappsdk-fragments.txt"
