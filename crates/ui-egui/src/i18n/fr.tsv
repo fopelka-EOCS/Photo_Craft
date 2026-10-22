@@ -3319,3 +3319,4 @@ curves	Smooth	Lisser
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Adaptateur GPU
+smartSvg	AI/PDF/EPS contents will be edited as SVG. Saving replaces the embedded source; format-specific features may change.	Le contenu AI/PDF/EPS sera modifié au format SVG. L’enregistrement remplace la source incorporée ; les propriétés propres au format peuvent changer.

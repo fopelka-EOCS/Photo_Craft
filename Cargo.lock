@@ -4670,6 +4670,8 @@ dependencies = [
  "resvg",
  "rfd",
  "ron",
+ "roxmltree 0.20.0",
+ "rustix 1.1.5",
  "serde_json",
  "tempfile",
  "winit",
@@ -4808,6 +4810,7 @@ dependencies = [
 name = "photocraft-engine"
 version = "0.12.0"
 dependencies = [
+ "base64 0.22.1",
  "blake3",
  "craft-print",
  "exr",
@@ -4905,6 +4908,7 @@ dependencies = [
  "craft-docpath",
  "crc32fast",
  "flate2",
+ "imagesize",
  "photocraft-affinity",
  "photocraft-algo",
  "photocraft-cms",

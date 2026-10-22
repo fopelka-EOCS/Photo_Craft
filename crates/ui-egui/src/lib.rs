@@ -198,6 +198,11 @@ mod single_line_drag;
 mod sizing;
 pub mod slice_ui;
 pub mod smart_filter_dialog;
+#[cfg(not(target_arch = "wasm32"))]
+mod smart_svg_ui;
+#[cfg(target_arch = "wasm32")]
+#[path = "smart_svg_ui/browser.rs"]
+mod smart_svg_ui;
 pub mod smart_ui;
 pub mod snap_ui;
 pub(crate) mod solid_fill_ui;
@@ -455,6 +460,32 @@ pub type ClipboardSetFn = Box<dyn FnMut(u32, u32, &[u8]) -> Result<(), String>>;
 pub type ClipboardGetFn = Box<dyn FnMut() -> Result<Option<(u32, u32, Vec<u8>)>, String>>;
 /// Whether the last clipboard read found no way to reach the OS clipboard at all.
 pub type ClipboardUnreadableFn = Box<dyn Fn() -> bool>;
+/// An editor selected by the user, never an executable supplied by document metadata.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ExternalSvgEditor {
+    VectorCraft,
+    Illustrator,
+    Program(String),
+}
+
+/// A native editing session supplies stable saved source snapshots without blocking the UI.
+pub trait ExternalSvgSession {
+    fn poll(&mut self) -> Option<Result<Vec<u8>, String>>;
+    /// No more snapshots can arrive, for example after the desktop chooser was cancelled.
+    fn finished(&self) -> bool {
+        false
+    }
+}
+
+/// An immutable embedded source. The shell converts non-SVG inputs in its owned working directory.
+#[derive(Clone)]
+pub struct ExternalVectorSource {
+    pub bytes: std::sync::Arc<Vec<u8>>,
+    pub extension: String,
+    pub size: Option<(f64, f64)>,
+}
+
+pub type OpenExternalSvgFn = Box<dyn FnMut(ExternalSvgEditor, ExternalVectorSource) -> Result<Box<dyn ExternalSvgSession>, String>>;
 /// Shared queue of (file name, bytes) delivered asynchronously.
 pub type Inbox = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
 /// Read the saved preferences text (`None` when there is none yet).
@@ -511,6 +542,8 @@ pub type RightButtonDownFn = Box<dyn Fn() -> bool + Send + Sync>;
 /// I/O dependencies.
 #[derive(Default)]
 pub struct Services {
+    /// Explicit interactive SVG smart-object editing; unavailable in browser and automation.
+    pub open_external_svg: Option<OpenExternalSvgFn>,
     /// User-initiated desktop/browser pixel sampling.
     pub screen_pick: Option<screen_picker::Service>,
     /// Decode a file's bytes into a document (PSD, PNG, JPEG, …).
@@ -855,6 +888,7 @@ pub struct PhotocraftApp {
     /// The OS clipboard was already read for the paste in flight (Edit › Paste positions it first),
     /// so `run` doesn't read it a second time.
     pub(crate) clip_read_for_paste: bool,
+    pub(crate) smart_svg: smart_svg_ui::State,
     /// Pointer position over the canvas (document px), for the Info panel and status bar.
     pub(crate) hover_doc: Option<[f64; 2]>,
     /// Layer hovered in the Layers panel, outlined on the canvas.
@@ -1047,6 +1081,7 @@ impl PhotocraftApp {
             clip_unmirrored: true,
             clip_external: false,
             clip_read_for_paste: false,
+            smart_svg: Default::default(),
             transform_preview: None,
             move_mods: Default::default(),
             nudge_bundle: Default::default(),
@@ -1236,6 +1271,9 @@ impl PhotocraftApp {
             }
         }
         if let Some(result) = panel_docking::command(self, id, &params) {
+            return result;
+        }
+        if let Some(result) = smart_svg_ui::intercept(self, id, &params) {
             return result;
         }
         if let Some(r) = transform_tool::intercept(self, id) {
@@ -1602,6 +1640,9 @@ impl PhotocraftApp {
     /// (a flat file): confirming the document's own file is recorded as a `file.save` step,
     /// which writes whichever file the action is played on, not as a Save As to a fixed path.
     pub(crate) fn save_dialog_flow(&mut self, path: Option<String>, choices: FormatChoices, plain_save: bool) -> Result<Value, String> {
+        if self.smart_svg.modal_open() {
+            return Err("Answer Edit SVG Contents before starting a save".into());
+        }
         if self.save_options_open() {
             return Err("Answer the TIFF, Targa or DDS Options before starting another save".into());
         }
@@ -1662,6 +1703,9 @@ impl PhotocraftApp {
 
     /// [`Self::save_as_with`] once the path is known.
     pub(crate) fn save_to(&mut self, path: String, choices: FormatChoices) -> Result<Value, String> {
+        if self.smart_svg.modal_open() {
+            return Err("Answer Edit SVG Contents before starting a save".into());
+        }
         // An RGB Targa asks for its bits per pixel, and a DDS texture for its compression, unless
         // the caller chose them; the save continues from the prompt (still a copy when it would
         // be one without the prompt), which records the step once answered.
@@ -2276,6 +2320,8 @@ impl eframe::App for PhotocraftApp {
         tiff_options_ui::show(self, &ctx);
         targa_options_ui::show(self, &ctx);
         dds_options_ui::show(self, &ctx);
+        smart_svg_ui::poll(self, &ctx);
+        smart_svg_ui::show(self, &ctx);
         distort_ui::show(self, &ctx);
         camera_raw_ui::show(self, &ctx);
         wide_angle_ui::show(self, &ctx);

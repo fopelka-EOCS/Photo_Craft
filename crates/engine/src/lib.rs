@@ -111,6 +111,7 @@ pub mod shell_commands;
 pub mod shortcut_sets;
 pub mod slice_cmds;
 pub mod smart_cmds;
+pub mod smart_svg_cmds;
 pub mod smartselect_cmds;
 pub mod snap;
 pub mod solid_fill_cmds;
