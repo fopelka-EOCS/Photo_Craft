@@ -823,6 +823,60 @@ fn line_edge(app: &mut PhotocraftApp, id: LayerId, caret: usize, end: bool) -> u
     photocraft_text::line_edge(&l, &text, caret, end)
 }
 
+/// Caret one screen of lines away (Page Down) or up (Page Up), keeping the column like the
+/// arrows. The page is the count of the laid-out lines whose cross-line position sits inside
+/// the canvas: between its top and bottom edges for horizontal type, between its left and
+/// right edges for vertical type's columns (at least one line of type), so a zoomed-out view
+/// pages farther. The screen edges go through the view transform and the layer's transform, so
+/// rotations, flips, pan and zoom all count the lines the user actually sees. Hostile or
+/// missing view state and empty layouts hold the caret.
+fn page_step(app: &mut PhotocraftApp, id: LayerId, ctx: &egui::Context, caret: usize, down: bool) -> usize {
+    let Some((l, aff, text)) = layout(app, id) else { return caret };
+    let Some(view) = app.session.active_index().and_then(|i| app.ui.views.get(i)).cloned() else { return caret };
+    let rect = app.last_canvas_rect;
+    if !rect.is_finite() || rect.width() <= 0.0 || rect.height() <= 0.0 || l.lines.is_empty() {
+        return caret;
+    }
+    let ppp = ctx.pixels_per_point();
+    let ppp = if ppp.is_finite() && ppp > 0.0 { ppp } else { 1.0 };
+    let xf = crate::canvas::ViewXform {
+        rect,
+        zoom: view.zoom / ppp,
+        center: view.center,
+        flip: app.ui.view.flip_horizontal,
+        rotation: view.rotation,
+        aspect: app.ui.view.display_aspect(),
+    };
+    let text_cross = |p: Pos2| {
+        let d = xf.to_doc(p);
+        to_text(&aff, d[0], d[1])
+    };
+    // The cross-line coordinate in text space: the line's y for horizontal type, the column's
+    // centre x for vertical type (a line's `baseline` is its column centre there).
+    let cross = |t: (f32, f32)| if l.vertical { t.0 } else { t.1 };
+    // Horizontal type pages over the canvas's vertical span; vertical type's columns cross it
+    // horizontally, so its page is the columns between the canvas's left and right edges.
+    let (a, b) = if l.vertical {
+        (cross(text_cross(egui::pos2(rect.left(), rect.top()))), cross(text_cross(egui::pos2(rect.right(), rect.top()))))
+    } else {
+        (cross(text_cross(egui::pos2(rect.left(), rect.top()))), cross(text_cross(egui::pos2(rect.left(), rect.bottom()))))
+    };
+    let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+    // At least one line of type (a page can't stall). The count is a known-small bound (visible
+    // lines), so to<i32> can't overflow.
+    let n = l
+        .lines
+        .iter()
+        .filter(|ln| {
+            let t = cross(l.to_text(0.0, ln.baseline));
+            t > lo && t < hi
+        })
+        .count()
+        .max(1) as i32;
+    let x = l.caret(byte_of(&text, caret)).0;
+    photocraft_text::line_step(&l, &text, caret, x, if down { n } else { -n })
+}
+
 /// Keyboard input while editing. Returns true when a type edit session is active (single-key
 /// tool shortcuts must then be skipped). Handled events are removed from the frame's input.
 pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
@@ -966,6 +1020,12 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
                     }
                     Key::Home | Key::End => {
                         let to = line_edge(app, id, ed.caret, *key == Key::End);
+                        set(app, to, m.shift);
+                    }
+                    // Page Down/Up: one screen of lines down/up, keeping the column. ⌘/Ctrl+
+                    // PageUp/PageDown passes to the menus (Photoshop's next/previous document).
+                    Key::PageUp | Key::PageDown if !m.command => {
+                        let to = page_step(app, id, ctx, ed.caret, *key == Key::PageDown);
                         set(app, to, m.shift);
                     }
                     Key::Enter if m.command => commit_with(app, *m),
