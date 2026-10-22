@@ -225,7 +225,7 @@ fn layer_ref(p: &Value) -> Option<D> {
         Some(Value::String(n)) => Some(name_ref("Lyr ", n)),
         Some(Value::Number(n)) => match n.as_u64() {
             Some(i) if i <= u32::MAX as u64 => Some(D::Reference(vec![ReferenceItem::Identifier { class: class("Lyr "), id: i as u32 }])),
-            _ => Some(target_ref("Lyr ")),
+            _ => None,
         },
         _ => None,
     }
@@ -1635,14 +1635,6 @@ fn set_to(id: &str, p: &Value) -> Option<Descriptor> {
             const MAPPED: [&str; 7] = ["layer", "name", "opacity", "fill", "blend", "visible", "color"];
             if p.as_object().is_some_and(|m| m.iter().any(|(k, v)| !v.is_null() && !MAPPED.contains(&k.as_str()))) {
                 return None;
-            }
-            // A numeric `layer` is an imported `Idnt`; one the reference cannot hold (negative,
-            // or beyond u32) exports as nothing, rather than drift to the target layer.
-            if let Some(Value::Number(n)) = p.get("layer") {
-                let i = n.as_u64()?;
-                if i > u32::MAX as u64 {
-                    return None;
-                }
             }
             let mut t = desc("Lyr ");
             if let Some(n) = jstr(p, "name") {
@@ -3838,40 +3830,58 @@ fn export_item(id: &str, params: &Value, set: &str) -> Option<AtnItem> {
 /// write each layer property separately, renaming last so named references still resolve. A
 /// `.atn` reference is also one target, so a `layer.setProps` step that named `layers` exports
 /// as one Set per layer, each referenced by Photoshop's layer id: an edit that accepted the
-/// list must not replay on the active layer alone (#7246). A step unable to represent the
-/// whole list exactly (an id beyond `Idnt`'s u32; a rename of several layers, which
-/// PhotoCraft itself refuses) comes back as `None`, to refuse or skip the source step.
+/// list must not replay on the active layer alone (#7246). The list is split into one-target
+/// params before the step maps, so the keyed check that refuses the keys the `.atn` adapters
+/// cannot write (#7196) sees a mapped one. A step unable to represent the whole list exactly
+/// (an id beyond `Idnt`'s u32; a rename of several layers, which PhotoCraft itself refuses)
+/// comes back as `None`, to refuse or skip the source step.
 fn export_items(id: &str, params: &Value, set: &str) -> Option<Vec<AtnItem>> {
+    if id == "layer.setProps" {
+        if let Some(Value::Array(ids)) = params.get("layers") {
+            return layer_set_items(ids, params, set);
+        }
+        if params.get("layers").map(|v| !v.is_null()) == Some(true) {
+            return None;
+        }
+    }
     let item = export_item(id, params, set)?;
     if id != "layer.setProps" {
         return Some(vec![item]);
     }
+    item_property_split(item)
+}
+
+/// One Set per layer of an explicit `layers` list, by Photoshop's ever-present layer id.
+fn layer_set_items(ids: &[Value], params: &Value, set: &str) -> Option<Vec<AtnItem>> {
+    if ids.is_empty() || (params.get("name").is_some() && ids.len() > 1) {
+        return None;
+    }
+    let mut items = Vec::new();
+    for v in ids {
+        let layer = v.as_u64().filter(|n| *n <= u32::MAX as u64)?;
+        let mut p = params.clone();
+        let obj = p.as_object_mut()?;
+        obj.remove("layers");
+        obj.insert("layer".into(), Value::Number(serde_json::Number::from(layer)));
+        items.extend(item_property_split(export_item("layer.setProps", &p, set)?)?);
+    }
+    Some(items)
+}
+
+/// One item per property of one `Lyr ` target, renaming last so named references resolve
+/// when the whole Set replays (#8304).
+fn item_property_split(item: AtnItem) -> Option<Vec<AtnItem>> {
     let descriptor = item.descriptor.as_ref()?;
     let properties = get_obj(descriptor, "T   ")?;
-    let targets = match params.get("layers") {
-        None | Some(Value::Null) => vec![descriptor.get("null")?.clone()],
-        Some(Value::Array(ids)) => {
-            if ids.is_empty() || (params.get("name").is_some() && ids.len() > 1) {
-                return None;
-            }
-            let mut refs = Vec::with_capacity(ids.len());
-            for v in ids {
-                let id = v.as_u64().filter(|n| *n <= u32::MAX as u64)?;
-                refs.push(D::Reference(vec![ReferenceItem::Identifier { class: class("Lyr "), id: id as u32 }]));
-            }
-            refs
-        }
-        Some(_) => return None,
-    };
-    if properties.items.len() <= 1 && targets.len() == 1 {
+    if properties.items.len() <= 1 {
         return Some(vec![item]);
     }
-    let mut items = Vec::with_capacity(properties.items.len() * targets.len());
-    for target in targets {
-        for (key, value) in properties.items.iter().filter(|(k, _)| !k.is("Nm  ")).chain(properties.items.iter().filter(|(k, _)| k.is("Nm  "))) {
-            let mut property = properties.clone();
-            property.items = vec![(key.clone(), value.clone())];
-            let descriptor = desc("null").with("null", target.clone()).with("T   ", D::Descriptor(property));
+    let target = descriptor.get("null")?.clone();
+    let mut items = Vec::with_capacity(properties.items.len());
+    for (key, value) in properties.items.iter().filter(|(k, _)| !k.is("Nm  ")).chain(properties.items.iter().filter(|(k, _)| k.is("Nm  "))) {
+        let mut property = properties.clone();
+        property.items = vec![(key.clone(), value.clone())];
+        let descriptor = desc("null").with("null", target.clone()).with("T   ", D::Descriptor(property));
         items.push(AtnItem { descriptor: Some(descriptor), ..item.clone() });
     }
     Some(items)
