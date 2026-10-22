@@ -154,10 +154,11 @@ jobs:
         run: |
           cargo fmt --all
           if ! git diff --exit-code; then
-            echo "### rustfmt diff" >> "$GITHUB_STEP_SUMMARY"
-            echo '```diff' >> "$GITHUB_STEP_SUMMARY"
-            git diff >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            DIFF=$(git diff)
+            DIFF="${DIFF//'%'/'%25'}"
+            DIFF="${DIFF//$'\r'/'%0D'}"
+            DIFF="${DIFF//$'\n'/'%0A'}"
+            echo "::error title=rustfmt diff::$DIFF"
             exit 1
           fi
 
