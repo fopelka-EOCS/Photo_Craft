@@ -323,7 +323,16 @@ pub(crate) fn image_surface(img: &Image, target_layout: ChannelLayout, csample: 
 /// (keeping CMYK / depth exactly) instead of going through the compositor.
 pub(crate) fn single_layer(doc: &Document) -> Option<&Surface> {
     let [l] = &doc.layers[..] else { return None };
-    let ok = l.visible
+    match &l.content {
+        LayerContent::Raster(s) if plain_layer(l, doc.mode) && s.format() == doc.pixel_format() => Some(s),
+        _ => None,
+    }
+}
+
+/// A visible, unmasked, normal, fully opaque layer with no effects or blending options: on its
+/// own, its pixels are the composite.
+fn plain_layer(l: &Layer, mode: ColorMode) -> bool {
+    l.visible
         && l.opacity >= 1.0
         && l.fill_opacity >= 1.0
         && l.mask.is_none()
@@ -331,12 +340,8 @@ pub(crate) fn single_layer(doc: &Document) -> Option<&Surface> {
         && l.effects.items.is_empty()
         && l.effects.psd_raw.is_none()
         && matches!(l.blend, BlendMode::Normal | BlendMode::PassThrough)
-        && photocraft_compose::channel_weights(l, doc.mode).is_none()
-        && !photocraft_compose::blend_if_active(l, doc.mode);
-    match (&l.content, ok) {
-        (LayerContent::Raster(s), true) if s.format() == doc.pixel_format() => Some(s),
-        _ => None,
-    }
+        && photocraft_compose::channel_weights(l, mode).is_none()
+        && !photocraft_compose::blend_if_active(l, mode)
 }
 
 pub(crate) fn layout_for(mode: ColorMode, alpha: bool) -> ChannelLayout {
@@ -367,40 +372,57 @@ pub fn document_to_image(doc: &Document, warnings: &mut Vec<String>) -> Result<I
 
 /// `cmyk_target` / `lab_target`: the format stores CMYK / Lab pixels.
 fn document_to_image_for(doc: &Document, warnings: &mut Vec<String>, cmyk_target: bool, lab_target: bool) -> Result<Image, IoError> {
+    let src = FlatSource::new(doc, warnings, cmyk_target, lab_target)?;
     let (w, h) = (doc.size.width, doc.size.height);
-    let canvas = doc.bounds();
-    let fmt = doc.pixel_format();
-    let n = (w as usize) * (h as usize);
-    // A Lab document keeps its pixels only for a format that stores Lab (TIFF); for the others it
-    // goes through the sRGB composite, which flattens nothing when there is a single plain layer.
-    let single = single_layer(doc);
-    let native = single.filter(|_| fmt.mode != ColorMode::Lab || lab_target);
-    let mut icc = doc.icc_profile.as_ref().map(|i| i.to_vec());
-    let img = if let Some(s) = native {
-        // Native path: keep model and depth. The surface's encoded samples are the codec's raw
-        // native-endian samples, copied a band of rows at a time (alpha dropped when opaque).
-        let ch = fmt.channels();
-        let opaque = opaque_surface(s, canvas);
-        let layout = layout_for(fmt.mode, !opaque);
-        let bps = fmt.sample.bytes();
-        let keep = if opaque { (ch - 1) * bps } else { ch * bps };
-        let mut data = try_buffer(n, keep)?;
-        let rows = (BAND_BYTES / (w as usize * ch * bps).max(1)).max(1) as i32;
-        let mut y = 0;
-        while y < h as i32 {
-            let y1 = y.saturating_add(rows).min(h as i32);
-            let band = s.to_interleaved(Rect::new(0, y, w as i32, y1));
-            if opaque {
-                for px in band.chunks_exact(ch * bps) {
-                    data.extend_from_slice(&px[..keep]);
-                }
-            } else {
-                data.extend_from_slice(&band);
-            }
-            y = y1;
+    // The single layer's alpha is dropped up front when it is opaque. A composite is rendered
+    // with alpha, dropped afterwards, in place, when every pixel turned out opaque.
+    let alpha = src.native.is_none_or(|s| !opaque_surface(s, doc.bounds()));
+    let bytes = src.sample.bytes();
+    let mut data = try_buffer((w as usize) * (h as usize), src.layout(alpha).channels() * bytes)?;
+    let mut opaque = true;
+    src.bands(alpha, |_, band, translucent| {
+        opaque &= !translucent;
+        data.extend_from_slice(&band);
+        Ok(())
+    })?;
+    let mut layout = src.layout(alpha);
+    if src.native.is_none() && opaque {
+        drop_alpha(&mut data, layout.color_channels() * bytes, bytes);
+        layout = src.layout(false);
+    }
+    Ok(Image::from_raw(w, h, layout, src.sample, data)?.with_icc(src.icc.clone()).with_meta(src.meta()))
+}
+
+/// How a document becomes flat codec pixels, a band of rows at a time: [`document_to_image`]
+/// gathers the bands into one image, a streamed PNG export ([`export_png_streamed`]) encodes each
+/// band as it is rendered.
+struct FlatSource<'a> {
+    doc: &'a Document,
+    /// The single plain layer, written in its own model and depth ([`single_layer`]).
+    native: Option<&'a Surface>,
+    /// The model of the pixels: the document's for the single layer, else CMYK, gray or RGB.
+    mode: ColorMode,
+    sample: CSample,
+    /// The CMYK profile the composite is separated through, for a CMYK target.
+    space: Option<Arc<photocraft_color::convert::CmykSpace>>,
+    icc: Option<Vec<u8>>,
+    /// Rows per band; 0 picks them from the size (tests ask for small bands).
+    rows: i32,
+}
+
+impl<'a> FlatSource<'a> {
+    /// `cmyk_target` / `lab_target`: the format stores CMYK / Lab pixels.
+    fn new(doc: &'a Document, warnings: &mut Vec<String>, cmyk_target: bool, lab_target: bool) -> Result<Self, IoError> {
+        let fmt = doc.pixel_format();
+        let sample = csample(fmt.sample);
+        // A Lab document keeps its pixels only for a format that stores Lab (TIFF); for the others it
+        // goes through the sRGB composite, which flattens nothing when there is a single plain layer.
+        let single = single_layer(doc);
+        let native = single.filter(|_| fmt.mode != ColorMode::Lab || lab_target);
+        let mut icc = doc.icc_profile.as_ref().map(|i| i.to_vec());
+        if native.is_some() {
+            return Ok(Self { doc, native, mode: fmt.mode, sample, space: None, icc, rows: 0 });
         }
-        Image::from_raw(w, h, layout, csample(fmt.sample), data)?
-    } else {
         if single.is_none() {
             let count = doc.layer_count();
             warnings.push(format!("{count} layer(s) flattened; layers, masks and blend modes are not kept"));
@@ -427,26 +449,73 @@ fn document_to_image_for(doc: &Document, warnings: &mut Vec<String>, cmyk_target
         } else {
             None
         };
-        let gray = fmt.mode == ColorMode::Grayscale;
         if (fmt.mode == ColorMode::Cmyk && !cmyk) || fmt.mode == ColorMode::Lab {
             // RGB-only targets use the sRGB composite directly, without reseparating CMYK.
             warnings.push(format!("{:?} composite written as sRGB RGB (colour-managed conversion)", fmt.mode));
             icc = Some(photocraft_cms::Builtin::Srgb.profile().to_bytes().to_vec());
         }
-        let cs = csample(fmt.sample);
-        let colors = if cmyk {
-            4
-        } else if gray {
-            1
+        let mode = if cmyk {
+            ColorMode::Cmyk
+        } else if fmt.mode == ColorMode::Grayscale {
+            ColorMode::Grayscale
         } else {
-            3
+            ColorMode::Rgb
         };
-        // Rendered and quantised in bands (no full-size float composite), with alpha; the alpha
-        // is dropped afterwards, in place, when every pixel turned out opaque.
-        let mut data = try_buffer(n, (colors + 1) * cs.bytes())?;
-        let mut opaque = true;
-        let _ = photocraft_compose::render_bands(doc, canvas, 0, |band| -> Result<(), ()> {
-            opaque &= band.px.iter().all(|p| p[3] >= 1.0);
+        Ok(Self { doc, native: None, mode, sample, space, icc, rows: 0 })
+    }
+
+    fn layout(&self, alpha: bool) -> ChannelLayout {
+        layout_for(self.mode, alpha)
+    }
+
+    /// The document's EXIF, XMP, text and resolution.
+    fn meta(&self) -> codecs::Metadata {
+        let doc = self.doc;
+        codecs::Metadata {
+            exif: doc.metadata.exif.as_ref().map(|e| e.to_vec()),
+            xmp: doc.metadata.xmp.clone(),
+            text: doc.metadata.text.clone(),
+            dpi: Some((doc.resolution_dpi, doc.resolution_dpi)),
+            ..Default::default()
+        }
+    }
+
+    /// Every row of the document, top to bottom, as bands of interleaved native-endian samples
+    /// in [`Self::layout`]`(alpha)`: `sink(rows, samples, translucent)`, where `translucent` says
+    /// whether a composite band held a pixel that isn't fully opaque (its alpha is dropped all
+    /// the same when `alpha` is false). A single layer's band is never translucent without
+    /// `alpha`: drop it only when [`opaque_surface`] says so.
+    fn bands(&self, alpha: bool, mut sink: impl FnMut(u32, Vec<u8>, bool) -> Result<(), IoError>) -> Result<(), IoError> {
+        let doc = self.doc;
+        let (w, h) = (doc.size.width, doc.size.height);
+        let fmt = doc.pixel_format();
+        if let Some(s) = self.native {
+            // Native path: keep model and depth. The surface's encoded samples are the codec's raw
+            // native-endian samples, copied a band of rows at a time (alpha dropped when opaque).
+            let ch = fmt.channels();
+            let bps = fmt.sample.bytes();
+            let keep = (ch - 1) * bps;
+            let rows = if self.rows > 0 { self.rows } else { (BAND_BYTES / (w as usize * ch * bps).max(1)).max(1) as i32 };
+            let mut y = 0;
+            while y < h as i32 {
+                let y1 = y.saturating_add(rows).min(h as i32);
+                let mut band = s.to_interleaved(Rect::new(0, y, w as i32, y1));
+                if !alpha {
+                    compact_alpha(&mut band, keep, bps);
+                }
+                sink((y1 - y) as u32, band, alpha)?;
+                y = y1;
+            }
+            return Ok(());
+        }
+        let cs = self.sample;
+        let cmyk = self.mode == ColorMode::Cmyk;
+        let gray = self.mode == ColorMode::Grayscale;
+        let colors = self.layout(false).channels();
+        let space = &self.space;
+        // Rendered and quantised in bands (no full-size float composite), with alpha.
+        photocraft_compose::render_bands(doc, doc.bounds(), self.rows, |band| -> Result<(), IoError> {
+            let translucent = band.px.iter().any(|p| p[3] < 1.0 || p[3].is_nan());
             let parts = crate::pixels::par_map(crate::pixels::bands(band.px.len()), |range| {
                 photocraft_color::convert::with_cmyk_space(space.as_ref(), || {
                     let mut out = Vec::with_capacity(range.len() * (colors + 1) * cs.bytes());
@@ -478,34 +547,16 @@ fn document_to_image_for(doc: &Document, warnings: &mut Vec<String>, cmyk_target
                     out
                 })
             });
+            let mut data = Vec::with_capacity(band.px.len() * (colors + 1) * cs.bytes());
             for part in parts {
                 data.extend_from_slice(&part);
             }
-            Ok(())
-        });
-        if opaque {
-            drop_alpha(&mut data, colors * cs.bytes(), cs.bytes());
-        }
-        let layout = layout_for(
-            if cmyk {
-                ColorMode::Cmyk
-            } else if gray {
-                ColorMode::Grayscale
-            } else {
-                ColorMode::Rgb
-            },
-            !opaque,
-        );
-        Image::from_raw(w, h, layout, cs, data)?
-    };
-    let meta = codecs::Metadata {
-        exif: doc.metadata.exif.as_ref().map(|e| e.to_vec()),
-        xmp: doc.metadata.xmp.clone(),
-        text: doc.metadata.text.clone(),
-        dpi: Some((doc.resolution_dpi, doc.resolution_dpi)),
-        ..Default::default()
-    };
-    Ok(img.with_icc(icc).with_meta(meta))
+            if !alpha {
+                compact_alpha(&mut data, colors * cs.bytes(), cs.bytes());
+            }
+            sink(band.rect.height(), data, translucent)
+        })
+    }
 }
 
 /// An empty buffer with room for `pixels × bytes_per_pixel` bytes, or an error (not an abort)
@@ -517,15 +568,21 @@ pub(crate) fn try_buffer(pixels: usize, bytes_per_pixel: usize) -> Result<Vec<u8
     Ok(v)
 }
 
-/// Remove the trailing `alpha` bytes of every `color + alpha`-byte pixel, in place.
+/// Remove the trailing `alpha` bytes of every `color + alpha`-byte pixel, in place, and give the
+/// freed memory back.
 fn drop_alpha(data: &mut Vec<u8>, color: usize, alpha: usize) {
+    compact_alpha(data, color, alpha);
+    data.shrink_to_fit();
+}
+
+/// [`drop_alpha`] keeping the allocation (a band about to be handed on).
+fn compact_alpha(data: &mut Vec<u8>, color: usize, alpha: usize) {
     let stride = color + alpha;
     let n = data.len() / stride;
     for i in 0..n {
         data.copy_within(i * stride..i * stride + color, i * color);
     }
     data.truncate(n * color);
-    data.shrink_to_fit();
 }
 
 /// Whether every pixel of `s` over `r` is fully opaque (read from the tiles, no copy).
@@ -567,9 +624,11 @@ pub fn export_flat(doc: &Document, format: Format, opts: &ExportOptions) -> Resu
 /// [`export_flat`] reporting a coarse step through `ctl` once the composite is rendered; the
 /// encoder does the rest (#3389).
 pub(crate) fn export_flat_with(doc: &Document, format: Format, opts: &ExportOptions, ctl: &photocraft_raster::Interrupt) -> Result<ExportResult, IoError> {
-    use photocraft_cms::{Builtin, Intent};
     if let Some(r) = export_mode_specific(doc, format, opts)? {
         return Ok(r);
+    }
+    if format == Format::Png && streams_png(doc) {
+        return export_png_streamed(doc, opts, ctl, 0);
     }
     let mut warnings = Vec::new();
     let cmyk_target = format.caps().layouts.iter().any(|layout| layout.is_cmyk());
@@ -577,13 +636,29 @@ pub(crate) fn export_flat_with(doc: &Document, format: Format, opts: &ExportOpti
     let mut img = document_to_image_for(doc, &mut warnings, cmyk_target, lab_target)?;
     ctl.check().map_err(|_| IoError::Cancelled)?;
     ctl.progress(composite_share(format));
-    if opts.xmp == XmpEmbed::None {
-        // Export As's Metadata: None: the packet lists the text of every type layer and one id
-        // per placed document (#647).
-        img.meta.xmp = None;
-        // Free-form descriptions can contain the same sensitive text as an XMP packet.
-        img.meta.text.clear();
+    strip_xmp(&mut img.meta, opts);
+    let mut img = prepare_flat(img, format, &mut warnings)?;
+    if format == Format::Tga {
+        img = tga_image(doc, img, opts.tga_bits, &mut warnings)?;
     }
+    encode_image(&img, format, opts, warnings)
+}
+
+/// Export As's Metadata: None drops the XMP packet, which lists the text of every type layer and
+/// one id per placed document (#647), and the free-form descriptions, which can hold the same
+/// sensitive text.
+fn strip_xmp(meta: &mut codecs::Metadata, opts: &ExportOptions) {
+    if opts.xmp == XmpEmbed::None {
+        meta.xmp = None;
+        meta.text.clear();
+    }
+}
+
+/// `img` made storable as `format`: matted over white without alpha support, CMYK converted for a
+/// format without CMYK, colours converted to what an untagged file means. Pixel by pixel, so a
+/// band of rows gets what the whole image would (and the same warnings).
+fn prepare_flat(mut img: Image, format: Format, warnings: &mut Vec<String>) -> Result<Image, IoError> {
+    use photocraft_cms::{Builtin, Intent};
     if img.layout().has_alpha() && !format.caps().alpha {
         // Flattened over white, as saving a transparent document without transparency does.
         img = matte_over_white(&img)?;
@@ -613,10 +688,109 @@ pub(crate) fn export_flat_with(doc: &Document, format: Format, opts: &ExportOpti
             warnings.push(format!("colours converted to sGray; {format:?} can't embed the document's colour profile"));
         }
     }
-    if format == Format::Tga {
-        img = tga_image(doc, img, opts.tga_bits, &mut warnings)?;
+    Ok(img)
+}
+
+/// Decoded pixel bytes past which a PNG export is written a band of rows at a time
+/// ([`export_png_streamed`]) instead of from one image buffer (about 90 MP of 8-bit RGB).
+const STREAM_PNG_BYTES: u64 = 256 << 20;
+
+/// Whether a PNG export of `doc` streams: its pixels would take more than [`STREAM_PNG_BYTES`].
+fn streams_png(doc: &Document) -> bool {
+    let fmt = doc.pixel_format();
+    doc.size.area().saturating_mul((fmt.channels() * fmt.sample.bytes()) as u64) > STREAM_PNG_BYTES
+}
+
+/// A PNG export rendered, converted and encoded a band of rows at a time, so no full-size image
+/// is held: the only way a multi-gigapixel print (a 117504 × 22464 px banner is 7.9 GB of 8-bit
+/// RGB) can be written as PNG (#8456). The pixels are the ones [`export_flat`] writes for a
+/// smaller document, with these differences: Interlaced is turned off (Adam7 needs the whole
+/// image), and a composite whose bottom layer isn't an opaque pixel layer keeps its alpha even
+/// when every pixel turns out opaque (that is only known once the last row is written).
+///
+/// `rows`: rows per band, 0 to size them to the document.
+fn export_png_streamed(doc: &Document, opts: &ExportOptions, ctl: &photocraft_raster::Interrupt, rows: i32) -> Result<ExportResult, IoError> {
+    // A wrong guess (a knockout or a blend mode the guess doesn't foresee) shows in a band and
+    // the export starts again with alpha.
+    let opaque = match single_layer(doc) {
+        Some(s) => opaque_surface(s, doc.bounds()),
+        None => opaque_bottom(doc),
+    };
+    match stream_png(doc, opts, ctl, !opaque, rows)? {
+        Some(r) => Ok(r),
+        None => stream_png(doc, opts, ctl, true, rows)?.ok_or_else(|| IoError::Unsupported("PNG export lost its alpha channel".into())),
     }
-    encode_image(&img, format, opts, warnings)
+}
+
+/// Whether the bottom layer is a plain pixel layer opaque over the whole canvas (a Background
+/// layer): the layers above it add coverage, so the composite is (most likely) opaque too.
+fn opaque_bottom(doc: &Document) -> bool {
+    doc.layers.first().is_some_and(|l| plain_layer(l, doc.mode) && matches!(&l.content, LayerContent::Raster(s) if opaque_surface(s, doc.bounds())))
+}
+
+/// [`export_png_streamed`] with or without `alpha`, in bands of `rows` rows (0: sized to the
+/// document). `None` when a translucent pixel shows up without `alpha`.
+fn stream_png(doc: &Document, opts: &ExportOptions, ctl: &photocraft_raster::Interrupt, alpha: bool, rows: i32) -> Result<Option<ExportResult>, IoError> {
+    let format = Format::Png;
+    let (w, h) = (doc.size.width, doc.size.height);
+    let mut warnings = Vec::new();
+    let cmyk_target = format.caps().layouts.iter().any(|layout| layout.is_cmyk());
+    let lab_target = format.caps().layouts.iter().any(|layout| layout.is_lab());
+    let src = FlatSource { rows, ..FlatSource::new(doc, &mut warnings, cmyk_target, lab_target)? };
+    let mut encode = opts.encode.clone();
+    let mut late = Vec::new();
+    if encode.png_interlaced {
+        encode.png_interlaced = false;
+        late.push(format!("written without interlacing: a {w} × {h} px PNG is written a band of rows at a time"));
+    }
+    // One blank row through the same steps as the bands gives the file's layout, profile and
+    // metadata (and their warnings) before anything is rendered.
+    let mut meta = src.meta();
+    strip_xmp(&mut meta, opts);
+    let row = try_buffer(w as usize, src.layout(alpha).channels() * src.sample.bytes()).map(|mut v| {
+        v.resize(v.capacity(), 0);
+        v
+    })?;
+    let first = prepare_flat(Image::from_raw(w, 1, src.layout(alpha), src.sample, row)?.with_icc(src.icc.clone()).with_meta(meta), format, &mut warnings)?;
+    let mut fidelity: Vec<String> = Vec::new();
+    let mut note = |img: &Image| -> Result<(), IoError> {
+        for f in codecs::fidelity_warnings_with(img, format, &encode) {
+            if f.is_fatal() {
+                return Err(IoError::Unsupported(f.to_string()));
+            }
+            let f = f.to_string();
+            if !fidelity.contains(&f) {
+                fidelity.push(f);
+            }
+        }
+        Ok(())
+    };
+    note(&first)?;
+    let mut bytes = Vec::new();
+    let mut png = codecs::PngRows::new(&mut bytes, &first, h, &encode)?;
+    let (mut done, mut translucent) = (0u64, false);
+    let streamed = src.bands(alpha, |rows, data, see_through| {
+        if see_through && !alpha {
+            translucent = true;
+            return Err(IoError::Cancelled);
+        }
+        ctl.check().map_err(|_| IoError::Cancelled)?;
+        let mut band_warnings = Vec::new();
+        let band = prepare_flat(Image::from_raw(w, rows, src.layout(alpha), src.sample, data)?.with_icc(src.icc.clone()), format, &mut band_warnings)?;
+        note(&band)?;
+        png.push(&band)?;
+        done += u64::from(rows);
+        ctl.progress(done as f32 / h as f32);
+        Ok(())
+    });
+    if translucent {
+        return Ok(None);
+    }
+    streamed?;
+    png.finish()?;
+    warnings.extend(fidelity);
+    warnings.extend(late);
+    Ok(Some(ExportResult { bytes, warnings }))
 }
 
 /// What Targa Options offers first, as Photoshop does: 32 bits per pixel when the document has an
@@ -983,5 +1157,147 @@ mod cmyk_band_tests {
         let first = out.data().get(..4).unwrap().to_vec();
         assert!(out.data().chunks(4).all(|p| p == first.as_slice()), "{:?}", out.data());
         assert_eq!(first[3], 255);
+    }
+}
+
+#[cfg(test)]
+mod streamed_png_tests {
+    use super::*;
+    use photocraft_raster::Interrupt;
+
+    fn layer(doc: &Document, fills: &[(Rect, &[f32])]) -> Layer {
+        let mut s = Surface::new(doc.pixel_format());
+        for (r, px) in fills {
+            s.fill_rect(*r, px);
+        }
+        Layer::new("Layer", LayerContent::Raster(s))
+    }
+
+    fn decoded(bytes: &[u8]) -> Image {
+        codecs::decode(bytes).unwrap()
+    }
+
+    /// The bytes ahead of the first IDAT: signature, header, profile and metadata chunks.
+    fn head(png: &[u8]) -> &[u8] {
+        &png[..png.windows(4).position(|w| w == b"IDAT").unwrap() - 4]
+    }
+
+    /// Streamed in bands of `rows`, `doc` gives the pixels, warnings and header chunks of the
+    /// whole-image export.
+    fn same_as_whole(doc: &Document, rows: i32, opts: &ExportOptions) -> ExportResult {
+        let whole = export_flat(doc, Format::Png, opts).unwrap();
+        let streamed = export_png_streamed(doc, opts, &Interrupt::NONE, rows).unwrap();
+        let (a, b) = (decoded(&whole.bytes), decoded(&streamed.bytes));
+        assert_eq!((b.dimensions(), b.layout(), b.sample_type()), (a.dimensions(), a.layout(), a.sample_type()));
+        assert!(a.data() == b.data(), "{}: pixels differ", doc.name);
+        assert_eq!(streamed.warnings, whole.warnings);
+        assert!(head(&streamed.bytes) == head(&whole.bytes), "{}: header chunks differ", doc.name);
+        streamed
+    }
+
+    #[test]
+    fn a_composite_over_an_opaque_bottom_layer_streams_as_rgb() {
+        let mut doc = Document::new("composite", Size::new(300, 700), ColorMode::Rgb, SampleType::U8);
+        doc.resolution_dpi = 300.0;
+        doc.metadata.xmp = Some("<x:xmpmeta xmlns:x='adobe:ns:meta/'/>".into());
+        doc.metadata.text = vec![("Title".into(), "Tent".into())];
+        let bottom = layer(&doc, &[(doc.bounds(), &[0.9, 0.5, 0.1, 1.0]), (Rect::new(0, 300, 300, 420), &[0.1, 0.2, 0.8, 1.0])]);
+        let mut top = layer(&doc, &[(Rect::new(40, 100, 260, 650), &[0.2, 0.7, 0.3, 0.5])]);
+        top.opacity = 0.7;
+        top.blend = BlendMode::Multiply;
+        doc.layers = vec![bottom, top];
+        assert!(opaque_bottom(&doc));
+        for xmp in [XmpEmbed::All, XmpEmbed::None] {
+            let r = same_as_whole(&doc, 256, &ExportOptions { xmp, ..Default::default() });
+            assert_eq!(decoded(&r.bytes).layout(), ChannelLayout::Rgb);
+        }
+    }
+
+    #[test]
+    fn single_layers_stream_in_their_own_model_and_depth() {
+        // Transparent RGBA, opaque CMYK (written as sRGB through its profile), 16-bit gray and
+        // float RGB out of range (written with 16 bits, clipped, with the warning).
+        let mut rgba = Document::new("rgba", Size::new(130, 333), ColorMode::Rgb, SampleType::U8);
+        rgba.layers = vec![layer(&rgba, &[(Rect::new(10, 20, 120, 300), &[0.3, 0.6, 0.9, 0.4])])];
+        let mut cmyk = Document::new("cmyk", Size::new(97, 211), ColorMode::Cmyk, SampleType::U8);
+        cmyk.icc_profile = Some(photocraft_cms::Builtin::CoatedCmyk.profile().to_bytes());
+        cmyk.layers = vec![layer(&cmyk, &[(cmyk.bounds(), &[0.3, 0.6, 0.1, 0.2, 1.0]), (Rect::new(0, 50, 97, 99), &[0.0, 0.9, 0.9, 0.0, 1.0])])];
+        let mut gray = Document::new("gray", Size::new(64, 190), ColorMode::Grayscale, SampleType::U16);
+        gray.layers = vec![layer(&gray, &[(gray.bounds(), &[0.25, 1.0]), (Rect::new(0, 0, 64, 77), &[0.6123, 1.0])])];
+        let mut hdr = Document::new("hdr", Size::new(50, 120), ColorMode::Rgb, SampleType::F32);
+        hdr.layers = vec![layer(&hdr, &[(hdr.bounds(), &[1.5, 0.25, -0.1, 1.0])])];
+        for doc in [&rgba, &cmyk, &gray, &hdr] {
+            assert!(single_layer(doc).is_some(), "{}", doc.name);
+            same_as_whole(doc, 37, &ExportOptions::default());
+        }
+        let r = same_as_whole(&hdr, 37, &ExportOptions::default());
+        assert!(r.warnings.iter().any(|w| w.contains("clip")), "{:?}", r.warnings);
+    }
+
+    /// Without an opaque bottom layer the composite keeps its alpha, even when every pixel is
+    /// opaque (the whole-image export finds that out and drops it).
+    #[test]
+    fn a_composite_without_an_opaque_bottom_layer_keeps_its_alpha() {
+        let mut doc = Document::new("masked", Size::new(80, 300), ColorMode::Rgb, SampleType::U8);
+        let mut bottom = layer(&doc, &[(doc.bounds(), &[0.2, 0.4, 0.6, 1.0])]);
+        bottom.mask = Some(photocraft_doc::LayerMask {
+            surface: Surface::with_default(PixelFormat::GRAY8, &[1.0]),
+            enabled: true,
+            linked: true,
+            density: 1.0,
+            feather: 0.0,
+        });
+        doc.layers = vec![bottom, layer(&doc, &[(Rect::new(0, 0, 40, 40), &[1.0, 0.0, 0.0, 1.0])])];
+        assert!(!opaque_bottom(&doc));
+        let whole = decoded(&export_flat(&doc, Format::Png, &ExportOptions::default()).unwrap().bytes);
+        let streamed = decoded(&export_png_streamed(&doc, &ExportOptions::default(), &Interrupt::NONE, 256).unwrap().bytes);
+        assert_eq!((whole.layout(), streamed.layout()), (ChannelLayout::Rgb, ChannelLayout::Rgba));
+        assert!(whole.convert(ChannelLayout::Rgba, CSample::U8).data() == streamed.data());
+    }
+
+    /// A knockout through an opaque bottom layer makes the guess wrong: the export starts again
+    /// with alpha and keeps the hole.
+    #[test]
+    fn a_wrong_opacity_guess_starts_again_with_alpha() {
+        let mut doc = Document::new("knockout", Size::new(64, 600), ColorMode::Rgb, SampleType::U8);
+        let bottom = layer(&doc, &[(doc.bounds(), &[0.2, 0.4, 0.6, 1.0])]);
+        let mut hole = layer(&doc, &[(Rect::new(8, 400, 56, 560), &[1.0, 1.0, 1.0, 1.0])]);
+        hole.fill_opacity = 0.0;
+        hole.advanced.knockout = photocraft_doc::Knockout::Deep;
+        doc.layers = vec![bottom, hole];
+        assert!(opaque_bottom(&doc));
+        assert!(stream_png(&doc, &ExportOptions::default(), &Interrupt::NONE, false, 256).unwrap().is_none());
+        let r = same_as_whole(&doc, 256, &ExportOptions::default());
+        assert_eq!(decoded(&r.bytes).layout(), ChannelLayout::Rgba);
+    }
+
+    #[test]
+    fn interlacing_is_turned_off_with_a_warning() {
+        let mut doc = Document::new("interlaced", Size::new(40, 30), ColorMode::Rgb, SampleType::U8);
+        doc.layers = vec![layer(&doc, &[(doc.bounds(), &[0.5, 0.5, 0.5, 1.0])])];
+        let mut opts = ExportOptions::default();
+        opts.encode.png_interlaced = true;
+        let r = export_png_streamed(&doc, &opts, &Interrupt::NONE, 7).unwrap();
+        assert!(r.warnings.iter().any(|w| w.contains("without interlacing")), "{:?}", r.warnings);
+        let whole = decoded(&export_flat(&doc, Format::Png, &opts).unwrap().bytes);
+        assert!(decoded(&r.bytes).data() == whole.data());
+    }
+
+    #[test]
+    fn a_cancelled_stream_stops_with_cancelled() {
+        let mut doc = Document::new("cancel", Size::new(40, 30), ColorMode::Rgb, SampleType::U8);
+        doc.layers = vec![layer(&doc, &[(doc.bounds(), &[0.5, 0.5, 0.5, 1.0])])];
+        let yes = || true;
+        let r = export_png_streamed(&doc, &ExportOptions::default(), &Interrupt::cancel_only(&yes), 7);
+        assert!(matches!(r, Err(IoError::Cancelled)), "{:?}", r.map(|_| ()));
+    }
+
+    #[test]
+    fn only_large_documents_stream() {
+        let doc = |w, h, depth| Document::new("size", Size::new(w, h), ColorMode::Rgb, depth);
+        assert!(!streams_png(&doc(6000, 4000, SampleType::U8)));
+        assert!(streams_png(&doc(10_000, 8000, SampleType::U8)));
+        assert!(streams_png(&doc(8000, 6000, SampleType::U16)));
+        assert!(streams_png(&doc(117_504, 22_464, SampleType::U8)));
     }
 }
