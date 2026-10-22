@@ -689,7 +689,8 @@ pub struct ToolOptions {
     pub move_auto_select: bool,
     #[serde(default = "default_move_target")]
     pub move_target: String,
-    #[serde(default)]
+    /// Show Transform Controls is on by default (#4402); unticking it is remembered.
+    #[serde(default = "yes")]
     pub move_show_transform: bool,
     /// Crop options bar: aspect ratio ("" = Ratio/unconstrained, "w:h", or "original") and
     /// Delete Cropped Pixels.
@@ -953,7 +954,7 @@ impl Default for ToolOptions {
             marquee_unit: default_marquee_unit(),
             move_auto_select: true,
             move_target: default_move_target(),
-            move_show_transform: false,
+            move_show_transform: true,
             crop_ratio: String::new(),
             crop_custom_ratio_width: 0.0,
             crop_custom_ratio_height: 0.0,
