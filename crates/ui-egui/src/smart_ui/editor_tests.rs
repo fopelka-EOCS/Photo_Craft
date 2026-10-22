@@ -172,7 +172,7 @@ fn filter_editor_starts_missing_parameters_from_defaults_not_remembered_values()
     let ctx = egui::Context::default();
     let mut sm = smart(&app, layer).clone();
     let index = sm.smart_filters.iter().position(|f| f.command == command).unwrap();
-    sm.smart_filters[index].params = json!({"amount": 125, "radius": 2});
+    sm.smart_filters[index].params = json!({"amount": 125, "radius": 2}).into();
 
     super::open_editor(&mut app, &ctx, layer.0, &sm, index);
     let fields = &app.ui.dialogs.last().unwrap().fields;

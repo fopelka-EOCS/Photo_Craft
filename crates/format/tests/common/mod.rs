@@ -173,7 +173,7 @@ pub fn rich_doc(mode: ColorMode, depth: SampleType) -> Document {
             transform: Affine::scale(0.5),
             smart_filters: vec![SmartFilter {
                 command: "filter.blur.gaussian".into(),
-                params: json!({"radius": 2.5, "nested": {"a": [1, 2, 3]}}),
+                params: json!({"radius": 2.5, "nested": {"a": [1, 2, 3]}}).into(),
                 blend: BlendMode::Screen,
                 opacity: 0.6,
                 visible: true,

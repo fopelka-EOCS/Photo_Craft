@@ -105,7 +105,7 @@ pub(super) fn import_params(item: &Descriptor) -> Option<J> {
     fltr_map(item)?;
     // Neutral blending in the template: the model's own fields replace it on export.
     let mut template = item.clone();
-    let neutral = SmartFilter { command: String::new(), params: J::Null, blend: photocraft_color::BlendMode::Normal, opacity: 1.0, visible: true };
+    let neutral = SmartFilter { command: String::new(), params: J::Null.into(), blend: photocraft_color::BlendMode::Normal, opacity: 1.0, visible: true };
     set(&mut template, "blendOptions", blend_options(&neutral));
     set(&mut template, "enab", Value::Boolean(true));
     params.as_object_mut()?.insert(TEMPLATE_KEY.into(), json!(to_hex(&template.to_bytes())));
@@ -187,7 +187,7 @@ pub fn embed_map(params: &J, map: &Image) -> Option<J> {
     let enumerated = |t: &str, v: &str| Value::Enumerated { type_id: Id::new(t), value: Id::new(v) };
     // The settings here are placeholders: the params' own replace them when the filter renders
     // and when it is written to PSD (`export_item`).
-    let neutral = SmartFilter { command: String::new(), params: J::Null, blend: photocraft_color::BlendMode::Normal, opacity: 1.0, visible: true };
+    let neutral = SmartFilter { command: String::new(), params: J::Null.into(), blend: photocraft_color::BlendMode::Normal, opacity: 1.0, visible: true };
     let item = Descriptor::new("filterFX")
         .with("Nm  ", Value::Text(photocraft_psd::descriptor::UnicodeString::new_nul("Displace...")))
         .with("blendOptions", blend_options(&neutral))
@@ -266,7 +266,7 @@ mod tests {
                 "blendOptions",
                 blend_options(&SmartFilter {
                     command: String::new(),
-                    params: J::Null,
+                    params: J::Null.into(),
                     blend: photocraft_color::BlendMode::Normal,
                     opacity: 1.0,
                     visible: true,
@@ -342,9 +342,9 @@ mod tests {
         assert_eq!(map.data[1], 20.0 / 255.0);
 
         let mut edited = f.clone();
-        edited.params["horizontal"] = json!(-25.4);
-        edited.params["fit"] = json!("tile");
-        edited.params["undefinedAreas"] = json!("wrap");
+        std::sync::Arc::make_mut(&mut edited.params)["horizontal"] = json!(-25.4);
+        std::sync::Arc::make_mut(&mut edited.params)["fit"] = json!("tile");
+        std::sync::Arc::make_mut(&mut edited.params)["undefinedAreas"] = json!("wrap");
         edited.opacity = 0.5;
         let back = filter_from_item(&item_for_filter(&edited).unwrap());
         assert_eq!(back.command, COMMAND);
@@ -389,7 +389,7 @@ mod tests {
     fn bad_exports_report_errors() {
         let ok = filter_from_item(&item(tdta(2, 2, |_| 0, |_| 0, 0))).params;
         let with = |k: &str, v: J| {
-            let mut p = ok.clone();
+            let mut p = (*ok).clone();
             p[k] = v;
             p
         };

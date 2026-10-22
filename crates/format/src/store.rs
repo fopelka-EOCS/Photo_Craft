@@ -390,6 +390,7 @@ pub struct PcraftWriter {
     compressed_budget: usize,
     verified_directory: Option<DirectoryVerificationCache>,
     reverify_budget: u64,
+    max_manifest_bytes: usize,
 }
 
 impl Default for PcraftWriter {
@@ -401,6 +402,7 @@ impl Default for PcraftWriter {
             compressed_budget: usize::MAX,
             verified_directory: None,
             reverify_budget: DEFAULT_REVERIFY_BUDGET,
+            max_manifest_bytes: LoadOptions::default().max_manifest_bytes,
         }
     }
 }
@@ -744,6 +746,32 @@ fn par_compress<'a>(objects: &[(&'a String, &'a Object)]) -> Result<Vec<Compress
     })
 }
 
+/// Stop serialization before allocating a manifest larger than the reader can accept.
+struct ManifestBuffer {
+    bytes: Vec<u8>,
+    limit: usize,
+    exceeded: bool,
+}
+
+impl Write for ManifestBuffer {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let Some(len) = self.bytes.len().checked_add(bytes.len()).filter(|&n| n <= self.limit) else {
+            self.exceeded = true;
+            return Err(std::io::Error::other("manifest byte limit exceeded"));
+        };
+        if len > self.bytes.capacity() {
+            let capacity = len.max(self.bytes.capacity().saturating_mul(2)).max(1024).min(self.limit);
+            self.bytes.try_reserve_exact(capacity - self.bytes.len()).map_err(std::io::Error::other)?;
+        }
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 impl PcraftWriter {
     pub fn new() -> Self {
         Self::default()
@@ -761,6 +789,12 @@ impl PcraftWriter {
     pub fn set_compressed_cache_budget(&mut self, bytes: usize) {
         self.compressed_budget = bytes;
         self.compressed.clear();
+    }
+
+    /// Lower the manifest limit for callers using a stricter reader budget. The writer never
+    /// exceeds the default reader limit, even if a caller requests a larger value.
+    pub fn set_manifest_byte_limit(&mut self, bytes: usize) {
+        self.max_manifest_bytes = bytes.min(LoadOptions::default().max_manifest_bytes);
     }
 
     fn prepare(&mut self, doc: &Document, opts: &SaveOptions) -> Result<Prepared> {
@@ -789,7 +823,14 @@ impl PcraftWriter {
             crate::finite::Problem::NonFinite { path } => FormatError::NonFinite { path },
             crate::finite::Problem::Other(m) => FormatError::Unsupported(format!("manifest: {m}")),
         })?;
-        let manifest = serde_json::to_vec_pretty(&manifest)?;
+        let mut buffer = ManifestBuffer { bytes: Vec::new(), limit: self.max_manifest_bytes, exceeded: false };
+        if let Err(error) = serde_json::to_writer_pretty(&mut buffer, &manifest) {
+            if buffer.exceeded {
+                return Err(FormatError::LimitExceeded(format!("manifest.json exceeds {} bytes", buffer.limit)));
+            }
+            return Err(error.into());
+        }
+        let manifest = buffer.bytes;
         check_manifest_depth(&manifest)?;
         let stats = SaveStats { tiles_total: c.tiles.len(), blobs_total: c.blobs.len(), manifest_bytes: manifest.len(), ..Default::default() };
         let mut objects = BTreeMap::new();

@@ -559,10 +559,65 @@ pub enum SmartSource {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SmartFilter {
     pub command: String,
-    pub params: serde_json::Value,
+    /// Immutable parameters shared by document/history clones. Edit with `Arc::make_mut` so
+    /// changing a filter cannot mutate an undo state. Serde keeps the legacy JSON shape.
+    pub params: Arc<serde_json::Value>,
     pub blend: BlendMode,
     pub opacity: f32,
     pub visible: bool,
+}
+
+impl SmartFilter {
+    /// Approximate retained allocation size for the history budget, including large strings
+    /// such as embedded PSD templates. Container allocator overhead is approximate, as for
+    /// pixel tiles; string capacities and array storage are counted without serializing.
+    pub fn parameter_bytes(&self) -> usize {
+        enum Children<'a> {
+            Array(std::slice::Iter<'a, serde_json::Value>),
+            Object(serde_json::map::Iter<'a>),
+        }
+        // Walk depth-first without recursion or a second nesting limit. The native format
+        // accepts parameters deeper than serde_json's default 128 levels. Retain only one
+        // iterator per ancestor, not a worklist proportional to an array's width.
+        let mut parents = Vec::new();
+        let mut total = std::mem::size_of::<serde_json::Value>().saturating_add(2 * std::mem::size_of::<usize>());
+        let mut next = Some((self.params.as_ref(), 0usize));
+        while let Some((value, entry_bytes)) = next {
+            total = total.saturating_add(entry_bytes);
+            let children = match value {
+                serde_json::Value::String(s) => {
+                    total = total.saturating_add(s.capacity());
+                    None
+                }
+                serde_json::Value::Array(values) => {
+                    total = total.saturating_add(values.capacity().saturating_mul(std::mem::size_of::<serde_json::Value>()));
+                    Some(Children::Array(values.iter()))
+                }
+                serde_json::Value::Object(values) => Some(Children::Object(values.iter())),
+                _ => None,
+            };
+            if let Some(children) = children {
+                if parents.try_reserve(1).is_err() {
+                    return usize::MAX;
+                }
+                parents.push(children);
+            }
+            next = loop {
+                let Some(parent) = parents.last_mut() else { break None };
+                let child = match parent {
+                    Children::Array(values) => values.next().map(|v| (v, 0)),
+                    Children::Object(values) => {
+                        values.next().map(|(key, v)| (v, std::mem::size_of::<(String, serde_json::Value)>().saturating_add(key.capacity())))
+                    }
+                };
+                if child.is_some() {
+                    break child;
+                }
+                parents.pop();
+            };
+        }
+        total
+    }
 }
 
 /// Pixels rendered by another application (Photoshop) for a fill layer.

@@ -4936,6 +4936,7 @@ name = "photocraft-ops"
 version = "0.12.0"
 dependencies = [
  "photocraft-doc",
+ "serde_json",
 ]
 
 [[package]]

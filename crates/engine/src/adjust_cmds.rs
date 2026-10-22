@@ -279,7 +279,7 @@ pub(crate) fn adjust_as_smart_filter(s: &mut Session, kind: &str, label: &str, p
     }
     let sf = photocraft_doc::SmartFilter {
         command: format!("image.adjustments.{kind}"),
-        params,
+        params: params.into(),
         blend: photocraft_color::BlendMode::Normal,
         opacity: 1.0,
         visible: true,

@@ -55,7 +55,7 @@ impl Fixture {
         let (h, layer) = self.setup(lookup);
         let mut doc = (*h.session.active().unwrap().doc).clone();
         let LayerContent::Smart(sm) = &mut doc.layer_mut(layer).unwrap().content else { panic!("smart object") };
-        sm.smart_filters[0].params = path_params(lookup, &self.outside(if lookup { "white.cube" } else { "white.png" }));
+        sm.smart_filters[0].params = path_params(lookup, &self.outside(if lookup { "white.cube" } else { "white.png" })).into();
         let bytes = photocraft_format::save_to_bytes(&doc, &Default::default()).unwrap();
         std::fs::write(self.root().join("stored.pcraft"), bytes).unwrap();
         (doc, layer)

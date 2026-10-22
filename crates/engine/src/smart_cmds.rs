@@ -1113,16 +1113,17 @@ fn set_filter_params(s: &mut Session, p: &Value) -> Result<Value> {
         if f.command == photocraft_io::smart_map::UNSUPPORTED_FILTER {
             return Err(bad(CMD, "this smart filter isn't implemented in PhotoCraft: it is kept as is (it can be hidden, moved or deleted)"));
         }
-        match (&mut f.params, new) {
+        match (Arc::make_mut(&mut f.params), new) {
             (Value::Object(old), Value::Object(n)) => old.extend(n),
             (slot, n) => *slot = n,
         }
         if f.command == DISPLACE {
             if let Some(map) = &new_map {
                 f.params = photocraft_io::smart_map::displace_embed_map(&f.params, map)
-                    .ok_or_else(|| bad(CMD, "the displacement map is too large to keep in a Smart Object's filter"))?;
+                    .ok_or_else(|| bad(CMD, "the displacement map is too large to keep in a Smart Object's filter"))?
+                    .into();
             } else if new_path {
-                f.params = photocraft_io::smart_map::displace_without_map(&f.params);
+                f.params = photocraft_io::smart_map::displace_without_map(&f.params).into();
             }
         }
         // Authorize the underlying command with the complete merged params, including paths

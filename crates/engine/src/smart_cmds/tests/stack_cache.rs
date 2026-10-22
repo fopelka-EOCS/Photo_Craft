@@ -48,7 +48,7 @@ fn a_cancelled_render_stops_before_an_uncached_filter() {
     let s = filtered(8);
     let mut sm = active_smart(&s);
     // A radius no other render uses, so the stack below it is cached but this stage isn't.
-    sm.smart_filters[0].params["radius"] = json!(2.375);
+    std::sync::Arc::make_mut(&mut sm.smart_filters[0].params)["radius"] = json!(2.375);
     let ctx = JobCtx::new();
     ctx.cancel();
     assert!(matches!(render_in(&s.active().unwrap().doc, &sm, &ctx), Err(EngineError::Cancelled)));

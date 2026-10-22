@@ -93,7 +93,7 @@ fn run(s: &mut Session, p: &Value) -> Result<Value> {
             LayerContent::Smart(_) => {
                 let sf = SmartFilter {
                     command: RUN.into(),
-                    params: json!({"id": id, "params": resolved}),
+                    params: json!({"id": id, "params": resolved}).into(),
                     blend: photocraft_color::BlendMode::Normal,
                     opacity: 1.0,
                     visible: true,

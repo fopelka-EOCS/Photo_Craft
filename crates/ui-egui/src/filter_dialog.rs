@@ -1111,7 +1111,7 @@ pub(crate) fn preview_document_for_target(
                 mask.feather /= run_k as f32;
             }
             for f in &mut sm.smart_filters {
-                scale_preview_params(&f.command, &mut f.params, run_k);
+                scale_preview_params(&f.command, std::sync::Arc::make_mut(&mut f.params), run_k);
             }
             if command == "layer.smartFilter.setParams" {
                 let f = sm.smart_filters.get(index)?;

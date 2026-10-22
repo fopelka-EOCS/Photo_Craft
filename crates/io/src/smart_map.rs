@@ -869,7 +869,7 @@ pub fn filter_from_item(item: &Descriptor) -> SmartFilter {
             let mut neutral = item.clone();
             for (k, v) in &mut neutral.items {
                 if k.is("blendOptions") {
-                    *v = blend_options(&SmartFilter { command: String::new(), params: J::Null, blend: BlendMode::Normal, opacity: 1.0, visible: true });
+                    *v = blend_options(&SmartFilter { command: String::new(), params: J::Null.into(), blend: BlendMode::Normal, opacity: 1.0, visible: true });
                 } else if k.is("enab") {
                     *v = Value::Boolean(true);
                 }
@@ -877,7 +877,7 @@ pub fn filter_from_item(item: &Descriptor) -> SmartFilter {
             (UNSUPPORTED_FILTER.to_string(), json!({"name": name.replace('&', ""), "filterID": filter_id, "psd": to_hex(&neutral.to_bytes())}))
         }
     };
-    SmartFilter { command, params, blend, opacity, visible }
+    SmartFilter { command, params: params.into(), blend, opacity, visible }
 }
 
 // ---------- writing ----------
@@ -1685,7 +1685,7 @@ mod tests {
     }
 
     fn sf(command: &str, params: J) -> SmartFilter {
-        SmartFilter { command: command.into(), params, blend: BlendMode::Normal, opacity: 1.0, visible: true }
+        SmartFilter { command: command.into(), params: params.into(), blend: BlendMode::Normal, opacity: 1.0, visible: true }
     }
 
     #[test]
@@ -1806,7 +1806,7 @@ mod tests {
             let item = photoshop_no_options_item("Weichzeichnen", Value::Integer(id));
             let f = filter_from_item(&Descriptor::from_bytes(&item.to_bytes()).unwrap());
             assert_eq!(f.command, command);
-            assert_eq!(f.params, json!({}));
+            assert_eq!(*f.params, json!({}));
             assert_eq!((f.visible, f.blend), (false, BlendMode::Multiply));
             assert!((f.opacity - 0.6).abs() < 1e-6);
         }
@@ -1869,7 +1869,7 @@ mod tests {
         let item = ps_item("Smart Sharpen...", fltr.clone(), 1131);
         let f = filter_from_item(&Descriptor::from_bytes(&item.to_bytes()).unwrap());
         assert_eq!(f.command, "filter.sharpen.smartSharpen");
-        assert_eq!(f.params, json!({"amount": 120.0, "radius": 2.5, "reduceNoise": 5.0}));
+        assert_eq!(*f.params, json!({"amount": 120.0, "radius": 2.5, "reduceNoise": 5.0}));
         assert_eq!(written_fltr(&f), fltr);
         let d = item_for_filter(&f).unwrap();
         assert_eq!(int(&d, "filterID"), Some(1131));
@@ -1890,7 +1890,7 @@ mod tests {
             let keys: Vec<&str> = f.params.as_object().unwrap().keys().map(String::as_str).collect();
             assert_eq!(keys.len(), 3, "{keys:?}");
             assert!(keys.iter().all(|k| ["amount", "radius", "reduceNoise"].contains(k)), "{keys:?}");
-            assert_eq!(f.params, json!({"amount": 200.0, "radius": 1.0, "reduceNoise": 10.0}));
+            assert_eq!(*f.params, json!({"amount": 200.0, "radius": 1.0, "reduceNoise": 10.0}));
             assert_eq!(written_fltr(&f), smart_sharpen(200.0, 1.0, 10.0, "GsnB"));
         }
 
@@ -1973,7 +1973,7 @@ mod tests {
             let item = ps_item("Dust & Scratches...", fltr.clone(), 1_148_417_107);
             let f = filter_from_item(&Descriptor::from_bytes(&item.to_bytes()).unwrap());
             assert_eq!(f.command, "filter.noise.dustAndScratches");
-            assert_eq!(f.params, json!({"radius": radius, "threshold": threshold}));
+            assert_eq!(*f.params, json!({"radius": radius, "threshold": threshold}));
             assert_eq!(written_fltr(&f), fltr);
             assert_eq!(int(&item_for_filter(&f).unwrap(), "filterID"), Some(1_148_417_107));
         }
@@ -2040,7 +2040,7 @@ mod tests {
             ("filter.noise.dustAndScratches", json!([]), json!({"radius": 1, "threshold": 0})),
         ] {
             let back = filter_from_item(&item_for_filter(&sf(command, p.clone())).unwrap());
-            assert_eq!((back.command.as_str(), &back.params), (command, &want), "{p}");
+            assert_eq!((back.command.as_str(), back.params.as_ref()), (command, &want), "{p}");
         }
     }
 
@@ -2162,7 +2162,7 @@ mod tests {
             let item = measured_item(fltr, 51.0, 255.0);
             // Through bytes, as read from a file.
             let f = filter_from_item(&Descriptor::from_bytes(&item.to_bytes()).unwrap());
-            assert_eq!((f.command.as_str(), &f.params), (command, &params));
+            assert_eq!((f.command.as_str(), f.params.as_ref()), (command, &params));
             // Written back in the measured shape: same class, keys and their order, value types
             // (long, bool, enum with its type), filterID; Tiles also its colours.
             let back = item_for_filter(&f).unwrap();
@@ -2181,12 +2181,12 @@ mod tests {
         assert_eq!(filter_from_item(&bare).command, UNSUPPORTED_FILTER);
         // Only Tiles reads the entry's colours; Wind and Extrude write the defaults.
         let f = filter_from_item(&measured_item(wind("Wnd ", "Left"), 51.0, 0.0));
-        assert_eq!(f.params, json!({"method": "wind", "direction": "fromRight"}));
+        assert_eq!(*f.params, json!({"method": "wind", "direction": "fromRight"}));
         let back = item_for_filter(&f).unwrap();
         assert_eq!((back.get("FrgC"), back.get("BckC")), (Some(&rgbc(0.0)), Some(&rgbc(255.0))));
         // Tiles without colours in its params (or the entry) writes the engine's black and white.
         let f = filter_from_item(&Descriptor::new("filterFX").with("Fltr", Value::Descriptor(tiles(long(4), long(5), "FlBc"))));
-        assert_eq!(f.params, json!({"count": 4, "maxOffset": 5, "fill": "background"}));
+        assert_eq!(*f.params, json!({"count": 4, "maxOffset": 5, "fill": "background"}));
         let back = item_for_filter(&f).unwrap();
         assert_eq!((back.get("FrgC"), back.get("BckC")), (Some(&rgbc(0.0)), Some(&rgbc(255.0))));
     }
@@ -2339,7 +2339,7 @@ mod tests {
             let item = measured_named_item(b"Ofst", "Offset...", offset_fltr(Value::Integer(h), Value::Integer(v), enumv("FlMd", fill)));
             let f = filter_from_item(&item);
             assert_eq!(f.command, "filter.other.offset");
-            assert_eq!(f.params, json!({"horizontal": h, "vertical": v, "undefinedAreas": ours}));
+            assert_eq!(*f.params, json!({"horizontal": h, "vertical": v, "undefinedAreas": ours}));
             // Written back exactly as measured.
             assert_eq!(item_for_filter(&f).unwrap(), item);
         }
@@ -2409,7 +2409,7 @@ mod tests {
             let item = measured_named_item(b"Cstm", "Custom...", custom_fltr(Value::Integer(scale), Value::Integer(offset), longs(&kernel)));
             let f = filter_from_item(&item);
             assert_eq!(f.command, "filter.other.custom");
-            assert_eq!(f.params, json!({"kernel": kernel, "scale": scale, "offset": offset}));
+            assert_eq!(*f.params, json!({"kernel": kernel, "scale": scale, "offset": offset}));
             assert_eq!(item_for_filter(&f).unwrap(), item);
         }
     }
@@ -2488,7 +2488,7 @@ mod tests {
         for (code, ty) in [("CrsD", "coarseDots"), ("LngS", "longStrokes")] {
             let item = pixelate_item("Mezzotint...", Descriptor::new("Mztn").with("MztT", enumv("MztT", code)), 1_299_870_830);
             let f = filter_from_item(&item);
-            assert_eq!((f.command.as_str(), &f.params), ("filter.pixelate.mezzotint", &json!({"type": ty})));
+            assert_eq!((f.command.as_str(), f.params.as_ref()), ("filter.pixelate.mezzotint", &json!({"type": ty})));
         }
         // No type or an unknown type is Fine Dots, like the engine; the seed
         // (PhotoCraft only) is not saved.
@@ -2527,7 +2527,7 @@ mod tests {
         let item = pixelate_item("Color Halftone...", measured.clone(), 1_131_180_616);
         let f = filter_from_item(&item);
         assert_eq!(f.command, "filter.pixelate.colorHalftone");
-        assert_eq!(f.params, json!({"maxRadius": 6, "channel1": 10, "channel2": 20, "channel3": 30, "channel4": 40}));
+        assert_eq!(*f.params, json!({"maxRadius": 6, "channel1": 10, "channel2": 20, "channel3": 30, "channel4": 40}));
         assert_eq!(get_desc(&item_for_filter(&f).unwrap(), "Fltr"), Some(&measured));
         // Defaults and hostile values write longs within the dialog's ranges.
         let d = item_for_filter(&sf("filter.pixelate.colorHalftone", json!({"maxRadius": f64::NAN, "channel1": 1e12, "channel2": -1e12, "channel3": "x"})))
@@ -2664,7 +2664,7 @@ mod tests {
         for (fltr, id, command, params) in cases {
             let item = ps_item("x", fltr.clone(), id);
             let f = filter_from_item(&Descriptor::from_bytes(&item.to_bytes()).unwrap());
-            assert_eq!((f.command.as_str(), &f.params), (command, &params), "{fltr:?}");
+            assert_eq!((f.command.as_str(), f.params.as_ref()), (command, &params), "{fltr:?}");
             let out = item_for_filter(&f).unwrap();
             assert_eq!(out.get("filterID"), Some(&Value::Integer(id)));
             assert_eq!(out.get("hasoptions"), Some(&Value::Boolean(true)));
@@ -2839,7 +2839,7 @@ mod tests {
             let item = photoshop_item(id, fltr);
             // Through bytes, as read from a file.
             let f = filter_from_item(&Descriptor::from_bytes(&item.to_bytes()).unwrap());
-            assert_eq!((f.command.as_str(), &f.params), (command, &params));
+            assert_eq!((f.command.as_str(), f.params.as_ref()), (command, &params));
             // Written back in the measured shape: same class, keys, value types and filterID.
             let back = item_for_filter(&f).unwrap();
             for key in ["Fltr", "filterID", "BckC"] {
@@ -2858,7 +2858,7 @@ mod tests {
         assert_eq!(item_for_filter(&f).unwrap().get("BckC"), Some(&rgbc(51.0)));
         let mut item = photoshop_item(b"Crst", Descriptor::new("Crst").with("ClSz", Value::Integer(7)));
         set(&mut item, "BckC", rgbc(51.0));
-        assert_eq!(filter_from_item(&item).params, json!({"cellSize": 7}));
+        assert_eq!(*filter_from_item(&item).params, json!({"cellSize": 7}));
         // Our random seed has no PSD key: it is not written.
         let fltr = |c: &str, p: J| item_for_filter(&sf(c, p)).unwrap().get("Fltr").cloned();
         assert_eq!(
@@ -2966,7 +2966,7 @@ mod tests {
         let f = filter_from_item(&gallery_item_with(vec![chrome(12, 4, true), chrome(3, 9, false)]));
         assert_eq!(f.command, "filter.filterGallery");
         assert_eq!(
-            f.params,
+            *f.params,
             json!({
                 "effects": [
                     {"filter": "chrome", "params": {"detail": 12, "smoothness": 4}, "visible": true},
@@ -3012,7 +3012,7 @@ mod tests {
         let f = filter_from_item(&item);
         assert_eq!(f.command, "filter.filterGallery");
         assert_eq!(
-            f.params,
+            *f.params,
             json!({
                 "effects": [{"filter": "chrome", "params": {"detail": 10, "smoothness": 4}, "visible": true}],
                 "foreground": [1.0, 1.0, 1.0, 1.0],
@@ -3026,7 +3026,7 @@ mod tests {
         assert_eq!(filter_from_item(&Descriptor::from_bytes(&d.to_bytes()).unwrap()), f);
         // A hidden single effect needs the list (only it has a visibility flag).
         let mut hidden = f.clone();
-        hidden.params["effects"][0]["visible"] = json!(false);
+        std::sync::Arc::make_mut(&mut hidden.params)["effects"][0]["visible"] = json!(false);
         let d = item_for_filter(&hidden).unwrap();
         assert!(get_desc(&d, "Fltr").unwrap().get("GEfs").is_some());
         assert_eq!(filter_from_item(&d), hidden);
@@ -3551,7 +3551,7 @@ mod tests {
         for (hex, command, params) in cases {
             let item = photoshop(hex);
             let f = filter_from_item(&item);
-            assert_eq!((f.command.as_str(), &f.params), (command, &params));
+            assert_eq!((f.command.as_str(), f.params.as_ref()), (command, &params));
             // Written back, it is Photoshop's item again: name, colours, settings and key order.
             assert_eq!(item_for_filter(&f).unwrap().items, item.items, "{command}");
         }
@@ -3638,12 +3638,12 @@ mod tests {
     fn render_filters_made_in_photocraft_are_written() {
         // Without colours (an older document or a script), Photoshop's default black and white.
         let back = filter_from_item(&item_for_filter(&sf("filter.render.clouds", json!({"seed": 7}))).unwrap());
-        assert_eq!(back.params, json!({"seed": 7, "foreground": [0.0, 0.0, 0.0, 1.0], "background": [1.0, 1.0, 1.0, 1.0]}));
+        assert_eq!(*back.params, json!({"seed": 7, "foreground": [0.0, 0.0, 0.0, 1.0], "background": [1.0, 1.0, 1.0, 1.0]}));
         // A seed above i32::MAX keeps its bit pattern, and colours may be hex.
         let p = json!({"variance": 30, "strength": 10, "seed": 4_000_000_000u32, "foreground": "#ff0000", "background": [0.0, 0.0, 1.0, 1.0]});
         let back = filter_from_item(&item_for_filter(&sf("filter.render.fibers", p)).unwrap());
         assert_eq!(
-            back.params,
+            *back.params,
             json!({"variance": 30, "strength": 10, "seed": 4_000_000_000u32, "foreground": [1.0, 0.0, 0.0, 1.0], "background": [0.0, 0.0, 1.0, 1.0]})
         );
         let flare = sf("filter.render.lensFlare", json!({"brightness": 120, "centerX": 0.25, "centerY": 0.75, "lens": "moviePrime"}));

@@ -302,7 +302,13 @@ fn run_filter(s: &mut Session, cmd: &str, label: &str, stored: Value, float_bg: 
             return Err(EngineError::Other(format!("layer \"{}\" is locked", l.name)));
         }
         if let LayerContent::Smart(_) = l.content {
-            let sf = SmartFilter { command: cmd.to_string(), params: stored.clone(), blend: photocraft_color::BlendMode::Normal, opacity: 1.0, visible: true };
+            let sf = SmartFilter {
+                command: cmd.to_string(),
+                params: stored.clone().into(),
+                blend: photocraft_color::BlendMode::Normal,
+                opacity: 1.0,
+                visible: true,
+            };
             return crate::smart_cmds::add_smart_filter(doc, id, sf, selection.as_ref());
         }
         // A Background layer gains transparency when the edge mode exposes it (as in Photoshop).

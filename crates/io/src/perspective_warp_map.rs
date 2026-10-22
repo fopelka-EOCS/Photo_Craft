@@ -108,7 +108,7 @@ pub(super) fn import_params(item: &Descriptor) -> Option<J> {
     let planes = planes_of(f)?;
     // Neutral blending in the template: the model's own fields replace it on export.
     let mut template = item.clone();
-    let neutral = SmartFilter { command: String::new(), params: J::Null, blend: photocraft_color::BlendMode::Normal, opacity: 1.0, visible: true };
+    let neutral = SmartFilter { command: String::new(), params: J::Null.into(), blend: photocraft_color::BlendMode::Normal, opacity: 1.0, visible: true };
     set(&mut template, "blendOptions", blend_options(&neutral));
     set(&mut template, "enab", Value::Boolean(true));
     // Export refuses a larger template; such an item stays opaque, so it is still written back.
@@ -275,7 +275,7 @@ mod tests {
                 "blendOptions",
                 blend_options(&SmartFilter {
                     command: String::new(),
-                    params: J::Null,
+                    params: J::Null.into(),
                     blend: photocraft_color::BlendMode::Normal,
                     opacity: 1.0,
                     visible: true,
@@ -331,7 +331,7 @@ mod tests {
     fn edited_planes_round_trip_and_keep_the_rest_of_the_template() {
         let src = two_planes(708);
         let mut f = filter_from_item(&src);
-        f.params["planes"][1]["dst"][2] = json!([155.5, 118.0]);
+        std::sync::Arc::make_mut(&mut f.params)["planes"][1]["dst"][2] = json!([155.5, 118.0]);
         f.opacity = 0.5;
         f.visible = false;
         let item = item_for_filter(&f).unwrap();
@@ -351,7 +351,7 @@ mod tests {
         let planes = vec![Plane { src: V, dst: W }];
         let f = SmartFilter {
             command: COMMAND.into(),
-            params: json!({"planes": planes}),
+            params: json!({"planes": planes}).into(),
             blend: photocraft_color::BlendMode::Multiply,
             opacity: 0.25,
             visible: true,
@@ -372,7 +372,7 @@ mod tests {
 
         // Edit › Perspective Warp on a smart object stores its own id; it is written too, with a
         // straighten baked in.
-        let f = SmartFilter { command: EDIT_COMMAND.into(), params: json!({"planes": planes, "straighten": "auto", "interpolation": "bilinear"}), ..f };
+        let f = SmartFilter { command: EDIT_COMMAND.into(), params: json!({"planes": planes, "straighten": "auto", "interpolation": "bilinear"}).into(), ..f };
         assert!(item_for_filter(&f).is_ok());
     }
 
@@ -429,7 +429,7 @@ mod tests {
     fn bad_exports_report_errors() {
         let ok = filter_from_item(&one_plane()).params;
         let with = |k: &str, v: J| {
-            let mut p = ok.clone();
+            let mut p = ok.as_ref().clone();
             p[k] = v;
             p
         };
@@ -448,7 +448,7 @@ mod tests {
             with(TEMPLATE_KEY, json!(to_hex(&Descriptor::new("filterFX").to_bytes()))),
             with(TEMPLATE_KEY, json!("0".repeat(MAX_TEMPLATE_BYTES * 2 + 2))),
         ] {
-            let f = SmartFilter { command: COMMAND.into(), params: p.clone(), blend: photocraft_color::BlendMode::Normal, opacity: 1.0, visible: true };
+            let f = SmartFilter { command: COMMAND.into(), params: p.clone().into(), blend: photocraft_color::BlendMode::Normal, opacity: 1.0, visible: true };
             assert!(export_item(&f).is_err(), "{p}");
         }
     }

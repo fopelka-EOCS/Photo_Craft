@@ -48,7 +48,7 @@ fn sold(file: &PsdFile, name: &str) -> smart_map::Placed {
 fn gaussian(radius: f64) -> SmartFilter {
     SmartFilter {
         command: "filter.blur.gaussianBlur".into(),
-        params: serde_json::json!({ "radius": radius }),
+        params: serde_json::json!({ "radius": radius }).into(),
         blend: BlendMode::Normal,
         opacity: 1.0,
         visible: true,

@@ -186,7 +186,7 @@ pub(super) fn import_params(item: &Descriptor) -> Option<J> {
     }
     let mut params = descriptor_params(get_desc(item, "Fltr")?)?;
     let mut template = item.clone();
-    let neutral = SmartFilter { command: String::new(), params: J::Null, blend: photocraft_color::BlendMode::Normal, opacity: 1.0, visible: true };
+    let neutral = SmartFilter { command: String::new(), params: J::Null.into(), blend: photocraft_color::BlendMode::Normal, opacity: 1.0, visible: true };
     set(&mut template, "blendOptions", blend_options(&neutral));
     set(&mut template, "enab", Value::Boolean(true));
     let bytes = template.to_bytes();
@@ -383,7 +383,7 @@ mod tests {
                 d = d.with(key, Value::Integer(value));
             }
         }
-        let f = SmartFilter { command: COMMAND.into(), params: J::Null, blend: BlendMode::Normal, opacity: 1.0, visible: true };
+        let f = SmartFilter { command: COMMAND.into(), params: J::Null.into(), blend: BlendMode::Normal, opacity: 1.0, visible: true };
         Descriptor::new("filterFX")
             .with("Nm  ", Value::Text(UnicodeString::new_nul("Camera Raw Filter")))
             .with("blendOptions", blend_options(&f))
@@ -467,14 +467,14 @@ mod tests {
             if get_param(&f.params, param).unwrap().as_f64() == Some(number) {
                 number += 1.0;
             }
-            *get_param_mut(&mut edited.params, param).unwrap() = json!(number);
+            *get_param_mut(std::sync::Arc::make_mut(&mut edited.params), param).unwrap() = json!(number);
             let mut expected = get_desc(&source, "Fltr").unwrap().clone();
             set(&mut expected, key, if matches!(*key, "Ex12" | "ShpR") { Value::Double(number) } else { Value::Integer(number as i32) });
             assert_eq!(get_desc(&item_for_filter(&edited).unwrap(), "Fltr"), Some(&expected), "{param}");
         }
         for (param, key) in CURVES {
             let mut edited = f.clone();
-            edited.params[*param] = json!([]);
+            std::sync::Arc::make_mut(&mut edited.params)[*param] = json!([]);
             let item = item_for_filter(&edited).unwrap();
             let mut expected = get_desc(&source, "Fltr").unwrap().clone();
             set(&mut expected, key, Value::List([0, 0, 255, 255].into_iter().map(Value::Integer).collect()));
@@ -541,7 +541,7 @@ mod tests {
         assert_eq!(f.params["gradeGlobal"], json!({"hue": 20.0, "sat": 61.0, "lum": 45.0}));
         assert_eq!(f.params["pointCurveRed"], json!([[0.0, 0.0], [90.0, 174.0], [255.0, 255.0]]));
         assert_eq!(item_for_filter(&f).unwrap(), projected);
-        f.params["exposure"] = json!(0.5);
+        std::sync::Arc::make_mut(&mut f.params)["exposure"] = json!(0.5);
         let mut expected = get_desc(&projected, "Fltr").unwrap().clone();
         set(&mut expected, "Ex12", Value::Double(0.5));
         assert_eq!(get_desc(&item_for_filter(&f).unwrap(), "Fltr"), Some(&expected));
@@ -559,8 +559,8 @@ mod tests {
         assert_eq!(f.params["curveSplits"], json!([25.0, 50.0, 75.0]));
         assert_eq!(f.params["hslHue"], json!([-50.0, 0.0, 29.0, 1.0, 0.0, 0.0, 0.0, 0.0]));
         assert_eq!(item_for_filter(&f).unwrap(), source);
-        f.params["exposure"] = json!(0.0);
-        f.params["hslHue"][2] = json!(-20.0);
+        std::sync::Arc::make_mut(&mut f.params)["exposure"] = json!(0.0);
+        std::sync::Arc::make_mut(&mut f.params)["hslHue"][2] = json!(-20.0);
         f.visible = false;
         f.opacity = 0.4;
         f.blend = BlendMode::Multiply;
@@ -591,7 +591,7 @@ mod tests {
         for (param, keys) in ARRAYS {
             params[*param] = if *param == "curveSplits" { json!([20, 45, 80]) } else { json!((0..keys.len()).map(|i| i as f64 + 1.0).collect::<Vec<_>>()) };
         }
-        let f = SmartFilter { command: COMMAND.into(), params: params.clone(), blend: BlendMode::Screen, opacity: 0.5, visible: false };
+        let f = SmartFilter { command: COMMAND.into(), params: params.clone().into(), blend: BlendMode::Screen, opacity: 0.5, visible: false };
         let item = item_for_filter(&f).unwrap();
         let back = filter_from_item(&Descriptor::from_bytes(&item.to_bytes()).unwrap());
         assert_eq!((&back.command, back.visible, back.blend, back.opacity), (&f.command, false, BlendMode::Screen, 0.5));
@@ -625,10 +625,10 @@ mod tests {
     #[test]
     fn fractional_slider_levels_round_instead_of_dropping_the_filter() {
         let mut f = filter_from_item(&source_item());
-        f.params["contrast"] = json!(-12.4);
-        f.params["hslHue"][0] = json!(10.5);
-        f.params["gradeShadows"]["hue"] = json!(359.7);
-        f.params["pointCurve"] = json!([[0, 0], [100.2, 120.6], [200.6, 180.4], [255, 255]]);
+        std::sync::Arc::make_mut(&mut f.params)["contrast"] = json!(-12.4);
+        std::sync::Arc::make_mut(&mut f.params)["hslHue"][0] = json!(10.5);
+        std::sync::Arc::make_mut(&mut f.params)["gradeShadows"]["hue"] = json!(359.7);
+        std::sync::Arc::make_mut(&mut f.params)["pointCurve"] = json!([[0, 0], [100.2, 120.6], [200.6, 180.4], [255, 255]]);
         let item = item_for_filter(&f).unwrap();
         let d = get_desc(&item, "Fltr").unwrap();
         assert_eq!(d.get("Cr12"), Some(&Value::Integer(-12)));

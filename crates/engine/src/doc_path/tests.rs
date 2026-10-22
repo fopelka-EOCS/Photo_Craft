@@ -151,7 +151,7 @@ fn psd_saves_embed_only_followed_links() {
 fn replayed(s: &mut Session, id: LayerId, params: serde_json::Value) -> Vec<[f32; 4]> {
     s.edit("Params", |doc, _| {
         if let Some(LayerContent::Smart(sm)) = doc.layer_mut(id).map(|l| &mut l.content) {
-            sm.smart_filters[0].params = params;
+            sm.smart_filters[0].params = params.into();
         }
         crate::smart_cmds::refresh(doc, id).map(|_| ())
     })

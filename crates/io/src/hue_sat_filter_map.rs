@@ -149,7 +149,7 @@ fn range_entry(i: usize, o: &J) -> Result<Option<Value>, String> {
 
 /// The `filterFXList` item for an `image.adjustments.hueSaturation` smart filter.
 pub(super) fn export_item(f: &SmartFilter) -> Result<Descriptor, String> {
-    let p = &f.params;
+    let p = f.params.as_ref();
     let obj = match p {
         J::Object(o) => o,
         J::Null => &Map::new(),
@@ -230,7 +230,7 @@ mod tests {
         let c = |r: f64, g: f64, b: f64| {
             Value::Descriptor(Descriptor::new("RGBC").with("Rd  ", Value::Double(r)).with("Grn ", Value::Double(g)).with("Bl  ", Value::Double(b)))
         };
-        let neutral = SmartFilter { command: String::new(), params: J::Null, blend: BlendMode::Normal, opacity: 1.0, visible: true };
+        let neutral = SmartFilter { command: String::new(), params: J::Null.into(), blend: BlendMode::Normal, opacity: 1.0, visible: true };
         Descriptor::new("filterFX")
             .with("Nm  ", Value::Text(UnicodeString::new_nul("Farbton/Sättigung...")))
             .with("blendOptions", blend_options(&neutral))
@@ -255,7 +255,7 @@ mod tests {
     }
 
     fn filter(params: J) -> SmartFilter {
-        SmartFilter { command: COMMAND.into(), params, blend: BlendMode::Normal, opacity: 1.0, visible: true }
+        SmartFilter { command: COMMAND.into(), params: params.into(), blend: BlendMode::Normal, opacity: 1.0, visible: true }
     }
 
     #[test]
@@ -268,13 +268,13 @@ mod tests {
         let f = filter_from_item(&observed());
         assert_eq!(f.command, COMMAND);
         assert_eq!(
-            f.params,
+            *f.params,
             json!({"colorize": false, "hue": 12, "saturation": -20, "lightness": 5,
                    "yellows": {"hue": -16, "saturation": 10, "lightness": -5, "range": [15, 45, 75, 105]}})
         );
         let c = filter_from_item(&item(fltr(true, vec![hst2(None, 200, 40, -10)])));
         assert_eq!(c.command, COMMAND);
-        assert_eq!(c.params, json!({"colorize": true, "hue": 200, "saturation": 40, "lightness": -10}));
+        assert_eq!(*c.params, json!({"colorize": true, "hue": 200, "saturation": 40, "lightness": -10}));
     }
 
     #[test]
@@ -300,11 +300,11 @@ mod tests {
     fn command_params_are_written_like_the_dialog() {
         let export = |p: J| filter_from_item(&item_for_filter(&filter(p)).unwrap()).params;
         // Partial params: the command's defaults, numbers rounded and clamped.
-        assert_eq!(export(json!({"hue": 12.4})), json!({"colorize": false, "hue": 12, "saturation": 0, "lightness": 0}));
-        assert_eq!(export(json!({"hue": -400, "lightness": 101, "layer": 3})), json!({"colorize": false, "hue": -180, "saturation": 0, "lightness": 100}));
-        assert_eq!(export(J::Null), json!({"colorize": false, "hue": 0, "saturation": 0, "lightness": 0}));
+        assert_eq!(*export(json!({"hue": 12.4})), json!({"colorize": false, "hue": 12, "saturation": 0, "lightness": 0}));
+        assert_eq!(*export(json!({"hue": -400, "lightness": 101, "layer": 3})), json!({"colorize": false, "hue": -180, "saturation": 0, "lightness": 100}));
+        assert_eq!(*export(J::Null), json!({"colorize": false, "hue": 0, "saturation": 0, "lightness": 0}));
         // Colorize starts at 25 % saturation and wraps the hue into 0..360.
-        assert_eq!(export(json!({"colorize": true, "hue": -30})), json!({"colorize": true, "hue": 330, "saturation": 25, "lightness": 0}));
+        assert_eq!(*export(json!({"colorize": true, "hue": -30})), json!({"colorize": true, "hue": 330, "saturation": 25, "lightness": 0}));
         // The full set (`to_params`): neutral ranges at their default extent are left out, reds
         // are written within one turn.
         let mut full = json!({"hue": 0, "saturation": 0, "lightness": 0, "colorize": false});

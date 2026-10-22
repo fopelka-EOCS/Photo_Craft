@@ -391,7 +391,7 @@ pub fn open_editor(app: &mut PhotocraftApp, ctx: &egui::Context, layer: u64, sm:
     };
     if let Some(d) = app.ui.dialog_mut(id) {
         d.fields.insert("__smartFilter".into(), target);
-        if let Value::Object(p) = &f.params {
+        if let Value::Object(p) = f.params.as_ref() {
             for (k, v) in p {
                 if !k.starts_with("__") {
                     d.fields.insert(k.clone(), v.clone());
