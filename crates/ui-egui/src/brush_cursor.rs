@@ -52,6 +52,52 @@ pub(crate) fn tip_axes(xf: &crate::canvas::ViewXform, size: f32) -> [Vec2; 2] {
     [xf.map_vec(Vec2::new(r, 0.0)), xf.map_vec(Vec2::new(0.0, r))]
 }
 
+/// Apply pen orientation after the cached tip shape, in document space before the view.
+/// Keeping this outside `rings` avoids retracing a sampled tip on every tablet sample.
+pub(crate) fn pen_axes(xf: &crate::canvas::ViewXform, brush: &BrushSettings, pen: Option<crate::stylus::PenSample>) -> [Vec2; 2] {
+    use photocraft_paint::brush::Control;
+    use photocraft_paint::dynamics::{StepInput, apply_pose, control_angle};
+    let axes = tip_axes(xf, brush.size);
+    if !brush.shape_dynamics.enabled {
+        return axes;
+    }
+    let Some(pen) = pen else { return axes };
+    let pen = pen.sanitized();
+    let point = apply_pose(
+        brush,
+        photocraft_paint::StrokePoint { pressure: pen.pressure, tilt_x: pen.tilt_x, tilt_y: pen.tilt_y, rotation: pen.rotation, ..Default::default() },
+    );
+    let sd = &brush.shape_dynamics;
+    let step = StepInput { point, direction: 0.0, initial_direction: 0.0, step: 0 };
+    let mut angle = match sd.angle.control {
+        Control::PenTilt | Control::Rotation => control_angle(sd.angle.control, sd.angle.fade_steps, &step),
+        _ => 0.0,
+    };
+    if sd.brush_projection {
+        angle += point.rotation;
+    }
+    let (sn, cs) = angle.to_radians().sin_cos();
+    let project = |v: Vec2| {
+        if !sd.brush_projection {
+            return v;
+        }
+        let tilt = point.tilt_x.hypot(point.tilt_y).clamp(0.0, 90.0);
+        if tilt == 0.0 {
+            return v;
+        }
+        let direction = Vec2::new(point.tilt_x, point.tilt_y).normalized();
+        v + direction * v.dot(direction) * (tilt.to_radians().cos().max(0.05) - 1.0)
+    };
+    if sd.brush_projection {
+        let x = project(Vec2::new(cs, -sn));
+        let y = project(Vec2::new(sn, cs));
+        [axes[0] * x.x + axes[1] * x.y, axes[0] * y.x + axes[1] * y.y]
+    } else {
+        // No projection: the pen's angle alone turns the outline, exactly as the brush's own angle would.
+        turned_axes(axes, angle)
+    }
+}
+
 /// Rings in radius units (document orientation) on screen, through [`tip_axes`].
 fn on_screen(rings: &[Vec<[f32; 2]>], axes: [Vec2; 2]) -> Vec<Vec<Vec2>> {
     rings.iter().map(|r| r.iter().map(|p| axes[0] * p[0] + axes[1] * p[1]).collect()).collect()
@@ -68,34 +114,33 @@ pub(crate) fn turned_axes(axes: [Vec2; 2], deg: f32) -> [Vec2; 2] {
     [axes[0] * cs - axes[1] * sn, axes[0] * sn + axes[1] * cs]
 }
 
-/// The axes to draw the brush outline with: `axes` turned by the pen's live hover angle, or —
-/// while a stroke is down — by the angle the pen had just before it touched (the outline turns
-/// with the hover, then locks through the stroke, as Photoshop). A mouse (no sample) keeps the
-/// brush's own angle.
-pub(crate) fn follow_axes(ctx: &egui::Context, brush: &BrushSettings, axes: [Vec2; 2], painting: bool, sample: Option<PenSample>) -> [Vec2; 2] {
-    let id = egui::Id::new("photocraft-tip-follow-angle");
-    let angle = if painting {
-        // The hover left this angle behind: hold it, never re-read mid-stroke.
-        ctx.data(|d| d.get_temp::<Option<f32>>(id).flatten())
+/// The axes to draw the brush outline with: [`pen_axes`]' pen orientation and projection for the
+/// live hover pose — or, while a stroke is down, the pose the pen had just before it touched (the
+/// outline turns with the hover, then locks through the stroke, as Photoshop). A mouse (no sample)
+/// keeps the brush's own angle.
+pub(crate) fn follow_axes(ctx: &egui::Context, xf: &crate::canvas::ViewXform, brush: &BrushSettings, painting: bool, sample: Option<PenSample>) -> [Vec2; 2] {
+    let id = egui::Id::new("photocraft-tip-follow-pose");
+    let axes = if painting {
+        // The hover left this pose behind: hold it, never re-read mid-stroke.
+        ctx.data(|d| d.get_temp::<Option<[Vec2; 2]>>(id).flatten())
     } else {
-        let angle = sample.map(|s| {
-            let point = photocraft_paint::StrokePoint { pressure: s.pressure, tilt_x: s.tilt_x, tilt_y: s.tilt_y, rotation: s.rotation, ..Default::default() };
-            photocraft_paint::dynamics::preview_angle(brush, &point)
-        });
-        ctx.data_mut(|d| d.insert_temp(id, angle));
-        angle
+        let axes = sample.map(|s| pen_axes(xf, brush, Some(s)));
+        ctx.data_mut(|d| d.insert_temp(id, axes));
+        axes
     };
-    match angle {
-        Some(deg) => turned_axes(axes, deg),
-        None => axes,
-    }
+    axes.unwrap_or_else(|| pen_axes(xf, brush, sample))
 }
 
 /// The brush cursor at `at`. `radius` is the tip's screen radius (size / 2 at the current zoom),
 /// for the plain circle; `axes` comes from [`tip_axes`], for a traced outline. `normal` is
 /// Preferences › Cursors "Normal Brush Tip" (the 50 % contour, not the full tip).
 pub(crate) fn cursor(painter: &Painter, at: Pos2, brush: &BrushSettings, radius: f32, axes: [Vec2; 2], normal: bool, centre: bool) -> CursorIcon {
-    if let Some(rings) = rings(painter.ctx(), brush, !normal) {
+    let anisotropic = (axes[0].length_sq() - axes[1].length_sq()).abs() > 0.001 || axes[0].dot(axes[1]).abs() > 0.001;
+    let outline = rings(painter.ctx(), brush, !normal).or_else(|| {
+        // A round tip becomes an ellipse under projection (or a non-square pixel aspect).
+        anisotropic.then(|| photocraft_paint::outline::tip_outline(brush, !normal).map(Arc::new)).flatten()
+    });
+    if let Some(rings) = outline {
         let pts = on_screen(&rings, axes);
         let extent = pts.iter().flatten().fold(0.0f32, |m, p| m.max(p.length()));
         if extent < MIN_RADIUS {
@@ -175,6 +220,76 @@ mod tests {
         (a - b).length() < 1e-4
     }
 
+    /// Component timing only: outline transformation and OS bitmap generation, not presentation
+    /// or tablet latency. Run explicitly in release mode on the same runner for both cases.
+    #[test]
+    #[ignore]
+    fn pen_cursor_cost_probe() {
+        let mut brush = BrushSettings { size: 60.0, roundness: 0.25, hardness: 1.0, ..Default::default() };
+        brush.shape_dynamics.enabled = true;
+        brush.shape_dynamics.angle.control = photocraft_paint::brush::Control::Rotation;
+        let xf = view(0.0, false, 1.0);
+        for dynamic in [false, true] {
+            let ctx = egui::Context::default();
+            for sample in 0..5 {
+                let start = std::time::Instant::now();
+                let _ = ctx.run_ui(Default::default(), |ui| {
+                    for i in 0..360 {
+                        let axes = if dynamic {
+                            pen_axes(&xf, &brush, Some(crate::stylus::PenSample { rotation: i as f32, ..Default::default() }))
+                        } else {
+                            tip_axes(&xf, brush.size)
+                        };
+                        std::hint::black_box(cursor(ui.painter(), pos2(100.0, 100.0), &brush, 60.0, axes, false, false));
+                    }
+                });
+                println!("PEN_CURSOR_COST dynamic={dynamic} sample={sample} us_per_update={:.3}", start.elapsed().as_secs_f64() * 1e6 / 360.0);
+            }
+        }
+    }
+
+    #[test]
+    fn pen_orientation_preserves_mouse_and_disabled_dynamics() {
+        let mut brush = BrushSettings::default();
+        brush.shape_dynamics.angle.control = photocraft_paint::brush::Control::Rotation;
+        let pen = crate::stylus::PenSample { rotation: 90.0, ..Default::default() };
+        let xf = view(30.0, true, 2.0);
+        assert_eq!(pen_axes(&xf, &brush, Some(pen)), tip_axes(&xf, brush.size));
+        brush.shape_dynamics.enabled = true;
+        assert_eq!(pen_axes(&xf, &brush, None), tip_axes(&xf, brush.size));
+    }
+
+    #[test]
+    fn pen_pose_rotation_precedes_the_view_and_reuses_the_tip_cache() {
+        let mut brush = BrushSettings { size: 20.0, roundness: 0.25, ..Default::default() };
+        brush.shape_dynamics.enabled = true;
+        brush.shape_dynamics.angle.control = photocraft_paint::brush::Control::Rotation;
+        brush.pose.enabled = true;
+        brush.pose.override_rotation = true;
+        brush.pose.rotation = 90.0;
+        let ctx = egui::Context::default();
+        let cached = rings(&ctx, &brush, true).unwrap();
+        for (rotation, flip, aspect) in [(0.0, false, 1.0), (30.0, true, 2.0)] {
+            let xf = view(rotation, flip, aspect);
+            let axes = pen_axes(&xf, &brush, Some(crate::stylus::PenSample::default()));
+            assert!(close(axes[0], xf.map_vec(Vec2::new(0.0, -10.0))));
+            assert!(close(axes[1], xf.map_vec(Vec2::new(10.0, 0.0))));
+            assert!(Arc::ptr_eq(&cached, &rings(&ctx, &brush, true).unwrap()));
+        }
+    }
+
+    #[test]
+    fn brush_projection_shortens_the_tilt_axis() {
+        let mut brush = BrushSettings { size: 20.0, ..Default::default() };
+        brush.shape_dynamics.enabled = true;
+        brush.shape_dynamics.brush_projection = true;
+        let xf = view(0.0, false, 1.0);
+        let axes = pen_axes(&xf, &brush, Some(crate::stylus::PenSample { tilt_x: 60.0, ..Default::default() }));
+        assert!(close(axes[0], Vec2::new(10.0, 0.0)));
+        assert!(close(axes[1], Vec2::new(0.0, 20.0)));
+        assert_eq!(pen_axes(&xf, &brush, Some(crate::stylus::PenSample::default())), tip_axes(&xf, brush.size));
+    }
+
     /// The axes are the screen offsets of the document points one radius right of and below the
     /// pointer, whatever the view does.
     #[test]
@@ -219,18 +334,19 @@ mod tests {
             shape_dynamics: ShapeDynamics { enabled: true, angle: Dynamic::controlled(Control::PenTilt), ..Default::default() },
             ..Default::default()
         };
-        let axes = [Vec2::new(20.0, 0.0), Vec2::new(0.0, 20.0)];
+        let xf = view(0.0, false, 1.0);
+        let axes = tip_axes(&xf, b.size);
         let pen = |tilt_x| PenSample { pressure: 0.0, tilt_x, tilt_y: -45.0, rotation: 0.0, eraser: false };
         // Hovering with the pen leaning "up" turns the outline 90° counter-clockwise.
-        let hover = follow_axes(&ctx, &b, axes, false, Some(pen(0.0)));
+        let hover = follow_axes(&ctx, &xf, &b, false, Some(pen(0.0)));
         assert!(close(hover[0], Vec2::new(0.0, -20.0)) && close(hover[1], Vec2::new(20.0, 0.0)), "{hover:?}");
-        // Touching down, even with a different live sample, holds the pre-touch turn.
-        let stroke = follow_axes(&ctx, &b, axes, true, Some(pen(45.0)));
+        // Touching down, even with a different live sample, holds the pre-touch pose.
+        let stroke = follow_axes(&ctx, &xf, &b, true, Some(pen(45.0)));
         assert!(close(stroke[0], hover[0]) && close(stroke[1], hover[1]), "{stroke:?}");
         // Lifted: live again, and a mouse keeps the brush's own angle.
-        let after = follow_axes(&ctx, &b, axes, false, Some(pen(45.0)));
+        let after = follow_axes(&ctx, &xf, &b, false, Some(pen(45.0)));
         assert!(!close(after[0], hover[0]), "{after:?}");
-        let mouse = follow_axes(&ctx, &b, axes, false, None);
+        let mouse = follow_axes(&ctx, &xf, &b, false, None);
         assert!(close(mouse[0], axes[0]) && close(mouse[1], axes[1]));
     }
 
