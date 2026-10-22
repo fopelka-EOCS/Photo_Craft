@@ -700,11 +700,12 @@ pub struct PhotocraftApp {
     monitors: monitor_status::State,
     checker: Option<egui::TextureHandle>,
     drag: Option<canvas::Drag>,
-    /// The canvas the drag in flight started in, and the pass it last ran its tools in
-    /// (`canvas::drag_pass`), when a canvas started it (the control channel's drags have none).
-    /// With a window of the document beside the main canvas, only that one carries the gesture on,
-    /// so the other doesn't feed it moves it maps through its own view (#6022).
-    drag_canvas: Option<(egui::Id, u64)>,
+    /// The canvas the drag in flight started in, the pass it last ran its tools in
+    /// (`canvas::drag_pass`) and the document it started on, when a canvas started it (the control
+    /// channel's drags have none). With a window of the document beside the main canvas, only that
+    /// one carries the gesture on, so the other doesn't feed it moves it maps through its own view
+    /// (#6022).
+    drag_canvas: Option<(egui::Id, u64, DocId)>,
     /// A Move-tool press landed on a locked layer: the first pointer move shows Photoshop's
     /// message (`move_lock`), a plain click shows nothing.
     pub(crate) move_blocked: bool,

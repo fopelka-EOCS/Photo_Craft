@@ -240,6 +240,76 @@ fn a_drag_whose_window_closes_ends_where_it_was() {
     assert_eq!(strokes, 1, "the release adds no second stroke");
 }
 
+/// A second 400 × 300 document with a transparent layer, behind the window's (0) or in front.
+fn second_document(h: &mut Harness<'static, PhotocraftApp>, active: usize) {
+    h.state_mut().run("file.new", json!({"width": 400, "height": 300})).unwrap();
+    h.state_mut().run("layer.new.layer", json!({})).unwrap();
+    h.state_mut().session.set_active(active);
+    h.run_steps(4);
+}
+
+/// Has document `doc`'s active layer any paint along the window drags' row (y = 150)?
+fn painted(h: &Harness<'static, PhotocraftApp>, doc: usize) -> bool {
+    let st = &h.state().session.documents()[doc];
+    let surface = st.doc.layer(st.active_layer.unwrap()).unwrap().surface().unwrap();
+    (100..300).any(|x| surface.rgba(x, 150)[3] > 0.0)
+}
+
+#[test]
+fn a_drag_whose_document_goes_back_is_dropped_not_finished_in_the_other() {
+    // Ending it where it was would commit its points to the document that came forward.
+    let mut h = harness(Tool::Brush);
+    second_document(&mut h, 0);
+    let (from, to) = (in_window(&h, 120.0, 150.0), in_window(&h, 200.0, 150.0));
+    h.event(egui::Event::PointerMoved(from));
+    h.run_steps(2);
+    button(&mut h, from, true);
+    for i in 1..=4 {
+        h.event(egui::Event::PointerMoved(from + (to - from) * (i as f32 / 4.0)));
+        h.run_steps(1);
+    }
+    assert!(h.state().drag.is_some(), "the stroke is in flight");
+    // Window › the other document (or ⌃Tab) while the button is still down.
+    h.state_mut().session.set_active(1);
+    h.event(egui::Event::PointerMoved(egui::pos2(300.0, 300.0)));
+    h.run_steps(3);
+    assert!(h.state().drag.is_none(), "the abandoned stroke is gone");
+    button(&mut h, egui::pos2(300.0, 300.0), false);
+    assert!(h.state().session.journal.iter().all(|(id, _)| id != "paint.stroke"), "nothing was committed");
+    assert!(!painted(&h, 1), "the document that came forward is untouched");
+    assert!(!painted(&h, 0), "and so is the one the stroke started on");
+}
+
+#[test]
+fn a_press_in_another_documents_window_mid_drag_leaves_the_drag_its_document() {
+    // A second button pressed over the window while drawing in the main one.
+    let mut h = harness(Tool::Brush);
+    second_document(&mut h, 1);
+    let main = &mut h.state_mut().ui.views[1];
+    (main.zoom, main.center, main.fit_pending) = (3.0, [200.0, 150.0], false);
+    h.run_steps(2);
+    let window = crate::canvas::window_canvas_rect(&h.ctx, WINDOW).unwrap();
+    let canvas = h.state().last_canvas_rect;
+    let (from, to) = (canvas.max - vec2(200.0, 80.0), canvas.max - vec2(100.0, 80.0));
+    assert!(!window.expand(40.0).contains(from), "a press on the main canvas, clear of the window: {from:?}, {window:?}");
+    h.event(egui::Event::PointerMoved(from));
+    h.run_steps(2);
+    button(&mut h, from, true);
+    h.event(egui::Event::PointerMoved(to));
+    h.run_steps(1);
+    assert!(h.state().drag.is_some(), "the stroke is in flight");
+    let over = in_window(&h, 200.0, 150.0);
+    h.event(egui::Event::PointerButton { pos: over, button: PointerButton::Middle, pressed: true, modifiers: egui::Modifiers::NONE });
+    h.run_steps(3);
+    assert_eq!(h.state().session.active_index(), Some(1), "the window's document stays behind");
+    assert!(h.state().drag.is_some(), "and the stroke carries on");
+    h.event(egui::Event::PointerButton { pos: over, button: PointerButton::Middle, pressed: false, modifiers: egui::Modifiers::NONE });
+    h.event(egui::Event::PointerMoved(to));
+    h.run_steps(1);
+    button(&mut h, to, false);
+    assert!(!painted(&h, 0), "the window's document is untouched");
+}
+
 #[test]
 fn every_tool_survives_a_drag_in_a_document_window() {
     // A press and drag over the image: an error or a no-op for a tool that needs more than that,

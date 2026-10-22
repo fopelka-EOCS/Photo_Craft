@@ -3422,7 +3422,12 @@ fn missed_a_pass(last_run: u64, pass: u64) -> bool {
     last_run.saturating_add(1) < pass
 }
 
-/// Is the drag in flight another canvas's to carry on? `owner` is `PhotocraftApp::drag_canvas`.
+/// The canvas that owns the drag in flight and the pass it last ran its tools in.
+fn drag_owner(app: &PhotocraftApp) -> Option<(egui::Id, u64)> {
+    app.drag_canvas.map(|(canvas, last_run, _)| (canvas, last_run))
+}
+
+/// Is the drag in flight another canvas's to carry on? `owner` is [`drag_owner`].
 pub(crate) fn drag_is_foreign(owner: Option<(egui::Id, u64)>, me: egui::Id, pass: u64) -> bool {
     owner.is_some_and(|(canvas, last_run)| canvas != me && !missed_a_pass(last_run, pass))
 }
@@ -3434,10 +3439,21 @@ pub(crate) fn drag_is_abandoned(owner: Option<(egui::Id, u64)>, me: egui::Id, pa
 }
 
 /// End an abandoned drag where it last was, as its release would have: what it drew is kept, and
-/// no other canvas feeds it moves mapped through its own view.
+/// no other canvas feeds it moves mapped through its own view. If another document has come
+/// forward since, that release would land in it, so the drag is dropped uncommitted instead, as
+/// `lasso_ui::cancel_stale` drops a lasso.
 fn end_abandoned_drag(app: &mut PhotocraftApp) {
-    app.drag_canvas = None;
+    let started_on = app.drag_canvas.take().map(|(_, _, doc)| doc);
     app.press_stroke = false;
+    if started_on.is_some_and(|doc| app.session.active().map(|st| st.doc.id) != Some(doc)) {
+        app.drag = None;
+        app.live_stroke = None;
+        app.move_preview = None;
+        // An ⌥-drag's copy stays a step of its own document: `move_mods::abandon` would undo in
+        // this one.
+        app.move_mods = Default::default();
+        return;
+    }
     let Some((p, mods)) = app.drag.as_ref().map(|d| (d.points.last().map_or(d.start, |q| [q[0], q[1]]), d.live)) else { return };
     tool_event(app, ToolEvent::Up { x: p[0], y: p[1] }, mods);
 }
@@ -3467,13 +3483,16 @@ pub(crate) fn canvas_view_as(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: us
     if app.drag.is_none() {
         app.drag_canvas = None;
     }
-    if tools && app.drag_canvas.is_some_and(|(c, _)| c == canvas_id) {
-        app.drag_canvas = Some((canvas_id, pass));
+    if tools
+        && let Some((c, _, doc)) = app.drag_canvas
+        && c == canvas_id
+    {
+        app.drag_canvas = Some((canvas_id, pass, doc));
     }
-    if tools && app.drag.is_some() && drag_is_abandoned(app.drag_canvas, canvas_id, pass) {
+    if tools && app.drag.is_some() && drag_is_abandoned(drag_owner(app), canvas_id, pass) {
         end_abandoned_drag(app);
     }
-    let foreign_drag = app.drag.is_some() && drag_is_foreign(app.drag_canvas, canvas_id, pass);
+    let foreign_drag = app.drag.is_some() && drag_is_foreign(drag_owner(app), canvas_id, pass);
     // The camera as the app holds it before this frame's input. The canvas works on its own copy
     // (`view`) and writes it back at the end; a tool that moves the camera itself meanwhile (the
     // Crop tool's default mode pans and turns the view with the image, `crop_mode`) must not be
@@ -4485,8 +4504,8 @@ pub(crate) fn canvas_view_as(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: us
             }
         }
         // The canvas that starts a drag owns it, and keeps the claim fresh while it carries on.
-        if app.drag.is_some() && (!had_drag || app.drag_canvas.is_some_and(|(c, _)| c == canvas_id)) {
-            app.drag_canvas = Some((canvas_id, pass));
+        if app.drag.is_some() && (!had_drag || drag_owner(app).is_some_and(|(c, _)| c == canvas_id)) {
+            app.drag_canvas = Some((canvas_id, pass, doc.id));
         }
     }
     if crop_camera && let (Some((center, rotation)), Some(now)) = (camera, app.ui.views.get(idx)) {
@@ -6642,10 +6661,11 @@ fn window_canvas_id(id: u64) -> egui::Id {
 /// One document window's canvas (#6022). In a window of the active document the tools work, in
 /// the window's own view. A press in a window of another document brings that document forward
 /// first, as a click on a tile does in a tiled layout, and goes on to use the tool there. While a
-/// dialog is open the press changes nothing: the dialog stays with the document it was opened on.
+/// dialog is open or a drag is in flight the press changes nothing: the dialog stays with the
+/// document it was opened on, and the drag with the one it started on.
 fn window_canvas(app: &mut PhotocraftApp, ui: &mut egui::Ui, doc: usize, rect: Rect, view: View) -> View {
     let pressed = ui.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| rect.contains(p)));
-    if pressed && app.ui.dialogs.is_empty() && app.session.active_index() != Some(doc) {
+    if pressed && app.drag.is_none() && app.ui.dialogs.is_empty() && app.session.active_index() != Some(doc) {
         app.session.set_active(doc);
     }
     if app.session.active_index() != Some(doc) {
