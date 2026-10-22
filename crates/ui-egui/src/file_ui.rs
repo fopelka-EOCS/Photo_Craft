@@ -806,6 +806,11 @@ fn take_turned_page(f: &mut Map<String, Value>, r: &Value) {
     };
     f.insert("printerSettings".into(), json!(settings));
     f.insert("paper".into(), json!([w, h]));
+    // The printable area turns with the paper; left portrait, it wouldn't fit the turned sheet.
+    match r.get("printable").filter(|v| v.as_array().is_some_and(|a| a.len() == 4 && a.iter().all(Value::is_number))) {
+        Some(area) => f.insert("printable".into(), area.clone()),
+        None => f.remove("printable"),
+    };
     f.insert("orientation".into(), json!("portrait"));
     f.remove("__pageError");
 }
@@ -817,10 +822,12 @@ fn driver_page(f: &mut Map<String, Value>) {
     match craft_print::rgb::page(&printer, settings.as_ref()) {
         Ok(pg) => {
             f.insert("paper".into(), json!([pg.paper.0, pg.paper.1]));
+            f.insert("printable".into(), json!([pg.printable.0, pg.printable.1, pg.printable.2, pg.printable.3]));
             f.insert("orientation".into(), json!("portrait"));
             f.remove("__pageError");
         }
         Err(e) => {
+            f.remove("printable");
             f.insert("__pageError".into(), json!(e.to_string()));
         }
     }
@@ -936,7 +943,9 @@ fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
             f.insert("__driverPageInitialized".into(), json!(true));
         }
     } else {
+        // PDF output and previews have no driver page: Scale to Fit Media uses the paper.
         f.remove("__driverPageInitialized");
+        f.remove("printable");
     }
     let p = params(f);
     let mut browse = false;
@@ -1216,8 +1225,20 @@ fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
     }
 }
 
+/// `file.print`'s params. The driver's printable area only goes with a print to the printer:
+/// an output path or a preview set in the same frame as the confirm still drops it.
+fn print_params(f: &Map<String, Value>) -> Value {
+    let mut p = params(f);
+    if (b(f, "dryRun", false) || !s(f, "output", "").is_empty())
+        && let Some(o) = p.as_object_mut()
+    {
+        o.remove("printable");
+    }
+    p
+}
+
 fn print_confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value, String> {
-    let r = app.run("file.print", params(f))?;
+    let r = app.run("file.print", print_params(f))?;
     if r["pending"] != json!(true) {
         print_status(app, &r);
     }
@@ -1527,6 +1548,20 @@ mod tests {
         assert!(params(f).get("__printers").is_none());
     }
 
+    /// An output path or a preview typed and confirmed in one frame doesn't take the driver's area.
+    #[test]
+    fn the_printable_area_goes_only_with_a_print_to_the_printer() {
+        let area = json!([0.0, 0.0, 842.29, 1191.14]);
+        let mut f = Map::new();
+        f.insert("printable".into(), area.clone());
+        assert_eq!(print_params(&f)["printable"], area);
+        f.insert("output".into(), json!("/tmp/out.pdf"));
+        assert!(print_params(&f).get("printable").is_none());
+        f.insert("output".into(), json!(""));
+        f.insert("dryRun".into(), json!(true));
+        assert!(print_params(&f).get("printable").is_none());
+    }
+
     /// #7410: File › Print opens with the settings of the last print, also those remembered from
     /// an earlier session (the preferences), before anything was printed in this one.
     #[test]
@@ -1636,6 +1671,32 @@ mod tests {
             take_turned_page(&mut f, &partial);
             assert_eq!((f.get("printerSettings"), f.get("paper")), (Some(&json!("old")), Some(&json!([595.28, 841.89]))), "{partial}");
             assert!(f.get("__pageError").is_some(), "{partial}");
+        }
+    }
+
+    /// #7782: the driver's printable area turns with the paper. Left portrait on a landscape
+    /// sheet, Scale to Fit Media refused the print instead of fitting it.
+    #[test]
+    fn a_turn_takes_the_printable_area_with_the_paper() {
+        let (mut app, ctx) = app();
+        crate::menus::invoke(&mut app, &ctx, "file.new", json!({"width": 500, "height": 1000})).unwrap();
+        let doc = app.session.active().unwrap().doc.clone();
+        let mut f = Map::new();
+        f.insert("scaleToFit".into(), json!(true));
+        f.insert("dryRun".into(), json!(false));
+        f.insert("printerSettings".into(), json!("old"));
+        f.insert("paper".into(), json!([842.29, 1191.14]));
+        f.insert("printable".into(), json!([12.0, 12.0, 818.29, 1167.14]));
+        f.insert("orientation".into(), json!("portrait"));
+        take_turned_page(&mut f, &json!({"printerSettings": "new", "paper": [1191.14, 842.29], "printable": [12.0, 12.0, 1167.14, 818.29]}));
+        let l = photocraft_engine::print_cmds::layout(&doc, &print_params(&f), "file.print");
+        assert_eq!(l.map(|l| l.paper).map_err(|e| e.to_string()), Ok((1191.14, 842.29)));
+        assert_eq!(f.get("printable"), Some(&json!([12.0, 12.0, 1167.14, 818.29])));
+        // An answer without a usable area drops the old one: the fixed margin, not a stale area.
+        for area in [Value::Null, json!([12.0, 12.0, 818.29]), json!("x")] {
+            f.insert("printable".into(), json!([12.0, 12.0, 1167.14, 818.29]));
+            take_turned_page(&mut f, &json!({"printerSettings": "newer", "paper": [842.29, 1191.14], "printable": area}));
+            assert!(f.get("printable").is_none(), "{area}");
         }
     }
 }
