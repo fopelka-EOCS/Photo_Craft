@@ -1605,6 +1605,11 @@ fn select_to(id: &str, p: &Value) -> Option<Descriptor> {
     let enumerated = |cls: &str, ty: &str, v: &str| D::Reference(vec![ReferenceItem::Enumerated { class: class(cls), type_id: code(ty), value: code(v) }]);
     Some(match id {
         "layer.select" => {
+            // ATN names a layer, but PhotoCraft can record a specific duplicate-name occurrence.
+            // Refuse that form rather than silently selecting a different layer on replay.
+            if p.get("name").is_some() || p.get("occurrence").is_some() {
+                return None;
+            }
             let mut d = desc("null").with("null", name_ref("Lyr ", jstr(p, "layer")?));
             match jstr(p, "mode") {
                 None | Some("replace") => {}

@@ -937,6 +937,8 @@ fn vignette(px: &mut [[f32; 4]], w: usize, h: usize, p: &CameraRaw) {
     } else {
         (cx, cy)
     };
+    // Keep the pixel-coordinate divisors positive for degenerate one-pixel vignette geometry.
+    let (ax, ay) = (ax.max(f32::EPSILON), ay.max(f32::EPSILON));
     let pw = 2.0 + (-round).max(0.0) * 6.0;
     let inner = 1.0 - mid * 0.8;
     let edge0 = inner - feather * 0.5 * inner;
@@ -984,6 +986,21 @@ fn vignette(px: &mut [[f32; 4]], w: usize, h: usize, p: &CameraRaw) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_one_pixel_vignette_keeps_its_center_finite_and_neutral() {
+        for style in ["highlightPriority", "colorPriority", "paintOverlay"] {
+            for amount in [-80.0, 80.0] {
+                let mut out = [[0.5f32, 0.5, 0.5, 1.0]];
+                let p = CameraRaw { vignette_amount: amount, vignette_roundness: 100.0, vignette_style: style.into(), ..Default::default() };
+                develop(&mut out, 1, 1, &p, false);
+                for value in &out[0][..3] {
+                    assert!(value.is_finite() && (*value - 0.5).abs() < 1e-5, "{style}, {amount}: {out:?}");
+                }
+                assert_eq!(out[0][3], 1.0);
+            }
+        }
+    }
 
     #[test]
     fn new_curves_are_validated_but_saved_curves_still_load_and_render() {

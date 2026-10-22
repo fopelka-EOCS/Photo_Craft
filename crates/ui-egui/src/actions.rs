@@ -357,8 +357,8 @@ fn load_dialog(app: &mut PhotocraftApp) -> Result<Value, String> {
 fn save_dialog(app: &mut PhotocraftApp, set: Option<String>) -> Result<Value, String> {
     let set = set.or_else(|| selected_action(app).and_then(|a| a.set.clone()));
     let params = match &set {
-        Some(set) => json!({"set": set, "skipUnsupported": true}),
-        None => json!({"skipUnsupported": true}),
+        Some(set) => json!({"set": set}),
+        None => json!({}),
     };
     let r = app.run("actions.save", params)?;
     let bytes = r["data"].as_str().and_then(photocraft_engine::paint::tile::b64_decode).ok_or("the export returned no data")?;
@@ -1031,6 +1031,16 @@ mod tests {
         h.get_by_label("Select Layer (Background)");
         assert_eq!(step_label("layer.select", &json!({"layer":26})), "Select Layer (ID 26)");
         assert_eq!(step_label("layer.select", &json!({"layer":"Background"})), "Select Layer (Background)");
+    }
+
+    #[test]
+    fn save_actions_reports_steps_it_cannot_export() {
+        // A recorded occurrence cannot be represented by an ATN layer name alone. The menu
+        // handler surfaces this strict export error instead of saving an incomplete action.
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.session.actions.list.push(Action::new("Select photo", vec![("layer.select".into(), json!({"name": "Photo", "occurrence": 0}))]));
+        let err = save_dialog(&mut app, None).unwrap_err();
+        assert!(err.contains("step 1") && err.contains("layer.select"), "{err}");
     }
 
     #[test]

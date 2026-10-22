@@ -701,8 +701,47 @@ fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
+/// Decode one XML 1.0 reference, preserving malformed or forbidden references verbatim.
+fn xml_reference(reference: &str) -> Option<char> {
+    match reference {
+        "lt" => return Some('<'),
+        "gt" => return Some('>'),
+        "quot" => return Some('"'),
+        "apos" => return Some('\''),
+        "amp" => return Some('&'),
+        _ => {}
+    }
+    let number = reference.strip_prefix('#')?;
+    let (digits, radix) = number.strip_prefix('x').map_or((number, 10), |hex| (hex, 16));
+    if digits.is_empty() || !digits.bytes().all(|b| if radix == 16 { b.is_ascii_hexdigit() } else { b.is_ascii_digit() }) {
+        return None;
+    }
+    let code = u32::from_str_radix(digits, radix).ok()?;
+    // XML 1.0 Char, not merely a Unicode scalar: NUL, most controls and FFFE/FFFF are invalid.
+    if !matches!(code, 0x9 | 0xA | 0xD | 0x20..=0xD7FF | 0xE000..=0xFFFD | 0x10000..=0x10FFFF) {
+        return None;
+    }
+    char::from_u32(code)
+}
+
 fn xml_unescape(s: &str) -> String {
-    s.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&")
+    // Split on source ampersands only: decoded text is never interpreted a second time. Each
+    // input segment is scanned once, including malformed runs of ampersands or long zero padding.
+    let mut parts = s.split('&');
+    let mut out = String::with_capacity(s.len());
+    out.push_str(parts.next().unwrap_or_default());
+    for part in parts {
+        if let Some((reference, tail)) = part.split_once(';')
+            && let Some(c) = xml_reference(reference)
+        {
+            out.push(c);
+            out.push_str(tail);
+        } else {
+            out.push('&');
+            out.push_str(part);
+        }
+    }
+    out
 }
 
 /// The element `<tag …>…</tag>` (first occurrence) as (start, end, inner).
