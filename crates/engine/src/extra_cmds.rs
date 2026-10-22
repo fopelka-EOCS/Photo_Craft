@@ -336,6 +336,9 @@ fn can_reselect(s: &Session) -> std::result::Result<(), String> {
     reselect_target(s).map(|_| ()).ok_or_else(|| "there is no selection to restore".into())
 }
 
+/// Edit › Paste Special › Paste Into (or Outside): the clipboard centred on the selection, not
+/// clamped to the canvas, as a new layer masked to the selection (or its inverse), or into the
+/// targeted mask or channel. One history step.
 fn paste_into(s: &mut Session, p: &Value, outside: bool) -> Result<Value> {
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let selection = d.doc.selection.clone().ok_or(EngineError::Other("Paste Into needs a selection".into()))?;

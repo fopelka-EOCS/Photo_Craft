@@ -3590,10 +3590,11 @@ mod clipboard_tests {
         app
     }
 
+    /// Paste is enabled from the clipboard service alone (no read); the explicit paste imports
+    /// the OS image, once, and centres it in the view like Photoshop does for foreign clipboard
+    /// content.
     #[test]
     fn external_clipboard_enables_and_centres_paste() {
-        // Paste is enabled from the clipboard service alone (no read); the explicit paste imports
-        // the OS image, once, and centres it like Photoshop does for foreign clipboard content.
         let (os, reads) = (OsClip::default(), Arc::default());
         let mut app = app_with_os_clipboard(&os, &reads);
         *os.lock().unwrap() = Some((4, 4, [255u8, 0, 0, 255].repeat(16)));

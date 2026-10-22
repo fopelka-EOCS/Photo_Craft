@@ -1363,6 +1363,7 @@ mod tests {
         assert_eq!(active_bounds(&s), Rect::new(75, 85, 115, 105));
     }
 
+    /// The clamp never overflows or panics: NaN, infinite and `i32`-limit shifts saturate (Rule 9).
     #[test]
     fn paste_offset_clamp_survives_extreme_coordinates() {
         assert_eq!(clamp_shift(f64::NAN, 0, 10, 0, 100), 0);
