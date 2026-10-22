@@ -124,6 +124,7 @@ enum Target {
     Class,
     Offset(i32),
     Index(u32),
+    Id(u32),
     Other,
 }
 
@@ -133,6 +134,7 @@ fn target(r: &[ReferenceItem]) -> Target {
         Some(ReferenceItem::Name { name, .. }) => Target::Name(name.to_string_lossy()),
         Some(ReferenceItem::Property { key, .. }) => Target::Property(trimmed(key)),
         Some(ReferenceItem::Class(_)) => Target::Class,
+        Some(ReferenceItem::Identifier { id, .. }) => Target::Id(*id),
         Some(ReferenceItem::Offset { offset, .. }) => Target::Offset(*offset),
         Some(ReferenceItem::Index { index, .. }) => Target::Index(*index),
         _ => Target::Other,
@@ -140,7 +142,8 @@ fn target(r: &[ReferenceItem]) -> Target {
 }
 
 /// `{"layer": name}` for a reference that names a layer, `{}` for the target layer, `None`
-/// for anything else (an index or id: meaningless in another document).
+/// for anything else (an index: meaningless in another document). A layer id reference
+/// (`Idnt`) comes back as the id the engine's `layer` param takes.
 fn layer_target(r: &[ReferenceItem]) -> Option<Map<String, Value>> {
     let mut m = Map::new();
     match target(r) {
@@ -150,6 +153,10 @@ fn layer_target(r: &[ReferenceItem]) -> Option<Map<String, Value>> {
         }
         Target::Property(p) if p == "Bckg" => {
             m.insert("layer".into(), json!("Background"));
+        }
+        // Photoshop's layer id: exact in the document whose ids the file refers to.
+        Target::Id(id) if ref_class(r).as_deref() == Some("Lyr") => {
+            m.insert("layer".into(), json!(id));
         }
         _ => return None,
     }
@@ -3814,8 +3821,13 @@ fn export_item(id: &str, params: &Value, set: &str) -> Option<AtnItem> {
     Some(AtnItem { event, dictionary: e.label.as_bytes().to_vec(), descriptor: Some(descriptor), ..Default::default() })
 }
 
-/// Photoshop applies only the rename when a Set mixes it with opacity or blend mode (#8304).
-/// Write each layer property separately, renaming last so named references still resolve.
+/// Photoshop applies only the rename when a Set mixes it with opacity or blend mode (#8304):
+/// write each layer property separately, renaming last so named references still resolve. A
+/// `.atn` reference is also one target, so a `layer.setProps` step that named `layers` exports
+/// as one Set per layer, each referenced by Photoshop's layer id: an edit that accepted the
+/// list must not replay on the active layer alone (#7246). A step unable to represent the
+/// whole list exactly (an id beyond `Idnt`'s u32; a rename of several layers, which
+/// PhotoCraft itself refuses) comes back as `None`, to refuse or skip the source step.
 fn export_items(id: &str, params: &Value, set: &str) -> Option<Vec<AtnItem>> {
     let item = export_item(id, params, set)?;
     if id != "layer.setProps" {
@@ -3823,15 +3835,30 @@ fn export_items(id: &str, params: &Value, set: &str) -> Option<Vec<AtnItem>> {
     }
     let descriptor = item.descriptor.as_ref()?;
     let properties = get_obj(descriptor, "T   ")?;
-    if properties.items.len() <= 1 {
+    let targets = match params.get("layers") {
+        None | Some(Value::Null) => vec![descriptor.get("null")?.clone()],
+        Some(Value::Array(ids)) => {
+            if ids.is_empty() || (params.get("name").is_some() && ids.len() > 1) {
+                return None;
+            }
+            let mut refs = Vec::with_capacity(ids.len());
+            for v in ids {
+                let id = v.as_u64().filter(|n| *n <= u32::MAX as u64)?;
+                refs.push(D::Reference(vec![ReferenceItem::Identifier { class: class("Lyr "), id: id as u32 }]));
+            }
+            refs
+        }
+        Some(_) => return None,
+    };
+    if properties.items.len() <= 1 && targets.len() == 1 {
         return Some(vec![item]);
     }
-    let target = descriptor.get("null")?;
-    let mut items = Vec::with_capacity(properties.items.len());
-    for (key, value) in properties.items.iter().filter(|(k, _)| !k.is("Nm  ")).chain(properties.items.iter().filter(|(k, _)| k.is("Nm  "))) {
-        let mut property = properties.clone();
-        property.items = vec![(key.clone(), value.clone())];
-        let descriptor = desc("null").with("null", target.clone()).with("T   ", D::Descriptor(property));
+    let mut items = Vec::with_capacity(properties.items.len() * targets.len());
+    for target in targets {
+        for (key, value) in properties.items.iter().filter(|(k, _)| !k.is("Nm  ")).chain(properties.items.iter().filter(|(k, _)| k.is("Nm  "))) {
+            let mut property = properties.clone();
+            property.items = vec![(key.clone(), value.clone())];
+            let descriptor = desc("null").with("null", target.clone()).with("T   ", D::Descriptor(property));
         items.push(AtnItem { descriptor: Some(descriptor), ..item.clone() });
     }
     Some(items)
@@ -4140,3 +4167,6 @@ mod tests;
 
 #[cfg(test)]
 mod layer_props_tests;
+
+#[cfg(test)]
+mod layer_list_tests;
