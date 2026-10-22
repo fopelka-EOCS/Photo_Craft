@@ -61,80 +61,87 @@ pub(crate) fn edit_points(ui: &mut egui::Ui, rect_key: egui::Id, points: &mut Ve
         *points = vec![[0.0, 0.0], [1.0, 1.0]];
     }
     let mut changed = false;
-    // The square with the presets beside it, so the control fits the preferences page's height.
-    ui.horizontal_top(|ui| {
-        let (rect, resp) = ui.allocate_exact_size(Vec2::splat(SIZE), Sense::click_and_drag());
-        // Where the square is this frame (tests and automation point at curve coordinates).
-        ui.data_mut(|d| d.insert_temp(rect_key, rect));
-        let to_screen = |p: [f32; 2]| pos2(rect.left() + p[0] * rect.width(), rect.bottom() - p[1] * rect.height());
-        let to_curve = |s: Pos2| [((s.x - rect.left()) / rect.width()).clamp(0.0, 1.0), ((rect.bottom() - s.y) / rect.height()).clamp(0.0, 1.0)];
-        let painter = ui.painter_at(rect.expand(4.0));
-        painter.rect_filled(rect, 2.0, t.field);
-        for i in 1..4 {
-            let f = i as f32 / 4.0;
-            let grid = Stroke::new(1.0, t.field_border);
-            painter.line_segment([pos2(rect.left() + f * rect.width(), rect.top()), pos2(rect.left() + f * rect.width(), rect.bottom())], grid);
-            painter.line_segment([pos2(rect.left(), rect.top() + f * rect.height()), pos2(rect.right(), rect.top() + f * rect.height())], grid);
-        }
-        painter.rect_stroke(rect, 2.0, Stroke::new(1.0, t.field_border), egui::StrokeKind::Inside);
-        painter.line_segment([rect.left_bottom(), rect.right_top()], Stroke::new(1.0, t.text_dim.gamma_multiply(0.35)));
-
-        // The point under a press is dragged until release (kept in the egui memory).
-        let drag_id = resp.id.with("dragging");
-        let nearest = |at: Pos2, pts: &[[f32; 2]]| {
-            pts.iter().enumerate().map(|(i, p)| (i, to_screen(*p).distance(at))).filter(|(_, d)| *d <= GRAB).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(i, _)| i)
-        };
-        // The point under the press, not under the pointer when the drag is recognised (by then
-        // it has moved past egui's drag threshold, off the point).
-        if resp.drag_started()
-            && let Some(at) = ui.input(|i| i.pointer.press_origin()).or(resp.interact_pointer_pos())
-        {
-            let grabbed = nearest(at, points);
-            ui.data_mut(|d| d.insert_temp(drag_id, grabbed));
-        }
-        let dragging: Option<usize> = ui.data(|d| d.get_temp(drag_id)).flatten();
-        if let (Some(i), Some(at)) = (dragging, resp.interact_pointer_pos().filter(|_| resp.dragged()))
-            && let Some(p) = points.get_mut(i)
-        {
-            *p = to_curve(at);
-            changed = true;
-        }
-        if resp.drag_stopped() {
-            ui.data_mut(|d| d.insert_temp::<Option<usize>>(drag_id, None));
-        }
-        if resp.clicked()
-            && let Some(at) = resp.interact_pointer_pos()
-            && nearest(at, points).is_none()
-            && points.len() < PressureCurve::MAX_POINTS
-        {
-            points.push(to_curve(at));
-            changed = true;
-        }
-        if resp.secondary_clicked()
-            && let Some(at) = resp.interact_pointer_pos()
-            && let Some(i) = nearest(at, points)
-            && points.len() > 2
-        {
-            points.remove(i);
-            changed = true;
-        }
-
-        let curve = PressureCurve::new(points);
-        let line: Vec<Pos2> = (0..=64).map(|i| i as f32 / 64.0).map(|x| to_screen([x, curve.eval(x)])).collect();
-        painter.add(egui::Shape::line(line, Stroke::new(2.0, t.accent)));
-        for (i, p) in points.iter().enumerate() {
-            let active = dragging == Some(i);
-            painter.circle(to_screen(*p), if active { 5.0 } else { 4.0 }, if active { t.accent } else { t.field }, Stroke::new(1.5, t.accent));
-        }
-        resp.on_hover_text(tl!("Click to add a point, right-click to remove"));
-
-        ui.vertical(|ui| {
-            for (name, preset) in PRESETS {
-                if ui.small_button(tl!(name)).clicked() {
-                    *points = preset.to_vec();
-                    changed = true;
-                }
+    // Keep the wrapped editor and presets in one grid cell so its full height is measured.
+    ui.vertical(|ui| {
+        ui.horizontal_wrapped(|ui| {
+            let (rect, resp) = ui.allocate_exact_size(Vec2::splat(SIZE), Sense::click_and_drag());
+            // Where the square is this frame (tests and automation point at curve coordinates).
+            ui.data_mut(|d| d.insert_temp(rect_key, rect));
+            let to_screen = |p: [f32; 2]| pos2(rect.left() + p[0] * rect.width(), rect.bottom() - p[1] * rect.height());
+            let to_curve = |s: Pos2| [((s.x - rect.left()) / rect.width()).clamp(0.0, 1.0), ((rect.bottom() - s.y) / rect.height()).clamp(0.0, 1.0)];
+            let painter = ui.painter_at(rect.expand(4.0));
+            painter.rect_filled(rect, 2.0, t.field);
+            for i in 1..4 {
+                let f = i as f32 / 4.0;
+                let grid = Stroke::new(1.0, t.field_border);
+                painter.line_segment([pos2(rect.left() + f * rect.width(), rect.top()), pos2(rect.left() + f * rect.width(), rect.bottom())], grid);
+                painter.line_segment([pos2(rect.left(), rect.top() + f * rect.height()), pos2(rect.right(), rect.top() + f * rect.height())], grid);
             }
+            painter.rect_stroke(rect, 2.0, Stroke::new(1.0, t.field_border), egui::StrokeKind::Inside);
+            painter.line_segment([rect.left_bottom(), rect.right_top()], Stroke::new(1.0, t.text_dim.gamma_multiply(0.35)));
+
+            // The point under a press is dragged until release (kept in the egui memory).
+            let drag_id = resp.id.with("dragging");
+            let nearest = |at: Pos2, pts: &[[f32; 2]]| {
+                pts.iter()
+                    .enumerate()
+                    .map(|(i, p)| (i, to_screen(*p).distance(at)))
+                    .filter(|(_, d)| *d <= GRAB)
+                    .min_by(|a, b| a.1.total_cmp(&b.1))
+                    .map(|(i, _)| i)
+            };
+            // The point under the press, not under the pointer when the drag is recognised (by then
+            // it has moved past egui's drag threshold, off the point).
+            if resp.drag_started()
+                && let Some(at) = ui.input(|i| i.pointer.press_origin()).or(resp.interact_pointer_pos())
+            {
+                let grabbed = nearest(at, points);
+                ui.data_mut(|d| d.insert_temp(drag_id, grabbed));
+            }
+            let dragging: Option<usize> = ui.data(|d| d.get_temp(drag_id)).flatten();
+            if let (Some(i), Some(at)) = (dragging, resp.interact_pointer_pos().filter(|_| resp.dragged()))
+                && let Some(p) = points.get_mut(i)
+            {
+                *p = to_curve(at);
+                changed = true;
+            }
+            if resp.drag_stopped() {
+                ui.data_mut(|d| d.insert_temp::<Option<usize>>(drag_id, None));
+            }
+            if resp.clicked()
+                && let Some(at) = resp.interact_pointer_pos()
+                && nearest(at, points).is_none()
+                && points.len() < PressureCurve::MAX_POINTS
+            {
+                points.push(to_curve(at));
+                changed = true;
+            }
+            if resp.secondary_clicked()
+                && let Some(at) = resp.interact_pointer_pos()
+                && let Some(i) = nearest(at, points)
+                && points.len() > 2
+            {
+                points.remove(i);
+                changed = true;
+            }
+
+            let curve = PressureCurve::new(points);
+            let line: Vec<Pos2> = (0..=64).map(|i| i as f32 / 64.0).map(|x| to_screen([x, curve.eval(x)])).collect();
+            painter.add(egui::Shape::line(line, Stroke::new(2.0, t.accent)));
+            for (i, p) in points.iter().enumerate() {
+                let active = dragging == Some(i);
+                painter.circle(to_screen(*p), if active { 5.0 } else { 4.0 }, if active { t.accent } else { t.field }, Stroke::new(1.5, t.accent));
+            }
+            resp.on_hover_text(tl!("Click to add a point, right-click to remove"));
+
+            ui.vertical(|ui| {
+                for (name, preset) in PRESETS {
+                    if ui.small_button(tl!(name)).clicked() {
+                        *points = preset.to_vec();
+                        changed = true;
+                    }
+                }
+            });
         });
     });
     if changed {

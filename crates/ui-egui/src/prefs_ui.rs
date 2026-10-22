@@ -1044,6 +1044,10 @@ pub fn owns(fields: &Map<String, Value>) -> bool {
 }
 
 /// Only Preferences supports applying changes without closing the dialog.
+pub fn is_shortcuts(fields: &Map<String, Value>) -> bool {
+    fields.get("__prefsui").and_then(Value::as_str) == Some("shortcuts")
+}
+
 pub fn is_preferences(fields: &Map<String, Value>) -> bool {
     fields.get("__prefsui").and_then(Value::as_str) == Some("prefs")
 }
@@ -1081,7 +1085,7 @@ pub const PREFERENCES_SIZE: egui::Vec2 = egui::vec2(1040.0, 800.0);
 /// The height of the settings area (section list and fields) when `available` is left below the
 /// search field: everything but the dialog's button row (`item_spacing` + 8 pt + the buttons) and
 /// a little slack, never less than a few rows.
-fn settings_height(available: f32, item_spacing: f32, button_height: f32) -> f32 {
+pub(crate) fn settings_height(available: f32, item_spacing: f32, button_height: f32) -> f32 {
     (available - (item_spacing + 8.0 + button_height + 4.0)).max(160.0)
 }
 
@@ -1090,7 +1094,7 @@ fn settings_height(available: f32, item_spacing: f32, button_height: f32) -> f32
 pub fn width(fields: &Map<String, Value>, available: f32) -> Option<f32> {
     match fields.get("__prefsui").and_then(Value::as_str)? {
         "prefs" => Some(available.max(380.0)),
-        "shortcuts" => Some(720.0),
+        "shortcuts" => Some(available.clamp(380.0, 720.0)),
         _ => Some(460.0),
     }
 }
@@ -1290,6 +1294,29 @@ fn color_of(s: &str) -> Color32 {
     prefs::parse_hex(s).map_or(Color32::GRAY, |c| Color32::from_rgb(c[0], c[1], c[2]))
 }
 
+/// Compute widths before entering a grid so its remembered cell sizes cannot
+/// feed back into dialog sizing. Compound controls use the same column budgets.
+#[derive(Clone, Copy)]
+struct PreferenceWidths {
+    label: f32,
+    field: f32,
+}
+
+impl PreferenceWidths {
+    fn new(available: f32) -> Self {
+        let room = (available - 14.0).max(0.0);
+        let label = (room * 0.42).min(220.0);
+        Self { label, field: (room - label).min(260.0) }
+    }
+
+    fn label(self, ui: &mut egui::Ui, text: &str) {
+        let t = Tokens::get(ui.ctx());
+        ui.allocate_ui_with_layout(vec2(self.label, ui.spacing().interact_size.y), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.add(egui::Label::new(RichText::new(text).color(t.text_dim)).wrap());
+        });
+    }
+}
+
 /// Search the same visible, editable preference labels used in the dialog.
 fn preference_matches(section: &str, key: &str, query: &str) -> bool {
     let label = humanize(key);
@@ -1329,49 +1356,53 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui
         section = (*first).to_string();
     }
     ui.add_space(6.0);
+    let content_height = settings_height(ui.available_height(), ui.spacing().item_spacing.y, crate::widgets::button_height(ui.ctx()));
     ui.horizontal_top(|ui| {
-        // Section list.
+        // Both columns share the remaining height, keeping the confirmation row visible.
         ui.vertical(|ui| {
             ui.set_width(170.0);
-            if found.is_empty() {
-                ui.label(RichText::new(tl!("No matching settings")).color(t.text_dim));
-            }
-            for &(id, title) in &found {
-                let sel = section == id;
-                let empty = !has_visible_fields(&values, id);
-                let (rect, resp) = ui.allocate_exact_size(vec2(170.0, 22.0), Sense::click());
-                if sel {
-                    ui.painter().rect_filled(rect, t.radius_sm, t.row_selected);
-                } else if resp.hovered() {
-                    ui.painter().rect_filled(rect, t.radius_sm, t.hover);
+            egui::ScrollArea::vertical().id_salt("prefs-sections").max_height(content_height).auto_shrink([false, true]).max_width(170.0).show(ui, |ui| {
+                let section_width = ui.available_width().min(170.0);
+                if found.is_empty() {
+                    ui.label(RichText::new(tl!("No matching settings")).color(t.text_dim));
                 }
-                let color = if sel {
-                    t.text
-                } else if empty {
-                    t.text_faint
-                } else {
-                    t.text_dim
-                };
-                // Translated section names can be longer than the column: elide them (the full
-                // name is the tooltip) instead of drawing over the settings.
-                let mut job = egui::text::LayoutJob::simple_singleline(tl!(title).to_string(), crate::theme::medium(12.5), color);
-                job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width() - 12.0);
-                let galley = ui.painter().layout_job(job);
-                let elided = galley.elided;
-                ui.painter().galley(rect.left_center() + vec2(8.0, -galley.size().y / 2.0), galley, color);
-                let resp = if elided { resp.on_hover_text(tl!(title)) } else { resp };
-                if resp.clicked() {
-                    section = id.to_string();
+                for &(id, title) in &found {
+                    let sel = section == id;
+                    let empty = !has_visible_fields(&values, id);
+                    let (rect, resp) = ui.allocate_exact_size(vec2(section_width, 22.0), Sense::click());
+                    if sel {
+                        ui.painter().rect_filled(rect, t.radius_sm, t.row_selected);
+                    } else if resp.hovered() {
+                        ui.painter().rect_filled(rect, t.radius_sm, t.hover);
+                    }
+                    let color = if sel {
+                        t.text
+                    } else if empty {
+                        t.text_faint
+                    } else {
+                        t.text_dim
+                    };
+                    // Translated section names can be longer than the column: elide them (the full
+                    // name is the tooltip) instead of drawing over the settings.
+                    let mut job = egui::text::LayoutJob::simple_singleline(tl!(title).to_string(), crate::theme::medium(12.5), color);
+                    job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width() - 12.0);
+                    let galley = ui.painter().layout_job(job);
+                    let elided = galley.elided;
+                    ui.painter().galley(rect.left_center() + vec2(8.0, -galley.size().y / 2.0), galley, color);
+                    let resp = if elided { resp.on_hover_text(tl!(title)) } else { resp };
+                    if resp.clicked() {
+                        section = id.to_string();
+                    }
                 }
-            }
+            });
         });
         // The settings fill the dialog's resizable area down to the button row (#7420). Sizing them
         // from the window instead left a resized dialog with empty space and the buttons mid-way.
         // The area grows to fit its content, so this must never ask for more than it was given.
-        let content_height = settings_height(ui.available_height(), ui.spacing().item_spacing.y, crate::widgets::button_height(ui.ctx()));
         crate::widgets::vline(ui, content_height);
         ui.vertical(|ui| {
             ui.set_width((ui.available_width() - 12.0).max(340.0));
+            let top = ui.cursor().top();
             let title = SECTIONS.iter().find(|(id, _)| *id == section).map_or("General", |(_, t)| *t);
             ui.label(RichText::new(tl!(&title)).font(crate::theme::semibold(14.0)).color(t.text));
             let show_all = search.trim().is_empty()
@@ -1379,33 +1410,37 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui
                 || tl!(&title).to_lowercase().contains(&search.trim().to_lowercase());
             let filter = if show_all { "" } else { search.trim() };
             ui.add_space(6.0);
-            egui::ScrollArea::vertical().max_height(content_height - 30.0).id_salt("prefs-scroll").show(ui, |ui| {
-                let order: Vec<String> =
-                    f.get("__order").and_then(|o| o.get(&section)).and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
-                if !has_visible_fields(&values, &section) {
-                    ui.add_space(4.0);
-                    ui.label(RichText::new(tl!("These settings aren't available in PhotoCraft yet.")).color(t.text_faint));
-                } else if let Some(obj) = values.get_mut(&section).and_then(Value::as_object_mut) {
-                    section_fields(ui, &section, obj, &order, lang, system, filter);
-                    if section == "fileHandling" {
-                        ui.label(
-                            RichText::new(tl!("0 turns this threshold off; SVG groups nested deeper than 100 levels are always rasterized."))
-                                .color(t.text_faint),
-                        );
+            egui::ScrollArea::vertical()
+                .max_height((content_height - (ui.cursor().top() - top)).max(0.0))
+                .auto_shrink([false, true])
+                .id_salt(("prefs-scroll", &section))
+                .show(ui, |ui| {
+                    let order: Vec<String> =
+                        f.get("__order").and_then(|o| o.get(&section)).and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
+                    if !has_visible_fields(&values, &section) {
+                        ui.add_space(4.0);
+                        ui.label(RichText::new(tl!("These settings aren't available in PhotoCraft yet.")).color(t.text_faint));
+                    } else if let Some(obj) = values.get_mut(&section).and_then(Value::as_object_mut) {
+                        section_fields(ui, &section, obj, &order, lang, system, filter);
+                        if section == "fileHandling" {
+                            ui.label(
+                                RichText::new(tl!("0 turns this threshold off; SVG groups nested deeper than 100 levels are always rasterized."))
+                                    .color(t.text_faint),
+                            );
+                        }
+                        if section == "performance" {
+                            gpu_status_rows(ui, f.get("__gpuInfo"), f.get("__gpuAdapters"), obj);
+                        }
+                        ui.add_space(8.0);
                     }
-                    if section == "performance" {
-                        gpu_status_rows(ui, f.get("__gpuInfo"), f.get("__gpuAdapters"), obj);
+                    if search.trim().is_empty()
+                        && has_visible_fields(&values, &section)
+                        && crate::widgets::secondary_button(ui, tl!("Reset Section"), 110.0).clicked()
+                        && let Some(def) = prefs::Preferences::default().get(&section)
+                    {
+                        values[&section] = def;
                     }
-                    ui.add_space(8.0);
-                }
-                if search.trim().is_empty()
-                    && has_visible_fields(&values, &section)
-                    && crate::widgets::secondary_button(ui, tl!("Reset Section"), 110.0).clicked()
-                    && let Some(def) = prefs::Preferences::default().get(&section)
-                {
-                    values[&section] = def;
-                }
-            });
+                });
         });
     });
     f.insert("section".into(), json!(section));
@@ -1429,7 +1464,7 @@ fn gpu_status_rows(ui: &mut egui::Ui, info: Option<&Value>, adapters: Option<&Va
     ui.add_space(4.0);
     ui.label(RichText::new(tl!("Applies at next launch.")).color(t.text_faint));
     ui.collapsing(tl!("Advanced"), |ui| {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label(tl!("GPU Backend"));
             let mut current = obj.get("gpuBackend").and_then(Value::as_str).unwrap_or("auto").to_string();
             let options = prefs::choices("performance.gpuBackend").unwrap_or(&[]);
@@ -1461,9 +1496,9 @@ fn graphics_adapter_row(ui: &mut egui::Ui, adapters: Option<&Value>, obj: &mut M
     let labels: Vec<String> = names.iter().map(|n| if missing && *n == current { format!("⚠ {n}") } else { n.clone() }).collect();
     let mut pairs: Vec<(String, &str)> = vec![(String::new(), automatic)];
     pairs.extend(names.iter().cloned().zip(labels.iter().map(String::as_str)));
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.label(tl!("GPU adapter"));
-        crate::widgets::dropdown_literal(ui, "graphics-adapter", &mut current, &pairs, 320.0);
+        crate::widgets::dropdown_literal(ui, "graphics-adapter", &mut current, &pairs, 320.0_f32.min(ui.available_width()));
     });
     ui.label(RichText::new(tl!("Applies at next launch.")).color(Tokens::get(ui.ctx()).text_faint));
     obj.insert("gpuAdapter".into(), json!(current));
@@ -1472,7 +1507,7 @@ fn graphics_adapter_row(ui: &mut egui::Ui, adapters: Option<&Value>, obj: &mut M
 /// One user-facing choice; legacy flags remain compatible with older settings.
 fn rendering_mode_row(ui: &mut egui::Ui, obj: &mut Map<String, Value>) {
     let mut current = rendering_mode_value(obj);
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.label(tl!("Rendering Mode"));
         let pairs =
             vec![("auto".to_string(), tl!("Automatic (recommended)")), ("gpu".to_string(), tl!("GPU")), ("cpu".to_string(), tl!("CPU / Compatibility"))];
@@ -1572,16 +1607,19 @@ fn theme_swatch(ui: &mut egui::Ui, kind: ThemeKind, id: &str, selected: &mut Str
 fn theme_row(ui: &mut egui::Ui, title: &str, active: bool, selected: &mut String, favorites: &mut Vec<SavedTheme>, options: &[(&str, ThemeKind)]) {
     let t = Tokens::get(ui.ctx());
     ui.label(RichText::new(tl!(title)).color(t.text_dim));
-    ui.horizontal(|ui| {
-        // Room for the favourite star badges on the swatch corners.
-        ui.spacing_mut().item_spacing.x = 6.0;
-        for (id, kind) in options {
-            theme_swatch(ui, *kind, id, selected, favorites);
-        }
-        if active {
-            ui.add_space(6.0);
-            ui.label(RichText::new(tl!("Active")).color(t.accent_text).small());
-        }
+    // Measure the wrapped swatches as one cell to avoid cached grid heights adding empty space.
+    ui.vertical(|ui| {
+        ui.horizontal_wrapped(|ui| {
+            // Room for the favourite star badges on the swatch corners.
+            ui.spacing_mut().item_spacing.x = 6.0;
+            for (id, kind) in options {
+                theme_swatch(ui, *kind, id, selected, favorites);
+            }
+            if active {
+                ui.add_space(6.0);
+                ui.label(RichText::new(tl!("Active")).color(t.accent_text).small());
+            }
+        });
     });
     ui.end_row();
 }
@@ -1607,14 +1645,13 @@ impl AppearanceRows {
 }
 
 /// Appearance Mode and the light and dark Color Theme swatches, as rows of the Appearance grid.
-fn appearance_rows(ui: &mut egui::Ui, obj: &mut Map<String, Value>, system: Option<egui::Theme>, rows: AppearanceRows) {
-    let t = Tokens::get(ui.ctx());
+fn appearance_rows(ui: &mut egui::Ui, obj: &mut Map<String, Value>, system: Option<egui::Theme>, rows: AppearanceRows, widths: PreferenceWidths) {
     let mut mode = obj.get("appearanceMode").and_then(Value::as_str).unwrap_or("auto").to_string();
     if rows.mode {
-        ui.label(RichText::new(tl!("Appearance Mode")).color(t.text_dim));
+        widths.label(ui, tl!("Appearance Mode"));
         let choices: [(String, &str); 3] = [("auto".into(), tl!("Sync with system")), ("dark".into(), tl!("Dark")), ("light".into(), tl!("Light"))];
         let pairs: Vec<(String, &str)> = choices.iter().map(|(id, label)| (id.clone(), *label)).collect();
-        crate::widgets::dropdown(ui, "appearance-mode", &mut mode, &pairs, 220.0);
+        crate::widgets::dropdown(ui, "appearance-mode", &mut mode, &pairs, 220.0_f32.min(widths.field));
         ui.end_row();
     }
     let light_active = mode == "light" || (mode == "auto" && system == Some(egui::Theme::Light));
@@ -1665,21 +1702,31 @@ fn interface_groups(ui: &mut egui::Ui, obj: &mut Map<String, Value>, keys: &[Str
     let grid = |id: &str| egui::Grid::new(("prefs-grid", id.to_string())).num_columns(2).spacing([14.0, 7.0]).min_col_width(150.0);
     if rows.any() || !appearance.is_empty() {
         pref_group(ui, "Appearance", |ui| {
-            grid("interface-appearance").show(ui, |ui| {
-                appearance_rows(ui, obj, system, rows);
-                field_rows(ui, "interface", obj, appearance, lang);
+            let widths = PreferenceWidths::new(ui.available_width());
+            grid("interface-appearance").max_col_width(widths.field.max(widths.label)).show(ui, |ui| {
+                appearance_rows(ui, obj, system, rows, widths);
+                field_rows(ui, "interface", obj, appearance, lang, widths);
             });
         });
     }
     if !presentation.is_empty() {
         pref_group(ui, "Presentation", |ui| {
-            grid("interface-presentation").show(ui, |ui| field_rows(ui, "interface", obj, presentation, lang));
+            let widths = PreferenceWidths::new(ui.available_width());
+            grid("interface-presentation")
+                .max_col_width(widths.field.max(widths.label))
+                .show(ui, |ui| field_rows(ui, "interface", obj, presentation, lang, widths));
         });
     }
     if !checks.is_empty() || !other.is_empty() {
         pref_group(ui, "Options", |ui| {
-            egui::Grid::new("prefs-grid-interface-checks").num_columns(2).spacing([0.0, 7.0]).show(ui, |ui| field_rows(ui, "interface", obj, checks, lang));
-            grid("interface-options").show(ui, |ui| field_rows(ui, "interface", obj, other, lang));
+            let widths = PreferenceWidths::new(ui.available_width());
+            let check_widths = PreferenceWidths { label: 0.0, field: ui.available_width() };
+            egui::Grid::new("prefs-grid-interface-checks")
+                .num_columns(2)
+                .spacing([0.0, 7.0])
+                .max_col_width(check_widths.field)
+                .show(ui, |ui| field_rows(ui, "interface", obj, checks, lang, check_widths));
+            grid("interface-options").max_col_width(widths.field.max(widths.label)).show(ui, |ui| field_rows(ui, "interface", obj, other, lang, widths));
         });
     }
 }
@@ -1737,7 +1784,12 @@ fn section_fields(
         memory_usage_row(ui, obj);
     }
     keys.retain(|k| field_visible(section, obj, k, &query));
-    egui::Grid::new(("prefs-grid", section)).num_columns(2).spacing([14.0, 7.0]).show(ui, |ui| field_rows(ui, section, obj, keys, lang));
+    let widths = PreferenceWidths::new(ui.available_width());
+    egui::Grid::new(("prefs-grid", section))
+        .num_columns(2)
+        .spacing([14.0, 7.0])
+        .max_col_width(widths.field.max(widths.label))
+        .show(ui, |ui| field_rows(ui, section, obj, keys, lang, widths));
 }
 
 /// Explain the per-document RAM limit separately from the graphics-memory preference.
@@ -1746,7 +1798,7 @@ fn memory_usage_row(ui: &mut egui::Ui, obj: &mut Map<String, Value>) {
     ui.group(|ui| {
         ui.label(RichText::new(tl!("Memory Usage")).strong());
         let mut mb = obj.get("memoryUsageMb").and_then(Value::as_u64).unwrap_or(8192);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label(tl!("Per-document RAM limit (MB)"));
             if ui.add(egui::DragValue::new(&mut mb).range(256..=1_048_576).suffix(" MB")).changed() {
                 obj.insert("memoryUsageMb".into(), json!(mb));
@@ -1765,8 +1817,9 @@ fn memory_usage_row(ui: &mut egui::Ui, obj: &mut Map<String, Value>) {
 }
 
 /// One grid row per setting in `keys` (already filtered by `field_visible`).
-fn field_rows(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>, keys: Vec<String>, lang: crate::i18n::Lang) {
+fn field_rows(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>, keys: Vec<String>, lang: crate::i18n::Lang, widths: PreferenceWidths) {
     let t = Tokens::get(ui.ctx());
+    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
     for k in keys {
         let path = format!("{section}.{k}");
         let v = obj.get(&k).cloned().unwrap_or(Value::Null);
@@ -1787,24 +1840,24 @@ fn field_rows(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>, ke
                 obj.insert(k, json!(b));
             }
             Value::String(s) if path == "interface.language" => {
-                ui.label(RichText::new(tl!(&label)).color(t.text_dim));
+                widths.label(ui, &label);
                 let mut pairs: Vec<(String, &str)> = vec![("auto".into(), tl!("Auto"))];
                 pairs.extend(crate::i18n::Lang::all().map(|l| (l.code().to_string(), l.name())));
                 let mut cur = s.clone();
-                crate::widgets::dropdown(ui, &format!("pref-{path}"), &mut cur, &pairs, 220.0);
+                crate::widgets::dropdown(ui, &format!("pref-{path}"), &mut cur, &pairs, 220.0_f32.min(widths.field));
                 obj.insert(k, json!(cur));
             }
             Value::String(s) if prefs::choices(&path).is_some() => {
-                ui.label(RichText::new(tl!(&label)).color(t.text_dim));
+                widths.label(ui, &label);
                 let opts = prefs::choices(&path).unwrap_or(&[]);
                 let labels: Vec<String> = opts.iter().map(|o| choice_label(o)).collect();
                 let pairs: Vec<(String, &str)> = opts.iter().map(|o| o.to_string()).zip(labels.iter().map(String::as_str)).collect();
                 let mut cur = s.clone();
-                crate::widgets::dropdown(ui, &format!("pref-{path}"), &mut cur, &pairs, 220.0);
+                crate::widgets::dropdown(ui, &format!("pref-{path}"), &mut cur, &pairs, 220.0_f32.min(widths.field));
                 obj.insert(k, json!(cur));
             }
             Value::String(s) if prefs::is_color(&path) => {
-                ui.label(RichText::new(tl!(&label)).color(t.text_dim));
+                widths.label(ui, &label);
                 let c = prefs::parse_hex(s).unwrap_or([128, 128, 128]);
                 let mut rgb = c;
                 ui.horizontal(|ui| {
@@ -1818,13 +1871,13 @@ fn field_rows(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>, ke
                 let _ = color_of(s);
             }
             Value::String(s) => {
-                ui.label(RichText::new(tl!(&label)).color(t.text_dim));
+                widths.label(ui, &label);
                 let mut s = s.clone();
-                ui.add(egui::TextEdit::singleline(&mut s).desired_width(260.0));
+                ui.add(egui::TextEdit::singleline(&mut s).desired_width((widths.field - 8.0).max(0.0)));
                 obj.insert(k, json!(s));
             }
             Value::Number(n) => {
-                ui.label(RichText::new(tl!(&label)).color(t.text_dim));
+                widths.label(ui, &label);
                 let (lo, hi) = prefs::range(&path).unwrap_or((-1e9, 1e9));
                 if n.is_u64() || n.is_i64() {
                     let mut x = n.as_i64().unwrap_or(0);
@@ -1837,13 +1890,13 @@ fn field_rows(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>, ke
                 }
             }
             Value::Array(_) if path == "tools.pressureCurve" => {
-                ui.label(RichText::new(tl!(&label)).color(t.text_dim));
+                widths.label(ui, &label);
                 if let Some(next) = crate::pressure_curve_ui::editor(ui, &v) {
                     obj.insert(k, next);
                 }
             }
             Value::Array(items) if k == "disks" => {
-                ui.label(RichText::new(tl!("Scratch disks")).color(t.text_dim));
+                widths.label(ui, tl!("Scratch disks"));
                 let mut items = items.clone();
                 ui.vertical(|ui| {
                     for d in &mut items {
@@ -1851,7 +1904,7 @@ fn field_rows(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>, ke
                             let mut on = d.get("enabled").and_then(Value::as_bool).unwrap_or(false);
                             let mut path = d.get("path").and_then(Value::as_str).unwrap_or("").to_string();
                             crate::widgets::checkbox(ui, &mut on, "");
-                            ui.add(egui::TextEdit::singleline(&mut path).desired_width(240.0));
+                            ui.add(egui::TextEdit::singleline(&mut path).desired_width((widths.field - 36.0).clamp(0.0, 240.0)));
                             *d = json!({"enabled": on, "path": path});
                         });
                     }
@@ -1862,11 +1915,13 @@ fn field_rows(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>, ke
                 obj.insert(k, Value::Array(items));
             }
             Value::Array(items) => {
-                ui.label(RichText::new(tl!(&label)).color(t.text_dim));
-                ui.label(RichText::new(crate::i18n::trn(lang, items.len() as u64, "{n} item", "{n} items")).color(t.text_faint));
-                if !items.is_empty() && ui.small_button(tl!("Clear")).clicked() {
-                    obj.insert(k, json!([]));
-                }
+                widths.label(ui, &label);
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(crate::i18n::trn(lang, items.len() as u64, "{n} item", "{n} items")).color(t.text_faint));
+                    if !items.is_empty() && ui.small_button(tl!("Clear")).clicked() {
+                        obj.insert(k, json!([]));
+                    }
+                });
             }
             _ => continue,
         }
@@ -1879,7 +1934,7 @@ fn field_rows(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>, ke
 fn shortcuts_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     let t = Tokens::get(ui.ctx());
     let mut tab = f.get("tab").and_then(Value::as_u64).unwrap_or(0);
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         for (i, name) in [tl!("Keyboard Shortcuts"), tl!("Menus"), tl!("Toolbar")].iter().enumerate() {
             if crate::widgets::pill_tab(ui, name, tab == i as u64).clicked() {
                 tab = i as u64;
@@ -1919,7 +1974,7 @@ fn shortcuts_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String
         ui.add_space(4.0);
     }
     let mut filter = f.get("filter").and_then(Value::as_str).unwrap_or("").to_string();
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.label(RichText::new(tl!("Search")).color(t.text_dim));
         ui.add(egui::TextEdit::singleline(&mut filter).desired_width(260.0).hint_text(tl!("command or shortcut")));
     });
@@ -2025,193 +2080,247 @@ fn shortcuts_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String
             }
         }
     }
-    let needle = filter.to_ascii_lowercase();
-    egui::ScrollArea::vertical().max_height(420.0).id_salt("shortcuts-scroll").show(ui, |ui| {
-        let mut last_top = String::new();
-        egui::Grid::new("shortcut-grid").num_columns(3).spacing([12.0, 3.0]).striped(true).show(ui, |ui| {
-            for (id, label, path, def) in &items {
-                if tab == 1 && crate::tool_shortcuts::tool(id).is_some() {
-                    continue;
-                }
-                let cur = eff(&overrides, id, def);
-                let alts = eff_alts(&alt_overrides, id, cur.as_deref());
-                let (shown_path, shown_label) = shown(id, label, path);
-                // Match what is shown and the English name (commands are documented in English).
-                let hay =
-                    format!("{} {} {} {} {} {}", shown_path.join(" "), shown_label, path.join(" "), label, cur.clone().unwrap_or_default(), alts.join(" "))
-                        .to_lowercase();
-                if !needle.is_empty() && !hay.contains(&needle) && !id.to_ascii_lowercase().contains(&needle) {
-                    continue;
-                }
-                if tab == 0 && path.is_empty() && def.is_none() && cur.is_none() && alts.is_empty() {
-                    continue;
-                }
-                let top = shown_path.first().cloned().unwrap_or_else(|| tl!("Other").into());
-                if top != last_top {
-                    ui.label(RichText::new(&top).font(crate::theme::semibold(12.5)).color(t.text));
-                    ui.label("");
-                    ui.label("");
-                    ui.end_row();
-                    last_top = top;
-                }
-                let name = match shown_path.get(1..) {
-                    Some(rest) if !rest.is_empty() => format!("{} › {}", rest.join(" › "), shown_label),
-                    _ => shown_label,
-                };
-                let sel = selected == *id;
-                if ui.selectable_label(sel, RichText::new(format!("   {name}")).color(t.text_dim)).clicked() {
-                    selected = id.clone();
-                }
-                if tab == 0 {
-                    let text = if sel && capture && !capture_alt {
-                        tl!("Press keys…").to_string()
-                    } else {
-                        cur.as_deref().map(crate::shortcuts::pretty).unwrap_or_default()
-                    };
-                    let changed = overrides.contains_key(id) || alt_overrides.contains_key(id);
-                    let r = ui.add(
-                        egui::Button::new(RichText::new(tl!(&text)).size(12.0).color(if changed { t.accent_text } else { t.text })).min_size(vec2(120.0, 18.0)),
-                    );
-                    if r.clicked() {
-                        selected = id.clone();
+    egui::Panel::bottom(ui.id().with("shortcut-actions"))
+        .resizable(false)
+        .default_size(0.0)
+        .min_size(0.0)
+        .show_separator_line(false)
+        .frame(egui::Frame::NONE)
+        .show(ui, |ui| {
+            ui.add_space(6.0);
+            if tab == 0 {
+                ui.horizontal_wrapped(|ui| {
+                    let has_sel = !selected.is_empty();
+                    if ui.add_enabled(has_sel, egui::Button::new(tl!("Add Shortcut"))).clicked() {
                         capture = true;
-                        capture_alt = false;
+                        capture_alt = true;
                         message.clear();
                         message_warning = false;
                     }
-                    // The further keys (F3 beside ⌘C), each removable on its own, as Photoshop
-                    // lists them as rows of their own (#3665).
-                    ui.horizontal(|ui| {
-                        for k in &alts {
-                            let b = egui::Button::new(RichText::new(format!("{}  ×", crate::shortcuts::pretty(k))).size(11.0).color(t.text)).small();
-                            if ui.add(b).on_hover_text(tl!("Delete Shortcut")).clicked() {
-                                alt_overrides.insert(id.clone(), alts.iter().filter(|x| *x != k).cloned().collect());
-                                selected = id.clone();
-                                message = tl!("Shortcut removed.").into();
-                                message_warning = false;
+                    if ui.add_enabled(has_sel, egui::Button::new(tl!("Use Default"))).clicked() {
+                        overrides.remove(&selected);
+                        alt_overrides.remove(&selected);
+                        message = tl!("Default restored.").into();
+                        message_warning = false;
+                    }
+                    if ui.add_enabled(has_sel, egui::Button::new(tl!("Delete Shortcut"))).clicked() {
+                        overrides.insert(selected.clone(), String::new());
+                        message = tl!("Shortcut removed.").into();
+                        message_warning = false;
+                    }
+                    if ui.button(tl!("Reset All to Defaults")).clicked() {
+                        overrides.clear();
+                        alt_overrides.clear();
+                        message = tl!("All shortcuts reset to PhotoCraft defaults.").into();
+                        message_warning = false;
+                    }
+                    // A Photoshop set (`.kys`) fills the overrides; the file arrives after this frame
+                    // and `kys_import` writes the dialog's fields then (#1163).
+                    if ui.button(tl!("Import Shortcuts…")).on_hover_text(tl!("Load a keyboard shortcut set saved as .kys")).clicked()
+                        && let Err(e) = crate::kys_import::import_dialog(app)
+                    {
+                        message = e;
+                        message_warning = false;
+                    }
+                });
+            } else if ui.button(tl!("Show All Menu Items")).clicked() {
+                hidden.clear();
+                colors.clear();
+            }
+            if !message.is_empty() {
+                ui.label(RichText::new(&message).color(if message_warning { t.warning } else { t.text_dim }));
+            }
+            // The conflict describes the bindings as the capture left them: any later change (Use
+            // Default, Delete, ×, Reset All, another command or set) makes it stale, and it goes.
+            let state = conflict_state(&overrides, &alt_overrides, &selected, f.get("activeSet"));
+            if conflict.as_ref().and_then(|c| c.get("state")).is_some_and(|s| s.as_u64() != Some(state)) {
+                conflict = None;
+            }
+            if tab == 0
+                && let Some(c) = conflict.clone()
+            {
+                let (key, with, command) =
+                    (c["shortcut"].as_str().unwrap_or_default(), c["with"].as_str().unwrap_or_default(), c["command"].as_str().unwrap_or_default());
+                ui.horizontal_wrapped(|ui| {
+                    if ui.button(tl!("Accept and Go to Conflict")).on_hover_text(tl!("Take the shortcut from the other command and select it")).clicked() {
+                        let holders: Vec<String> = serde_json::from_value(c["holders"].clone()).unwrap_or_else(|_| vec![with.to_string()]);
+                        for holder in &holders {
+                            let def = items.iter().find(|i| i.0 == *holder).and_then(|i| i.3.clone());
+                            let cur = eff(&overrides, holder, &def);
+                            if cur.as_deref().and_then(prefs::normalize_shortcut).as_deref() == Some(key) {
+                                overrides.insert(holder.clone(), String::new());
+                            }
+                            let keys = eff_alts(&alt_overrides, holder, eff(&overrides, holder, &def).as_deref());
+                            if keys.iter().any(|k| k == key) {
+                                alt_overrides.insert(holder.clone(), keys.into_iter().filter(|k| k != key).collect());
                             }
                         }
-                        if sel && capture && capture_alt {
-                            ui.label(RichText::new(tl!("Press keys…")).size(11.0).color(t.accent_text));
-                        }
-                        if changed {
-                            ui.label(RichText::new(tl!("modified")).color(t.text_faint).size(10.5));
-                        }
-                    });
-                } else {
-                    // Edit › Menus, Keyboard Shortcuts, Preferences, Save and Exit always stay (#5096).
-                    let hideable = photocraft_engine::prefs::MenuCustomization::hideable(id);
-                    let mut visible = !hideable || !hidden.contains(id);
-                    ui.add_enabled_ui(hideable, |ui| crate::widgets::checkbox(ui, &mut visible, tl!("Visible")));
-                    if visible {
-                        hidden.retain(|h| h != id);
-                    } else if !hidden.contains(id) {
-                        hidden.push(id.clone());
+                        selected = with.to_string();
+                        filter.clear();
+                        message = tl!("Choose a new shortcut for this command, or leave it without one.").into();
+                        message_warning = false;
+                        conflict = None;
                     }
-                    let mut col = colors.get(id).cloned().unwrap_or_else(|| "none".into());
-                    let opts: Vec<(String, &str)> =
-                        ["none", "red", "orange", "yellow", "green", "blue", "violet", "gray"].iter().map(|c| (c.to_string(), *c)).collect();
-                    crate::widgets::dropdown(ui, &format!("menu-color-{id}"), &mut col, &opts, 90.0);
-                    if col == "none" {
-                        colors.remove(id);
+                    if ui.button(tl!("Undo Changes")).on_hover_text(tl!("Put this command's shortcuts back as they were")).clicked() {
+                        match c["main"].as_str() {
+                            Some(m) => overrides.insert(command.to_string(), m.to_string()),
+                            None => overrides.remove(command),
+                        };
+                        match serde_json::from_value::<Vec<String>>(c["alternates"].clone()) {
+                            Ok(list) => alt_overrides.insert(command.to_string(), list),
+                            Err(_) => alt_overrides.remove(command),
+                        };
+                        selected = command.to_string();
+                        message = tl!("Changes undone.").into();
+                        message_warning = false;
+                        conflict = None;
+                    }
+                });
+            }
+        });
+    let needle = filter.to_ascii_lowercase();
+    egui::ScrollArea::vertical()
+        .max_height(ui.available_height().max(0.0))
+        .auto_shrink([false, false])
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+        .id_salt(("shortcuts-scroll", tab))
+        .show(ui, |ui| {
+            let control_width = 120.0_f32.min(ui.available_width() * 0.25);
+            let extra_width = if tab == 0 { 150.0 } else { 90.0 };
+            let name_width = (ui.available_width() - control_width - extra_width - 24.0).max(0.0);
+            let row_height = ui.spacing().interact_size.y;
+            let visibility_padding = (control_width - crate::widgets::checkbox_width(ui, tl!("Visible"))).max(0.0);
+            let mut last_top = String::new();
+            egui::Grid::new(("shortcut-grid", tab)).num_columns(3).spacing([12.0, 3.0]).striped(true).show(ui, |ui| {
+                for (id, label, path, def) in &items {
+                    if tab == 1 && crate::tool_shortcuts::tool(id).is_some() {
+                        continue;
+                    }
+                    let cur = eff(&overrides, id, def);
+                    let alts = eff_alts(&alt_overrides, id, cur.as_deref());
+                    let (shown_path, shown_label) = shown(id, label, path);
+                    // Match what is shown and the English name (commands are documented in English).
+                    let hay =
+                        format!("{} {} {} {} {} {}", shown_path.join(" "), shown_label, path.join(" "), label, cur.clone().unwrap_or_default(), alts.join(" "))
+                            .to_lowercase();
+                    if !needle.is_empty() && !hay.contains(&needle) && !id.to_ascii_lowercase().contains(&needle) {
+                        continue;
+                    }
+                    if tab == 0 && path.is_empty() && def.is_none() && cur.is_none() && alts.is_empty() {
+                        continue;
+                    }
+                    let top = shown_path.first().cloned().unwrap_or_else(|| tl!("Other").into());
+                    if top != last_top {
+                        // Seed all columns in the sizing pass so they do not shift when this tab becomes visible.
+                        ui.allocate_ui_with_layout(vec2(name_width, row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                            ui.set_width(name_width);
+                            ui.add(egui::Label::new(RichText::new(&top).font(crate::theme::semibold(12.5)).color(t.text)).truncate()).on_hover_text(&top);
+                        });
+                        ui.allocate_space(vec2(control_width, row_height));
+                        ui.allocate_space(vec2(extra_width, row_height));
+                        ui.end_row();
+                        last_top = top;
+                    }
+                    let name = match shown_path.get(1..) {
+                        Some(rest) if !rest.is_empty() => format!("{} › {}", rest.join(" › "), shown_label),
+                        _ => shown_label,
+                    };
+                    let sel = selected == *id;
+                    let changed = overrides.contains_key(id) || alt_overrides.contains_key(id);
+                    let label = egui::Button::selectable(sel, ()).left_text(RichText::new(format!("   {name}")).color(t.text_dim)).truncate();
+                    let named = ui
+                        .vertical(|ui| {
+                            ui.set_width(name_width);
+                            ui.add_sized(vec2(name_width, row_height), label).on_hover_text(&name)
+                        })
+                        .inner;
+                    if named.clicked() {
+                        selected = id.clone();
+                    }
+                    if tab == 0 {
+                        let text = if sel && capture && !capture_alt {
+                            tl!("Press keys…").to_string()
+                        } else {
+                            cur.as_deref().map(crate::shortcuts::pretty).unwrap_or_default()
+                        };
+                        let r = ui
+                            .vertical(|ui| {
+                                ui.set_width(control_width);
+                                ui.add_sized(
+                                    vec2(control_width, row_height),
+                                    egui::Button::new(RichText::new(tl!(&text)).size(12.0).color(if changed { t.accent_text } else { t.text })).truncate(),
+                                )
+                                .on_hover_text(tl!(&text))
+                            })
+                            .inner;
+                        if r.clicked() {
+                            selected = id.clone();
+                            capture = true;
+                            capture_alt = false;
+                            message.clear();
+                            message_warning = false;
+                        }
+                        // The further keys (F3 beside ⌘C), each removable on its own, as Photoshop
+                        // lists them as rows of their own (#3665).
+                        // Measure the full binding stack to prevent repeated-frame row-height growth.
+                        ui.vertical(|ui| {
+                            ui.set_width(extra_width);
+                            for k in &alts {
+                                let text = format!("{}  ×", crate::shortcuts::pretty(k));
+                                let b = egui::Button::new(RichText::new(&text).size(11.0).color(t.text)).small().truncate();
+                                if ui
+                                    .add_sized(vec2(extra_width, row_height), b)
+                                    .on_hover_text(format!("{}: {}", tl!("Delete Shortcut"), crate::shortcuts::pretty(k)))
+                                    .clicked()
+                                {
+                                    alt_overrides.insert(id.clone(), alts.iter().filter(|x| *x != k).cloned().collect());
+                                    selected = id.clone();
+                                    message = tl!("Shortcut removed.").into();
+                                    message_warning = false;
+                                }
+                            }
+                            if sel && capture && capture_alt {
+                                ui.add_sized(
+                                    vec2(extra_width, row_height),
+                                    egui::Label::new(RichText::new(tl!("Press keys…")).size(11.0).color(t.accent_text)).truncate(),
+                                );
+                            }
+                            if changed {
+                                ui.add_sized(
+                                    vec2(extra_width, row_height),
+                                    egui::Label::new(RichText::new(tl!("modified")).color(t.text_faint).size(10.5)).truncate(),
+                                );
+                            }
+                        });
                     } else {
-                        colors.insert(id.clone(), col);
+                        // Edit › Menus, Keyboard Shortcuts, Preferences, Save and Exit always stay (#5096).
+                        let hideable = photocraft_engine::prefs::MenuCustomization::hideable(id);
+                        let mut visible = !hideable || !hidden.contains(id);
+                        ui.allocate_ui_with_layout(vec2(control_width, row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                            // Keep the checkbox beside its color selector without moving the grid columns.
+                            ui.add_space(visibility_padding);
+                            ui.add_enabled_ui(hideable, |ui| crate::widgets::checkbox(ui, &mut visible, tl!("Visible")));
+                        });
+                        if visible {
+                            hidden.retain(|h| h != id);
+                        } else if !hidden.contains(id) {
+                            hidden.push(id.clone());
+                        }
+                        let mut col = colors.get(id).cloned().unwrap_or_else(|| "none".into());
+                        let opts: Vec<(String, &str)> =
+                            ["none", "red", "orange", "yellow", "green", "blue", "violet", "gray"].iter().map(|c| (c.to_string(), *c)).collect();
+                        crate::widgets::dropdown(ui, &format!("menu-color-{id}"), &mut col, &opts, extra_width);
+                        if col == "none" {
+                            colors.remove(id);
+                        } else {
+                            colors.insert(id.clone(), col);
+                        }
                     }
+                    ui.end_row();
                 }
-                ui.end_row();
-            }
+            });
         });
-    });
-    ui.add_space(6.0);
-    if tab == 0 {
-        ui.horizontal(|ui| {
-            let has_sel = !selected.is_empty();
-            if ui.add_enabled(has_sel, egui::Button::new(tl!("Add Shortcut"))).clicked() {
-                capture = true;
-                capture_alt = true;
-                message.clear();
-                message_warning = false;
-            }
-            if ui.add_enabled(has_sel, egui::Button::new(tl!("Use Default"))).clicked() {
-                overrides.remove(&selected);
-                alt_overrides.remove(&selected);
-                message = tl!("Default restored.").into();
-                message_warning = false;
-            }
-            if ui.add_enabled(has_sel, egui::Button::new(tl!("Delete Shortcut"))).clicked() {
-                overrides.insert(selected.clone(), String::new());
-                message = tl!("Shortcut removed.").into();
-                message_warning = false;
-            }
-            if ui.button(tl!("Reset All to Defaults")).clicked() {
-                overrides.clear();
-                alt_overrides.clear();
-                message = tl!("All shortcuts reset to PhotoCraft defaults.").into();
-                message_warning = false;
-            }
-            // A Photoshop set (`.kys`) fills the overrides; the file arrives after this frame
-            // and `kys_import` writes the dialog's fields then (#1163).
-            if ui.button(tl!("Import Shortcuts…")).on_hover_text(tl!("Load a keyboard shortcut set saved as .kys")).clicked()
-                && let Err(e) = crate::kys_import::import_dialog(app)
-            {
-                message = e;
-                message_warning = false;
-            }
-        });
-    } else if ui.button(tl!("Show All Menu Items")).clicked() {
-        hidden.clear();
-        colors.clear();
-    }
-    if !message.is_empty() {
-        ui.label(RichText::new(&message).color(if message_warning { t.warning } else { t.text_dim }));
-    }
-    // The conflict describes the bindings as the capture left them: any later change (Use
-    // Default, Delete, ×, Reset All, another command or set) makes it stale, and it goes.
-    let state = conflict_state(&overrides, &alt_overrides, &selected, f.get("activeSet"));
-    if conflict.as_ref().and_then(|c| c.get("state")).is_some_and(|s| s.as_u64() != Some(state)) {
-        conflict = None;
-    }
-    if tab == 0
-        && let Some(c) = conflict.clone()
-    {
-        let (key, with, command) =
-            (c["shortcut"].as_str().unwrap_or_default(), c["with"].as_str().unwrap_or_default(), c["command"].as_str().unwrap_or_default());
-        ui.horizontal(|ui| {
-            if ui.button(tl!("Accept and Go to Conflict")).on_hover_text(tl!("Take the shortcut from the other command and select it")).clicked() {
-                let holders: Vec<String> = serde_json::from_value(c["holders"].clone()).unwrap_or_else(|_| vec![with.to_string()]);
-                for holder in &holders {
-                    let def = items.iter().find(|i| i.0 == *holder).and_then(|i| i.3.clone());
-                    let cur = eff(&overrides, holder, &def);
-                    if cur.as_deref().and_then(prefs::normalize_shortcut).as_deref() == Some(key) {
-                        overrides.insert(holder.clone(), String::new());
-                    }
-                    let keys = eff_alts(&alt_overrides, holder, eff(&overrides, holder, &def).as_deref());
-                    if keys.iter().any(|k| k == key) {
-                        alt_overrides.insert(holder.clone(), keys.into_iter().filter(|k| k != key).collect());
-                    }
-                }
-                selected = with.to_string();
-                filter.clear();
-                message = tl!("Choose a new shortcut for this command, or leave it without one.").into();
-                message_warning = false;
-                conflict = None;
-            }
-            if ui.button(tl!("Undo Changes")).on_hover_text(tl!("Put this command's shortcuts back as they were")).clicked() {
-                match c["main"].as_str() {
-                    Some(m) => overrides.insert(command.to_string(), m.to_string()),
-                    None => overrides.remove(command),
-                };
-                match serde_json::from_value::<Vec<String>>(c["alternates"].clone()) {
-                    Ok(list) => alt_overrides.insert(command.to_string(), list),
-                    Err(_) => alt_overrides.remove(command),
-                };
-                selected = command.to_string();
-                message = tl!("Changes undone.").into();
-                message_warning = false;
-                conflict = None;
-            }
-        });
-    }
     if overrides_ok {
         f.insert("overrides".into(), json!(overrides));
     }
@@ -2235,6 +2344,7 @@ fn shortcuts_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String
     }
     f.insert("message".into(), json!(message));
     f.insert("messageWarning".into(), json!(message_warning));
+    f.insert("filter".into(), json!(filter));
 }
 
 /// A command's keys as the dialog stands, main key first: the edited main key (or its default)
@@ -2290,11 +2400,18 @@ fn set_row(
     let set_label = if active.is_empty() { defaults.clone() } else { active.clone() };
     let mut export = false;
     let mut summarize = false;
-    ui.horizontal(|ui| {
+    let active_label = shown(&active);
+    ui.horizontal_wrapped(|ui| {
         ui.label(tl!("Set:"));
         let mut chosen = active.clone();
         let pairs: Vec<(String, &str)> = names.iter().map(|(n, l)| (n.clone(), l.as_str())).collect();
-        if crate::widgets::dropdown(ui, "shortcut-set", &mut chosen, &pairs, 220.0) && chosen != active {
+        let width = 220.0_f32.min(ui.available_width());
+        let picked = ui.allocate_ui_with_layout(vec2(width, ui.spacing().interact_size.y), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+            crate::widgets::dropdown(ui, "shortcut-set", &mut chosen, &pairs, width)
+        });
+        picked.response.on_hover_text(&active_label);
+        if picked.inner && chosen != active {
             let set = sets.get(&chosen).cloned().unwrap_or_default();
             *overrides = set.shortcuts;
             *alternates = set.alternate_shortcuts;
@@ -2321,7 +2438,7 @@ fn set_row(
     if let Some(name) = new_name.as_mut() {
         let mut create = false;
         let mut cancel = false;
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label(tl!("Name:"));
             let r = ui.add(egui::TextEdit::singleline(name).desired_width(220.0).hint_text(tl!("set name")));
             create = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
@@ -2400,23 +2517,28 @@ fn save_text(app: &mut PhotocraftApp, suggested: &str, text: String) -> Result<V
 
 fn toolbar_tab(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     let mut hidden: Vec<String> = f.get("toolbarHidden").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
-    egui::ScrollArea::vertical().max_height(380.0).id_salt("toolbar-scroll").show(ui, |ui| {
-        egui::Grid::new("toolbar-grid").num_columns(2).spacing([16.0, 4.0]).show(ui, |ui| {
-            for tool in crate::state::Tool::ALL {
-                let name = format!("{tool:?}");
-                let mut on = !hidden.contains(&name);
-                crate::widgets::checkbox(ui, &mut on, tl!(tool.label()));
-                if on {
-                    hidden.retain(|h| *h != name);
-                } else if !hidden.contains(&name) {
-                    hidden.push(name);
+    egui::ScrollArea::vertical()
+        .max_height((ui.available_height() - crate::widgets::button_height(ui.ctx()) - ui.spacing().item_spacing.y).max(0.0))
+        .auto_shrink([false, false])
+        .id_salt("toolbar-scroll")
+        .show(ui, |ui| {
+            let width = (ui.available_width() - 48.0).max(0.0);
+            egui::Grid::new("toolbar-grid").max_col_width(width).num_columns(2).spacing([16.0, 4.0]).show(ui, |ui| {
+                for tool in crate::state::Tool::ALL {
+                    let name = format!("{tool:?}");
+                    let mut on = !hidden.contains(&name);
+                    crate::widgets::checkbox(ui, &mut on, tl!(tool.label()));
+                    if on {
+                        hidden.retain(|h| *h != name);
+                    } else if !hidden.contains(&name) {
+                        hidden.push(name);
+                    }
+                    let k = tool.key();
+                    ui.label(if k == '\0' { String::new() } else { k.to_string() });
+                    ui.end_row();
                 }
-                let k = tool.key();
-                ui.label(if k == '\0' { String::new() } else { k.to_string() });
-                ui.end_row();
-            }
+            });
         });
-    });
     if ui.button(tl!("Restore Defaults")).clicked() {
         hidden.clear();
     }
@@ -2762,6 +2884,32 @@ mod tests {
         assert_eq!(super::width(prefs, 3000.0), Some(3000.0));
         let shortcuts = serde_json::json!({"__prefsui": "shortcuts"});
         assert_eq!(super::width(shortcuts.as_object().unwrap(), 3000.0), Some(720.0));
+    }
+
+    #[test]
+    fn preference_array_count_and_clear_share_the_value_column() {
+        use egui_kittest::{Harness, kittest::Queryable};
+        let values = json!({"alpha": [1], "beta": 3}).as_object().unwrap().clone();
+        let mut h = Harness::builder().with_size(vec2(480.0, 320.0)).build_ui_state(
+            |ui, obj| {
+                if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("semibold".into()))) {
+                    let widths = PreferenceWidths::new(ui.available_width());
+                    egui::Grid::new("array-row-test").num_columns(2).show(ui, |ui| {
+                        field_rows(ui, "test", obj, vec!["alpha".into(), "beta".into()], crate::i18n::Lang::from_pref("en"), widths);
+                    });
+                }
+            },
+            values,
+        );
+        PhotocraftApp::setup_context(&h.ctx, Default::default());
+        h.run_steps(4);
+        let count = h.get_by_label("1 item").rect();
+        let clear = h.get_by_label("Clear").rect();
+        assert!((count.left() - clear.left()).abs() < 0.5, "count {count:?}, clear {clear:?}");
+        assert!(h.get_by_label("Beta").rect().top() > clear.bottom());
+        h.get_by_label("Clear").click();
+        h.run_steps(3);
+        assert_eq!(h.state()["alpha"], json!([]));
     }
 
     #[test]
