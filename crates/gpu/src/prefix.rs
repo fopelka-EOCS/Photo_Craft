@@ -189,8 +189,17 @@ impl Prefix {
     /// Merges the rendered `rect` (document coordinates) into its whole grid chunk, admitting
     /// the chunk while space remains. Replacing entries on every miss would make a full
     /// refresh larger than the cache evict its own next hits.
-    /// A chunk holding another (lower) checkpoint starts over with this capture.
-    pub(crate) fn capture(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, rect: Rect, src: &wgpu::Texture, checkpoint: Checkpoint) {
+    /// A chunk holding another (lower) checkpoint starts over with this capture. `reserved` is
+    /// what the stack-above cache (`suffix`) already holds of the same allowance.
+    pub(crate) fn capture(
+        &mut self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        rect: Rect,
+        src: &wgpu::Texture,
+        checkpoint: Checkpoint,
+        reserved: u64,
+    ) {
         if rect.is_empty() {
             return;
         }
@@ -198,7 +207,7 @@ impl Prefix {
         let bpp = if src.format() == wgpu::TextureFormat::Rgba32Float { 16 } else { 8 };
         let cell_bytes = u64::from(cell.width()).saturating_mul(u64::from(cell.height())).saturating_mul(bpp);
         if !self.chunks.contains_key(&cell) {
-            if cell_bytes == 0 || cell_bytes > self.budget.saturating_sub(self.bytes) {
+            if cell_bytes == 0 || cell_bytes > self.budget.saturating_sub(self.bytes).saturating_sub(reserved) {
                 return;
             }
             let tex = device.create_texture(&wgpu::TextureDescriptor {

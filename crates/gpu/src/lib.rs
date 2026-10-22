@@ -1818,7 +1818,7 @@ impl Compositor {
                 && let Some(cp) = checkpoint.filter(|cp| cp.pass_end == n)
                 && let Some((src, _)) = self.pool.get(cp.slot as usize)
             {
-                self.prefix.capture(device, encoder, *c, src, cp);
+                self.prefix.capture(device, encoder, *c, src, cp, self.suffix.bytes());
             }
             let (t, v) = &self.pool[plan.root as usize];
             sink(encoder, ChunkOut { rect: *c, texture: t, view: v });
@@ -1872,7 +1872,7 @@ impl Compositor {
                 && let Some(cp) = checkpoint.filter(|cp| cp.pass_end == i)
                 && let Some((src, _)) = self.pool.get(cp.slot as usize)
             {
-                self.prefix.capture(device, encoder, *c, src, cp);
+                self.prefix.capture(device, encoder, *c, src, cp, self.suffix.bytes());
             }
             let scissor = match p.clip {
                 Some(clip) => {
