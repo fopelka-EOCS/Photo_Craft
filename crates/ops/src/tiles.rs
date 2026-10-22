@@ -9,6 +9,10 @@ use std::sync::Arc;
 pub(crate) struct Tiles {
     refs: HashMap<usize, (u128, usize)>,
     bytes: u128,
+    /// Lazy surfaces the states hold (see `Surface::lazy`), by identity: (references, one of
+    /// them). Their tiles aren't counted per state, since they decode later (or never); the
+    /// decoded ones are charged once, when the budget is checked.
+    lazy: HashMap<usize, (u128, Surface)>,
 }
 
 pub(crate) fn surfaces(doc: &Document, mut visit: impl FnMut(&Surface)) {
@@ -48,9 +52,14 @@ pub(crate) fn surfaces(doc: &Document, mut visit: impl FnMut(&Surface)) {
 }
 
 impl Tiles {
+    // A lazy surface's tiles (see `Surface::lazy`) are not counted per state: they are not in
+    // memory until decoded, and decoded ones are counted once, with the current document.
     pub(crate) fn add(&mut self, doc: &Document) {
         surfaces(doc, |surface| {
-            for (_, tile) in surface.tiles() {
+            if let Some(id) = surface.lazy_identity() {
+                self.lazy.entry(id).or_insert_with(|| (0, surface.clone())).0 += 1;
+            }
+            for (_, tile) in surface.owned_tiles() {
                 let count = self.refs.entry(Arc::as_ptr(tile) as usize).or_insert_with(|| {
                     self.bytes += tile.bytes().len() as u128;
                     (0, tile.bytes().len())
@@ -62,7 +71,15 @@ impl Tiles {
 
     pub(crate) fn remove(&mut self, doc: &Document) {
         surfaces(doc, |surface| {
-            for (_, tile) in surface.tiles() {
+            if let Some(id) = surface.lazy_identity()
+                && let Some(entry) = self.lazy.get_mut(&id)
+            {
+                entry.0 -= 1;
+                if entry.0 == 0 {
+                    self.lazy.remove(&id);
+                }
+            }
+            for (_, tile) in surface.owned_tiles() {
                 let key = Arc::as_ptr(tile) as usize;
                 if let Some(count) = self.refs.get_mut(&key) {
                     count.0 -= 1;
@@ -85,14 +102,75 @@ impl Tiles {
     pub(crate) fn bytes_with(&self, current: &Document) -> u128 {
         let mut total = self.bytes;
         let mut seen = HashSet::new();
+        let mut lazy = HashSet::new();
         surfaces(current, |surface| {
-            for (_, tile) in surface.tiles() {
+            for (_, tile) in surface.owned_tiles() {
                 let key = Arc::as_ptr(tile) as usize;
                 if !self.refs.contains_key(&key) && seen.insert(key) {
                     total += tile.bytes().len() as u128;
                 }
             }
+            if let Some((id, tiles)) = surface.lazy_decoded()
+                && lazy.insert(id)
+            {
+                for (_, tile) in tiles {
+                    if seen.insert(Arc::as_ptr(tile) as usize) {
+                        total += tile.bytes().len() as u128;
+                    }
+                }
+            }
         });
+        // Lazy surfaces only History still holds, decoded since they were recorded.
+        for (_, surface) in self.lazy.values() {
+            if let Some((id, tiles)) = surface.lazy_decoded()
+                && lazy.insert(id)
+            {
+                for (_, tile) in tiles {
+                    if seen.insert(Arc::as_ptr(tile) as usize) {
+                        total += tile.bytes().len() as u128;
+                    }
+                }
+            }
+        }
         total
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use photocraft_doc::{ColorMode, Document, Layer, LayerContent, PixelFormat, Rect, SampleType, Size};
+
+    /// A lazy layer decoded after its state was recorded is charged once, also when only History
+    /// still holds it.
+    #[test]
+    fn decoded_lazy_tiles_held_by_history_are_counted() {
+        let fmt = PixelFormat::RGBA8;
+        let r = Rect::new(0, 0, 256, 256);
+        let lazy = Surface::lazy(
+            fmt,
+            r,
+            None,
+            Box::new(move || {
+                let mut s = Surface::new(fmt);
+                s.fill_rect(r, &[1.0, 0.0, 0.0, 1.0]);
+                s.write_pixel(0, 0, &[0.0, 0.0, 0.0, 1.0]);
+                Ok(s)
+            }),
+        );
+        let mut held = Document::new("held", Size::new(256, 256), ColorMode::Rgb, SampleType::U8);
+        let mut layer = Layer::raster("hidden", fmt);
+        layer.content = LayerContent::Raster(lazy.clone());
+        held.layers.push(layer);
+        let mut tiles = Tiles::default();
+        tiles.add(&held);
+        let empty = Document::new("current", Size::new(256, 256), ColorMode::Rgb, SampleType::U8);
+        assert_eq!(tiles.bytes_with(&empty), 0, "pending: nothing in memory");
+        lazy.tile_count();
+        let tile = 256 * 256 * 4;
+        assert_eq!(tiles.bytes_with(&empty), tile, "decoded, held by History only");
+        assert_eq!(tiles.bytes_with(&held), tile, "and counted once when current holds it too");
+        tiles.remove(&held);
+        assert_eq!(tiles.bytes_with(&empty), 0);
     }
 }

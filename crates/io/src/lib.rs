@@ -124,6 +124,9 @@ pub enum IoError {
     /// An SVG that does not parse (or is too large to rasterise).
     #[error("SVG: {0}")]
     Svg(String),
+    /// The file could not be read.
+    #[error("{0}")]
+    Read(String),
     /// A background import or save was cancelled ([`import_with`], [`export_with`]).
     #[error("cancelled")]
     Cancelled,
@@ -325,22 +328,78 @@ pub fn import_with_svg_group_depth_and_interrupt(
     Ok(r)
 }
 
-fn import_psd(name: &str, bytes: &[u8], ctl: &photocraft_raster::Interrupt) -> Result<ImportResult, IoError> {
+/// The PSD/PSB part of an import, from a parse that takes [`PsdFile::from_bytes_and_merged_recovering`]'s
+/// `want` and `recover`.
+fn import_psd(
+    name: &str,
+    ctl: &photocraft_raster::Interrupt,
+    lazy_hidden: bool,
+    parse: impl FnOnce(&dyn Fn(&PsdFile) -> bool, &dyn Fn(&PsdFile) -> bool) -> photocraft_psd::Result<(PsdFile, Option<photocraft_psd::Result<Vec<u8>>>)>,
+) -> Result<ImportResult, IoError> {
     // A merged image the import reads is decoded with the parse: a ZIP one is inflated once.
-    let (file, merged) = PsdFile::from_bytes_and_merged_recovering(
-        bytes,
-        |f| psd_import::check_group_depth(f).is_ok() && psd_import::merged_needed(f),
-        psd_import::can_recover_layers,
-    )?;
+    let (file, merged) = parse(&|f| psd_import::check_group_depth(f).is_ok() && psd_import::merged_needed(f), &psd_import::can_recover_layers)?;
     // Nesting past the document model's cap could never be saved; reject the file with the
     // actionable limit.
     psd_import::check_group_depth(&file)?;
     ctl.check().map_err(|_| IoError::Cancelled)?;
     ctl.progress(0.05);
-    let (mut document, warnings) = psd_import::psd_to_document_decoded(&file, ctl, merged).ok_or(IoError::Cancelled)?;
+    let (mut document, warnings) = psd_import::psd_to_document_owned(file, ctl, merged, lazy_hidden).ok_or(IoError::Cancelled)?;
     document.name = name.to_string();
     text_import::prepare(&mut document);
     Ok(ImportResult { document, warnings, source_read_only: false, preview_only: false })
+}
+
+pub use photocraft_psd::Preview as PsdPreview;
+
+/// A small picture of the PSD/PSB at `path` from its merged image (see
+/// [`PsdFile::merged_preview`]), reading only the file's structure and the rows it samples: for a
+/// multi-gigabyte file a few megabytes, so it can show while the file is still opening. `None`
+/// for other files, and PSDs without a merged image it can sample.
+#[cfg(any(unix, windows))]
+pub fn psd_preview(path: &std::path::Path, max_side: u32) -> Option<PsdPreview> {
+    let source = photocraft_psd::FileSource::open(path).ok()?;
+    let mut magic = [0u8; 4];
+    photocraft_psd::ReadAt::read_at(&source, 0, &mut magic).ok()?;
+    if !is_psd(&magic) {
+        return None;
+    }
+    // Every global block of any size stays in the file: only the merged image is read.
+    let (file, _) = PsdFile::from_source_deferring(photocraft_psd::Source::new(source), |_, len| len >= 1 << 16, |_| false, |_| false).ok()?;
+    file.merged_preview(max_side).ok().flatten()
+}
+
+/// Global blocks [`import_file`] leaves in the file: embedded smart-object files of at least a
+/// megabyte, read when a smart object's contents are (editing them, saving). Only where a save
+/// that replaces the file leaves the open one readable (Unix rename semantics); on Windows the
+/// open file would block that replace, so they are read at open there.
+fn defer_block(key: &[u8; 4], len: u64) -> bool {
+    cfg!(unix) && matches!(key, b"lnk2" | b"lnk3" | b"lnkD") && len >= 1 << 20
+}
+
+/// Imports the file at `path`, as [`import_with_svg_group_depth_and_interrupt`] imports its
+/// bytes. A PSD/PSB is parsed from the open file ([`PsdFile::from_source`]) rather than read
+/// whole: its channel data is read layer by layer as it is decoded, so opening it needs memory
+/// for the document, not for the document plus the file. Other formats are read whole.
+#[cfg(any(unix, windows))]
+pub fn import_file(name: &str, path: &std::path::Path, max_group_depth: usize, ctl: &photocraft_raster::Interrupt) -> Result<ImportResult, IoError> {
+    let read_failed = |e: std::io::Error| IoError::Read(format!("{}: {e}", path.display()));
+    ctl.check().map_err(|_| IoError::Cancelled)?;
+    let source = photocraft_psd::FileSource::open(path).map_err(read_failed)?;
+    let mut magic = [0u8; 4];
+    let psd = !has_extension(name, photocraft_format::EXTENSION)
+        && photocraft_psd::ReadAt::read_at(&source, 0, &mut magic).is_ok()
+        && is_psd(&magic);
+    if !psd {
+        drop(source);
+        let bytes = photocraft_format::read_file(path).map_err(read_failed)?;
+        return import_with_svg_group_depth_and_interrupt(name, &bytes, max_group_depth, ctl);
+    }
+    let source = photocraft_psd::Source::new(source);
+    // Hidden layers are decoded when first used, from the open file (Unix: see `defer_block`).
+    let r = import_psd(name, ctl, cfg!(unix), |want, recover| PsdFile::from_source_deferring(source, defer_block, want, recover))?;
+    ctl.check().map_err(|_| IoError::Cancelled)?;
+    ctl.progress(1.0);
+    Ok(r)
 }
 
 fn import_stages(name: &str, bytes: &[u8], ctl: &photocraft_raster::Interrupt, max_group_depth: usize) -> Result<ImportResult, IoError> {
@@ -352,7 +411,7 @@ fn import_stages(name: &str, bytes: &[u8], ctl: &photocraft_raster::Interrupt, m
     // Magic first: an Affinity file renamed .psd is still Affinity (#5258 corpus
     // preview_never_saves_back_to_its_native_or_renamed_source).
     if is_psd(bytes) {
-        return import_psd(name, bytes, ctl);
+        return import_psd(name, ctl, false, |want, recover| PsdFile::from_bytes_and_merged_recovering(bytes, want, recover));
     }
     if affinity::is_affinity(bytes) || affinity::has_extension(name) {
         return affinity::import(name, bytes);
@@ -385,7 +444,7 @@ fn import_stages(name: &str, bytes: &[u8], ctl: &photocraft_raster::Interrupt, m
     // A `.psd`/`.psb`/`.psdt` with no raster signature keeps the PSD error instead of
     // `codec: unrecognized image format` (#5258). Magic already returned above.
     if is_psd_input(name, bytes) {
-        return import_psd(name, bytes, ctl);
+        return import_psd(name, ctl, false, |want, recover| PsdFile::from_bytes_and_merged_recovering(bytes, want, recover));
     }
     flat::import_flat(name, bytes)
 }
@@ -444,6 +503,21 @@ pub fn export_with(doc: &Document, name_or_ext: &str, opts: &ExportOptions, ctl:
     Ok(r)
 }
 
+/// `doc` with its global blocks in memory: a copy with those left in the opened file read
+/// (`Blob::Deferred`), or `doc` itself when none is. A block that can't be read is an error.
+///
+/// Hidden layers still in the opened file (lazy surfaces) are decoded too: one that can't be read
+/// is an error, not an empty layer in the file written.
+pub(crate) fn with_blocks_loaded(doc: &Document) -> Result<std::borrow::Cow<'_, Document>, IoError> {
+    doc.decode_lazy_layers().map_err(IoError::Read)?;
+    if !doc.metadata.has_deferred_blocks() {
+        return Ok(std::borrow::Cow::Borrowed(doc));
+    }
+    let mut d = doc.clone();
+    d.metadata.load_deferred_blocks().map_err(|e| IoError::Read(format!("a smart object's embedded file could not be read: {e}")))?;
+    Ok(std::borrow::Cow::Owned(d))
+}
+
 /// Run `f` with an interrupt whose progress `0..=1` fills `lo..=hi` of `ctl`'s (same cancellation).
 pub(crate) fn with_span<R>(ctl: &photocraft_raster::Interrupt, lo: f32, hi: f32, f: impl FnOnce(&photocraft_raster::Interrupt) -> R) -> R {
     let cancelled = || ctl.cancelled();
@@ -476,6 +550,9 @@ fn export_stages(doc: &Document, name_or_ext: &str, opts: &ExportOptions, ctl: &
         ));
     }
     if ext == "ora" {
+        // ORA writes every layer: hidden ones still in the opened file are read first (one that
+        // can't be is an error, not an empty layer).
+        doc.decode_lazy_layers().map_err(IoError::Read)?;
         return ora::export(doc);
     }
     if ext == "pdf" {
@@ -497,6 +574,10 @@ fn export_stages(doc: &Document, name_or_ext: &str, opts: &ExportOptions, ctl: &
         return Ok(ExportResult { bytes, warnings: Vec::new() });
     }
     if ext == "psd" || ext == "psb" {
+        // Smart-object files left in the file the document was opened from are read for the save
+        // (the writer works on bytes in memory); a failed read fails it, never writes them empty.
+        // Only the formats that write the blocks read them: a flat export doesn't need them.
+        let doc = &*with_blocks_loaded(doc)?;
         let o = PsdExportOptions {
             force_psb: opts.force_psb || ext == "psb",
             maximize_compatibility: opts.psd_maximize_compatibility,
@@ -527,7 +608,8 @@ fn export_stages(doc: &Document, name_or_ext: &str, opts: &ExportOptions, ctl: &
     }
     let format = photocraft_codecs::from_extension(&ext).ok_or_else(|| IoError::UnknownFormat(name_or_ext.to_string()))?;
     if format == photocraft_codecs::Format::Tiff && opts.tiff_layers && tiff_layers::would_write_layers(doc) {
-        return tiff_layers::export_layered(doc, opts, ctl);
+        // Its layer data is a PSD layer section, with the PSD's global blocks.
+        return tiff_layers::export_layered(&*with_blocks_loaded(doc)?, opts, ctl);
     }
     flat::export_flat_with(doc, format, opts, ctl)
 }
