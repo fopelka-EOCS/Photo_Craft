@@ -66,12 +66,12 @@ fn production(text: &str) -> String {
         // Further attributes, then the item: one line (`mod x;`) or a block up to `}` (or a
         // multi-line `use`'s `};`) at column 0.
         for item in lines.by_ref() {
-            let item = bare(item);
+            let item = code(item);
             if item.starts_with("#[") {
                 continue;
             }
             // `mod x;` and a one-line `mod tests {}` end on their own line.
-            if !item.trim_end().ends_with([';', '}']) {
+            if !item.ends_with([';', '}']) {
                 for l in lines.by_ref() {
                     if matches!(code(l).as_str(), "}" | "};") {
                         break;
@@ -220,6 +220,8 @@ fn production_keeps_code_after_an_inline_test_module() {
     assert_eq!(production(commented), "fn b() { p.x.read }\n");
     let multiline_use = "#[cfg(test)]\nuse super::{\n    a,\n    b,\n};\nfn b() { p.x.read }\n";
     assert_eq!(production(multiline_use), "fn b() { p.x.read }\n");
+    let commented_item = "#[cfg(test)]\nmod more; // helpers\nfn b() { p.x.read }\n}\n";
+    assert_eq!(production(commented_item), "fn b() { p.x.read }\n}\n");
     for newline in ["\n", "\r\n"] {
         let source = format!(
             "fn a() {{}}{newline}#[cfg(test)]{newline}#[allow(dead_code)]{newline}mod inline_tests {{{newline}    fn t() {{ p.x.hidden }}{newline}}}{newline}{newline}fn b() {{ p.x.read }}{newline}#[cfg(test)]{newline}mod more;{newline}fn c() {{}}{newline}"
