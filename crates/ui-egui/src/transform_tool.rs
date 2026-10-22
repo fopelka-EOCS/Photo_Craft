@@ -983,9 +983,21 @@ fn show_only(layers: &mut [photocraft_doc::Layer], keep: &[LayerId]) {
             continue;
         }
         match &mut l.content {
-            LayerContent::Group(g) if g.children.iter().any(|c| keep.iter().any(|k| contains(c, *k))) => show_only(&mut g.children, keep),
+            LayerContent::Group(g) if g.children.iter().any(|c| keep.iter().any(|k| contains(c, *k))) => {
+                clear_board(g);
+                show_only(&mut g.children, keep);
+            }
             _ => l.visible = false,
         }
+    }
+}
+
+/// An artboard kept only because it holds the layers a preview isolates draws its contents
+/// clipped to the board, but not its background: an opaque board would cover the moving pixels
+/// and every layer under them while the box is open (#7944).
+fn clear_board(g: &mut photocraft_doc::Group) {
+    if let Some(board) = g.artboard.as_mut() {
+        board.background = photocraft_doc::ArtboardBackground::Transparent;
     }
 }
 
@@ -1002,6 +1014,7 @@ pub(crate) fn solo_layer(layers: &mut [photocraft_doc::Layer], id: LayerId) {
         match &mut l.content {
             LayerContent::Group(g) if g.children.iter().any(|c| contains(c, id)) => {
                 l.clipped = false;
+                clear_board(g);
                 solo_layer(&mut g.children, id);
             }
             _ => l.visible = false,
@@ -4953,6 +4966,35 @@ mod tests {
             Color32::from_rgb(255, 0, 0),
             "a sibling in the parent group must not be baked into the moving texture"
         );
+    }
+
+    /// #7944: transforming a layer inside an artboard, the moving texture and the composite of
+    /// the layers covering it carry the board's clip but not its opaque background, which would
+    /// blank out the moving layer and every layer under it while the box is open.
+    #[test]
+    fn previews_inside_an_artboard_leave_out_its_background() {
+        let mut app = app_with_square(64, photocraft_geom::Rect::new(8, 8, 24, 24));
+        let red = app.session.active().unwrap().doc.layers.last().unwrap().id;
+        app.session.execute("layer.select", json!({"layer": red.0})).unwrap();
+        let group = LayerId(app.session.execute("layer.groupLayers", json!({})).unwrap()["layer"].as_u64().unwrap());
+        let board = LayerId(app.session.execute("layer.new.artboardFromLayers", json!({})).unwrap()["layer"].as_u64().unwrap());
+        app.session.execute("layer.artboard.set", json!({"width": 40, "height": 40})).unwrap();
+        let doc = app.session.active().unwrap().doc.clone();
+        assert!(matches!(doc.layer(board).unwrap().artboard().unwrap().background, photocraft_doc::ArtboardBackground::White));
+
+        // The moving texture of the group: red where the square is, clear elsewhere on the board.
+        let b = photocraft_geom::Rect::new(8, 8, 48, 48);
+        let (image, _) = preview_image(&doc, group, None, b, 4096, false);
+        let at = |x: usize, y: usize| image.pixels[(y - 8) * image.size[0] + (x - 8)];
+        assert_eq!(at(10, 10), Color32::from_rgb(255, 0, 0));
+        assert_eq!(at(40, 40).a(), 0, "the board's white background is not baked into the moving texture");
+
+        // The covering composite keeps the board (its clip) but not its background.
+        let mut over = doc.layers.clone();
+        show_only(&mut over, &[red]);
+        let kept = over.iter().find(|l| l.id == board).unwrap();
+        assert!(kept.visible);
+        assert!(matches!(kept.artboard().unwrap().background, photocraft_doc::ArtboardBackground::Transparent));
     }
 
     #[test]
