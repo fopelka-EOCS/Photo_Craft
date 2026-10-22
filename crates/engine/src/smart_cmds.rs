@@ -77,8 +77,13 @@ fn base_name(path: &str) -> String {
     path.rsplit(['/', '\\']).next().unwrap_or(path).to_string()
 }
 
+/// A linked file's bytes; `None` when it is missing or its path is not followed
+/// ([`crate::doc_path::resolve`]).
 fn read_file(path: &str) -> Option<Vec<u8>> {
-    if path.is_empty() { None } else { photocraft_format::read_file(std::path::Path::new(path)).ok() }
+    if path.is_empty() {
+        return None;
+    }
+    photocraft_format::read_file(&crate::doc_path::resolve(path).ok()?).ok()
 }
 
 /// The source file of a smart object: embedded bytes, the PSD's embedded linked-layer data (PSD
@@ -309,12 +314,27 @@ pub fn apply_smart_filters(placed: &Surface, sm: &SmartObject, canvas: Rect) -> 
     // Edge pixels repeat at the canvas ∪ placed-content edge, as for layer filters.
     let extent = canvas.union(&placed.content_bounds());
     for f in sm.smart_filters.iter().filter(|f| f.visible) {
-        cur = apply_smart_filter(f, &cur, canvas, extent)?;
+        cur = apply_smart_filter(f, &cur, filter_bounds(f, placed, canvas), extent)?;
     }
     Ok(match sm.filter_mask.as_ref().filter(|m| m.enabled) {
         Some(m) => photocraft_compose::filter_mask::mix(placed, &cur, m),
         None => cur,
     })
+}
+
+/// The reference bounds of smart filter `f`. Render filters work within the smart object, as
+/// Photoshop's do: Lens Flare's centre is a fraction of the object, and Clouds and Fibers fill it
+/// and size their pattern by it. The object is its placed content's bounds (which leaves out
+/// fully transparent edges of the source); the other filters use the canvas, as on a layer.
+fn filter_bounds(f: &SmartFilter, placed: &Surface, canvas: Rect) -> Rect {
+    match placed.content_bounds() {
+        b if renders_in_object(f) && !b.is_empty() => b,
+        _ => canvas,
+    }
+}
+
+fn renders_in_object(f: &SmartFilter) -> bool {
+    matches!(f.command.as_str(), "filter.render.clouds" | "filter.render.differenceClouds" | "filter.render.fibers" | "filter.render.lensFlare")
 }
 
 /// One visible smart filter over `cur`, blended with its blend mode and opacity. `Err` when the
@@ -419,10 +439,18 @@ fn render_in(doc: &Document, sm: &SmartObject, ctx: &JobCtx) -> Result<Option<Su
         None => (0, placed()?),
     };
     let n = filters.len() as f32;
+    // The object's bounds, found once: the placed stage may have been evicted from the cache, and
+    // placing it again for every render filter would decode the source each time.
+    let mut object_bounds: Option<Rect> = None;
     for (i, (f, key)) in filters.iter().zip(&keys).enumerate().skip(done) {
         ctx.check()?;
         ctx.progress(i as f32 / n, "");
-        cur = Stage { surface: apply_smart_filter(f, &cur.surface, canvas, cur.extent)?, extent: cur.extent };
+        let bounds = match object_bounds {
+            _ if !renders_in_object(f) => canvas,
+            Some(b) => b,
+            None => *object_bounds.insert(filter_bounds(f, &placed()?.surface, canvas)),
+        };
+        cur = Stage { surface: apply_smart_filter(f, &cur.surface, bounds, cur.extent)?, extent: cur.extent };
         stack_cache::put(*key, &cur);
     }
     ctx.progress(1.0, "");
@@ -492,10 +520,14 @@ fn refresh_or_fail(doc: &mut Document, id: LayerId) -> Result<()> {
 
 fn refresh_or_fail_in(doc: &mut Document, id: LayerId, ctx: &JobCtx) -> Result<()> {
     if refresh_in(doc, id, ctx)? {
-        Ok(())
-    } else {
-        Err(other("the smart object's contents are unavailable (missing linked file?), so it can't be re-rendered"))
+        return Ok(());
     }
+    if let SmartSource::Linked { path } = &smart(doc, id)?.source
+        && let Err(why @ crate::doc_path::NotFollowed::Refused(_)) = crate::doc_path::resolve(path)
+    {
+        return Err(crate::doc_path::refusal("the linked file", path, why));
+    }
+    Err(other("the smart object's contents are unavailable (missing linked file?), so it can't be re-rendered"))
 }
 
 fn smart(doc: &Document, id: LayerId) -> Result<&SmartObject> {
@@ -1009,10 +1041,40 @@ fn set_filter_visible(s: &mut Session, p: &Value) -> Result<Value> {
     })
 }
 
+/// The Displace filter, whose map a smart filter keeps embedded in its params.
+const DISPLACE: &str = "filter.distort.displace";
+
 fn set_filter_params(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "layer.smartFilter.setParams";
     let new = p.get("params").cloned().ok_or_else(|| bad(CMD, "pass `params` (merged into the filter's parameters)"))?;
     let authorize = s.authorize;
+    // A Displace given another open document as its map embeds that one in place of the old
+    // (#7423). It is read here, before the edit, from the session; the request is authorized
+    // first, as the merged params are below. A new `mapPath` stays a path (read next to the
+    // document on each re-render) and only drops the old embedded map; an empty one, or a
+    // negative `mapDocument` (the dialog's "None"), names no map.
+    let new_map_asked = crate::filters_ext::map_document(&new).is_some();
+    let new_path = crate::filters_ext::map_path(&new).is_some();
+    let displace = {
+        let doc = &s.active().ok_or(EngineError::NoDocument)?.doc;
+        let sm = smart(doc, layer_param(s, p)?)?;
+        sm.smart_filters.get(filter_index(CMD, p, sm)?).is_some_and(|f| f.command == DISPLACE)
+    };
+    let new_map = if displace && new_map_asked {
+        // The old embedded map, if the edit passed it back, gives way to the one named.
+        let request = crate::filters_ext::displace_request(&new);
+        if let Some(gate) = authorize {
+            gate(DISPLACE, &request)?;
+        }
+        let mut fp = crate::filters::params_for(DISPLACE, &request).ok_or_else(|| bad(CMD, "unreadable Displace settings"))?;
+        crate::filters_ext::resolve(s, &mut fp, &request)?;
+        match fp {
+            photocraft_algo::FilterParams::Displace { map, .. } => map,
+            _ => None,
+        }
+    } else {
+        None
+    };
     edit_filters(s, p, "Edit Smart Filter", |sm| {
         let i = filter_index(CMD, p, sm)?;
         let f = &mut sm.smart_filters[i];
@@ -1022,6 +1084,14 @@ fn set_filter_params(s: &mut Session, p: &Value) -> Result<Value> {
         match (&mut f.params, new) {
             (Value::Object(old), Value::Object(n)) => old.extend(n),
             (slot, n) => *slot = n,
+        }
+        if f.command == DISPLACE {
+            if let Some(map) = &new_map {
+                f.params = photocraft_io::smart_map::displace_embed_map(&f.params, map)
+                    .ok_or_else(|| bad(CMD, "the displacement map is too large to keep in a Smart Object's filter"))?;
+            } else if new_path {
+                f.params = photocraft_io::smart_map::displace_without_map(&f.params);
+            }
         }
         // Authorize the underlying command with the complete merged params, including paths
         // already stored in the document, before committing the edit or starting a worker.
@@ -1056,6 +1126,9 @@ fn delete_filter(s: &mut Session, p: &Value) -> Result<Value> {
     edit_filters(s, p, "Delete Smart Filter", |sm| {
         let i = filter_index("layer.smartFilter.delete", p, sm)?;
         sm.smart_filters.remove(i);
+        if sm.smart_filters.is_empty() {
+            sm.filter_mask = None;
+        }
         Ok(())
     })
 }
@@ -1125,6 +1198,9 @@ fn transfer_filters(s: &mut Session, p: &Value) -> Result<Value> {
                 match index {
                     Some(i) => {
                         src.smart_filters.remove(i);
+                        if src.smart_filters.is_empty() {
+                            src.filter_mask = None;
+                        }
                     }
                     None => {
                         src.smart_filters.clear();
