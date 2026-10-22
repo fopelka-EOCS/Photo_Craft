@@ -60,7 +60,9 @@ fn sample_at(at: vec2<f32>, footprint: vec2<f32>, repeat_edge: bool) -> vec2<f32
     let coverage = clamp(value.y, 0.0, 1.0);
     let a = quant(coverage);
     var gray = 0.0;
-    if coverage > 0.000001 { gray = quant(value.x / coverage); }
+    // The CPU divides the premultiplied sample by the original alpha before clipping it.
+    // Bicubic alpha may overshoot 1; dividing by clipped coverage lightens the sample.
+    if value.y > 0.000001 { gray = quant(value.x / value.y); }
     return vec2(gray * a, a);
 }
 fn srgb(c: vec3<f32>) -> vec3<f32> {

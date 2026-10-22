@@ -40,7 +40,10 @@ pub(crate) fn float_selected(app: &mut PhotocraftApp, copy: bool, dx: f64, dy: f
     let floating = app.session.active().is_some_and(|st| photocraft_engine::float_cmds::floating(st).is_some());
     let dropped = if copy && floating { app.run("select.drop", json!({})) } else { Ok(json!(null)) };
     match dropped.and_then(|_| app.run("select.float", json!({"dx": dx, "dy": dy, "copy": copy}))) {
-        Ok(_) => true,
+        Ok(_) => {
+            crate::snap_ui::follow_cut(app);
+            true
+        }
         Err(e) => {
             app.ui.status = e;
             app.ui.status_error = true;
@@ -408,6 +411,13 @@ pub(crate) fn is_preview_key(key: u64) -> bool {
     key > BASE && key < BASE << 1
 }
 
+/// Does a Move drag of whole layers take the selection along? With several layers selected, as
+/// in Photoshop (#7538): their selected pixels can't float, so the layers move and the marching
+/// ants follow them.
+pub(crate) fn carries_selection(app: &PhotocraftApp) -> bool {
+    app.session.active().is_some_and(|st| st.doc.selection.is_some() && st.selected_layers().len() > 1)
+}
+
 /// Release: one `layer.translate` by the drag's offset. The canvas already shows the result, so
 /// its caches are told it showed the document: the command's damage rect refreshes that area.
 pub(crate) fn finish(app: &mut PhotocraftApp, dx: f64, dy: f64) {
@@ -421,7 +431,7 @@ pub(crate) fn finish(app: &mut PhotocraftApp, dx: f64, dy: f64) {
     if dx == 0.0 && dy == 0.0 {
         return;
     }
-    if app.run("layer.translate", json!({"dx": dx, "dy": dy})).is_err() {
+    if app.run("layer.translate", json!({"dx": dx, "dy": dy, "selection": carries_selection(app)})).is_err() {
         return;
     }
     let Some(p) = shown else { return };
@@ -502,9 +512,10 @@ mod tests {
                 let mut moved = doc.clone();
                 photocraft_engine::channel_cmds::move_color_channel(&mut moved, layer, 0, dx, 0, app.session.tools.background).unwrap();
                 let view = &app.session.active().unwrap().channel_view;
-                let expected = crate::channel_view::render_for_display(&moved, view, moved.bounds(), 1, false, Some(layer), None)
-                    .filter(|pixels| pixels.iter().all(|p| p.a() == 255))
-                    .unwrap_or_else(|| crate::canvas::display_image(None, &photocraft_compose::flatten(&moved)).pixels);
+                let expected =
+                    crate::channel_view::render_for_display(&moved, view, moved.bounds(), 1, crate::channel_view::Look::default(), Some(layer), None)
+                        .filter(|pixels| pixels.iter().all(|p| p.a() == 255))
+                        .unwrap_or_else(|| crate::canvas::display_image(None, &photocraft_compose::flatten(&moved)).pixels);
                 let max =
                     actual.iter().zip(&expected).flat_map(|(a, b)| a.to_array().into_iter().zip(b.to_array()).map(|(x, y)| x.abs_diff(y))).max().unwrap_or(0);
                 assert!(max <= 1, "{depth:?}, offset {dx}, visible {visible}: max display difference {max}");
@@ -846,6 +857,28 @@ mod tests {
             assert!(alpha(&app, id, 10, 10) == 1.0 && alpha(&app, id, 35, 35) == 1.0, "{depth}-bit: original and copy");
             assert!(app.session.undo());
             assert_eq!(alpha(&app, id, 35, 35), 0.0, "{depth}-bit: undone");
+        }
+    }
+
+    /// #7538: a loose marquee round the red square shrinks to it as the drag starts: the canvas
+    /// outlines the moved pixels while they float, and the dropped selection is theirs. Alt-drag
+    /// (a copy) too.
+    #[test]
+    fn dragging_selected_pixels_shrinks_the_ants_to_them() {
+        for depth in [8, 16, 32] {
+            for m in [egui::Modifiers::NONE, egui::Modifiers::ALT] {
+                let (mut app, _) = selected_pixels(depth);
+                app.session.execute("select.rect", json!({"x": 2, "y": 2, "width": 30, "height": 30})).unwrap();
+                drag(&mut app, [16.0, 16.0], [26.0, 21.0], m);
+                assert_eq!(offset(&app), Some((10, 5)), "{depth}-bit, {m:?}: floating");
+                let ants = crate::canvas::floating_outline(&app, 0).map(|s| s.content_bounds());
+                assert_eq!(ants, Some(Rect::new(8, 8, 24, 24)), "{depth}-bit, {m:?}: the ants hug the red square");
+                assert!(crate::canvas::floating_outline(&app, 1).is_none(), "only the active document's");
+                app.run("select.drop", json!({})).unwrap();
+                let sel = app.session.active().unwrap().doc.selection.as_ref().map(|s| s.content_bounds());
+                assert_eq!(sel, Some(Rect::new(18, 13, 34, 29)), "{depth}-bit, {m:?}: dropped");
+                assert!(crate::canvas::floating_outline(&app, 0).is_none(), "nothing floats");
+            }
         }
     }
 

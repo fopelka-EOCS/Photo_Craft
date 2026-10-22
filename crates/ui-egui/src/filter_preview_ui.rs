@@ -239,7 +239,7 @@ fn upload(ctx: &egui::Context, app: &PhotocraftApp, name: &str, doc: &Document) 
             &st.channel_view,
             doc.bounds(),
             factor,
-            app.session.prefs().interface.show_channels_in_color,
+            crate::channel_view::Look::of(&app.session),
             st.active_layer,
             display.as_deref(),
         )
@@ -317,8 +317,15 @@ mod tests {
         assert_eq!(shown, image(dialog.id()), "opening a filter must not change the channel colour");
         assert_ne!(
             shown,
-            crate::channel_view::render(&doc, &app.session.active().unwrap().channel_view, doc.bounds(), 1, true, app.session.active().unwrap().active_layer)
-                .unwrap()
+            crate::channel_view::render(
+                &doc,
+                &app.session.active().unwrap().channel_view,
+                doc.bounds(),
+                1,
+                crate::channel_view::Look { in_color: true, ..crate::channel_view::Look::default() },
+                app.session.active().unwrap().active_layer,
+            )
+            .unwrap()
         );
         delta.clear();
     }
@@ -387,7 +394,9 @@ mod tests {
                 let egui::ImageData::Color(image) = &delta.set.get(&texture.id()).unwrap()[0].image;
                 let pixels = image.pixels.clone();
                 delta.clear();
-                let expected = crate::channel_view::render(&preview, &st.channel_view, preview.bounds(), 1, false, st.active_layer).unwrap();
+                let expected =
+                    crate::channel_view::render(&preview, &st.channel_view, preview.bounds(), 1, crate::channel_view::Look::default(), st.active_layer)
+                        .unwrap();
                 assert_eq!(pixels, expected, "depth {depth}, factor {k}");
                 assert_ne!(pixels[0], pixels[pixels.len() - 1], "the alpha edge is visible, not the white RGB layer");
                 assert!(pixels.iter().any(|p| p.r() > 0 && p.r() < 255), "the blurred edge is visible");
