@@ -2928,3 +2928,15 @@ curves	Smooth	平滑
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	GPU 介面卡
+
+# Help › System Info
+	PhotoCraft version: {value}	PhotoCraft 版本：{value}
+	Operating system: {value}	作業系統：{value}
+	System architecture: {value}	系統架構：{value}
+	Logical processor count: {value}	邏輯處理器數量：{value}
+	Built-in memory: {value} MB	內建記憶體：{value} MB
+	Memory available to PhotoCraft: {value} MB	PhotoCraft 可用記憶體：{value} MB
+	Memory used by PhotoCraft: {value} MB	PhotoCraft 已用記憶體：{value} MB
+	History states: {value}	步驟記錄數量：{value}
+	Cache levels: {value}	快取層級：{value}
+	Cache tile size: {value} px	快取拼貼大小：{value} px

@@ -4035,3 +4035,15 @@ cameraData	Lens	Lens
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	GPU bağdaştırıcısı
+
+# Help › System Info
+	PhotoCraft version: {value}	PhotoCraft sürümü: {value}
+	Operating system: {value}	İşletim sistemi: {value}
+	System architecture: {value}	Sistem mimarisi: {value}
+	Logical processor count: {value}	Mantıksal işlemci sayısı: {value}
+	Built-in memory: {value} MB	Yerleşik bellek: {value} MB
+	Memory available to PhotoCraft: {value} MB	PhotoCraft'ın kullanabileceği bellek: {value} MB
+	Memory used by PhotoCraft: {value} MB	PhotoCraft'ın kullandığı bellek: {value} MB
+	History states: {value}	Tarih durumları: {value}
+	Cache levels: {value}	Önbellek düzeyleri: {value}
+	Cache tile size: {value} px	Önbellek kutucuğu boyutu: {value} px

@@ -45,11 +45,15 @@ flate2 = { workspace = true }
 rayon = { workspace = true }
 # Safe native UI-language APIs (Windows/macOS); no subprocess or web dependency.
 sys-locale = "=0.3.2"
+# Memory the app is using, for Help › System Info. Already in the lockfile through photocraft-testkit,
+# same features (statm, not smaps, on Linux).
+memory-stats = { version = "=1.2.0", features = ["always_use_statm"] }
 
 # Installed RAM for the GPU memory budget (`gpu_canvas::physical_memory`): the safe binding the
-# desktop app already uses, pinned to the same version.
+# desktop app already uses, pinned to the same version. `advapi` reads the Windows version and
+# processor name from the registry for Help › System Info.
 [target.'cfg(target_os = "windows")'.dependencies]
-winsafe = { version = "=0.0.29", default-features = false, features = ["kernel", "dxgi"] }
+winsafe = { version = "=0.0.29", default-features = false, features = ["kernel", "dxgi", "advapi"] }
 
 [dev-dependencies]
 # egui's own default fonts in tests: the oracle for egui_fonts.rs, and contexts made with

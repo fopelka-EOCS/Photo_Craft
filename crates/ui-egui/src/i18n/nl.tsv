@@ -4068,3 +4068,15 @@ curves	Smooth	Vloeiend maken
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	GPU-adapter
+
+# Help › System Info
+	PhotoCraft version: {value}	PhotoCraft-versie: {value}
+	Operating system: {value}	Besturingssysteem: {value}
+	System architecture: {value}	Systeemarchitectuur: {value}
+	Logical processor count: {value}	Aantal logische processors: {value}
+	Built-in memory: {value} MB	Ingebouwd geheugen: {value} MB
+	Memory available to PhotoCraft: {value} MB	Geheugen beschikbaar voor PhotoCraft: {value} MB
+	Memory used by PhotoCraft: {value} MB	Geheugen in gebruik door PhotoCraft: {value} MB
+	History states: {value}	Geschiedenisstappen: {value}
+	Cache levels: {value}	Cacheniveaus: {value}
+	Cache tile size: {value} px	Tegelgrootte cache: {value} px

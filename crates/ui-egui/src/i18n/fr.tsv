@@ -3319,3 +3319,15 @@ curves	Smooth	Lisser
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Adaptateur GPU
+
+# Help › System Info
+	PhotoCraft version: {value}	Version de PhotoCraft : {value}
+	Operating system: {value}	Système d'exploitation : {value}
+	System architecture: {value}	Architecture du système : {value}
+	Logical processor count: {value}	Nombre de processeurs logiques : {value}
+	Built-in memory: {value} MB	Mémoire intégrée : {value} Mo
+	Memory available to PhotoCraft: {value} MB	Mémoire disponible pour PhotoCraft : {value} Mo
+	Memory used by PhotoCraft: {value} MB	Mémoire utilisée par PhotoCraft : {value} Mo
+	History states: {value}	États d'historique : {value}
+	Cache levels: {value}	Niveaux de cache : {value}
+	Cache tile size: {value} px	Taille des tuiles du cache : {value} px

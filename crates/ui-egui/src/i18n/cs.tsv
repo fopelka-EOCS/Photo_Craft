@@ -3720,7 +3720,16 @@ curves	Smooth	Vyhladit
 	unknown	neznámý
 	unknown type	neznámý typ
 	auto	automaticky
-	Platform: {os} {arch}	Platforma: {os} {arch}
+	PhotoCraft version: {value}	Verze aplikace PhotoCraft: {value}
+	Operating system: {value}	Operační systém: {value}
+	System architecture: {value}	Architektura systému: {value}
+	Logical processor count: {value}	Počet logických procesorů: {value}
+	Built-in memory: {value} MB	Vestavěná paměť: {value} MB
+	Memory available to PhotoCraft: {value} MB	Paměť dostupná pro PhotoCraft: {value} MB
+	Memory used by PhotoCraft: {value} MB	Paměť používaná aplikací PhotoCraft: {value} MB
+	History states: {value}	Počet stavů historie: {value}
+	Cache levels: {value}	Úrovně mezipaměti: {value}
+	Cache tile size: {value} px	Velikost dlaždice mezipaměti: {value} px
 	previous reading kept; the last re-read failed: {reason}	ponechány předchozí údaje; poslední načtení selhalo: {reason}
 	Monitor profile: {profile}	Profil monitoru: {profile}
 	Display profiles: {reason}	Profily displejů: {reason}

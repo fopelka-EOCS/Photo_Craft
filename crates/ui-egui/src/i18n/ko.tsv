@@ -3498,3 +3498,15 @@ curves	Smooth	매끄럽게
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	GPU 어댑터
+
+# Help › System Info
+	PhotoCraft version: {value}	PhotoCraft 버전: {value}
+	Operating system: {value}	운영 체제: {value}
+	System architecture: {value}	시스템 아키텍처: {value}
+	Logical processor count: {value}	논리 프로세서 수: {value}
+	Built-in memory: {value} MB	내장 메모리: {value} MB
+	Memory available to PhotoCraft: {value} MB	PhotoCraft에서 사용 가능한 메모리: {value} MB
+	Memory used by PhotoCraft: {value} MB	PhotoCraft가 사용 중인 메모리: {value} MB
+	History states: {value}	작업 내역 상태 수: {value}
+	Cache levels: {value}	캐시 레벨: {value}
+	Cache tile size: {value} px	캐시 타일 크기: {value} px

@@ -2826,7 +2826,16 @@ curves	Smooth	Glätten
 	Image compositor: {processor}	Bildkompositor: {processor}
 	Window renderer: {renderer}	Fensterdarstellung: {renderer}
 	Graphics adapter	Grafikadapter
-	Platform: {os} {arch}	Plattform: {os} {arch}
+	PhotoCraft version: {value}	PhotoCraft-Version: {value}
+	Operating system: {value}	Betriebssystem: {value}
+	System architecture: {value}	Systemarchitektur: {value}
+	Logical processor count: {value}	Anzahl logischer Prozessoren: {value}
+	Built-in memory: {value} MB	Eingebauter Arbeitsspeicher: {value} MB
+	Memory available to PhotoCraft: {value} MB	Für PhotoCraft verfügbarer Arbeitsspeicher: {value} MB
+	Memory used by PhotoCraft: {value} MB	Von PhotoCraft belegter Arbeitsspeicher: {value} MB
+	History states: {value}	Protokollschritte: {value}
+	Cache levels: {value}	Cache-Stufen: {value}
+	Cache tile size: {value} px	Cache-Kachelgröße: {value} px
 	Monitor profile: {profile}	Monitorprofil: {profile}
 	Opened {url}	{url} geöffnet
 	{index} of {total}	{index} von {total}

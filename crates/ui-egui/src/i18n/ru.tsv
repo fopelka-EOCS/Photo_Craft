@@ -3286,3 +3286,15 @@ curves	Smooth	Сгладить
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Адаптер GPU
+
+# Help › System Info
+	PhotoCraft version: {value}	Версия PhotoCraft: {value}
+	Operating system: {value}	Операционная система: {value}
+	System architecture: {value}	Архитектура системы: {value}
+	Logical processor count: {value}	Число логических процессоров: {value}
+	Built-in memory: {value} MB	Встроенная память: {value} МБ
+	Memory available to PhotoCraft: {value} MB	Память, доступная PhotoCraft: {value} МБ
+	Memory used by PhotoCraft: {value} MB	Память, используемая PhotoCraft: {value} МБ
+	History states: {value}	Состояния истории: {value}
+	Cache levels: {value}	Уровни кэша: {value}
+	Cache tile size: {value} px	Размер блока кэша: {value} px

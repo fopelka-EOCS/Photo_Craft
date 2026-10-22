@@ -3306,3 +3306,15 @@ curves	Smooth	Haluskan
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Adaptor GPU
+
+# Help › System Info
+	PhotoCraft version: {value}	Versi PhotoCraft: {value}
+	Operating system: {value}	Sistem operasi: {value}
+	System architecture: {value}	Arsitektur sistem: {value}
+	Logical processor count: {value}	Jumlah prosesor logis: {value}
+	Built-in memory: {value} MB	Memori terpasang: {value} MB
+	Memory available to PhotoCraft: {value} MB	Memori yang tersedia untuk PhotoCraft: {value} MB
+	Memory used by PhotoCraft: {value} MB	Memori yang digunakan PhotoCraft: {value} MB
+	History states: {value}	Status riwayat: {value}
+	Cache levels: {value}	Level cache: {value}
+	Cache tile size: {value} px	Ukuran tile cache: {value} px

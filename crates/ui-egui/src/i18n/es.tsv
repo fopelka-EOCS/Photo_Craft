@@ -4066,7 +4066,16 @@ layerLabel	No Color	Sin color
 	Software adapter	Adaptador de software
 	Graphics adapter	Adaptador gráfico
 	unknown type	tipo desconocido
-	Platform: {os} {arch}	Plataforma: {os} {arch}
+	PhotoCraft version: {value}	Versión de PhotoCraft: {value}
+	Operating system: {value}	Sistema operativo: {value}
+	System architecture: {value}	Arquitectura del sistema: {value}
+	Logical processor count: {value}	Número de procesadores lógicos: {value}
+	Built-in memory: {value} MB	Memoria integrada: {value} MB
+	Memory available to PhotoCraft: {value} MB	Memoria disponible para PhotoCraft: {value} MB
+	Memory used by PhotoCraft: {value} MB	Memoria usada por PhotoCraft: {value} MB
+	History states: {value}	Estados de historia: {value}
+	Cache levels: {value}	Niveles de caché: {value}
+	Cache tile size: {value} px	Tamaño de tesela de caché: {value} px
 	previous reading kept; the last re-read failed: {reason}	se conservó la lectura anterior; la última relectura falló: {reason}
 	Monitor profile: {profile}	Perfil del monitor: {profile}
 	Display profiles: {reason}	Perfiles de pantalla: {reason}
