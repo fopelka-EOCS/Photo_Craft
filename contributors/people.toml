@@ -192,6 +192,9 @@ sync_github_name = true
 [people.ha1des]
 sync_github_name = true
 
+[people.benandez]
+real_name = "Martin Ball"
+
 [people.sbjwin]
 real_name = "Baekjin Sung"
 display_name = "Baekjin"
