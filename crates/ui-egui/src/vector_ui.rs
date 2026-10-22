@@ -536,11 +536,16 @@ fn draft_before_finish(pen: &PenPath) -> PenPath {
 /// (the Pen that drew it comes back) and after undoing what came next, such as the selection
 /// Make Selection made from it, or later paths. False for a plain Undo.
 pub(crate) fn pen_resume_on_undo(app: &mut PhotocraftApp) -> Result<bool, String> {
-    if app.ui.pen.is_some() {
+    if app.ui.pen.is_some() || box_steps(app, "edit.undo") {
         return Ok(false);
     }
     let Some(i) = app.finished_pens.iter().rposition(|f| !f.resumed && is_current(app, &f.doc)) else { return Ok(false) };
+    let before = current_doc(app);
     app.run("edit.undo", json!({}))?;
+    // The finish wasn't taken back: the path stays finished.
+    if is_current(app, &before) {
+        return Ok(true);
+    }
     let doc = current_doc(app);
     let Some(finished) = app.finished_pens.get_mut(i) else { return Ok(true) };
     finished.doc = doc;
@@ -557,12 +562,16 @@ pub(crate) fn pen_resume_on_undo(app: &mut PhotocraftApp) -> Result<bool, String
 
 /// Edit › Redo after [`pen_resume_on_undo`], with the path untouched since: finish it again.
 pub(crate) fn pen_finish_on_redo(app: &mut PhotocraftApp) -> Result<bool, String> {
+    if box_steps(app, "edit.redo") {
+        return Ok(false);
+    }
     let Some(i) = app.finished_pens.iter().rposition(|f| f.resumed && is_current(app, &f.doc) && app.ui.pen.as_ref() == Some(&f.draft)) else {
         return Ok(false);
     };
-    let pen = app.ui.pen.take();
+    let (pen, pen_doc) = (app.ui.pen.take(), app.ui.pen_doc);
     if let Err(e) = app.run("edit.redo", json!({})) {
         app.ui.pen = pen;
+        app.ui.pen_doc = pen_doc;
         return Err(e);
     }
     app.ui.pen_doc = None;
@@ -572,6 +581,12 @@ pub(crate) fn pen_finish_on_redo(app: &mut PhotocraftApp) -> Result<bool, String
         finished.resumed = false;
     }
     Ok(true)
+}
+
+/// Do Free Transform's or the Crop tool's own box steps take `id` (Undo/Redo) rather than History
+/// (`transform_tool::intercept`, `crop_ui::intercept`)?
+fn box_steps(app: &PhotocraftApp, id: &str) -> bool {
+    crate::transform_tool::is_enabled(app, id).is_some() || crate::crop_ui::is_enabled(app, id).is_some()
 }
 
 /// Preserve a foreign document's draft as its Work Path before another document can edit it.
@@ -3573,6 +3588,58 @@ mod tests {
             assert_eq!(app.ui.pen.as_ref().map(|p| p.knots.clone()), Some(knots));
             assert!(app.session.active().unwrap().doc.work_path.is_none());
         }
+    }
+
+    #[test]
+    fn a_free_transform_box_keeps_its_own_undo_and_redo_over_a_finished_pen_path() {
+        let ctx = egui::Context::default();
+        let mut app = app();
+        app.run("layer.new.layer", json!({})).unwrap();
+        app.run("select.rect", json!({"x": 50, "y": 50, "width": 60, "height": 60})).unwrap();
+        app.run("edit.fill", json!({"color": "#ff0000"})).unwrap();
+        app.run("select.deselect", json!({})).unwrap();
+        app.ui.tool = Tool::Pen;
+        for (x, y) in [(20.0, 20.0), (120.0, 20.0), (120.0, 120.0)] {
+            pen_down(&mut app, x, y, false);
+            pen_up(&mut app);
+        }
+        let knots = app.ui.pen.as_ref().unwrap().knots.clone();
+        crate::tool_memory::select(&mut app, Tool::Move);
+        pen_commit(&mut app, false);
+
+        // Undo under the box steps the box: the path stays finished, and comes back once it closes.
+        crate::transform_tool::begin(&mut app, &ctx).unwrap();
+        menu(&mut app, "edit.undo");
+        assert!(app.ui.transform.is_some() && app.ui.pen.is_none(), "the box took the Undo");
+        assert!(app.session.active().unwrap().doc.work_path.is_some());
+        crate::transform_tool::cancel(&mut app);
+        menu(&mut app, "edit.undo");
+        assert_eq!(app.ui.pen.as_ref().map(|p| p.knots.clone()), Some(knots));
+
+        // Redo under the box steps the box too, leaving the Pen its path.
+        crate::transform_tool::begin(&mut app, &ctx).unwrap();
+        menu(&mut app, "edit.redo");
+        assert!(app.ui.transform.is_some() && app.ui.pen.is_some(), "the box took the Redo");
+        assert!(app.session.active().unwrap().doc.work_path.is_none());
+    }
+
+    #[test]
+    fn a_refused_pen_redo_keeps_the_path_claimed_by_its_document() {
+        let mut app = app();
+        app.ui.tool = Tool::Pen;
+        for (x, y) in [(20.0, 20.0), (120.0, 20.0), (120.0, 120.0)] {
+            pen_down(&mut app, x, y, false);
+            pen_up(&mut app);
+        }
+        press(&mut app, egui::Key::Enter, egui::Modifiers::NONE);
+        menu(&mut app, "edit.undo");
+        let owner = app.ui.pen_doc;
+        assert!(app.ui.pen.is_some() && owner.is_some());
+        app.automation_input = true;
+        app.services.automation_command = Some(Box::new(|id, _| if id == "edit.redo" { Err("denied".into()) } else { Ok(()) }));
+        assert!(pen_finish_on_redo(&mut app).is_err());
+        assert!(app.ui.pen.is_some());
+        assert_eq!(app.ui.pen_doc, owner, "the path given back still belongs to its document");
     }
 
     #[test]
