@@ -83,9 +83,11 @@ fn copy_linked_sources(source: &Document, copies: &mut Document) -> Result<()> {
         if !matches!(key, b"lnk2" | b"lnk3" | b"lnkD" | b"lnkE") {
             continue;
         }
-        let selected = photocraft_io::linked::select_items(data, &|uuid, _| paths.contains(uuid))
+        // A block left in the opened file is read for the copy.
+        let bytes = data.bytes().map_err(|e| EngineError::Other(format!("Could not copy smart-object contents: {e}; the clipboard was not changed")))?;
+        let selected = photocraft_io::linked::select_items(&bytes, &|uuid, _| paths.contains(uuid))
             .map_err(|e| EngineError::Other(format!("Could not copy smart-object contents: {e}; the clipboard was not changed")))?;
-        let selected = selected.map(std::sync::Arc::new).unwrap_or_else(|| data.clone());
+        let selected = selected.map(photocraft_doc::Blob::new).unwrap_or_else(|| data.clone());
         if !selected.is_empty() {
             copies.metadata.psd_global_blocks.try_reserve(1).map_err(|_| EngineError::Other("not enough memory to copy smart-object source records".into()))?;
             copies.metadata.psd_global_blocks.push((*signature, *key, selected));
@@ -420,17 +422,29 @@ fn paste_layers(s: &mut Session, layers: &Document, dx: i32, dy: i32) -> Result<
     let patterns: Vec<_> = copies.patterns.iter().filter(|pat| !d.doc.patterns.iter().any(|q| q.id == pat.id)).cloned().collect();
     // A copied smart object may name a PSD-embedded linked file; land its `lnk` block too (#3584).
     let mut linked = Vec::new();
+    // Destination blocks by key, read once (one left in the opened file is read whole).
+    let mut dest_by_key: std::collections::HashMap<[u8; 4], Vec<std::sync::Arc<Vec<u8>>>> = std::collections::HashMap::new();
     for (signature, key, data) in copies.metadata.psd_global_blocks.iter().filter(|(_, k, _)| matches!(k, b"lnk2" | b"lnk3" | b"lnkD" | b"lnkE")) {
-        if d.doc.metadata.psd_global_blocks.iter().any(|(_, dk, dd)| dk == key && std::sync::Arc::ptr_eq(dd, data)) {
+        if d.doc.metadata.psd_global_blocks.iter().any(|(_, dk, dd)| dk == key && dd.ptr_eq(data)) {
             continue;
         }
+        let failed = |e: photocraft_doc::BlobError| EngineError::Other(format!("Could not paste smart-object contents: {e}; the document was not changed"));
+        let bytes = data.bytes().map_err(failed)?;
+        let dest = match dest_by_key.entry(*key) {
+            std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+            std::collections::hash_map::Entry::Vacant(e) => {
+                let mut dest = Vec::new();
+                for (_, _, dd) in d.doc.metadata.psd_global_blocks.iter().filter(|(_, dk, _)| dk == key) {
+                    dest.push(dd.bytes().map_err(failed)?);
+                }
+                e.insert(dest)
+            }
+        };
         // The clipboard may contain a subset of a destination block. Compare complete records,
         // so copying one layer in the same document does not duplicate large embedded files.
-        let missing = photocraft_io::linked::select_items(data, &|_, raw| {
-            !d.doc.metadata.psd_global_blocks.iter().any(|(_, dk, dd)| dk == key && photocraft_io::linked::contains_item(dd, raw))
-        })
-        .map_err(|e| EngineError::Other(format!("Could not paste smart-object contents: {e}; the document was not changed")))?;
-        let missing = missing.map(std::sync::Arc::new).unwrap_or_else(|| data.clone());
+        let missing = photocraft_io::linked::select_items(&bytes, &|_, raw| !dest.iter().any(|dd| photocraft_io::linked::contains_item(dd, raw)))
+            .map_err(|e| EngineError::Other(format!("Could not paste smart-object contents: {e}; the document was not changed")))?;
+        let missing = missing.map(photocraft_doc::Blob::new).unwrap_or_else(|| data.clone());
         if !missing.is_empty() {
             linked.try_reserve(1).map_err(|_| EngineError::Other("not enough memory to paste smart-object source records".into()))?;
             linked.push((*signature, *key, missing));
@@ -1853,7 +1867,6 @@ mod tests {
     /// source a uuid) can still be opened after Copy + Paste into another document.
     #[test]
     fn paste_keeps_a_psd_embedded_smart_object_openable() {
-        use std::sync::Arc;
         let mut s = session();
         s.execute("layer.smartObjects.convertToSmartObject", json!({})).unwrap();
         let outer = s.active().unwrap().active_layer.unwrap();
@@ -1863,7 +1876,7 @@ mod tests {
             };
             sm.source = photocraft_doc::SmartSource::Linked { path: "uuid-1".into() };
             let linked = photocraft_io::linked::LinkedFile { uuid: "uuid-1".into(), file_name: "in.png".into(), bytes: vec![1, 2, 3, 4] };
-            doc.metadata.psd_global_blocks.push((*b"8BIM", *b"lnk2", Arc::new(photocraft_io::linked::encode_linked_file(&linked))));
+            doc.metadata.psd_global_blocks.push((*b"8BIM", *b"lnk2", photocraft_doc::Blob::new(photocraft_io::linked::encode_linked_file(&linked))));
             Ok(())
         })
         .unwrap();
