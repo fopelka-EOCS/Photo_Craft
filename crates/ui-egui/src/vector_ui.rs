@@ -496,6 +496,9 @@ pub(crate) struct FinishedPen {
     /// the allocation, so a later document can't reuse its address and match by mistake, and
     /// dies once History lets go of that document.
     doc: std::sync::Weak<Document>,
+    /// The History state the finish made. Redo must bring back this state, not just a document
+    /// (`Session::redo` may hand back a copy of it).
+    state: Option<u64>,
     /// Undo has given the Pen the path back: Redo can finish it again.
     resumed: bool,
 }
@@ -503,6 +506,13 @@ pub(crate) struct FinishedPen {
 /// Is `doc` still the active document's current state (no step since)?
 fn is_current(app: &PhotocraftApp, doc: &std::sync::Weak<Document>) -> bool {
     app.session.active().is_some_and(|st| std::ptr::eq(std::sync::Arc::as_ptr(&st.doc), doc.as_ptr()))
+}
+
+/// The id of the active document's current History state (`History::row_id`); `next` for the
+/// state Redo would bring back.
+fn history_state(app: &PhotocraftApp, next: bool) -> Option<u64> {
+    let history = &app.session.active()?.history;
+    history.row_id(history.past_len().checked_add(usize::from(next))?)
 }
 
 fn current_doc(app: &PhotocraftApp) -> std::sync::Weak<Document> {
@@ -560,10 +570,12 @@ pub(crate) fn pen_resume_on_undo(app: &mut PhotocraftApp) -> Result<bool, String
     Ok(true)
 }
 
-/// The finish [`pen_resume_on_undo`] took back, while the Pen still draws that path.
+/// The finish [`pen_resume_on_undo`] took back, while the Pen still draws that path and Redo
+/// would bring back the finish's History state (not a step made and undone since).
 fn resumed_finish(app: &PhotocraftApp) -> Option<usize> {
     app.ui.pen.as_ref()?;
-    app.finished_pens.iter().rposition(|f| f.resumed && is_current(app, &f.doc))
+    let next = history_state(app, true)?;
+    app.finished_pens.iter().rposition(|f| f.resumed && is_current(app, &f.doc) && f.state == Some(next))
 }
 
 /// Edit › Redo would put back the finish of the path the Pen is drawing, edited since Undo gave
@@ -583,11 +595,14 @@ pub(crate) fn pen_finish_on_redo(app: &mut PhotocraftApp) -> Result<bool, String
         return Ok(true);
     }
     let Some(i) = resumed_finish(app) else { return Ok(false) };
+    let state = app.finished_pens.get(i).and_then(|f| f.state);
     let (pen, pen_doc) = (app.ui.pen.take(), app.ui.pen_doc);
-    if let Err(e) = app.run("edit.redo", json!({})) {
+    let redone = app.run("edit.redo", json!({}));
+    // Redo didn't bring back the finish's state: the Pen keeps its path, and the finish stays taken back.
+    if redone.is_err() || history_state(app, false) != state {
         app.ui.pen = pen;
         app.ui.pen_doc = pen_doc;
-        return Err(e);
+        return redone.map(|_| true);
     }
     app.ui.pen_doc = None;
     let doc = current_doc(app);
@@ -660,8 +675,8 @@ pub fn pen_commit(app: &mut PhotocraftApp, closed: bool) {
     commit_path(app, &pen, closed);
     // Only a finish that made a History step can be taken back.
     if !is_current(app, &before) {
-        let doc = current_doc(app);
-        remember_finish(app, FinishedPen { draft, doc, resumed: false });
+        let (doc, state) = (current_doc(app), history_state(app, false));
+        remember_finish(app, FinishedPen { draft, doc, state, resumed: false });
     }
 }
 
@@ -3673,6 +3688,29 @@ mod tests {
         menu(&mut app, "edit.redo");
         assert!(app.ui.pen.is_none());
         assert_eq!(app.session.active().unwrap().doc.work_path.as_ref().unwrap().subpaths[0].knots.len(), 3);
+    }
+
+    #[test]
+    fn redo_of_a_step_made_and_undone_over_a_resumed_path_leaves_the_pen_its_path() {
+        let mut app = app();
+        app.ui.tool = Tool::Pen;
+        for (x, y) in [(20.0, 20.0), (120.0, 20.0), (120.0, 120.0)] {
+            pen_down(&mut app, x, y, false);
+            pen_up(&mut app);
+        }
+        press(&mut app, egui::Key::Enter, egui::Modifiers::NONE);
+        menu(&mut app, "edit.undo");
+        let (knots, owner) = (app.ui.pen.as_ref().unwrap().knots.clone(), app.ui.pen_doc);
+        // Another step over the resumed path, undone: it, not the finish, is next to redo.
+        app.run("select.all", json!({})).unwrap();
+        app.run("edit.undo", json!({})).unwrap();
+        assert!(crate::menus::is_enabled(&app, "edit.redo"));
+        menu(&mut app, "edit.redo");
+        let st = app.session.active().unwrap();
+        assert!(st.doc.selection.is_some(), "Redo made the selection again");
+        assert!(st.doc.work_path.is_none(), "and didn't finish the path");
+        assert_eq!(app.ui.pen.as_ref().map(|p| p.knots.clone()), Some(knots));
+        assert_eq!(app.ui.pen_doc, owner);
     }
 
     #[test]
