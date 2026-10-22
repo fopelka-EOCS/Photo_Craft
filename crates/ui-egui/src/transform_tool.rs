@@ -5250,6 +5250,8 @@ mod tests {
         app.session.execute("file.new", json!({"width": 64, "height": 64})).unwrap();
         app.sync_views();
         app.run("path.set", json!({"name": "work", "path": {"subpaths": [{"closed": true, "knots": [[10, 10], [30, 10], [30, 20], [10, 20]]}]}})).unwrap();
+        // Photoshop transforms the path the Paths panel targets: select the Work Path row.
+        app.ui.selected_path = Some("work".into());
         app.ui.tool = Tool::PathSelection;
         assert!(crate::menus::is_enabled(&app, "edit.freeTransform"), "a path is transformable on the Background");
         let pixels = app.session.active().unwrap().doc.layers[0].surface().cloned();

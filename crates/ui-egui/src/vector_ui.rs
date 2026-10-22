@@ -747,6 +747,9 @@ enum PathTarget {
     Shape(u64),
     /// The active layer's vector mask, when its Layers thumbnail is targeted (#196).
     VectorMask(u64),
+    /// A saved path selected in the Paths panel, by name: `path.set` and `path.transform` take
+    /// any name, so dragging and free transforming overwrite the saved path, as in Photoshop.
+    Saved(String),
     Work,
 }
 
@@ -782,16 +785,37 @@ pub(crate) fn delete_key_deletes_work_path(app: &PhotocraftApp) -> bool {
         && matches!(target_path(app), Some((PathTarget::Work, _)))
 }
 
-/// The path Path Selection edits: the targeted vector mask, the active shape layer's path, else
-/// the work path.
+/// The path Path Selection edits: [`visible_target_path`] made addressable. The Paths panel's
+/// active row wins (the work path, a saved path, or the active layer's shape path / vector
+/// mask), else the targeted vector mask, else the active shape layer's path — always the one
+/// path the canvas draws, as in Photoshop. A work path the panel no longer targets (Make
+/// Selection deselected it, or a panel click deselected the row) draws nothing and Path
+/// Selection leaves it alone; the old fallback went on dragging that invisible path, which
+/// made the tool look dead while it moved something the canvas didn't show.
 fn target_path(app: &PhotocraftApp) -> Option<(PathTarget, Path)> {
+    let st = app.session.active()?;
+    let rows = path_rows(&st.doc, st.active_layer);
+    if let Some(selected) = app.ui.selected_path.as_deref()
+        && let Some(row) = rows.iter().find(|r| row_key(r) == selected)
+    {
+        let path = row.path.clone();
+        return match &row.kind {
+            PathRow::Work => Some((PathTarget::Work, path)),
+            PathRow::Saved => Some((PathTarget::Saved(row.name.clone()), path)),
+            // The layer row belongs to the active layer: its shape path, or its vector mask.
+            PathRow::Layer => {
+                let l = st.doc.layer(st.active_layer?)?;
+                match &l.content {
+                    LayerContent::Shape(_) => Some((PathTarget::Shape(l.id.0), path)),
+                    _ => Some((PathTarget::VectorMask(l.id.0), path)),
+                }
+            }
+        };
+    }
     if let Some((id, p)) = targeted_vector_mask(app) {
         return Some((PathTarget::VectorMask(id), p));
     }
-    if let Some((id, p)) = active_shape_path(app) {
-        return Some((PathTarget::Shape(id), p));
-    }
-    app.session.active()?.doc.work_path.clone().map(|p| (PathTarget::Work, p))
+    active_shape_path(app).map(|(id, p)| (PathTarget::Shape(id), p))
 }
 
 /// Edit › Free Transform Path (⌘T with Path Selection or Direct Selection): the path the
@@ -804,6 +828,7 @@ pub(crate) fn free_transform_path(app: &PhotocraftApp) -> Option<(Value, Path)> 
     path.control_bounds()?;
     let params = match target {
         PathTarget::Shape(id) | PathTarget::VectorMask(id) => json!({"name": "layer", "layer": id}),
+        PathTarget::Saved(name) => json!({"name": name}),
         PathTarget::Work => json!({"name": "work"}),
     };
     Some((params, path))
@@ -911,6 +936,10 @@ pub fn path_selection_finish(app: &mut PhotocraftApp, start: [f64; 2], end: [f64
         PathTarget::Work => {
             let moved = path.transform(&Affine::translate(dx.round(), dy.round()));
             app.run("path.set", json!({"name": "work", "path": photocraft_engine::vector_cmds::path_json(&moved)}))
+        }
+        PathTarget::Saved(name) => {
+            let moved = path.transform(&Affine::translate(dx.round(), dy.round()));
+            app.run("path.set", json!({"name": name, "path": photocraft_engine::vector_cmds::path_json(&moved)}))
         }
     };
 }
@@ -1108,6 +1137,26 @@ pub fn draw_overlay(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform
 // ---------------------------------------------------------------------------------------------
 // Options bars
 
+/// The hint the Path Selection options bar shows when no shape layer is active: what a drag
+/// edits (the one path the canvas draws — the Paths panel's active row, the targeted vector
+/// mask), or how to give the tool a path again, or nothing when there is no path at all
+/// (Photoshop shows nothing). The old hint kept promising to drag the Work Path after Make
+/// Selection deselected it, while the canvas drew nothing and the drag moved it invisibly.
+pub(crate) fn path_selection_hint(app: &PhotocraftApp) -> Option<String> {
+    let st = app.session.active()?;
+    let hint = if app.ui.vector_mask_target {
+        // Untranslated plain English, as before: only now the needs-a-row hint is a `tl!` label.
+        Some("Drag to move the targeted vector mask".to_string())
+    } else if visible_target_path(app, &st.doc).is_some() {
+        Some(tl!("Drag to move the active shape's path or the Work Path").to_string())
+    } else if st.doc.work_path.is_some() {
+        Some(tl!("Select the Work Path in the Paths panel to move it").to_string())
+    } else {
+        None
+    };
+    hint.map(|hint| hint.to_string())
+}
+
 /// Options bar for vector tools; false for other tools.
 pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: Tool) -> bool {
     if !(is_shape_tool(tool)
@@ -1125,7 +1174,9 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: Tool) -> bo
     let o = &mut app.ui.tool_options;
     let target = selected_shape(&app.session);
     if tool == Tool::PathSelection && target.is_none() {
-        lbl(ui, if app.ui.vector_mask_target { "Drag to move the targeted vector mask" } else { tl!("Drag to move the active shape's path or the Work Path") });
+        if let Some(hint) = path_selection_hint(app) {
+            lbl(ui, &hint);
+        }
         return true;
     }
     if tool == Tool::DirectSelection && target.is_none() {

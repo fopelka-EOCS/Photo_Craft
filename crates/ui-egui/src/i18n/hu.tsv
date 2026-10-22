@@ -3187,6 +3187,7 @@ cameraRaw	Yellow	Sárga
 	Documents	Dokumentumok
 	Draft	Vázlat
 	Drag to move the active shape's path or the Work Path	Húzással mozgathatod az aktív alakzat útvonalát vagy a munkaútvonalat
+	Select the Work Path in the Paths panel to move it	Az áthelyezéshez válaszd ki a munkaútvonalat az Útvonalak panelen
 	Drag: draw freehand · {alt}-click: straight segment · Release on the start point: close	Húzás: szabadkézi rajzolás · {alt}+kattintás: egyenes szakasz · Elengedés a kezdőponton: lezárás
 	Draw with the Pen tool (P) or make a work path from a selection.	Rajzolj a Toll eszközzel (P), vagy készíts munkaútvonalat egy kijelölésből.
 	Driver: {driver}	Illesztőprogram: {driver}

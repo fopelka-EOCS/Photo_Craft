@@ -1195,6 +1195,7 @@
 	Vector Mask from Current Path	Векторная маска из текущего контура
 	Create new shape from the current path	Создать новую фигуру из текущего контура
 	Drag to move the active shape's path or the Work Path	Перетащите, чтобы переместить контур активной фигуры или рабочий контур
+	Select the Work Path in the Paths panel to move it	Выберите рабочий контур на панели «Контуры», чтобы переместить его
 	Click: select anchor · Drag: move anchor, handle or segment · {shift}-click: add · {alt}-click: whole subpath	Щелчок: выбрать узел · Перетаскивание: переместить узел, маркер или сегмент · {shift}-щелчок: добавить · {alt}-щелчок: весь подконтур
 	Draw with the Pen tool (P) or make a work path from a selection.	Нарисуйте пером (P) или создайте рабочий контур из выделения.
 

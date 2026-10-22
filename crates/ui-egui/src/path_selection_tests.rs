@@ -432,7 +432,9 @@ fn make_selection_from_another_row_keeps_the_target() {
 }
 
 /// Saving (renaming) the Work Path keeps it the panel's target under its new name, as Photoshop's
-/// Save Path does; deleting the targeted path deselects it; data follows the commands.
+/// Save Path does. Deleting a targeted path keeps the click with its (now missing) row: the stale
+/// name draws and edits nothing, and Edit › Undo turns it back into the target when it brings the
+/// path back — so ⌫ → ↩ → ⌫ keeps working (#5702).
 #[test]
 fn save_and_delete_keep_the_paths_panel_target_accurate() {
     let mut h = harness();
@@ -445,9 +447,111 @@ fn save_and_delete_keep_the_paths_panel_target_accurate() {
     assert!(crate::vector_ui::visible_target_path(h.state(), &doc).is_some(), "the outline follows the row");
 
     h.state_mut().run("path.delete", json!({"name": "My Path"})).unwrap();
-    assert!(h.state().ui.selected_path.is_none(), "the deleted path stops being the target");
+    assert_eq!(h.state().ui.selected_path.as_deref(), Some("My Path"), "the click stays with the deleted row");
+    let doc = h.state().session.active().unwrap().doc.clone();
+    assert!(crate::vector_ui::visible_target_path(h.state(), &doc).is_none(), "the deleted path draws nothing");
+
     h.state_mut().run("path.set", json!({"name": "work", "path": rect_path(10.0, 10.0, 50.0, 40.0)})).unwrap();
     h.state_mut().ui.selected_path = Some("work".into());
     h.state_mut().run("path.delete", json!({"name": "work"})).unwrap();
-    assert!(h.state().ui.selected_path.is_none(), "deleting the Work Path deselects it too");
+    let doc = h.state().session.active().unwrap().doc.clone();
+    assert!(crate::vector_ui::visible_target_path(h.state(), &doc).is_none(), "the deleted work path draws nothing");
+    h.state_mut().run("edit.undo", json!({})).unwrap();
+    let doc = h.state().session.active().unwrap().doc.clone();
+    assert!(crate::vector_ui::visible_target_path(h.state(), &doc).is_some(), "undo restores the path and its target");
+}
+
+/// Path Selection edits exactly the one path the canvas draws. Make Selection deselects the
+/// work path (Photoshop), so the canvas draws nothing — and then a drag, ⌫/Delete or ⌘T must
+/// leave the invisible path alone. The old fallback went on moving that invisible path: the
+/// tool looked dead ("nothing draws") while it moved something the canvas didn't show.
+/// Selecting the Work Path row again restores the outline and the edits.
+#[test]
+fn path_selection_only_edits_the_path_that_draws() {
+    let anchors = |p: &photocraft_doc::vector::Path| p.subpaths[0].knots.iter().map(|k| [k.anchor.x, k.anchor.y]).collect::<Vec<_>>();
+    let mut h = harness();
+    h.state_mut().run("path.set", json!({"name": "work", "path": rect_path(10.0, 10.0, 50.0, 40.0)})).unwrap();
+    h.state_mut().ui.selected_path = Some("work".into());
+    h.state_mut().ui.tool = Tool::PathSelection;
+    h.run_steps(2);
+    let targeted = h.state().session.active().unwrap().doc.work_path.clone().unwrap();
+    assert!(crate::vector_ui::delete_key_deletes_work_path(h.state()), "⌫ deletes the drawn work path (#5702)");
+
+    press(&mut h, Key::Enter, command());
+    assert!(selection(&h).is_some(), "⌘↩ made a selection: {}", h.state().ui.status);
+    assert!(h.state().ui.selected_path.is_none(), "and deselected the work path");
+    let deselected = h.state().session.active().unwrap().doc.work_path.clone().unwrap();
+    let doc = h.state().session.active().unwrap().doc.clone();
+    assert!(deselected.subpaths[0].knots.len() == 4 && deselected.subpaths[0].closed, "the data stays (the path hides, Photoshop-style)");
+    assert!(crate::vector_ui::visible_target_path(h.state(), &doc).is_none(), "the canvas draws nothing");
+
+    // The tried-to-move anchors, for contrast: a drag of (+40, +30) would give these.
+    let moved: Vec<_> = anchors(&deselected).into_iter().map(|[x, y]| [x + 40.0, y + 30.0]).collect();
+    crate::vector_ui::path_selection_finish(h.state_mut(), [30.0, 30.0], [70.0, 60.0]);
+    let after = h.state().session.active().unwrap().doc.work_path.clone().unwrap();
+    assert_eq!(anchors(&after), anchors(&deselected), "the drag left the deselected path alone");
+    assert_ne!(anchors(&deselected), moved, "the drag would have moved it: the test bites");
+    assert!(!crate::vector_ui::delete_key_deletes_work_path(h.state()), "⌫ reaches Edit › Clear again, as in Photoshop");
+    assert!(crate::vector_ui::free_transform_path(h.state()).is_none(), "⌘T is the pixel transform again");
+
+    // Selecting the Work Path row in the Paths panel gives the tool its path back.
+    h.state_mut().ui.selected_path = Some("work".into());
+    h.run_steps(2);
+    let doc = h.state().session.active().unwrap().doc.clone();
+    assert!(crate::vector_ui::visible_target_path(h.state(), &doc).is_some(), "the outline is back");
+    crate::vector_ui::path_selection_finish(h.state_mut(), [30.0, 30.0], [50.0, 10.0]);
+    let retargeted = h.state().session.active().unwrap().doc.work_path.clone().unwrap();
+    let want: Vec<_> = anchors(&targeted).into_iter().map(|[x, y]| [x + 20.0, y - 20.0]).collect();
+    assert_eq!(anchors(&retargeted), want, "the targeted path moved with the drag");
+    assert!(crate::vector_ui::delete_key_deletes_work_path(h.state()), "⌫ deletes it again");
+    let tf = crate::vector_ui::free_transform_path(h.state());
+    assert_eq!(tf.map(|(p, _)| p), Some(json!({"name": "work"})), "⌘T transforms the path again");
+}
+
+/// A saved path targeted in the Paths panel is what Path Selection drags and free transforms,
+/// as in Photoshop. The old fallback moved the work path instead — a path other than the one
+/// drawn — and moved nothing at all once the work path needed targeting.
+#[test]
+fn path_selection_moves_the_targeted_saved_path() {
+    let mut h = harness();
+    h.state_mut().run("path.set", json!({"name": "Path 1", "path": rect_path(10.0, 10.0, 50.0, 40.0)})).unwrap();
+    h.state_mut().ui.selected_path = Some("Path 1".into());
+    h.state_mut().ui.tool = Tool::PathSelection;
+    h.run_steps(2);
+    let doc = h.state().session.active().unwrap().doc.clone();
+    assert!(crate::vector_ui::visible_target_path(h.state(), &doc).is_some(), "the saved path draws");
+
+    crate::vector_ui::path_selection_finish(h.state_mut(), [30.0, 30.0], [60.0, 50.0]);
+    let saved = h.state().session.active().unwrap().doc.paths.iter().find(|p| p.name == "Path 1").map(|p| p.path.clone()).unwrap();
+    let anchors: Vec<[f64; 2]> = saved.subpaths[0].knots.iter().map(|k| [k.anchor.x, k.anchor.y]).collect();
+    assert_eq!(anchors, vec![[40.0, 30.0], [90.0, 30.0], [90.0, 70.0], [40.0, 70.0]], "the saved path moved");
+    assert!(h.state().session.active().unwrap().doc.work_path.is_none(), "the work path was never created or touched");
+
+    let tf = crate::vector_ui::free_transform_path(h.state());
+    assert_eq!(tf.map(|(p, _)| p), Some(json!({"name": "Path 1"})), "⌘T transforms the saved path");
+}
+
+/// The Path Selection options bar's hint tells the truth per state: a drawn path is what a drag
+/// edits, the deselected work path sends the user to the Paths panel, and with no paths at all
+/// there is nothing to promise (Photoshop shows nothing).
+#[test]
+fn path_selection_hint_follows_the_panel_row() {
+    let mut h = harness();
+    h.state_mut().ui.tool = Tool::PathSelection;
+    h.run_steps(1);
+    assert!(crate::vector_ui::path_selection_hint(h.state()).is_none(), "no paths, no hint");
+    h.state_mut().run("path.set", json!({"name": "work", "path": rect_path(10.0, 10.0, 50.0, 40.0)})).unwrap();
+    h.state_mut().ui.selected_path = Some("work".into());
+    let hint = crate::vector_ui::path_selection_hint(h.state()).unwrap();
+    assert!(hint.contains("Drag to move"), "the targeted path is the drag: {hint}");
+
+    press(&mut h, Key::Enter, command());
+    assert!(h.state().ui.selected_path.is_none(), "Make Selection deselected the work path");
+    let hint = crate::vector_ui::path_selection_hint(h.state()).unwrap();
+    assert!(hint.contains("Paths panel"), "the deselected work path points to the Paths panel: {hint}");
+
+    h.state_mut().ui.selected_path = Some("work".into());
+    h.state_mut().ui.tool = Tool::Brush;
+    h.run_steps(2);
+    assert!(crate::vector_ui::path_selection_hint(h.state()).is_some(), "the path is back, targeted: {:#?}", crate::vector_ui::path_selection_hint(h.state()));
 }
