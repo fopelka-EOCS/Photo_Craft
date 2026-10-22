@@ -54,7 +54,7 @@ impl Default for Prefix {
 }
 
 /// The whole grid chunk a rectangle falls into (chunk-aligned origin, full chunk size).
-fn cell_of(rect: Rect, step: i32) -> Rect {
+pub(crate) fn cell_of(rect: Rect, step: i32) -> Rect {
     let x0 = rect.x0.div_euclid(step) * step;
     let y0 = rect.y0.div_euclid(step) * step;
     Rect::new(x0, y0, x0.saturating_add(step), y0.saturating_add(step))
