@@ -1,7 +1,9 @@
 //! Trusted, session-local compatibility adapters (`plugin.adapter.*`).
 //!
-//! Only Rust callers can register adapters. This module neither opens an opaque `resource` nor
-//! loads libraries or starts programs. It does not change the sandboxed WebAssembly plug-in ABI.
+//! Trusted Rust callers can register adapters directly; native worker packages additionally
+//! use the explicit-consent `adapter_packages` path. This module never interprets an opaque
+//! `resource` or loads libraries itself, but a registered adapter can start a trusted program.
+//! It does not change the sandboxed WebAssembly plug-in ABI.
 //! The first engine bridge reads and writes the canvas rectangle only; off-canvas layer pixels
 //! are retained unchanged. Inputs are native-mode f32 samples, not an RGB/u8 conversion.
 
@@ -496,7 +498,8 @@ pub fn specs() -> Vec<CommandSpec> {
 impl Session {
     /// Register a trusted, in-process adapter for this session only.
     ///
-    /// There is deliberately no JSON/MCP install or arbitrary native-library/worker loader.
+    /// Explicit-consent native package installation is a separate local engine path; it is not
+    /// an arbitrary DLL loader and remains denied by default capability-scoped automation.
     /// Registration neither runs the adapter nor promises devices not in its descriptor.
     pub fn register_adapter(&mut self, adapter: Arc<dyn adapter::Adapter>) -> Result<()> {
         self.adapters.register(adapter).map_err(adapter_error)
@@ -504,7 +507,8 @@ impl Session {
 
     /// Remove a trusted registration, preventing new runs. Already-started jobs retain their
     /// immutable adapter snapshot until completion; cancel those explicitly with the job API.
-    /// There is deliberately no JSON/MCP remove or arbitrary native-library loader command.
+    /// Removing an installed package is a separate explicit package-management operation.
+    /// There is no arbitrary native-library loader command.
     pub fn unregister_adapter(&mut self, id: &str) -> bool {
         self.adapters.remove(id)
     }

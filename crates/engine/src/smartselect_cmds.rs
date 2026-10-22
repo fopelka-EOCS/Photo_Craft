@@ -421,7 +421,31 @@ fn subject_adapter(s: &Session, p: &SubjectParams) -> Result<Option<std::sync::A
     }
     let registered = match &p.provider {
         Some(id) => Some(s.adapters.get(id).ok_or_else(|| bad(SUBJECT, &format!("adapter `{id}` is not registered")))?),
-        None => s.adapters.list().iter().find(|d| d.operations.iter().any(|op| op.id == SUBJECT_OPERATION)).and_then(|d| s.adapters.get(&d.id)),
+        None => {
+            // Automatic routing must not let an alphabetically earlier, incompatible or
+            // unprepared package shadow another usable provider. Consult cached readiness;
+            // selecting a subject must never implicitly probe workers or prepare models.
+            let input_mode =
+                s.active().and_then(|st| subject_format(&st.doc, st.active_layer, p.all_layers).ok()).and_then(|format| subject_color_mode(format.mode).ok());
+            s.adapters
+                .list()
+                .iter()
+                .find(|descriptor| {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if !s.adapter_packages.ready_for_automatic_run(&descriptor.id) {
+                        return false;
+                    }
+                    descriptor.operations.iter().any(|op| {
+                        op.id == SUBJECT_OPERATION
+                            && op.output_kind == OutputKind::Mask
+                            && input_mode.is_some_and(|mode| op.color_modes.iter().any(|m| m == mode))
+                    }) && p
+                        .device
+                        .as_ref()
+                        .is_none_or(|id| descriptor.devices.iter().any(|device| device.id == *id && device.operations.iter().any(|op| op == SUBJECT_OPERATION)))
+                })
+                .and_then(|descriptor| s.adapters.get(&descriptor.id))
+        }
     };
     let Some(registered) = registered else {
         if p.device.is_some() || p.resource.is_some() || p.allow_fallback || p.params.as_object().is_some_and(|m| !m.is_empty()) {
@@ -1566,6 +1590,45 @@ mod tests {
         s.execute(SUBJECT, json!({})).unwrap();
         assert!(cov(&s, 15, 20) > 0.99 && cov(&s, 60, 20) < 0.01);
         assert_eq!(replacement.requests().len(), 1);
+    }
+
+    #[test]
+    fn automatic_subject_routing_skips_incompatible_providers_without_running_them() {
+        for incompatible in ["kind", "color", "device"] {
+            let mut s = session_with(80, 40, 16, |_, _| [0.5; 3]);
+            let mut first = MockSubjectAdapter::new("test.a.incompatible", MockMask::Failure);
+            match incompatible {
+                "kind" => first.descriptor.operations[0].output_kind = OutputKind::Image,
+                "color" => first.descriptor.operations[0].color_modes = vec!["cmyk".into()],
+                "device" => {
+                    for device in &mut first.descriptor.devices {
+                        device.id = format!("other.{}", device.id);
+                    }
+                }
+                _ => unreachable!(),
+            }
+            let first = Arc::new(first);
+            s.register_adapter(first.clone()).unwrap();
+            let working = register_subject(&mut s, "test.b.compatible", MockMask::LeftHalf);
+            let result = s.execute(SUBJECT, json!({"device":CPU_DEVICE})).unwrap();
+            assert_eq!(result["provider"], "test.b.compatible", "{incompatible}");
+            assert!(first.requests().is_empty(), "incompatible providers must not run");
+            assert_eq!(working.requests().len(), 1);
+            assert!(s.execute(SUBJECT, json!({"provider":"test.a.incompatible","device":CPU_DEVICE})).is_err(), "explicit choice stays strict");
+            assert_eq!(working.requests().len(), 1, "explicit failure must not retry another provider");
+        }
+    }
+
+    #[test]
+    fn automatic_subject_routing_keeps_classical_path_when_no_provider_matches() {
+        let mut s = session_with(80, 40, 8, |_, _| [0.5; 3]);
+        let mut adapter = MockSubjectAdapter::new("test.incompatible", MockMask::Failure);
+        adapter.descriptor.operations[0].color_modes = vec!["lab".into()];
+        let adapter = Arc::new(adapter);
+        s.register_adapter(adapter.clone()).unwrap();
+        assert_eq!(s.execute(SUBJECT, json!({})).unwrap()["changed"], false);
+        assert!(adapter.requests().is_empty());
+        assert!(s.execute(SUBJECT, json!({"resource":"model.explicit"})).is_err(), "opaque model options must not be silently ignored");
     }
 
     #[test]

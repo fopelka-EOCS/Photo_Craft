@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # Validate reviewed contribution branches on the fork without needing to run
+    # untrusted code on a self-hosted/NPU machine or alter upstream PR settings.
+    branches: [main, "compat/**"]
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:

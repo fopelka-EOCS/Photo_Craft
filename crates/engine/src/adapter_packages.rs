@@ -22,7 +22,9 @@ use crate::{EngineError, Result, Session};
 const MAX_MANIFEST: u64 = 1024 * 1024;
 const MAX_FILE: u64 = 256 * 1024 * 1024;
 const MAX_PACKAGE: u64 = 512 * 1024 * 1024;
-const MAX_FILES: usize = 128;
+// Self-contained worker runtimes can legitimately contain several hundred small files.
+// Keep byte limits independent: this is not permission to bundle unbounded model weights.
+const MAX_FILES: usize = 512;
 const MAX_PACKAGES: usize = 64;
 const WARNING: &str = "Native compatibility adapters run programs with your user account's permissions. They are NOT sandboxed WebAssembly plug-ins. Install only packages and publishers you trust. Installing does not enable or start the worker; preparing a system model may download it.";
 
@@ -233,6 +235,13 @@ impl Adapter for VerifiedWorker {
     }
 }
 impl PackageStore {
+    /// Automatic routing consults cached state only; it never launches a probe/preparation.
+    /// Packages need an explicit successful check; embedded adapters own their availability.
+    /// This v1 package/default-model cache is not per-resource or hardware attestation.
+    pub(crate) fn ready_for_automatic_run(&self, id: &str) -> bool {
+        self.packages.get(id).is_none_or(|entry| entry.record.enabled && entry.status.get("state").and_then(Value::as_str) == Some("ready"))
+    }
+
     fn directory(&self, id: &str) -> Result<PathBuf> {
         if !valid_leaf(id) {
             return Err(io_error("invalid adapter id"));
@@ -586,6 +595,34 @@ mod tests {
         assert!(next.adapters.get(&id).is_none());
         assert!(next.execute("plugin.adapter.enable", json!({"provider":id,"enabled":true})).is_err());
     }
+    #[test]
+    fn automatic_routing_requires_explicit_cached_readiness_for_packages() {
+        let mut store = PackageStore::default();
+        assert!(store.ready_for_automatic_run("embedded.adapter"));
+        let record = Record { manifest: manifest(), enabled: true, hashes: BTreeMap::new() };
+        let id = record.manifest.descriptor.id.clone();
+        store.packages.insert(id.clone(), Installed { record, status: not_checked() });
+        assert!(!store.ready_for_automatic_run(&id));
+        for state in ["needs_model", "unavailable", "error", "not_checked", "ready"] {
+            store.packages.get_mut(&id).unwrap().status = json!({"state":state,"message":"synthetic status; no worker started"});
+            assert_eq!(store.ready_for_automatic_run(&id), state == "ready");
+        }
+        store.packages.get_mut(&id).unwrap().record.enabled = false;
+        assert!(!store.ready_for_automatic_run(&id));
+    }
+
+    #[test]
+    fn runtime_file_inventory_is_bounded_without_raising_model_byte_limits() {
+        let mut m = manifest();
+        m.files.extend((1..MAX_FILES).map(|i| format!("runtime/component-{i}.dll")));
+        assert_eq!(m.files.len(), 512);
+        assert!(validate_manifest(&m).is_ok(), "complete runtimes can have more than 128 small files");
+        m.files.push("runtime/one-too-many.dll".into());
+        assert!(validate_manifest(&m).is_err());
+        assert_eq!(MAX_FILE, 256 * 1024 * 1024);
+        assert_eq!(MAX_PACKAGE, 512 * 1024 * 1024);
+    }
+
     #[test]
     fn traversal_duplicates_invalid_descriptors_and_unconsented_preparation_fail() {
         for name in ["../worker.exe", "C:/worker.exe", "dir/../../worker.exe", "dir\\worker.exe", ".hidden", "worker.exe:stream"] {
