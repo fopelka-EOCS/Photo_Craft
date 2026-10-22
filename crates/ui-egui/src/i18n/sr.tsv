@@ -3968,6 +3968,7 @@ layerLabel	No Color	Bez boje
 	Exported presets to {path}	Šabloni su izvezeni u {path}
 	Ran script {name}	Pokrenuta skripta {name}
 	Sent to the printer ({spooler})	Poslato na štampač ({spooler})
+	Sent to the printer	Poslato na štampač
 	Printed to {path}	Odštampano u {path}
 	Exported {path} ({size})	Izvezeno: {path} ({size})
 	Exported {path}	Izvezeno: {path}
@@ -4379,3 +4380,17 @@ shape	Appearance	Izgled
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	GPU adapter
+
+# System print job controls
+	Auto-Rotate Image	Automatski rotiraj sliku
+	C5 Envelope	Koverta C5
+	Collate	Razvrstaj kopije
+	Print in Grayscale	Štampaj u sivim tonovima
+	Printer Default	Podrazumevano za štampač
+	Printer Properties	Svojstva štampača
+	Printer preferences opened	Podešavanja štampača su otvorena
+	Single-Sided	Jednostrano
+	System Default	Sistemski podrazumevano
+	Two-Sided, Flip on Long Edge	Dvostrano, okretanje po dužoj ivici
+	Two-Sided, Flip on Short Edge	Dvostrano, okretanje po kraćoj ivici
+	Unavailable	Nedostupno

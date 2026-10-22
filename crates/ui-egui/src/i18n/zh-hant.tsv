@@ -2815,6 +2815,7 @@ curves	Smooth	平滑
 	Print Settings…	列印設定…
 	Remember to turn off the printer's own colour management in Print Settings…	請記得在列印設定中關閉印表機本身的色彩管理…
 	Sent to {printer}	已傳送至 {printer}
+	Sent to the printer	已傳送至印表機
 	set in Print Settings…	在列印設定中設定…
 	ICO is limited to 256 × 256 pixels	ICO 最大為 256 × 256 像素
 # History panel › History Brush source (#2966)
@@ -2928,3 +2929,17 @@ curves	Smooth	平滑
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	GPU 介面卡
+
+# System print job controls
+	Auto-Rotate Image	自動旋轉影像
+	C5 Envelope	C5 信封
+	Collate	逐份列印
+	Print in Grayscale	以灰階列印
+	Printer Default	印表機預設值
+	Printer Properties	印表機內容
+	Printer preferences opened	已開啟印表機偏好設定
+	Single-Sided	單面
+	System Default	系統預設值
+	Two-Sided, Flip on Long Edge	雙面，長邊翻轉
+	Two-Sided, Flip on Short Edge	雙面，短邊翻轉
+	Unavailable	無法使用

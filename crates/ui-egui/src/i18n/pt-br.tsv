@@ -3994,6 +3994,7 @@ layerLabel	No Color	Sem cor
 	Print Settings…	Configurações de impressão…
 	Remember to turn off the printer's own colour management in Print Settings…	Lembre-se de desativar o gerenciamento de cores da própria impressora nas configurações de impressão…
 	Sent to {printer}	Enviado para {printer}
+	Sent to the printer	Enviado para a impressora
 	set in Print Settings…	definido nas configurações de impressão…
 	ICO is limited to 256 × 256 pixels	ICO é limitado a 256 × 256 pixels
 # History panel › History Brush source (#2966)
@@ -4098,3 +4099,17 @@ layerLabel	No Color	Sem cor
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Adaptador de GPU
+
+# System print job controls
+	Auto-Rotate Image	Girar imagem automaticamente
+	C5 Envelope	Envelope C5
+	Collate	Agrupar cópias
+	Print in Grayscale	Imprimir em escala de cinza
+	Printer Default	Padrão da impressora
+	Printer Properties	Propriedades da impressora
+	Printer preferences opened	Preferências da impressora abertas
+	Single-Sided	Um lado
+	System Default	Padrão do sistema
+	Two-Sided, Flip on Long Edge	Frente e verso, virar na borda longa
+	Two-Sided, Flip on Short Edge	Frente e verso, virar na borda curta
+	Unavailable	Indisponível

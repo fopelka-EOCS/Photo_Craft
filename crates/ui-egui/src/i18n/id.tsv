@@ -3198,6 +3198,7 @@ curves	Smooth	Haluskan
 	Print Settings…	Pengaturan Cetak…
 	Remember to turn off the printer's own colour management in Print Settings…	Ingat untuk menonaktifkan pengelolaan warna milik printer di Pengaturan Cetak…
 	Sent to {printer}	Dikirim ke {printer}
+	Sent to the printer	Dikirim ke printer
 	set in Print Settings…	diatur di Pengaturan Cetak…
 	ICO is limited to 256 × 256 pixels	ICO dibatasi hingga 256 × 256 piksel
 # History panel › History Brush source (#2966)
@@ -3306,3 +3307,17 @@ curves	Smooth	Haluskan
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Adaptor GPU
+
+# System print job controls
+	Auto-Rotate Image	Putar Gambar Otomatis
+	C5 Envelope	Amplop C5
+	Collate	Susun Salinan
+	Print in Grayscale	Cetak dalam Skala Abu-abu
+	Printer Default	Default Printer
+	Printer Properties	Properti Printer
+	Printer preferences opened	Preferensi printer dibuka
+	Single-Sided	Satu Sisi
+	System Default	Default Sistem
+	Two-Sided, Flip on Long Edge	Dua Sisi, Balik pada Tepi Panjang
+	Two-Sided, Flip on Short Edge	Dua Sisi, Balik pada Tepi Pendek
+	Unavailable	Tidak Tersedia

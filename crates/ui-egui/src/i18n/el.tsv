@@ -3902,6 +3902,7 @@ curves	Smooth	Εξομάλυνση
 	Print Settings…	Ρυθμίσεις εκτύπωσης…
 	Remember to turn off the printer's own colour management in Print Settings…	Θυμηθείτε να απενεργοποιήσετε τη διαχείριση χρωμάτων του εκτυπωτή στις ρυθμίσεις εκτύπωσης…
 	Sent to {printer}	Στάλθηκε στον {printer}
+	Sent to the printer	Στάλθηκε στον εκτυπωτή
 	set in Print Settings…	ορίζεται στις ρυθμίσεις εκτύπωσης…
 	ICO is limited to 256 × 256 pixels	Το ICO περιορίζεται σε 256 × 256 εικονοστοιχεία
 # History panel › History Brush source (#2966)
@@ -4008,3 +4009,17 @@ curves	Smooth	Εξομάλυνση
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Προσαρμογέας GPU
+
+# System print job controls
+	Auto-Rotate Image	Αυτόματη περιστροφή εικόνας
+	C5 Envelope	Φάκελος C5
+	Collate	Ταξινόμηση αντιγράφων
+	Print in Grayscale	Εκτύπωση σε κλίμακα του γκρι
+	Printer Default	Προεπιλογή εκτυπωτή
+	Printer Properties	Ιδιότητες εκτυπωτή
+	Printer preferences opened	Άνοιξαν οι προτιμήσεις εκτυπωτή
+	Single-Sided	Μονής όψης
+	System Default	Προεπιλογή συστήματος
+	Two-Sided, Flip on Long Edge	Διπλής όψης, αναστροφή στη μεγάλη πλευρά
+	Two-Sided, Flip on Short Edge	Διπλής όψης, αναστροφή στη μικρή πλευρά
+	Unavailable	Μη διαθέσιμο

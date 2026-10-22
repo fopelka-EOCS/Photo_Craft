@@ -3156,6 +3156,7 @@ curves	Smooth	Сгладить
 	Print Settings…	Параметры печати…
 	Remember to turn off the printer's own colour management in Print Settings…	Не забудьте отключить управление цветом самого принтера в параметрах печати…
 	Sent to {printer}	Отправлено на {printer}
+	Sent to the printer	Отправлено на принтер
 	set in Print Settings…	задаётся в параметрах печати…
 	ICO is limited to 256 × 256 pixels	ICO ограничен размером 256 × 256 пикселей
 # History panel › History Brush source (#2966)
@@ -3286,3 +3287,17 @@ curves	Smooth	Сгладить
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Адаптер GPU
+
+# System print job controls
+	Auto-Rotate Image	Автоматически поворачивать изображение
+	C5 Envelope	Конверт C5
+	Collate	Разобрать по копиям
+	Print in Grayscale	Печать в оттенках серого
+	Printer Default	По умолчанию для принтера
+	Printer Properties	Свойства принтера
+	Printer preferences opened	Настройки принтера открыты
+	Single-Sided	Односторонняя
+	System Default	По умолчанию для системы
+	Two-Sided, Flip on Long Edge	Двусторонняя, переворот по длинному краю
+	Two-Sided, Flip on Short Edge	Двусторонняя, переворот по короткому краю
+	Unavailable	Недоступно

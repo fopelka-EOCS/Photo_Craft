@@ -3647,6 +3647,7 @@ curves	Smooth	Vyhladit
 	Exported presets to {path}	Přednastavení exportována do {path}
 	Ran script {name}	Spuštěn skript {name}
 	Sent to the printer ({spooler})	Odesláno k tisku ({spooler})
+	Sent to the printer	Odesláno k tisku
 	Printed to {path}	Vytištěno do souboru {path}
 	Exported {path} ({size})	Exportováno: {path} ({size})
 	Exported {path}	Exportováno: {path}
@@ -3919,3 +3920,17 @@ navigator	Zoom	Zvětšení
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Adaptér GPU
+
+# System print job controls
+	Auto-Rotate Image	Automaticky otočit obraz
+	C5 Envelope	Obálka C5
+	Collate	Kompletovat
+	Print in Grayscale	Tisknout ve stupních šedi
+	Printer Default	Výchozí nastavení tiskárny
+	Printer Properties	Vlastnosti tiskárny
+	Printer preferences opened	Předvolby tiskárny otevřeny
+	Single-Sided	Jednostranně
+	System Default	Výchozí nastavení systému
+	Two-Sided, Flip on Long Edge	Oboustranně, převracet po dlouhé hraně
+	Two-Sided, Flip on Short Edge	Oboustranně, převracet po krátké hraně
+	Unavailable	Nedostupné

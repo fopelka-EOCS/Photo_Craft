@@ -3211,6 +3211,7 @@ curves	Smooth	Lisser
 	Print Settings…	Paramètres d’impression…
 	Remember to turn off the printer's own colour management in Print Settings…	Pensez à désactiver la gestion des couleurs de l’imprimante dans les paramètres d’impression…
 	Sent to {printer}	Envoyé à {printer}
+	Sent to the printer	Envoyé à l’imprimante
 	set in Print Settings…	défini dans les paramètres d’impression…
 	ICO is limited to 256 × 256 pixels	Le format ICO est limité à 256 × 256 pixels
 # History panel › History Brush source (#2966)
@@ -3319,3 +3320,17 @@ curves	Smooth	Lisser
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Adaptateur GPU
+
+# System print job controls
+	Auto-Rotate Image	Rotation automatique de l’image
+	C5 Envelope	Enveloppe C5
+	Collate	Assembler
+	Print in Grayscale	Imprimer en niveaux de gris
+	Printer Default	Valeur par défaut de l’imprimante
+	Printer Properties	Propriétés de l’imprimante
+	Printer preferences opened	Préférences de l’imprimante ouvertes
+	Single-Sided	Recto
+	System Default	Valeur par défaut du système
+	Two-Sided, Flip on Long Edge	Recto verso, retourner sur le bord long
+	Two-Sided, Flip on Short Edge	Recto verso, retourner sur le bord court
+	Unavailable	Indisponible

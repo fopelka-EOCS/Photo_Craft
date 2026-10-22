@@ -3665,6 +3665,7 @@ curves	Smooth	Làm mượt
 	Print Settings…	Thiết lập in…
 	Remember to turn off the printer's own colour management in Print Settings…	Nhớ tắt quản lý màu riêng của máy in trong thiết lập in…
 	Sent to {printer}	Đã gửi tới {printer}
+	Sent to the printer	Đã gửi tới máy in
 	set in Print Settings…	đặt trong thiết lập in…
 	ICO is limited to 256 × 256 pixels	ICO giới hạn ở 256 × 256 pixel
 # History panel › History Brush source (#2966)
@@ -3798,3 +3799,17 @@ curves	Smooth	Làm mượt
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Bộ điều hợp GPU
+
+# System print job controls
+	Auto-Rotate Image	Tự động xoay ảnh
+	C5 Envelope	Phong bì C5
+	Collate	Sắp xếp theo bộ
+	Print in Grayscale	In thang xám
+	Printer Default	Mặc định máy in
+	Printer Properties	Thuộc tính máy in
+	Printer preferences opened	Đã mở tùy chọn máy in
+	Single-Sided	Một mặt
+	System Default	Mặc định hệ thống
+	Two-Sided, Flip on Long Edge	Hai mặt, lật theo cạnh dài
+	Two-Sided, Flip on Short Edge	Hai mặt, lật theo cạnh ngắn
+	Unavailable	Không khả dụng

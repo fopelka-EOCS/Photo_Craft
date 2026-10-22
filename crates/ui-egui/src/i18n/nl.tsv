@@ -3964,6 +3964,7 @@ curves	Smooth	Vloeiend maken
 	Print Settings…	Afdrukinstellingen…
 	Remember to turn off the printer's own colour management in Print Settings…	Vergeet niet het eigen kleurbeheer van de printer uit te schakelen in de afdrukinstellingen…
 	Sent to {printer}	Verzonden naar {printer}
+	Sent to the printer	Naar de printer verzonden
 	set in Print Settings…	instellen in de afdrukinstellingen…
 	ICO is limited to 256 × 256 pixels	ICO is beperkt tot 256 × 256 pixels
 # History panel › History Brush source (#2966)
@@ -4068,3 +4069,17 @@ curves	Smooth	Vloeiend maken
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	GPU-adapter
+
+# System print job controls
+	Auto-Rotate Image	Afbeelding automatisch draaien
+	C5 Envelope	C5-envelop
+	Collate	Sorteren
+	Print in Grayscale	Afdrukken in grijstinten
+	Printer Default	Printerstandaard
+	Printer Properties	Printereigenschappen
+	Printer preferences opened	Printervoorkeuren geopend
+	Single-Sided	Enkelzijdig
+	System Default	Systeemstandaard
+	Two-Sided, Flip on Long Edge	Dubbelzijdig, omslaan langs lange zijde
+	Two-Sided, Flip on Short Edge	Dubbelzijdig, omslaan langs korte zijde
+	Unavailable	Niet beschikbaar

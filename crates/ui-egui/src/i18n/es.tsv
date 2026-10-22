@@ -4010,6 +4010,7 @@ layerLabel	No Color	Sin color
 	Exported presets to {path}	Se exportaron los ajustes preestablecidos a {path}
 	Ran script {name}	Se ejecutó la secuencia de comandos {name}
 	Sent to the printer ({spooler})	Se envió a la impresora ({spooler})
+	Sent to the printer	Se envió a la impresora
 	Printed to {path}	Se imprimió en {path}
 	Exported {path} ({size})	Se exportó {path} ({size})
 	Exported {path}	Se exportó {path}
@@ -4270,3 +4271,17 @@ navigator	Zoom	Zoom
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Adaptador de GPU
+
+# System print job controls
+	Auto-Rotate Image	Girar imagen automáticamente
+	C5 Envelope	Sobre C5
+	Collate	Intercalar
+	Print in Grayscale	Imprimir en escala de grises
+	Printer Default	Predeterminado de la impresora
+	Printer Properties	Propiedades de la impresora
+	Printer preferences opened	Preferencias de la impresora abiertas
+	Single-Sided	Una cara
+	System Default	Predeterminado del sistema
+	Two-Sided, Flip on Long Edge	Dos caras, voltear por el borde largo
+	Two-Sided, Flip on Short Edge	Dos caras, voltear por el borde corto
+	Unavailable	No disponible

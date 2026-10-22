@@ -38,7 +38,7 @@ jobs:
   # Which OSes the test job runs on. main, manual runs and PRs labelled `full-ci` get Linux and
   # Windows. Other PRs get Linux, plus Windows when they touch code whose behaviour differs by
   # platform: the app shell, UI, text and fonts, GPU, pen input, build scripts or the lockfile.
-  # macOS is tested only by release.yml.
+  # Full-workspace macOS tests run in release.yml; printing.yml checks focused print paths on all three desktop OSes.
   platforms:
     timeout-minutes: 10
     name: select platforms

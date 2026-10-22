@@ -513,6 +513,10 @@ pub struct Session {
     /// A further route for File › Print when neither `lp` nor a CUPS server over IPP is
     /// reachable (the XDG Print portal in a Flatpak); see `print_cmds::Spooler`.
     pub print_spooler: Option<print_cmds::Spooler>,
+    /// Desktop-shell bridge for File › Print. The engine supplies the fully composed PDF and
+    /// the shell opens the platform print confirmation dialog. Headless and web sessions leave
+    /// this unset; direct `file.printOneCopy` remains available through `craft-print`.
+    pub system_print_dialog: Option<print_cmds::SystemPrintDialog>,
     /// Background jobs (see [`jobs`]).
     jobs: jobs::Jobs,
     /// Color Sampler points dropped by the last canvas-size change (crop, Canvas Size, Image Size,

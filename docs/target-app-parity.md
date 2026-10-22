@@ -1,6 +1,6 @@
 # PhotoCraft vs Adobe Photoshop: target-app parity
 
-> **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-18 · **Change:** minor (Content-Aware Move live preview for every selection size, TOOL-213-4 done, #6680; retouching evidence: Pattern Stamp and Background Eraser draw live, only the Mixer Brush is left of TOOL-213-7; fill and adjustment layers copy and paste whole, UI-217-23 partial, #2344; shape layers take Density and Feather, TOOL-214-12 done, #5846; on-canvas corner radius widgets, TOOL-214-12; `.atn` import maps 112 events; Free Transform H/V skew fields; stale rows corrected against `main` and the scorecard, estimates unchanged; Photoshop Actions `.atn` load and save; 2026-10-10: Tilt-Shift measurements added; earlier the same day: major, full re-measure against Photoshop 2026 27.11.0; merged `parity-estimate.md` and the roadmap's honest assessment; stale missing-tool rows corrected: Color Replacement and Red Eye are live toolbar tools, Frame landed; percentages unchanged) · **Target:** Adobe Photoshop 2026
+> **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-20 · **Change:** minor (print positioning, grayscale preview/output, native print confirmation and desktop CI coverage improved; Content-Aware Move live preview for every selection size, TOOL-213-4 done, #6680; retouching evidence: Pattern Stamp and Background Eraser draw live, only the Mixer Brush is left of TOOL-213-7; fill and adjustment layers copy and paste whole, UI-217-23 partial, #2344; shape layers take Density and Feather, TOOL-214-12 done, #5846; on-canvas corner radius widgets, TOOL-214-12; `.atn` import maps 112 events; Free Transform H/V skew fields; stale rows corrected against `main` and the scorecard, estimates unchanged; Photoshop Actions `.atn` load and save; 2026-10-10: Tilt-Shift measurements added; earlier the same day: major, full re-measure against Photoshop 2026 27.11.0; merged `parity-estimate.md` and the roadmap's honest assessment; stale missing-tool rows corrected: Color Replacement and Red Eye are live toolbar tools, Frame landed; percentages unchanged) · **Target:** Adobe Photoshop 2026
 
 The authoritative answer to "how close is PhotoCraft to Photoshop, and how much work is left". The
 one-page summary is [`ROADMAP.md`](../ROADMAP.md); the ranked work list is [`gaps.md`](gaps.md);
@@ -185,6 +185,14 @@ parity for the area and are already contained in the dimension rows above.
 | AI / generative | 10% | 300–600 | See the dimension row |
 
 Batch supports [output naming templates](batch-naming.md); AUTO-219-5 remains partial.
+
+Print improvements (2026-10-13): preview dragging and stable centering, linked physical sizes,
+rotation-independent PPI, retained driver choices and explicit preset/custom media selection.
+Focused macOS/Linux/Windows print CI was added the same day; Windows direct paper limits are
+validated separately from PDF export. Print now confirms through the macOS print sheet, Linux XDG
+Print portal, or Windows Print dialog; cancellation submits no job. Grayscale appears in the
+preview and PDF. Physical acceptance remains open. Covered by engine and real dialog tests. Printer imageable margins,
+proof-color preview and resize handles remain open; no percentage re-measured.
 
 ## Remaining effort and calibration
 
@@ -565,11 +573,14 @@ See [method, raw measurements and reproduction](five-algorithm-performance.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-20 | minor | Interactive File › Print confirms through the platform print dialog; orientation and grayscale stay synchronized between preview and output; percentages unchanged |
 | 2026-10-18 | minor | Layers: with no selection, Copy takes fill and adjustment layers whole and Paste recreates them (#2344); UI-217-23 stays partial; percentages unchanged |
 | 2026-10-16 | minor | Content-Aware Move: live result preview for every selection the command takes (TOOL-213-4 done, #6680); percentages unchanged |
 | 2026-10-15 | minor | Vector shapes: shape layers take Density and Feather (Properties › Masks), PSD and .pcraft round trip; TOOL-214-12 done (#5846); estimates unchanged |
 | 2026-10-13 | minor | Vector shapes: on-canvas corner radius widgets on live rectangles (TOOL-214-12); estimates unchanged |
 | 2026-10-13 | minor | Stale "missing tool" rows corrected against main: Color Replacement (`paint.colorReplacement`), Red Eye (`paint.redEye`) and Add/Delete Anchor Point (the Pen flyout) are live toolbar tools and Frame landed, so Art History Brush is the only tool still missing; percentages unchanged |
+| 2026-10-13 | minor | Removed misleading PDF-viewer handoff; grayscale preview/PDF and focused desktop platform CI; percentages unchanged |
+| 2026-10-13 | minor | Print preview dragging, rotation-independent PPI, linked size fields, retained driver choices and explicit media selection; percentages unchanged |
 | 2026-10-12 | minor | Free Transform options bar H/V skew fields; percentages unchanged |
 | 2026-10-12 | minor | `.atn` import: 112 events mapped (TrueGrit Texture Supply sets play end to end); percentages unchanged |
 | 2026-10-11 | minor | Type row evidence: manual/optical kerning and the live Warp Text preview are done (TYPE-218-6/7; variable-font axes TYPE-218-4 too); the 40% estimate is not re-measured |
