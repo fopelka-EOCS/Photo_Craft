@@ -173,6 +173,7 @@ fn new_workspace(app: &mut PhotocraftApp, p: &Value) -> Result<Value, String> {
     if PRESETS.contains(&name.as_str()) {
         return Err(format!("\"{name}\" is a built-in workspace"));
     }
+    crate::panel_docking::prepare(app);
     let prefs = app.session.prefs().clone();
     let mut ws = json!({"panels": app.ui.panels, "dockTabs": app.ui.dock_tabs, "dock": app.ui.dock, "timelineOpen": app.ui.timeline.open, "docking": app.ui.docking, "dockingHidden": app.ui.docking_hidden, "dockingCollapsed": app.ui.docking_collapsed});
     // The icon rail and menu bar flags belong to an embedding app's session, not to a saved
@@ -338,7 +339,7 @@ pub fn confirm(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<Value, St
 
 /// Draws the Modifier Keys panel and the open dialog.
 pub fn windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
-    if app.ui.shell.modifier_keys {
+    if app.ui.shell.modifier_keys && !crate::panel_docking::managed(app, "modifierKeys") {
         let mut close = false;
         let mut s = app.ui.shell.clone();
         let cmd = crate::shortcuts::pretty("Cmd");
@@ -360,6 +361,17 @@ pub fn windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if app.ui.shell.dialog.is_some() {
         dialog(app, ctx);
     }
+}
+
+pub(crate) fn modifier_body(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    let s = &mut app.ui.shell;
+    ui.horizontal_wrapped(|ui| {
+        for (label, on) in [("Shift", &mut s.sticky_shift), ("Cmd", &mut s.sticky_command), ("Alt", &mut s.sticky_alt)] {
+            if ui.add(egui::Button::new(crate::shortcuts::pretty(label)).selected(*on).min_size(vec2(40.0, 30.0))).clicked() {
+                *on = !*on;
+            }
+        }
+    });
 }
 
 fn dialog(app: &mut PhotocraftApp, ctx: &egui::Context) {

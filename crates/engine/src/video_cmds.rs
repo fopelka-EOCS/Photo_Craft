@@ -131,6 +131,62 @@ fn new_blank(s: &mut Session, _p: &Value) -> Result<Value> {
     Ok(json!({"layer": id.0}))
 }
 
+/// Bake top-level artwork into independent animation frames. Originals remain in place,
+/// hidden; the entire conversion is one undo step. Nested selections must use their root group
+/// so group transforms and masks are retained by the document compositor.
+fn from_layers(s: &mut Session, p: &Value) -> Result<Value> {
+    let selected = s.active().ok_or(EngineError::NoDocument)?.selected_layers();
+    let scope = p.get("scope").and_then(Value::as_str).unwrap_or("selected");
+    if !matches!(scope, "selected" | "all") {
+        return Err(EngineError::Other("scope must be selected or all".into()));
+    }
+    let reverse = p.get("reverse").and_then(Value::as_bool).unwrap_or(false);
+    let id = s.edit("Create Frames from Layers", |doc, active| {
+        let mut sources: Vec<_> =
+            doc.layers.iter().filter(|l| l.video.is_none() && !doc.is_background(l.id) && (scope == "all" || selected.contains(&l.id))).cloned().collect();
+        if scope == "selected" && selected.iter().any(|id| !doc.layers.iter().any(|l| l.id == *id)) {
+            return Err(EngineError::Other("请选择顶层图层或完整的顶层组；不支持单独转换组内图层。".into()));
+        }
+        let pixels = u64::from(doc.size.width).saturating_mul(u64::from(doc.size.height));
+        if sources.is_empty() || sources.len() > 512 || pixels.saturating_mul(sources.len() as u64) > 64 << 20 {
+            return Err(EngineError::Other("请选择 1–512 个非背景静态顶层图层；总画布像素乘帧数不能超过 6400 万。".into()));
+        }
+        if sources.iter().any(|l| l.clipped || matches!(l.content, LayerContent::Adjustment(_))) {
+            return Err(EngineError::Other("剪贴层和调整层依赖其他图层，请先将相关图层合并到一个顶层组。".into()));
+        }
+        if reverse {
+            sources.reverse();
+        }
+        store(doc);
+        let fmt = doc.pixel_format();
+        let fmt = photocraft_color::PixelFormat::new(fmt.mode, fmt.sample, true);
+        let mut isolated = doc.clone();
+        let frames: Vec<_> = sources
+            .iter()
+            .map(|source| {
+                let mut layer = source.clone();
+                layer.visible = true;
+                isolated.layers = vec![layer];
+                photocraft_compose::flatten_to_surface(&isolated, fmt, None)
+            })
+            .collect();
+        let fps = doc.timeline.as_ref().map_or(12.0, |t| t.fps);
+        doc.timeline = Some(Timeline::new(frames.len(), fps));
+        for source in &sources {
+            if let Some(layer) = doc.layer_mut(source.id) {
+                layer.visible = false;
+            }
+        }
+        let mut layer = Layer::raster(doc.next_layer_name("Frames from Layers"), fmt);
+        layer.video = Some(VideoData::new(frames, fps));
+        let id = doc.insert_above(sources.last().map(|l| l.id), layer);
+        *active = Some(id);
+        sync(doc);
+        Ok(id)
+    })?;
+    Ok(json!({"layer":id.0,"frames":s.active().and_then(|st| st.doc.timeline.as_ref()).map_or(0, |t| t.duration)}))
+}
+
 fn insert_blank(s: &mut Session, _p: &Value) -> Result<Value> {
     let fmt = s.active().ok_or(EngineError::NoDocument)?.doc.pixel_format();
     edit_video(s, "Insert Blank Frame", move |v, cur| {
@@ -529,6 +585,16 @@ macro_rules! spec {
 pub fn specs() -> Vec<CommandSpec> {
     let vl = &["Layer", "Video Layers"] as &[&str];
     vec![
+        CommandSpec {
+            id: "layer.videoLayers.fromLayers",
+            label: "Create Frames from Layers",
+            menu: vl,
+            shortcut: None,
+            params: r#"{"scope":"selected|all"="selected","reverse":bool=false} → {"layer":id,"frames":n}; top-level non-background static layers, one layer/group per frame; originals hidden; replaces timeline; undoable"#,
+            enabled: has_doc,
+            journal: true,
+            run: from_layers,
+        },
         spec!("layer.videoLayers.newBlankVideoLayer", "New Blank Video Layer", vl, has_doc, |s, p| new_blank(s, p)),
         spec!("layer.videoLayers.insertBlankFrame", "Insert Blank Frame", vl, active_video, |s, p| insert_blank(s, p)),
         spec!("layer.videoLayers.duplicateFrame", "Duplicate Frame", vl, active_video, |s, p| duplicate_frame(s, p)),

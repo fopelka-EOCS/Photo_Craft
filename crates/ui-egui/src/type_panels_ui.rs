@@ -142,7 +142,7 @@ fn float_frame(t: &Tokens) -> egui::Frame {
 pub fn windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let t = Tokens::get(ctx);
     let canvas = app.last_canvas_rect;
-    if app.ui.type_panels.styles {
+    if app.ui.type_panels.styles && !crate::panel_docking::managed(app, "characterStyles") && !crate::panel_docking::managed(app, "paragraphStyles") {
         let mut close = false;
         egui::Window::new(tl!("Type Styles"))
             .id(egui::Id::new("type-styles-window"))
@@ -177,7 +177,7 @@ pub fn windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
             app.ui.type_panels.styles = false;
         }
     }
-    if app.ui.type_panels.glyphs {
+    if app.ui.type_panels.glyphs && !crate::panel_docking::managed(app, "glyphs") {
         let mut close = false;
         egui::Window::new(tl!("Glyphs"))
             .id(egui::Id::new("glyphs-window"))

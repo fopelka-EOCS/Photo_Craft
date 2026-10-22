@@ -7,6 +7,35 @@ fn app() -> PhotocraftApp {
 }
 
 #[test]
+fn canvas_is_protected_while_all_persistent_panels_can_share_docking() {
+    let mut app = app();
+    for (panel, _) in EXTRA_PANELS {
+        app.run("window.panel.activate", json!({"panel":panel})).unwrap();
+        assert!(managed(&app, panel));
+        app.run("window.panel.float", json!({"panel":panel})).unwrap();
+        app.run("window.panel.move", json!({"panel":panel,"anchor":"layers","zone":"tab"})).unwrap();
+        assert!(group_members(app.ui.docking.as_ref().unwrap(), "layers").contains(&panel.to_string()));
+    }
+    for operation in ["float", "close", "activate"] {
+        let before = app.ui.docking.clone();
+        assert!(app.run(&format!("window.panel.{operation}"), json!({"panel":CANVAS})).is_err());
+        assert_eq!(app.ui.docking, before);
+    }
+    let before = app.ui.docking.clone();
+    assert!(app.run("window.panel.move", json!({"panel":"timeline","anchor":CANVAS,"zone":"tab"})).is_err());
+    assert_eq!(app.ui.docking, before);
+    for zone in ["left", "right", "top", "bottom"] {
+        app.run("window.panel.move", json!({"panel":"timeline","anchor":CANVAS,"zone":zone})).unwrap();
+        assert!(valid(app.ui.docking.as_ref().unwrap()));
+    }
+    let saved = json!({"docking":app.ui.docking,"dockingHidden":app.ui.docking_hidden,"panels":app.ui.panels,"timelineOpen":app.ui.timeline.open});
+    let mut restored = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+    crate::dock::apply(&mut restored, &saved);
+    assert_eq!(restored.ui.docking, app.ui.docking);
+    assert!(restored.ui.timeline.open);
+}
+
+#[test]
 fn panel_commands_group_split_reorder_float_and_restore_without_duplicate_ownership() {
     let mut app = app();
     app.run("window.panel.move", json!({"panel":"swatches", "anchor":"layers", "zone":"top"})).unwrap();
@@ -88,7 +117,9 @@ fn harness(app: PhotocraftApp, size: egui::Vec2) -> Harness<'static, PhotocraftA
                 return;
             }
             crate::panels::right_dock(app, ui);
-            egui::CentralPanel::default().show(ui, |_| {});
+            egui::CentralPanel::default().show(ui, |ui| {
+                super::show(app, ui);
+            });
         },
         app,
     );
@@ -110,10 +141,62 @@ fn drag(h: &mut Harness<'static, PhotocraftApp>, from: Pos2, to: Pos2) {
 }
 
 #[test]
+fn timeline_tab_can_float_dock_at_canvas_edge_and_merge_with_layers() {
+    let mut app = app();
+    app.run("file.new", json!({"width":64,"height":64})).unwrap();
+    app.run("window.panel.activate", json!({"panel":"timeline"})).unwrap();
+    let mut h = harness(app, vec2(1440.0, 900.0));
+    let tab = |h: &Harness<'static, PhotocraftApp>, id: &str| {
+        h.ctx.read_response(egui::Id::new("photocraft-panel-docking").with(("tab", &id.to_owned()))).unwrap().rect.center()
+    };
+    let source = tab(&h, "timeline");
+    let destination = h.state().last_canvas_rect.center();
+    drag(&mut h, source, destination);
+    assert!(h.state().ui.docking.as_ref().unwrap().floating.iter().any(|g| g.panels.contains(&"timeline".into())));
+    let source = tab(&h, "timeline");
+    let canvas = h.state().last_canvas_rect;
+    drag(&mut h, source, egui::pos2(canvas.left() + 3.0, canvas.center().y));
+    let layout = h.state().ui.docking.as_ref().unwrap();
+    assert!(!layout.floating.iter().any(|g| g.panels.contains(&"timeline".into())));
+    assert!(valid(layout));
+    let source = tab(&h, "timeline");
+    let destination = tab(&h, "layers");
+    drag(&mut h, source, destination);
+    let layout = h.state().ui.docking.as_ref().unwrap();
+    assert!(group_members(layout, "layers").contains(&"timeline".into()));
+    assert_eq!(layout.panels().into_iter().filter(|p| p.as_str() == CANVAS).count(), 1);
+}
+
+#[test]
+fn previously_standalone_panel_bodies_render_in_a_narrow_shared_tab_group() {
+    let mut state = app();
+    state.run("file.new", json!({"width":64,"height":64})).unwrap();
+    enable(&mut state);
+    let mut h = harness(state, vec2(1280.0, 800.0));
+    for (panel, _) in EXTRA_PANELS {
+        h.state_mut().run("window.panel.move", json!({"panel":panel,"anchor":"layers","zone":"tab"})).unwrap();
+        h.state_mut().run("window.panel.activate", json!({"panel":panel})).unwrap();
+        h.run_steps(3);
+        assert!(managed(h.state(), panel));
+        assert!(valid(h.state().ui.docking.as_ref().unwrap()));
+        if *panel == "modifierKeys" {
+            h.get_by_label("Shift").click();
+            h.run_steps(2);
+            assert!(h.state().ui.shell.sticky_shift);
+            h.get_by_label("Shift").click();
+            h.run_steps(2);
+            assert!(!h.state().ui.shell.sticky_shift);
+        }
+        h.state_mut().run("window.panel.close", json!({"panel":panel})).unwrap();
+        h.run_steps(2);
+    }
+}
+
+#[test]
 fn ordinary_panel_tab_drag_enters_shared_docking_and_can_redock_into_another_tab_group() {
     let mut h = harness(app(), vec2(1280.0, 800.0));
     let source = h.query_all_by_label("Layers").find(|node| node.rect().height() <= 45.0).unwrap().rect().center();
-    drag(&mut h, source, egui::pos2(160.0, 140.0));
+    drag(&mut h, source, egui::pos2(450.0, 380.0));
     let layout = h.state().ui.docking.as_ref().expect("ordinary tab drag starts shared docking");
     assert!(layout.floating.iter().any(|g| g.panels.contains(&"layers".into())), "{layout:?}");
     let source = h.ctx.read_response(egui::Id::new("photocraft-panel-docking").with(("tab", &"layers".to_string()))).unwrap().rect.center();
@@ -129,8 +212,8 @@ fn brushes_tab_drag_floats_and_can_redock_into_another_tab_group() {
     let mut app = app();
     crate::menus::invoke(&mut app, &egui::Context::default(), "window.panel.brushes", json!({})).unwrap();
     let mut h = harness(app, vec2(1280.0, 800.0));
-    let source = h.query_all_by_label("Brushes").find(|node| node.rect().height() <= 45.0).unwrap().rect().center();
-    drag(&mut h, source, egui::pos2(160.0, 140.0));
+    let source = h.ctx.read_response(egui::Id::new("photocraft-panel-docking").with(("tab", &"brushes".to_string()))).unwrap().rect.center();
+    drag(&mut h, source, egui::pos2(450.0, 380.0));
     let layout = h.state().ui.docking.as_ref().expect("brushes drag starts shared docking");
     assert!(layout.floating.iter().any(|group| group.panels.contains(&"brushes".into())), "{layout:?}");
 
@@ -196,7 +279,7 @@ fn capture_custom_panel_docking_visual_fixtures() {
                         }
                         crate::panels::right_dock(app, ui);
                         egui::CentralPanel::default().show(ui, |ui| {
-                            ui.label("Custom panel workspace");
+                            super::show(app, ui);
                         });
                     },
                     app,
@@ -226,7 +309,9 @@ fn floating_group_titles_are_opaque_in_studio_themes() {
                 return;
             }
             crate::panels::right_dock(app, ui);
-            egui::CentralPanel::default().frame(egui::Frame::NONE.fill(egui::Color32::from_rgb(255, 0, 255))).show(ui, |_| {});
+            egui::CentralPanel::default().frame(egui::Frame::NONE.fill(egui::Color32::from_rgb(255, 0, 255))).show(ui, |ui| {
+                super::show(app, ui);
+            });
         },
         app,
     );
@@ -281,7 +366,7 @@ fn serialized_layout_actions_cover_geometry_reorder_accordion_and_atomic_rejecti
     let hidden = app.ui.docking_hidden.clone();
     for action in [
         json!({"MoveFloating":{"panel":"properties","rect":[0,0,-5,30]}}),
-        json!({"ResizeSplit":{"path":[true,true,true],"size":{"Ratio":0.2}}}),
+        json!({"ResizeSplit":{"path":[false,false,false,false],"size":{"Ratio":0.2}}}),
         json!({"Open":{"panel":"unknown","anchor":null}}),
         json!({"Move":{"panel":"properties","anchor":"swatches","placement":{"Tab":{"before":"unknown"}}}}),
     ] {
@@ -295,7 +380,10 @@ fn serialized_layout_actions_cover_geometry_reorder_accordion_and_atomic_rejecti
     });
     app.run("window.panel.layout", json!({"action":{"SetStackOpen":{"panel":"layers","open":false}}})).unwrap();
     app.run("window.panel.layout", json!({"action":{"ResizeStack":{"panel":"layers","height":150}}})).unwrap();
-    let Some(Node::Stack { entries }) = &app.ui.docking.as_ref().unwrap().root else { panic!("expected stack") };
+    let Some(Node::Split { second, .. }) = &app.ui.docking.as_ref().unwrap().root else { panic!("expected canvas and stack") };
+    let Node::Stack { entries } = second.as_ref() else {
+        panic!("expected stack");
+    };
     assert!(!entries[0].open);
     assert_eq!(entries[0].height, Some(150.0));
 }
@@ -373,7 +461,11 @@ fn populated_canvas_keeps_a_real_opacity_edit_after_floating_and_redocking() {
             crate::panels::options_bar(app, ui);
             crate::panels::toolbar(app, ui);
             crate::panels::right_dock(app, ui);
-            egui::CentralPanel::default().show(ui, |ui| crate::canvas::document_area(app, ui));
+            egui::CentralPanel::default().show(ui, |ui| {
+                if !super::show(app, ui) {
+                    crate::canvas::document_area(app, ui);
+                }
+            });
         },
         app,
     );
@@ -564,8 +656,10 @@ fn legacy_dock_width_is_consumed_by_custom_renderer_and_clamped_to_existing_rang
     for (requested, expected) in [(410.0, 410.0), (900.0, 520.0), (20.0, 250.0)] {
         assert_eq!(control_set(h.state_mut(), &ctx, json!({"dockWidth":requested}))["ok"], true);
         h.run_steps(2);
-        let state = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("shared-panel-dock")).unwrap();
-        assert!((state.outer_rect.width() - expected).abs() < 1.0, "{} / {expected}", state.outer_rect.width());
+        let Some(Node::Split { size: SplitSize::FixedSecond(width), .. }) = &h.state().ui.docking.as_ref().unwrap().root else {
+            panic!("workspace keeps its sidebar split");
+        };
+        assert!((*width - expected).abs() < 1.0, "{width} / {expected}");
         assert!(h.ctx.data(|data| data.get_temp::<f32>(crate::panels::dock_width_id())).is_none());
     }
 }

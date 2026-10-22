@@ -670,94 +670,115 @@ pub(crate) fn panel_window(app: &PhotocraftApp, ctx: &egui::Context, id: &str, t
 
 /// Draws the open panels and dialogs.
 pub fn windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
-    if app.ui.analysis.measurement_log {
-        let mut act: Option<(&str, Value)> = None;
-        let mut close = false;
-        let rows = app.session.analysis.log.clone();
-        let mut sel = app.ui.analysis.log_selected.clone();
-        let t = Tokens::get(ctx);
-        panel_window(app, ctx, "measurement-log", tl!("Measurement Log"), vec2(-300.0, 470.0), 620.0, |ui| {
-            close = title_row(ui, tl!("Measurement Log"));
-            ui.horizontal(|ui| {
-                if crate::widgets::secondary_button(ui, tl!("Record Measurements"), 0.0).clicked() {
-                    act = Some(("record", Value::Null));
-                }
-                if crate::widgets::secondary_button(ui, tl!("Select All"), 0.0).clicked() {
-                    sel = rows.iter().map(|r| r.id).collect();
-                }
-                if crate::widgets::secondary_button(ui, tl!("Deselect All"), 0.0).clicked() {
-                    sel.clear();
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if crate::icons::button(ui, "trash", 22.0, false, tl!("Delete selected measurements")).clicked() && !sel.is_empty() {
-                        act = Some(("measurementLog.delete", json!({"rows": sel.clone()})));
-                    }
-                    if crate::icons::button(ui, "file", 22.0, false, tl!("Export selected measurements (CSV)")).clicked() {
-                        act = Some(("export", json!(sel.clone())));
-                    }
-                });
-            });
-            let cols: Vec<&str> = photocraft_engine::analysis_cmds::log_columns(&rows).into_iter().filter(|c| *c != "histogram").collect();
-            egui::ScrollArea::both().max_height(220.0).max_width(620.0).show(ui, |ui| {
-                egui::Grid::new("mlog-grid").striped(true).spacing(vec2(10.0, 2.0)).show(ui, |ui| {
-                    for c in &cols {
-                        let name = photocraft_engine::analysis_cmds::COLUMNS.iter().find(|x| x.0 == *c).map_or(*c, |x| x.1);
-                        ui.label(RichText::new(tl!(name)).color(t.text_dim).size(10.5).strong());
-                    }
-                    ui.end_row();
-                    for r in &rows {
-                        let on = sel.contains(&r.id);
-                        for (k, c) in cols.iter().enumerate() {
-                            let v = r.values.get(*c).map(|v| match v {
-                                Value::String(s) => s.clone(),
-                                Value::Null => String::new(),
-                                other => other.to_string(),
-                            });
-                            let txt = RichText::new(v.unwrap_or_default()).size(10.5).color(if on { t.accent_text } else { t.text });
-                            let resp = if k == 0 { ui.selectable_label(on, txt) } else { ui.label(txt) };
-                            if k == 0 && resp.clicked() {
-                                if on {
-                                    sel.retain(|x| *x != r.id);
-                                } else {
-                                    sel.push(r.id);
-                                }
-                            }
-                        }
-                        ui.end_row();
-                    }
-                });
-            });
-        });
-        app.ui.analysis.log_selected = sel;
-        if close {
-            app.ui.analysis.measurement_log = false;
-        }
-        match act {
-            Some(("record", _)) => {
-                let _ = crate::menus::invoke(app, ctx, "image.analysis.recordMeasurements", json!({}));
-            }
-            Some(("export", rows)) => {
-                let ids: Vec<u64> = rows.as_array().map(|a| a.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
-                if let Err(e) = export_log(app, (!ids.is_empty()).then_some(ids))
-                    && e != "cancelled"
-                {
-                    app.ui.status = e;
-                }
-            }
-            Some((id, p)) => {
-                let result = app.run(id, p);
-                if result.is_ok() {
-                    app.ui.analysis.log_selected.clear();
-                }
-            }
-            None => {}
-        }
+    if app.ui.analysis.measurement_log && !crate::panel_docking::managed(app, "measurementLog") {
+        measurement_panel(app, ctx, None);
     }
-    if app.ui.analysis.notes {
-        notes_panel(app, ctx);
+    if app.ui.analysis.notes && !crate::panel_docking::managed(app, "notes") {
+        notes_panel(app, ctx, None);
     }
     if app.ui.analysis.dialog.is_some() {
         dialog(app, ctx);
+    }
+}
+
+pub(crate) fn dock_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, id: &str) {
+    let ctx = ui.ctx().clone();
+    if id == "measurementLog" {
+        measurement_panel(app, &ctx, Some(ui));
+    } else {
+        notes_panel(app, &ctx, Some(ui));
+    }
+}
+fn measurement_panel(app: &mut PhotocraftApp, ctx: &egui::Context, inline: Option<&mut egui::Ui>) {
+    let mut act: Option<(&str, Value)> = None;
+    let mut close = false;
+    let rows = app.session.analysis.log.clone();
+    let mut sel = app.ui.analysis.log_selected.clone();
+    let t = Tokens::get(ctx);
+    let mut contents = |ui: &mut egui::Ui| {
+        close = title_row(ui, tl!("Measurement Log"));
+        ui.horizontal(|ui| {
+            if crate::widgets::secondary_button(ui, tl!("Record Measurements"), 0.0).clicked() {
+                act = Some(("record", Value::Null));
+            }
+            if crate::widgets::secondary_button(ui, tl!("Select All"), 0.0).clicked() {
+                sel = rows.iter().map(|r| r.id).collect();
+            }
+            if crate::widgets::secondary_button(ui, tl!("Deselect All"), 0.0).clicked() {
+                sel.clear();
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if crate::icons::button(ui, "trash", 22.0, false, tl!("Delete selected measurements")).clicked() && !sel.is_empty() {
+                    act = Some(("measurementLog.delete", json!({"rows": sel.clone()})));
+                }
+                if crate::icons::button(ui, "file", 22.0, false, tl!("Export selected measurements (CSV)")).clicked() {
+                    act = Some(("export", json!(sel.clone())));
+                }
+            });
+        });
+        let cols: Vec<&str> = photocraft_engine::analysis_cmds::log_columns(&rows).into_iter().filter(|c| *c != "histogram").collect();
+        egui::ScrollArea::both().max_height(220.0).max_width(620.0).show(ui, |ui| {
+            egui::Grid::new("mlog-grid").striped(true).spacing(vec2(10.0, 2.0)).show(ui, |ui| {
+                for c in &cols {
+                    let name = photocraft_engine::analysis_cmds::COLUMNS.iter().find(|x| x.0 == *c).map_or(*c, |x| x.1);
+                    ui.label(RichText::new(tl!(name)).color(t.text_dim).size(10.5).strong());
+                }
+                ui.end_row();
+                for r in &rows {
+                    let on = sel.contains(&r.id);
+                    for (k, c) in cols.iter().enumerate() {
+                        let v = r.values.get(*c).map(|v| match v {
+                            Value::String(s) => s.clone(),
+                            Value::Null => String::new(),
+                            other => other.to_string(),
+                        });
+                        let txt = RichText::new(v.unwrap_or_default()).size(10.5).color(if on { t.accent_text } else { t.text });
+                        let resp = if k == 0 { ui.selectable_label(on, txt) } else { ui.label(txt) };
+                        if k == 0 && resp.clicked() {
+                            if on {
+                                sel.retain(|x| *x != r.id);
+                            } else {
+                                sel.push(r.id);
+                            }
+                        }
+                    }
+                    ui.end_row();
+                }
+            });
+        });
+    };
+    if let Some(ui) = inline {
+        contents(ui);
+    } else {
+        panel_window(app, ctx, "measurement-log", tl!("Measurement Log"), vec2(-300.0, 470.0), 620.0, contents);
+    }
+
+    app.ui.analysis.log_selected = sel;
+    if close {
+        if crate::panel_docking::managed(app, "measurementLog") {
+            let _ = app.run("window.panel.close", json!({"panel":"measurementLog"}));
+        }
+        app.ui.analysis.measurement_log = false;
+    }
+    match act {
+        Some(("record", _)) => {
+            let _ = crate::menus::invoke(app, ctx, "image.analysis.recordMeasurements", json!({}));
+        }
+        Some(("export", rows)) => {
+            let ids: Vec<u64> = rows.as_array().map(|a| a.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
+            if let Err(e) = export_log(app, (!ids.is_empty()).then_some(ids))
+                && e != "cancelled"
+            {
+                app.ui.status = e;
+            }
+        }
+        Some((id, p)) => {
+            let result = app.run(id, p);
+            if result.is_ok() {
+                app.ui.analysis.log_selected.clear();
+            }
+        }
+        None => {}
     }
 }
 
@@ -770,7 +791,7 @@ fn show_note_options(app: &mut PhotocraftApp, i: usize) {
     app.ui.analysis.note_color = color;
 }
 
-fn notes_panel(app: &mut PhotocraftApp, ctx: &egui::Context) {
+fn notes_panel(app: &mut PhotocraftApp, ctx: &egui::Context, inline: Option<&mut egui::Ui>) {
     let notes = app.session.active().map(|d| d.doc.notes.clone()).unwrap_or_default();
     let n = notes.len();
     let mut sel = app.ui.analysis.note_selected.filter(|i| *i < n).or((n > 0).then_some(0));
@@ -779,7 +800,7 @@ fn notes_panel(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let mut delete = false;
     let mut navigated = false;
     let t = Tokens::get(ctx);
-    panel_window(app, ctx, "notes-panel", tl!("Notes"), vec2(-40.0, 300.0), 260.0, |ui| {
+    let mut contents = |ui: &mut egui::Ui| {
         close = title_row(ui, tl!("Notes"));
         match sel {
             None => {
@@ -813,7 +834,13 @@ fn notes_panel(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 }
             });
         });
-    });
+    };
+    if let Some(ui) = inline {
+        contents(ui);
+    } else {
+        panel_window(app, ctx, "notes-panel", tl!("Notes"), vec2(-40.0, 300.0), 260.0, contents);
+    }
+
     app.ui.analysis.note_selected = sel;
     if navigated && let Some(i) = sel {
         show_note_options(app, i);
@@ -828,6 +855,9 @@ fn notes_panel(app: &mut PhotocraftApp, ctx: &egui::Context) {
         app.ui.analysis.note_selected = (n > 1).then(|| i.min(n - 2));
     }
     if close {
+        if crate::panel_docking::managed(app, "notes") {
+            let _ = app.run("window.panel.close", json!({"panel":"notes"}));
+        }
         app.ui.analysis.notes = false;
     }
 }

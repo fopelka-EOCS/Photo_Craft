@@ -40,6 +40,9 @@ fn with_timeline(s: &mut Session, f: impl FnOnce(&mut Option<Timeline>)) -> Resu
     crate::video_cmds::sync(&mut doc);
     st.doc = Arc::new(doc);
     st.revision += 1;
+    // A video frame can change pixels anywhere. Reusing the last brush stroke's
+    // damage (or a layer-selection's empty damage) leaves stale frames on the GPU.
+    st.last_damage = None;
     info(s)
 }
 
@@ -176,6 +179,24 @@ mod tests {
         // Delete.
         s.execute("timeline.delete", json!({})).unwrap();
         assert_eq!(s.execute("timeline.info", json!({})).unwrap()["timeline"], Value::Null);
+    }
+
+    #[test]
+    fn switching_frames_invalidates_the_whole_canvas_not_the_previous_stroke() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width":32,"height":16})).unwrap();
+        s.execute("timeline.create", json!({"duration":2,"fps":12})).unwrap();
+        s.execute("layer.videoLayers.newBlankVideoLayer", json!({})).unwrap();
+        s.execute("paint.stroke", json!({"points":[[4,8,1],[5,8,1]],"size":3})).unwrap();
+        s.active_mut().unwrap().last_damage = Some(photocraft_geom::Rect::EMPTY);
+        s.execute("timeline.setFrame", json!({"frame":1})).unwrap();
+        assert_eq!(s.active().unwrap().last_damage, None);
+        let st = s.active().unwrap();
+        let surface = st.doc.layer(st.active_layer.unwrap()).unwrap().surface().unwrap();
+        assert_eq!(surface.rgba(4, 8)[3], 0.0);
+        s.execute("timeline.setFrame", json!({"frame":0})).unwrap();
+        let st = s.active().unwrap();
+        assert!(st.doc.layer(st.active_layer.unwrap()).unwrap().surface().unwrap().rgba(4, 8)[3] > 0.0);
     }
 
     /// The document's timeline, revision and history depth, to show a rejected command changed nothing.

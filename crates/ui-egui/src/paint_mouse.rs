@@ -113,12 +113,20 @@ pub fn right_erases(app: &PhotocraftApp, tool: Tool) -> bool {
 /// `secondary_erase` or `brush_resize_armed` for this frame's `Down`.
 pub fn canvas_buttons(app: &mut PhotocraftApp, response: &Response, tool: Tool) -> Buttons {
     let physical_right = app.services.right_button_down.as_ref().is_some_and(|f| f());
+    let barrel_id = response.id.with("pen-secondary-down");
+    let was_right = response.ctx.data(|d| d.get_temp::<bool>(barrel_id).unwrap_or(false));
+    response.ctx.data_mut(|d| d.insert_temp(barrel_id, physical_right));
+    let latch_id = response.id.with("pen-secondary-contact");
+    let latched = response.ctx.data(|d| d.get_temp::<bool>(latch_id).unwrap_or(false));
+    let suppress_primary = physical_right || latched;
+    let primary_down = response.ctx.input(|i| i.pointer.primary_down());
+    response.ctx.data_mut(|d| d.insert_temp(latch_id, suppress_primary && primary_down));
     let (mods, mut right_down) = response.ctx.input(|i| (i.modifiers, i.pointer.secondary_down()));
     right_down |= physical_right;
     let right_started = response.drag_started_by(PointerButton::Secondary) || (physical_right && response.drag_started());
     let right_dragged = response.dragged_by(PointerButton::Secondary) || (physical_right && response.dragged());
     let resizing = app.brush_resize.is_some_and(|r| r.secondary);
-    let right_stopped = response.drag_stopped_by(PointerButton::Secondary) || (resizing && response.drag_stopped());
+    let right_stopped = response.drag_stopped_by(PointerButton::Secondary) || ((resizing || latched) && response.drag_stopped());
 
     if physical_right && crate::brush_resize::is_right_gesture(crate::workspace_ui::sticky_mods(app, mods)) {
         app.alt_sampling = false;
@@ -137,24 +145,31 @@ pub fn canvas_buttons(app: &mut PhotocraftApp, response: &Response, tool: Tool) 
     let layer_menu = crate::layer_pick_ui::is_gesture(tool, mods);
     let erase = right_erases(app, tool) && !resize_start && !resizing && !layer_menu;
     let right_stroke = erase && app.drag.is_some();
-    let right_start = erase && right_started;
-    let right_click = response.secondary_clicked();
+    // Windows Ink promotes pen contact to Primary even while its barrel button is held.
+    // Handle that contact before the canvas can interpret it as a paint stroke.
+    let pen_press = physical_right && response.is_pointer_button_down_on() && response.ctx.input(|i| i.pointer.primary_pressed());
+    let right_start = erase && (right_started || pen_press) && app.drag.is_none();
+    let barrel_press = physical_right && !was_right && response.contains_pointer();
+    let right_click = response.secondary_clicked() || pen_press || barrel_press;
     if right_click
         && !erase
+        && !resize_start
+        && !resizing
+        && !crate::brush_resize::is_right_gesture(crate::workspace_ui::sticky_mods(app, mods))
         && !layer_menu
         && right_click_picker(tool)
-        && let Some(p) = response.interact_pointer_pos()
+        && let Some(p) = response.interact_pointer_pos().or_else(|| response.hover_pos())
     {
         crate::brush_picker::open(&mut app.ui, &response.ctx, [p.x, p.y]);
     }
-    let erase_click = erase && right_click;
+    let erase_click = erase && response.secondary_clicked();
     app.secondary_erase = right_start || erase_click;
     let right_drag = right_stroke || resizing;
     Buttons {
-        started: response.drag_started_by(PointerButton::Primary) || right_start || resize_start,
-        dragged: response.dragged_by(PointerButton::Primary) || (right_drag && right_dragged),
-        stopped: response.drag_stopped_by(PointerButton::Primary) || (right_drag && right_stopped),
-        clicked: response.clicked() || erase_click,
+        started: (!suppress_primary && response.drag_started_by(PointerButton::Primary)) || right_start || resize_start,
+        dragged: (!suppress_primary && response.dragged_by(PointerButton::Primary)) || (right_drag && right_dragged),
+        stopped: (!suppress_primary && response.drag_stopped_by(PointerButton::Primary)) || (right_drag && right_stopped),
+        clicked: (!suppress_primary && response.clicked()) || erase_click,
     }
 }
 
@@ -308,6 +323,28 @@ mod tests {
         let (a, b) = drag(&mut h, PointerButton::Primary);
         assert_eq!(strokes(&h).len(), 1);
         assert!(alpha_at(&h, a + (b - a) * 0.5) > 0.9);
+    }
+
+    #[test]
+    fn pen_barrel_promoted_to_primary_opens_picker_without_painting() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+        let mut h = harness(None);
+        let barrel = Arc::new(AtomicBool::new(false));
+        let input = barrel.clone();
+        h.state_mut().services.right_button_down = Some(Box::new(move || input.load(Ordering::Relaxed)));
+        let point = h.state().last_canvas_rect.center();
+        h.event(egui::Event::PointerMoved(point));
+        h.run_steps(1);
+        barrel.store(true, Ordering::Relaxed);
+        press(&mut h, point, PointerButton::Primary, true);
+        assert!(h.state().ui.brush_picker.is_some(), "barrel opens brush picker");
+        barrel.store(false, Ordering::Relaxed);
+        press(&mut h, point, PointerButton::Primary, false);
+        assert!(strokes(&h).is_empty(), "neither barrel contact nor its release paints");
+        assert_eq!(alpha_at(&h, point), 0.0);
     }
 
     #[test]
