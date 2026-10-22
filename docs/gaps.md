@@ -1,6 +1,6 @@
 # Where PhotoCraft falls short of Photoshop
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (G8: Character panel OpenType buttons landed, TYPE-218-5 stays partial; G8: triple-, quadruple- and five-click type selection landed, TYPE-218-8 done; Czech UI localization evidence added to G13; G14: D5100 crop and Camera Raw tuning validation) · **Target:** Adobe Photoshop 2026
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-22 · **Change:** minor (G17: physical iPad launch and basic input verified; isolated UIScene bridge) · **Target:** Adobe Photoshop 2026
 
 Every known shortfall against Photoshop 2026 (27.11.0), one entry each, ranked by user impact
 on the way to beta. This is the work list agents pick from: take the highest-ranked entry that
@@ -218,13 +218,22 @@ what an agent can't finish alone.
 - **Missing:** Windows code signing (material not obtained), Windows ARM64 (DIST-220-2), in-app
   update check (DIST-220-1, #2650, #2375), in-app bug report (DIST-220-3), Flathub (#173),
   starting without a GPU adapter (#2519, #2412), Windows 7 (#2310, out of scope), Intel Macs with
-  OpenCore (#1859).
+  OpenCore (#1859). iPadOS has an experimental native Rust/egui shell and Xcode bundle; Files
+  integration, document sharing, Pencil hover/tilt validation and a touch-adapted workspace remain.
+  An isolated Rust `UIScene` bridge fixes the SDK 27 launch trap while winit #4224 is pending.
+  Physical iPadOS 27.2 beta launch is verified; the user reports working touch and Pencil pressure.
+  Safe-area menu placement is user-confirmed. Pencil hover input is implemented with a native
+  recognizer and tested event translation; hover movement is user-confirmed, but the brush
+  outline remains missing. This is an experimental community modification awaiting review.
+  Lifecycle/rotation coverage and production distribution are still incomplete.
 - **Estimate:** 30–60 h. **Human:** signing certificates.
 
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-22 | minor | G17: native iPad preview; launch/input, safe-area menu and hover movement user-confirmed; brush outline and public distribution remain open |
+| 2026-10-12 | minor | G17: experimental native iPadOS shell and Xcode bundle added; target remains unsupported |
 | 2026-10-11 | minor | D5100 image area and Camera Raw tuning validation; G14 remains open |
 | 2026-10-11 | minor | G13: Czech dynamic UI text localized; engine messages and native review remain open |
 | 2026-10-11 | minor | G8: triple/quadruple/five-click type selection done (TYPE-218-8, #3493); Type evidence recounted |

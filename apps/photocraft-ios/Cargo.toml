@@ -1,0 +1,32 @@
+[package]
+name = "photocraft-ios"
+description = "Native iPadOS shell for PhotoCraft"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+# UIKit interop is confined to src/scene.rs (approved platform exception).
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+
+[[bin]]
+name = "photocraft-ios"
+path = "src/main.rs"
+
+[target.'cfg(target_os = "ios")'.dependencies]
+photocraft-engine = { workspace = true }
+photocraft-ui-egui = { workspace = true }
+eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit"] }
+log = { workspace = true }
+objc2 = "=0.6.4"
+objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSObject", "NSArray", "NSSet", "NSGeometry", "NSValue"] }
+objc2-ui-kit = { version = "=0.3.2", default-features = false, features = ["std", "UIApplication", "UIResponder", "UIScene", "UISceneOptions", "UISceneSession", "UIWindowScene", "UIWindow", "UIView", "UIGeometry", "UIGestureRecognizer", "UIHoverGestureRecognizer", "UITouch", "objc2-core-foundation"] }
+raw-window-handle = "=0.6.2"
+
+[dev-dependencies]
+egui = { workspace = true }

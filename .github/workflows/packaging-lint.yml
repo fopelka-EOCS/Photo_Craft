@@ -28,3 +28,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: bash packaging/linux/verified-download-test.sh
+
+  ios-metadata:
+    name: iPadOS packaging metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: python3 packaging/ios/test_packaging.py

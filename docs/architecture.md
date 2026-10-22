@@ -1,15 +1,16 @@
 # PhotoCraft architecture
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** minor (current-state summary added; the design plan below is kept, with its deviations listed) · **Target:** Adobe Photoshop 2026
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-22 · **Change:** minor (isolated iPadOS UIScene adapter and portable signing) · **Target:** Adobe Photoshop 2026
 
 ## Current state (2026-10-10)
 
 What exists on `main` today. The numbered sections below are the original design plan of
 2026-09-30; where the code differs, this summary wins.
 
-- **Workspace:** 25 library crates under `crates/`, 3 apps (`photocraft` desktop, `photocraft-cli`,
-  `photocraft-web`), `xtask`, an example plug-in and 5 fuzz crates; ~393,000 lines of Rust in
-  ~1,020 files; ~5,460 `#[test]` functions (ui-egui 1,677, engine 1,237, algo 408, io 377,
+- **Workspace:** 25 library crates under `crates/`, 4 apps (`photocraft` desktop,
+  `photocraft-cli`, experimental `photocraft-ios`, `photocraft-web`), `xtask`, an example plug-in
+  and 5 fuzz crates; ~393,000 lines of Rust in ~1,020 files; ~5,460 `#[test]` functions
+  (ui-egui 1,677, engine 1,237, algo 408, io 377,
   codecs 325, psd 263). Crate map and layers: [`AGENTS.md`](../AGENTS.md) §2 and
   `xtask/src/layers.rs` (enforced by `cargo xtask layers`).
 - **UI toolkit:** decided: egui/eframe on wgpu (no webview, no JavaScript). The same Rust builds
@@ -23,8 +24,11 @@ What exists on `main` today. The numbered sections below are the original design
   Affinity (`affinity`), document mapping (`io`), native `.pcraft` (`format`, atomic saves).
   Coverage: [`file-format-parity.md`](file-format-parity.md).
 - **Not built (yet) from the plan:** the `ml` crate (no ML runtime; see gap G15), plug-in ABI v2.
-- **Deviations from the plan below:** `photocraft-tablet` is the one crate allowed `unsafe`
-  (AppKit pen events); `affinity`, `heif` and `raw` crates were added; the phased roadmap in §15
+- **Deviations from the plan below:** `photocraft-tablet` allows isolated `unsafe`
+  (AppKit pen events); the experimental iOS app proposes a second boundary, `scene.rs`, for maintainer review,
+  for UIKit scene registration, window attachment and the Pencil hover target/action callback.
+  Hover is translated into egui pointer movement in the app shell. No shared engine/UI code is affected.
+  `affinity`, `heif` and `raw` crates were added; the phased roadmap in §15
   is superseded by [`roadmap.md`](roadmap.md).
 
 ---
@@ -588,5 +592,7 @@ Each phase ends with a demoable build and green CI on all targets. Phases 8–10
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-22 | minor | Isolated UIKit scene/hover bridge and safe-area editor wrapper; personal signing excluded from shared project |
+| 2026-10-12 | minor | Experimental native iPadOS app target and Xcode bundle added |
 | 2026-10-10 | minor | Current-state summary and deviations from the plan; status line; broken link to `photoshop-parity.md` repointed to `target-app-parity.md` |
 | 2026-09-30 | major | Design plan v1 |
