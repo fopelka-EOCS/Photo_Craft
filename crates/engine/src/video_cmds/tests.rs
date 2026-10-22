@@ -595,3 +595,73 @@ fn fps_from_delays_picks_most_common_and_breaks_ties_by_first_seen() {
     many.push(20);
     assert_eq!(fps_from_delays(&many), Some(50.0));
 }
+
+#[test]
+fn drawn_layers_become_ordered_frames_and_undo_restores_originals() {
+    for depth in [8, 16, 32] {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width":16,"height":12,"depth":depth})).unwrap();
+        let ids = s
+            .edit("fixture", |doc, _| {
+                let mut ids = Vec::new();
+                for i in 0..13 {
+                    let mut l = Layer::raster(format!("Drawing {i}"), doc.pixel_format());
+                    if let LayerContent::Raster(surface) = &mut l.content {
+                        surface.write_pixel(i, 3, &[1.0, 0.0, 0.0, 1.0]);
+                    }
+                    let id = doc.insert_above(None, l);
+                    ids.push(id);
+                }
+                Ok(ids)
+            })
+            .unwrap();
+        let before = s.active().unwrap().doc.clone();
+        let result = s.execute("layer.videoLayers.fromLayers", json!({"scope":"all"})).unwrap();
+        assert_eq!(result["frames"], 13);
+        let id = LayerId(result["layer"].as_u64().unwrap());
+        let doc = &s.active().unwrap().doc;
+        let video = doc.layer(id).unwrap().video.as_ref().unwrap();
+        for (i, original) in ids.iter().enumerate() {
+            assert!(!doc.layer(*original).unwrap().visible);
+            assert_eq!(doc.layer(*original).unwrap().content, before.layer(*original).unwrap().content);
+            assert!(video.frames[i].pixel(i as i32, 3)[3] > 0.99);
+            assert!(video.frames[i].pixel((i as i32 + 1) % 13, 3)[3] < 0.01);
+        }
+        assert_eq!(video.frames[0].format().sample, before.pixel_format().sample);
+        assert!(doc.background().unwrap().visible);
+        assert!(s.undo());
+        assert_eq!(*s.active().unwrap().doc, *before);
+    }
+}
+
+#[test]
+fn selected_layers_conversion_reverses_without_touching_unselected_and_rejects_bad_scope() {
+    let mut s = session();
+    let ids = s
+        .edit("fixture", |doc, active| {
+            let mut ids = Vec::new();
+            for i in 0..3 {
+                let mut layer = Layer::raster(format!("Frame {i}"), doc.pixel_format());
+                if let LayerContent::Raster(surface) = &mut layer.content {
+                    surface.write_pixel(i, 2, &[0.0, 1.0, 0.0, 1.0]);
+                }
+                ids.push(doc.insert_above(None, layer));
+            }
+            *active = Some(ids[0]);
+            Ok(ids)
+        })
+        .unwrap();
+    s.active_mut().unwrap().selected_layers = vec![ids[0], ids[2]];
+    let result = s.execute("layer.videoLayers.fromLayers", json!({"reverse":true})).unwrap();
+    let doc = &s.active().unwrap().doc;
+    let video = doc.layer(LayerId(result["layer"].as_u64().unwrap())).unwrap().video.as_ref().unwrap();
+    assert_eq!(video.frames.len(), 2);
+    assert!(video.frames[0].pixel(2, 2)[3] > 0.99);
+    assert!(doc.layer(ids[1]).unwrap().visible);
+    assert!(s.execute("layer.videoLayers.fromLayers", json!({"scope":"oops"})).is_err());
+    assert!(s.undo());
+    let before = s.active().unwrap().doc.clone();
+    s.active_mut().unwrap().active_layer = s.active().unwrap().doc.background().map(|l| l.id);
+    assert!(s.execute("layer.videoLayers.fromLayers", json!({})).is_err());
+    assert_eq!(*s.active().unwrap().doc, *before);
+}

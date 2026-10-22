@@ -490,7 +490,13 @@ pub fn panel_menu(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
 }
 
+pub(crate) fn dock_body(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    egui::ScrollArea::both().id_salt("docked-brush-settings").auto_shrink([false, false]).show(ui, |ui| settings_tab(app, ui));
+}
 pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    if crate::panel_docking::managed(app, "brushSettings") {
+        return;
+    }
     if !app.ui.panels.brush_settings {
         return;
     }

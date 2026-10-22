@@ -3257,6 +3257,18 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                 paint_cpu_document(&painter, &pattern_xf(&xf, c, size), doc.bounds(), rotated, checkerboard, tex);
             }
         }
+        if app.ui.timeline.onion_skin && !app.ui.timeline.playing {
+            for tex in onion_textures(app, &ctx, &doc) {
+                paint_mapped_image(
+                    &painter,
+                    &xf,
+                    tex.id(),
+                    Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)),
+                    [doc.size.width as f32, doc.size.height as f32],
+                    Color32::WHITE,
+                );
+            }
+        }
         // Channels panel: alpha / Quick Mask overlays and single-channel views (channel_view.rs).
         if let Some(tex) = crate::channel_view::ensure(app, &ctx, idx) {
             if view.rotation.abs() > 0.05 {
@@ -4416,6 +4428,104 @@ fn zoom_about(view: &mut View, xf: &ViewXform, p: Pos2, new_zoom: f32, center_on
 }
 
 /// Textured document quad whose corners follow [`ViewXform`] (rotation + flip).
+/// Adjacent frames of the selected video layer, as view-only tinted overlays. Static
+/// backgrounds are excluded, and the proxy/cache bound the cost while the pen moves.
+fn onion_textures(app: &PhotocraftApp, ctx: &egui::Context, doc: &photocraft_doc::Document) -> Vec<egui::TextureHandle> {
+    let Some(st) = app.session.active() else { return Vec::new() };
+    if st.doc.id != doc.id {
+        return Vec::new();
+    }
+    let Some(layer_id) = st.active_layer else { return Vec::new() };
+    let Some(layer) = doc.layer(layer_id) else { return Vec::new() };
+    let Some(video) = &layer.video else { return Vec::new() };
+    let Some(tl) = &doc.timeline else { return Vec::new() };
+    type Cache = ((u64, u64, u64, usize), Vec<egui::TextureHandle>);
+    let key = (doc.id.0, st.revision, layer_id.0, tl.current);
+    let cache_id = egui::Id::new("timeline-onion-textures");
+    if let Some((cached, textures)) = ctx.data(|d| d.get_temp::<Cache>(cache_id))
+        && cached == key
+    {
+        return textures;
+    }
+    fn retain_layer(layers: &mut Vec<photocraft_doc::Layer>, target: photocraft_doc::LayerId, depth: usize) {
+        if depth > 64 {
+            layers.clear();
+            return;
+        }
+        for layer in layers.iter_mut() {
+            if let Some(children) = layer.children_mut() {
+                retain_layer(children, target, depth + 1);
+            }
+        }
+        layers.retain(|layer| layer.id == target || layer.children().is_some_and(|ch| !ch.is_empty()));
+    }
+    let mut textures = Vec::new();
+    for (frame, next) in [(tl.current.checked_sub(1), false), (tl.current.checked_add(1).filter(|f| *f < tl.duration), true)] {
+        let Some(frame) = frame.filter(|f| *f < video.frames.len()) else { continue };
+        let mut preview = doc.clone();
+        retain_layer(&mut preview.layers, layer_id, 0);
+        if let Some(t) = &mut preview.timeline {
+            t.current = frame;
+        }
+        photocraft_engine::sync_video_preview(&mut preview);
+        let factor = (1024.0 / f64::from(doc.size.width.max(doc.size.height).max(1))).min(1.0);
+        let buffer = photocraft_compose::render_reduced(
+            &preview,
+            (f64::from(doc.size.width) * factor).max(1.0) as u32,
+            (f64::from(doc.size.height) * factor).max(1.0) as u32,
+        );
+        let mut image = buffer_to_image(&buffer);
+        for pixel in &mut image.pixels {
+            let alpha = pixel.a() / 4;
+            *pixel = if next { Color32::from_rgba_unmultiplied(40, 220, 100, alpha) } else { Color32::from_rgba_unmultiplied(245, 65, 65, alpha) };
+        }
+        textures.push(ctx.load_texture(format!("onion-{frame}"), image, TextureOptions::LINEAR));
+    }
+    ctx.data_mut(|d| d.insert_temp(cache_id, (key, textures.clone())));
+    textures
+}
+
+#[cfg(test)]
+mod onion_tests {
+    use super::*;
+
+    #[test]
+    fn adjacent_frame_overlays_are_cached_and_do_not_change_the_document() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width":16,"height":16})).unwrap();
+        app.run("timeline.create", json!({"duration":3,"fps":12})).unwrap();
+        app.run("layer.videoLayers.newBlankVideoLayer", json!({})).unwrap();
+        app.run("paint.stroke", json!({"points":[[3,8,1],[5,8,1]],"size":3,"color":"#ffffff"})).unwrap();
+        app.run("timeline.setFrame", json!({"frame":2})).unwrap();
+        app.run("paint.stroke", json!({"points":[[11,8,1],[13,8,1]],"size":3,"color":"#ffffff"})).unwrap();
+        app.run("timeline.setFrame", json!({"frame":1})).unwrap();
+        let st = app.session.active().unwrap();
+        let doc = st.doc.clone();
+        let revision = st.revision;
+        let ctx = egui::Context::default();
+        ctx.begin_pass(egui::RawInput::default());
+        let a = onion_textures(&app, &ctx, &doc);
+        let b = onion_textures(&app, &ctx, &doc);
+        assert_eq!(a.len(), 2);
+        assert_eq!(a.iter().map(|t| t.id()).collect::<Vec<_>>(), b.iter().map(|t| t.id()).collect::<Vec<_>>());
+        assert_eq!(app.session.active().unwrap().revision, revision);
+        assert_eq!(app.session.active().unwrap().doc.timeline.as_ref().unwrap().current, 1);
+        let mut output = ctx.end_pass();
+        for (index, tex) in a.iter().enumerate() {
+            let delta = output.textures_delta.set.get(&tex.id()).and_then(|deltas| deltas.first()).unwrap();
+            let egui::ImageData::Color(img) = &delta.image;
+            assert!(img.pixels.iter().any(|p| p.a() > 0 && if index == 0 { p.r() > p.g() } else { p.g() > p.r() }));
+        }
+        output.textures_delta.clear();
+        app.run("timeline.setFrame", json!({"frame":0})).unwrap();
+        let doc = app.session.active().unwrap().doc.clone();
+        ctx.begin_pass(egui::RawInput::default());
+        assert_eq!(onion_textures(&app, &ctx, &doc).len(), 1, "first frame has no previous ghost");
+        let mut output = ctx.end_pass();
+        output.textures_delta.clear();
+    }
+}
+
 fn paint_mapped_image(painter: &egui::Painter, xf: &ViewXform, tex: egui::TextureId, uv: Rect, size: [f32; 2], tint: Color32) {
     let [w, h] = size;
     let pts = [xf.to_screen(0.0, 0.0), xf.to_screen(w, 0.0), xf.to_screen(w, h), xf.to_screen(0.0, h)];

@@ -1216,7 +1216,7 @@ fn a_tab_dragged_off_the_strip_moves_the_group_and_locking_stops_reordering() {
 }
 
 #[test]
-fn brush_settings_window_is_closed_on_restart_but_can_be_reopened() {
+fn brush_settings_panel_is_migrated_restored_and_can_be_toggled_after_restart() {
     let mut first = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
     first.ui.panels.brush_settings = true;
     first.ui.panels.history = true;
@@ -1231,10 +1231,13 @@ fn brush_settings_window_is_closed_on_restart_but_can_be_reopened() {
     session.load_prefs_json(&persisted).unwrap();
     let mut next = PhotocraftApp::new(session, crate::Services::default());
     restore(&mut next);
-    assert!(!next.ui.panels.brush_settings, "a floating Brush Settings window should not reopen on startup");
+    assert!(next.ui.panels.brush_settings, "saved Brush Settings migrates to the shared dock");
+    assert!(crate::panel_docking::managed(&next, "brushSettings"));
     assert!(next.ui.panels.history, "remembered dock panel visibility is preserved");
 
     let ctx = egui::Context::default();
+    crate::menus::invoke(&mut next, &ctx, "window.toggle.brushSettings", json!({})).unwrap();
+    assert!(!next.ui.panels.brush_settings, "Window > Brush Settings closes the restored panel");
     crate::menus::invoke(&mut next, &ctx, "window.toggle.brushSettings", json!({})).unwrap();
     assert!(next.ui.panels.brush_settings, "Window > Brush Settings can still open it");
 

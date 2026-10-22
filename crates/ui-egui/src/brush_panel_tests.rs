@@ -1118,6 +1118,9 @@ fn app_harness_with_language(lang: crate::i18n::Lang) -> Harness<'static, Photoc
             crate::i18n::set_current(lang);
             crate::shortcuts::handle(app, &ctx);
             crate::panels::options_bar(app, ui);
+            egui::CentralPanel::default().show(ui, |ui| {
+                crate::panel_docking::show(app, ui);
+            });
             window(app, &ctx);
             crate::paint_mouse::show_picker(app, &ctx);
             crate::i18n::set_current(previous);

@@ -806,16 +806,22 @@ fn float_window(
 /// Draws the open floating panels (Styles, Shapes, Tool Presets, Clone Source).
 pub fn windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let p = app.ui.presets_ui.clone();
-    if p.styles && float_window(app, ctx, "styles", tl!("Styles"), 250.0, 0.0, styles_panel) {
+    if p.styles && !crate::panel_docking::managed(app, "styles") && float_window(app, ctx, "styles", tl!("Styles"), 250.0, 0.0, styles_panel) {
         app.ui.presets_ui.styles = false;
     }
-    if p.shapes && float_window(app, ctx, "shapes", tl!("Shapes"), 250.0, 280.0, shapes_panel) {
+    if p.shapes && !crate::panel_docking::managed(app, "shapes") && float_window(app, ctx, "shapes", tl!("Shapes"), 250.0, 280.0, shapes_panel) {
         app.ui.presets_ui.shapes = false;
     }
-    if p.tool_presets && float_window(app, ctx, "toolPresets", tl!("Tool Presets"), 250.0, 560.0, tool_presets_panel) {
+    if p.tool_presets
+        && !crate::panel_docking::managed(app, "toolPresets")
+        && float_window(app, ctx, "toolPresets", tl!("Tool Presets"), 250.0, 560.0, tool_presets_panel)
+    {
         app.ui.presets_ui.tool_presets = false;
     }
-    if p.clone_source && float_window(app, ctx, "cloneSource", tl!("Clone Source"), 270.0, 840.0, clone_source_panel) {
+    if p.clone_source
+        && !crate::panel_docking::managed(app, "cloneSource")
+        && float_window(app, ctx, "cloneSource", tl!("Clone Source"), 270.0, 840.0, clone_source_panel)
+    {
         app.ui.presets_ui.clone_source = false;
     }
 }

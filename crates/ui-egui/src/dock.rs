@@ -836,10 +836,11 @@ pub fn restore(app: &mut PhotocraftApp) {
     }
     let saved = app.session.prefs().panel_layout.clone();
     apply(app, &saved);
-    // The floating Brush Settings window is transient, not a dock panel: remembering the
-    // workspace must not leave it open on a fresh launch, especially with no document.
-    // Explicit workspace switches still use `apply` and keep their stored panel visibility.
-    app.ui.panels.brush_settings = false;
+    // Legacy standalone windows were transient. Registered dock panels now restore
+    // their visibility and tab membership with the rest of the workspace.
+    if !crate::panel_docking::managed(app, "brushSettings") {
+        app.ui.panels.brush_settings = false;
+    }
     if let Some(ws) = saved.get("workspace").and_then(Value::as_str) {
         app.ui.workspace = ws.to_string();
     }
@@ -866,8 +867,9 @@ pub fn apply(app: &mut PhotocraftApp, v: &Value) {
     if let Some(d) = v.get("dock").and_then(|d| serde_json::from_value(d.clone()).ok()) {
         app.ui.dock = d;
     }
-    crate::panel_docking::sync_visibility(app);
     app.ui.timeline.open = v.get("timelineOpen").and_then(Value::as_bool).unwrap_or(false);
+    crate::panel_docking::prepare(app);
+    crate::panel_docking::sync_visibility(app);
     if !app.ui.timeline.open {
         app.ui.timeline.playing = false;
     }

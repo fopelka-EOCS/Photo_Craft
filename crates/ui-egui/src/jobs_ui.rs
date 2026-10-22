@@ -525,6 +525,10 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
             app.sync_views();
             crate::file_ui::print_status(app, result);
         }
+        JobOutcome::Done(ref result) if matches!(e.command.as_str(), photocraft_engine::genai_cmds::FILL | photocraft_engine::genai_cmds::EXPAND) => {
+            app.sync_views();
+            crate::genai_ui::result_status(app, result);
+        }
         JobOutcome::Done(_) => {
             app.sync_views();
             app.ui.status = e.label;
