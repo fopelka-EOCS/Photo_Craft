@@ -657,7 +657,16 @@ impl GpuCanvas {
                 out.gpu = stats.gpu_time;
                 return out;
             }
-            Err(e) => out.fallback = Some(e.0),
+            Err(e) => {
+                out.fallback = Some(e.0);
+                // Pipeline creation is lazy. Keep its permanent failure separate from an
+                // unsupported document, which may work on the next document or edit.
+                if key == doc.id.0 {
+                    let renderer = self.rs.renderer.read();
+                    out.compositor_init_failure =
+                        renderer.callback_resources.get::<Resources>().and_then(|res| res.compositor_failed.as_ref()).map(|failed| failed.0.clone());
+                }
+            }
         }
         let px = region.width() as u64 * region.height() as u64;
         if defer && px >= DEFER_PX && self.prepare_texture(key, doc).is_some() {
@@ -916,6 +925,8 @@ pub struct Refresh {
     pub gpu: Option<photocraft_gpu::GpuTiming>,
     /// Why the wgpu compositor wasn't used.
     pub fallback: Option<String>,
+    /// A cached failure to create the compositor pipelines, independent of this document.
+    pub compositor_init_failure: Option<String>,
 }
 
 /// How the app creates its wgpu device: egui's defaults clamped to the adapter's supported limits,
@@ -1035,6 +1046,12 @@ pub struct Perf {
     pub gpu_fallback: Option<String>,
     /// Adapter, backend, driver and fallback state (Help › System Info).
     pub gpu_info: GpuInfo,
+    /// The active document whose compositor result is shown in `gpu_info`.
+    #[serde(skip)]
+    compositor_doc: Option<u64>,
+    /// Pipeline creation failure persists across documents until a new GPU canvas starts.
+    #[serde(skip)]
+    compositor_init_failure: Option<String>,
     /// GPU memory the compositor may hold for layer pages and effect maps (MB; see
     /// [`memory_budget`]).
     pub gpu_budget_mb: u64,
@@ -1083,8 +1100,12 @@ pub struct GpuInfo {
     /// Why startup didn't use the preference as is (previous start crashed, `--safe-gpu`,
     /// `WGPU_BACKEND`, Intel on Windows).
     pub fallback: Option<String>,
-    /// "gpu" (wgpu canvas and compositor) or "cpu" (CPU compositor, egui textures).
+    /// "gpu" (wgpu canvas presentation) or "cpu" (egui textures).
     pub canvas: String,
+    /// "pending" before the first actual composition, then "gpu" or "cpu".
+    pub compositor: String,
+    /// Why image composition used the CPU; distinct from the startup backend fallback.
+    pub compositor_fallback: Option<String>,
     /// Why the GPU canvas was dropped during this session (device lost or a GPU error).
     pub lost: Option<String>,
     /// Present mode and frame latency ("fifo, latency 2"; launch overrides marked, see the
@@ -1146,7 +1167,14 @@ impl GpuInfo {
             },
             {
                 let template = "Image compositor: {processor}";
-                crate::i18n::fmt(tl!(template), &[("processor", if self.canvas == "gpu" { "GPU" } else { "CPU" })])
+                let processor = match self.compositor.as_str() {
+                    "gpu" => "GPU",
+                    "pending" => "Pending",
+                    "cpu" => "CPU",
+                    _ if self.canvas == "gpu" => "Pending",
+                    _ => "CPU",
+                };
+                crate::i18n::fmt(tl!(template), &[("processor", tl!(processor))])
             },
             {
                 let template = "Window renderer: {renderer}";
@@ -1164,6 +1192,12 @@ impl GpuInfo {
             v.push({
                 let template = "Fallback: {reason}";
                 crate::i18n::fmt(tl!(template), &[("reason", f)])
+            });
+        }
+        if let Some(reason) = &self.compositor_fallback {
+            v.push({
+                let template = "Compositor fallback: {reason}";
+                crate::i18n::fmt(tl!(template), &[("reason", reason)])
             });
         }
         if let Some(l) = &self.lost {
@@ -1189,6 +1223,76 @@ pub fn backend_name(b: wgpu::Backend) -> &'static str {
 }
 
 impl Perf {
+    /// A new window device can try the compositor again without changing saved preferences.
+    pub fn gpu_canvas_started(&mut self) {
+        self.compositor_doc = None;
+        self.compositor_init_failure = None;
+        self.gpu_info.canvas = "gpu".into();
+        self.gpu_info.compositor = "pending".into();
+        self.gpu_info.compositor_fallback = None;
+        self.gpu_info.lost = None;
+    }
+
+    /// A cached canvas may need no refresh on a document switch. Do not show the last
+    /// document's feature fallback as the new document's compositor status.
+    pub fn select_compositor_doc(&mut self, doc: u64) {
+        if self.gpu_info.canvas != "gpu" || self.compositor_doc == Some(doc) {
+            return;
+        }
+        self.compositor_doc = Some(doc);
+        if let Some(reason) = &self.compositor_init_failure {
+            self.gpu_info.compositor = "cpu".into();
+            self.gpu_info.compositor_fallback = Some(reason.clone());
+            self.gpu_fallback = Some(reason.clone());
+        } else {
+            self.gpu_info.compositor = "pending".into();
+            self.gpu_info.compositor_fallback = None;
+            self.gpu_fallback = None;
+        }
+    }
+
+    /// This document cannot fit a GPU display texture, so its CPU canvas is certain even
+    /// though `refresh_with` was not called.
+    pub fn compositor_unavailable(&mut self, doc: u64, reason: &str) {
+        if self.gpu_info.canvas != "gpu" {
+            return;
+        }
+        self.select_compositor_doc(doc);
+        let reason = self.compositor_init_failure.as_deref().unwrap_or(reason).to_string();
+        self.gpu_info.compositor = "cpu".into();
+        self.gpu_info.compositor_fallback = Some(reason.clone());
+        self.gpu_fallback = Some(reason);
+    }
+
+    /// Update diagnostics only after a real composition. Empty damage and deferred work do
+    /// not prove that the active document changed its compositor.
+    pub fn record_compositor_refresh(&mut self, doc: u64, r: &Refresh) {
+        if self.gpu_info.canvas != "gpu" {
+            return;
+        }
+        self.select_compositor_doc(doc);
+        if let Some(reason) = &r.compositor_init_failure {
+            self.compositor_init_failure = Some(reason.clone());
+            self.gpu_info.compositor = "cpu".into();
+            self.gpu_info.compositor_fallback = Some(reason.clone());
+            self.gpu_fallback = Some(reason.clone());
+            return;
+        }
+        if r.px == 0 || r.kind == REFRESH_DEFERRED {
+            return;
+        }
+        if r.kind.starts_with("gpu") {
+            self.compositor_init_failure = None;
+            self.gpu_info.compositor = "gpu".into();
+            self.gpu_info.compositor_fallback = None;
+            self.gpu_fallback = None;
+        } else if matches!(r.kind, "full" | "rect" | "background") {
+            self.gpu_info.compositor = "cpu".into();
+            self.gpu_info.compositor_fallback = self.compositor_init_failure.clone().or_else(|| r.fallback.clone());
+            self.gpu_fallback = self.gpu_info.compositor_fallback.clone();
+        }
+    }
+
     pub fn record(&mut self, kind: &'static str, px: u64, composite_ms: f64, upload_ms: f64) {
         self.frame_refresh_ms += composite_ms + upload_ms;
         self.last_refresh = kind;
@@ -2622,6 +2726,32 @@ mod mip_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cached_pipeline_failure_reaches_refresh_diagnostics() {
+        let _lock = photocraft_testkit::gpu_lock();
+        let Ok(rs) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| egui_kittest::wgpu::create_render_state(wgpu_setup(), Default::default())))
+        else {
+            return; // CI hosts without a GPU still run the state-only diagnostics tests.
+        };
+        let gpu = GpuCanvas::new(&rs);
+        let doc = photocraft_doc::Document::with_background(
+            "pipeline failure",
+            photocraft_doc::Size::new(4, 4),
+            photocraft_color::ColorMode::Rgb,
+            photocraft_color::SampleType::U8,
+            photocraft_color::Color::rgba(0.2, 0.5, 0.8, 1.0),
+        );
+        {
+            let mut renderer = rs.renderer.write();
+            let resources = renderer.callback_resources.get_mut::<Resources>().expect("GPU canvas registered its resources");
+            resources.compositor_failed = Some(photocraft_gpu::Unsupported("injected shader pipeline error".into()));
+        }
+        let r = gpu.refresh(doc.id.0, &doc, None, None);
+        assert_eq!(r.kind, "full");
+        assert_eq!(r.fallback.as_deref(), Some("injected shader pipeline error"));
+        assert_eq!(r.compositor_init_failure.as_deref(), Some("injected shader pipeline error"));
+    }
 
     /// A GPU measurement arrives a frame or two after its refresh, so most GPU refreshes carry
     /// none; the last one reported must stand until a newer one lands. A CPU refresh is

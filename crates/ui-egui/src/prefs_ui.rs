@@ -1423,25 +1423,57 @@ fn gpu_status_rows(ui: &mut egui::Ui, info: Option<&Value>, adapters: Option<&Va
     let t = Tokens::get(ui.ctx());
     ui.add_space(10.0);
     ui.label(RichText::new(tl!("Graphics")).font(crate::theme::semibold(12.5)).color(t.text));
+    if !cfg!(target_arch = "wasm32") {
+        ui.horizontal(|ui| {
+            ui.label(tl!("GPU Backend"));
+            let mut options = graphics_backend_choices(prefs::GpuPlatform::current());
+            let saved = obj.get("gpuBackend").and_then(Value::as_str).unwrap_or("auto");
+            // Keep an unavailable or legacy saved value visible, like an unplugged
+            // adapter below. Merely opening Preferences must not rewrite the profile.
+            let unavailable = !options.contains(&saved);
+            if unavailable {
+                options.push(saved);
+            }
+            let mut current = saved.to_string();
+            let labels: Vec<String> = options
+                .iter()
+                .map(|o| {
+                    let label = choice_label(o);
+                    let label = tl!(&label);
+                    if unavailable && *o == saved { format!("⚠ {label}") } else { label.to_string() }
+                })
+                .collect();
+            let pairs: Vec<(String, &str)> = options.iter().map(|o| o.to_string()).zip(labels.iter().map(String::as_str)).collect();
+            if crate::widgets::dropdown_literal(ui, "graphics-backend", &mut current, &pairs, 220.0) && current != saved {
+                set_graphics_backend(obj, &current);
+            }
+        });
+        if crate::widgets::secondary_button(ui, tl!("Reset GPU Backend"), 180.0).clicked() {
+            set_graphics_backend(obj, "auto");
+        }
+        ui.label(RichText::new(tl!("Applies at next launch.")).color(t.text_faint));
+    }
     for line in info.and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
         ui.label(RichText::new(line).color(t.text_dim));
     }
-    ui.add_space(4.0);
-    ui.label(RichText::new(tl!("Applies at next launch.")).color(t.text_faint));
-    ui.collapsing(tl!("Advanced"), |ui| {
-        ui.horizontal(|ui| {
-            ui.label(tl!("GPU Backend"));
-            let mut current = obj.get("gpuBackend").and_then(Value::as_str).unwrap_or("auto").to_string();
-            let options = prefs::choices("performance.gpuBackend").unwrap_or(&[]);
-            let labels: Vec<String> = options.iter().map(|o| choice_label(o)).collect();
-            let pairs: Vec<(String, &str)> = options.iter().map(|o| o.to_string()).zip(labels.iter().map(String::as_str)).collect();
-            crate::widgets::dropdown(ui, "graphics-backend", &mut current, &pairs, 220.0);
-            obj.insert("gpuBackend".into(), json!(current));
-        });
-        if !prefs::is_hidden("performance.gpuAdapter") {
+    if !prefs::is_hidden("performance.gpuAdapter") {
+        ui.collapsing(tl!("Advanced"), |ui| {
             graphics_adapter_row(ui, adapters, obj);
-        }
-    });
+        });
+    }
+}
+
+/// Use startup's shared native backend policy. The browser owns its backend.
+fn graphics_backend_choices(platform: prefs::GpuPlatform) -> Vec<&'static str> {
+    platform.backends().iter().map(|b| b.name()).collect()
+}
+
+fn set_graphics_backend(obj: &mut Map<String, Value>, backend: &str) {
+    // Capture the effective mode before replacing a legacy `gpuBackend: cpu` value,
+    // otherwise changing/resetting the backend would unexpectedly turn GPU rendering on.
+    let mode = rendering_mode_value(obj);
+    obj.insert("renderingMode".into(), json!(mode));
+    obj.insert("gpuBackend".into(), json!(backend));
 }
 
 /// Preferences › Performance › Graphics Adapter: which GPU draws on a machine with several. The
@@ -1484,6 +1516,7 @@ fn rendering_mode_row(ui: &mut egui::Ui, obj: &mut Map<String, Value>) {
         }
     });
     ui.label(tl!("Automatic uses GPU acceleration when available and falls back to CPU rendering on errors."));
+    ui.label(egui::RichText::new(tl!("Applies at next launch.")).color(Tokens::get(ui.ctx()).text_faint));
     ui.add_space(8.0);
 }
 
@@ -2650,6 +2683,121 @@ mod shortcut_set_tests;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn graphics_backend_can_be_changed_and_reset_without_opening_advanced() {
+        use egui::accesskit::Role;
+        use egui_kittest::{Harness, kittest::Queryable};
+        let values = json!({"gpuBackend":"auto"}).as_object().unwrap().clone();
+        let mut fonts_installed = false;
+        let mut h = Harness::builder().with_size(vec2(680.0, 350.0)).with_os(egui::os::OperatingSystem::Windows).build_ui_state(
+            move |ui, values| {
+                if !fonts_installed {
+                    crate::theme::install_fonts(ui.ctx());
+                    fonts_installed = true;
+                    return;
+                }
+                gpu_status_rows(ui, None, None, values);
+            },
+            values,
+        );
+        h.run();
+        h.get_by_label("GPU Backend");
+        h.get_by_label("Applies at next launch.");
+        assert!(!h.state().contains_key("renderingMode"), "opening the controls does not rewrite a profile");
+        assert_eq!(h.get_by_role(Role::ComboBox).value().as_deref(), Some("Auto"));
+        h.get_by_role(Role::ComboBox).click();
+        h.run();
+        // The target's native APIs decide the choices, even when the harness simulates
+        // Windows keyboard/window conventions on a Mac.
+        let (label, backend) = if cfg!(target_os = "macos") { ("Metal", "metal") } else { ("OpenGL", "gl") };
+        h.get_by_label(label).click();
+        h.run();
+        assert_eq!(h.state()["gpuBackend"], backend);
+        h.get_by_label("Reset GPU Backend").click();
+        h.run();
+        assert_eq!(h.state()["gpuBackend"], "auto");
+        assert_eq!(h.state()["renderingMode"], "auto");
+    }
+
+    #[test]
+    fn graphics_backend_choices_match_the_desktop_platform() {
+        use prefs::GpuPlatform::{Mac, Other, Windows};
+        assert_eq!(graphics_backend_choices(Windows), &["auto", "vulkan", "dx12", "gl"]);
+        assert_eq!(graphics_backend_choices(Mac), &["auto", "metal"]);
+        assert_eq!(graphics_backend_choices(Other), &["auto", "vulkan", "gl"]);
+        for os in [Mac, Other, Windows] {
+            assert!(!graphics_backend_choices(os).contains(&"cpu"));
+        }
+    }
+
+    #[test]
+    fn opening_graphics_controls_preserves_and_marks_unavailable_saved_backends() {
+        use egui::accesskit::Role;
+        use egui_kittest::{Harness, kittest::Queryable};
+        let foreign_backend = if cfg!(target_os = "macos") { "vulkan" } else { "metal" };
+        for (backend, choose_auto) in ["cpu", foreign_backend, "future-backend"].into_iter().flat_map(|backend| [(backend, false), (backend, true)]) {
+            let values = json!({"gpuBackend":backend, "useGpu":true, "memoryUsageMb":2048}).as_object().unwrap().clone();
+            let original = values.clone();
+            let mut fonts_installed = false;
+            let mut h = Harness::builder().with_size(vec2(680.0, 350.0)).build_ui_state(
+                move |ui, values| {
+                    if !fonts_installed {
+                        crate::theme::install_fonts(ui.ctx());
+                        fonts_installed = true;
+                        return;
+                    }
+                    gpu_status_rows(ui, None, None, values);
+                },
+                values,
+            );
+            h.run();
+            let label = format!("⚠ {}", choice_label(backend));
+            assert_eq!(h.get_by_role(Role::ComboBox).value().as_deref(), Some(label.as_str()));
+            assert_eq!(*h.state(), original, "opening controls must preserve the entire profile");
+            h.get_by_role(Role::ComboBox).click();
+            h.run();
+            h.get_by_label(&label);
+            assert_eq!(*h.state(), original, "opening the dropdown must preserve the entire profile");
+            h.get_by_label(&label).click();
+            h.run();
+            assert_eq!(*h.state(), original, "reselecting the saved backend must preserve the entire profile");
+            h.key_press(egui::Key::Escape);
+            h.run();
+            if choose_auto {
+                h.get_by_role(Role::ComboBox).click();
+                h.run();
+                h.get_by_label("Auto").click();
+            } else {
+                h.get_by_label("Reset GPU Backend").click();
+            }
+            h.run();
+            assert_eq!(h.state()["gpuBackend"], "auto");
+            assert_eq!(h.state()["renderingMode"], if backend == "cpu" { "cpu" } else { "auto" });
+            h.get_by_role(Role::ComboBox).click();
+            h.run();
+            assert!(h.query_by_label(&label).is_none(), "a replaced legacy/unavailable backend is no longer offered");
+        }
+    }
+
+    #[test]
+    fn changing_or_resetting_a_backend_keeps_the_effective_rendering_mode() {
+        for (values, mode) in [
+            (json!({"gpuBackend":"cpu", "useGpu":true}), "cpu"),
+            (json!({"gpuBackend":"auto", "useGpu":false}), "cpu"),
+            (json!({"gpuBackend":"cpu", "useGpu":false, "renderingMode":"gpu"}), "gpu"),
+            (json!({"gpuBackend":"gl", "useGpu":true, "renderingMode":"auto"}), "auto"),
+        ] {
+            let mut obj = values.as_object().unwrap().clone();
+            for backend in ["gl", "auto"] {
+                set_graphics_backend(&mut obj, backend);
+                assert_eq!(rendering_mode_value(&obj), mode);
+                let p: prefs::Preferences = serde_json::from_value(json!({"performance":obj})).unwrap();
+                assert_eq!(p.performance.effective_rendering_mode().name(), mode);
+                assert_eq!(obj["gpuBackend"], backend);
+            }
+        }
+    }
+
     #[test]
     fn memory_usage_has_a_dedicated_explanation_and_keeps_its_value() {
         use egui_kittest::{Harness, kittest::Queryable};

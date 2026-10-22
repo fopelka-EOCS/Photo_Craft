@@ -28,6 +28,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use eframe::{egui_wgpu, wgpu};
+pub use photocraft_engine::prefs::GpuPlatform as Os;
 use photocraft_engine::prefs::{GpuBackend, RenderingMode};
 use serde_json::{Value, json};
 
@@ -41,27 +42,6 @@ pub const QUALCOMM: u32 = 0x5143;
 pub const QUALCOMM_DXGI: u32 = 0x4D4F_4351;
 /// Largest marker read (a marker is a few hundred bytes).
 const MARKER_MAX: u64 = 64 << 10;
-
-/// Platform families with different backend chains.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Os {
-    Windows,
-    Mac,
-    /// Linux, the BSDs and other Unix.
-    Other,
-}
-
-impl Os {
-    pub fn current() -> Self {
-        if cfg!(windows) {
-            Os::Windows
-        } else if cfg!(target_os = "macos") {
-            Os::Mac
-        } else {
-            Os::Other
-        }
-    }
-}
 
 /// What a start records before touching the driver.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -117,15 +97,6 @@ pub struct Plan {
     pub remember: bool,
 }
 
-/// A backend the platform has (others fall back to `auto`).
-pub fn sanitize(pref: GpuBackend, os: Os) -> GpuBackend {
-    use GpuBackend::*;
-    match (os, pref) {
-        (Os::Windows, Metal) | (Os::Mac, Vulkan | Dx12 | Gl) | (Os::Other, Dx12 | Metal) => Auto,
-        (_, b) => b,
-    }
-}
-
 /// The next safer backend after a start on `tried` crashed.
 pub fn next_safer(tried: GpuBackend, os: Os) -> GpuBackend {
     use GpuBackend::*;
@@ -156,7 +127,7 @@ pub fn plan(pref: GpuBackend, crashed: Option<&Marker>, env: Option<&str>, safe_
     if safe_gpu {
         return Plan { backend: GpuBackend::Cpu, env: None, reason: Some("--safe-gpu: CPU renderer for this launch".into()), remember: false };
     }
-    let pref = sanitize(pref, os);
+    let pref = os.sanitize(pref);
     if let Some((m, tried)) = crashed.and_then(|m| Some((m, m.tried()?))) {
         let next = next_safer(tried, os);
         let on = if m.adapter.is_empty() { String::new() } else { format!(" ({})", m.adapter) };
@@ -270,16 +241,28 @@ pub struct Candidate {
     pub surface_ok: bool,
     /// Its name matches the adapter the user asked for ([`adapter_matches`]).
     pub wanted: bool,
+    /// VMware's GL renderer, which presents a black window on Windows (#1788).
+    pub vmware_gl: bool,
+}
+
+impl Candidate {
+    fn from_info(info: &wgpu::AdapterInfo, surface_ok: bool, wanted: bool) -> Self {
+        // wgpu's GL backend infers vendor ids from GL_VENDOR. SVGA3D can therefore have
+        // Mesa's id (or zero), rather than VMware's PCI id. Match its renderer name too.
+        let name = info.name.to_ascii_lowercase();
+        let vmware_gl = info.backend == wgpu::Backend::Gl && (info.vendor == 0x15ad || name.contains("svga3d") || name.contains("vmware"));
+        Self { vendor: info.vendor, device_type: info.device_type, backend: info.backend, surface_ok, wanted, vmware_gl }
+    }
 }
 
 /// Rank of an adapter (lower is better): high-performance device types first (egui's power
 /// preference) or software adapters first for `cpu`; then backends, with DX12 before Vulkan for
 /// Intel and Qualcomm on Windows ([`dx12_first_on_windows`]). For `cpu`, any GL adapter comes
 /// before Vulkan, which is only the fallback for presenting the window (see [`backends`]). On
-/// Windows GL comes after every other adapter, WARP included: GL there (VMware's SVGA3D, GL-only
-/// old GPUs) drew a black window (#5191, #1788).
+/// Windows only VMware GL comes after WARP: it drew a black window (#1788). Other GL hardware
+/// stays ahead of software renderers.
 fn rank(a: &Candidate, backend: GpuBackend, os: Os) -> (u8, u8, u8) {
-    let fallback = u8::from((backend == GpuBackend::Cpu && a.backend == wgpu::Backend::Vulkan) || (os == Os::Windows && a.backend == wgpu::Backend::Gl));
+    let fallback = u8::from((backend == GpuBackend::Cpu && a.backend == wgpu::Backend::Vulkan) || (os == Os::Windows && a.vmware_gl));
     let ty = match a.device_type {
         wgpu::DeviceType::DiscreteGpu => 0,
         wgpu::DeviceType::IntegratedGpu => 1,
@@ -309,6 +292,21 @@ pub fn pick(adapters: &[Candidate], backend: GpuBackend, os: Os) -> Option<usize
     let usable = |a: &&Candidate| a.surface_ok;
     let any_wanted = adapters.iter().filter(usable).any(|a| a.wanted);
     adapters.iter().enumerate().filter(|(_, a)| a.surface_ok && (a.wanted || !any_wanted)).min_by_key(|(i, a)| (rank(a, backend, os), *i)).map(|(i, _)| i)
+}
+
+/// Explain Automatic's VMware GL software fallback in System Info.
+fn automatic_gl_fallback(adapters: &[Candidate], chosen: usize, backend: GpuBackend, os: Os) -> Option<&'static str> {
+    if backend != GpuBackend::Auto || os != Os::Windows {
+        return None;
+    }
+    let selected = adapters.get(chosen)?;
+    if selected.device_type == wgpu::DeviceType::Cpu && adapters.iter().any(|c| c.surface_ok && c.vmware_gl) {
+        Some(
+            "Using software graphics because VMware's OpenGL renderer can display a black window; choose a GPU Backend in Preferences > Performance to override",
+        )
+    } else {
+        None
+    }
 }
 
 /// Whether an adapter called `name` is the one the user asked for: `wanted` is a case-insensitive
@@ -398,13 +396,11 @@ pub fn configure(setup: &mut egui_wgpu::WgpuSetup, plan: &Plan, os: Os, wanted: 
                     .iter()
                     .map(|a| {
                         let i = a.get_info();
-                        Candidate {
-                            vendor: i.vendor,
-                            device_type: i.device_type,
-                            backend: i.backend,
-                            surface_ok: surface.is_none_or(|s| a.is_surface_supported(s)),
-                            wanted: wanted.as_deref().is_some_and(|w| adapter_matches(&i.name, w)),
-                        }
+                        Candidate::from_info(
+                            &i,
+                            surface.is_none_or(|s| a.is_surface_supported(s)),
+                            wanted.as_deref().is_some_and(|w| adapter_matches(&i.name, w)),
+                        )
                     })
                     .collect();
                 let i = pick(&cands, backend, os).ok_or_else(|| "no graphics adapter found".to_string())?;
@@ -421,6 +417,9 @@ pub fn configure(setup: &mut egui_wgpu::WgpuSetup, plan: &Plan, os: Os, wanted: 
                 {
                     *note.lock().unwrap_or_else(PoisonError::into_inner) =
                         Some(format!("{maker} graphics on Windows: using DirectX 12 (the {maker} Vulkan driver is known to crash)"));
+                }
+                if let Some(reason) = automatic_gl_fallback(&cands, i, backend, os) {
+                    *note.lock().unwrap_or_else(PoisonError::into_inner) = Some(reason.into());
                 }
                 adapters.get(i).cloned().ok_or_else(|| "no graphics adapter found".to_string())
             }));
@@ -710,7 +709,7 @@ mod tests {
     }
 
     fn cand(vendor: u32, device_type: wgpu::DeviceType, backend: wgpu::Backend) -> Candidate {
-        Candidate { vendor, device_type, backend, surface_ok: true, wanted: false }
+        Candidate::from_info(&wgpu::AdapterInfo { vendor, ..wgpu::AdapterInfo::new(device_type, backend) }, true, false)
     }
 
     #[test]
@@ -902,18 +901,117 @@ mod tests {
         assert_eq!(pick(&[nvidia_gl, nvidia_vk], Auto, Os::Other), Some(1));
     }
 
-    /// #5191, #1788: a Windows VM offers VMware's SVGA3D over GL (`Other`) and WARP (`Cpu`, DX12).
-    /// GL drew a black window; WARP works. GL stays the last resort.
+    /// #1788: a Windows VM offers VMware's SVGA3D over GL (`Other`) and WARP (`Cpu`, DX12).
+    /// GL drew a black window; WARP works. Only that renderer stays the last resort.
     #[test]
-    fn windows_auto_prefers_warp_over_gl() {
+    fn windows_auto_prefers_warp_over_vmware_gl() {
         use wgpu::{Backend as B, DeviceType as T};
         let svga_gl = cand(0x15ad, T::Other, B::Gl);
         let warp = cand(0x1414, T::Cpu, B::Dx12);
         assert_eq!(pick(&[svga_gl, warp], Auto, Os::Windows), Some(1));
-        assert_eq!(pick(&[cand(INTEL, T::IntegratedGpu, B::Gl), warp], Auto, Os::Windows), Some(1));
         assert_eq!(pick(&[svga_gl], Auto, Os::Windows), Some(0));
         // Elsewhere GL keeps its rank.
         assert_eq!(pick(&[svga_gl, warp], Auto, Os::Other), Some(0));
+    }
+
+    #[test]
+    fn windows_auto_keeps_legacy_gl_hardware_ahead_of_warp() {
+        use wgpu::{Backend as B, DeviceType as T};
+        let warp = cand(0x1414, T::Cpu, B::Dx12);
+        // The reported Pentium G3220 is Haswell: OpenGL 4.3 is supported, while newer
+        // Windows drivers disable DX12 on that generation. Model its GL adapter + WARP.
+        let haswell = Candidate::from_info(
+            &wgpu::AdapterInfo { vendor: INTEL, name: "Intel(R) HD Graphics".into(), ..wgpu::AdapterInfo::new(T::IntegratedGpu, B::Gl) },
+            true,
+            false,
+        );
+        assert!(!haswell.vmware_gl);
+        assert_eq!(pick(&[warp, haswell], Auto, Os::Windows), Some(1));
+        assert_eq!(automatic_gl_fallback(&[warp, haswell], 1, Auto, Os::Windows), None);
+        assert_eq!(automatic_gl_fallback(&[warp, haswell], 1, Gl, Os::Windows), None, "explicit choices are not called automatic");
+        assert_eq!(automatic_gl_fallback(&[warp, haswell], 1, Auto, Os::Other), None);
+        // GL cannot reliably infer the type of older GPUs, so Other must work too.
+        for (vendor, ty) in [(INTEL, T::IntegratedGpu), (0x1002, T::DiscreteGpu), (0x10de, T::DiscreteGpu), (0, T::Other)] {
+            let gl = cand(vendor, ty, B::Gl);
+            assert_eq!(pick(&[gl, warp], Auto, Os::Windows), Some(0));
+            assert_eq!(pick(&[warp, gl], Auto, Os::Windows), Some(1));
+            assert_eq!(pick(&[gl, warp], Cpu, Os::Windows), Some(1), "explicit CPU mode still prefers software");
+        }
+        let mut gl = cand(INTEL, T::IntegratedGpu, B::Gl);
+        gl.surface_ok = false;
+        assert_eq!(pick(&[gl, warp], Auto, Os::Windows), Some(1), "hardware must be able to present");
+        for (vendor, name) in [(INTEL, "Intel(R) HD Graphics 4600"), (0x10de, "NVIDIA GeForce GTX 760/PCIe/SSE2"), (0x1002, "AMD Radeon HD 7700 Series")] {
+            let hardware = Candidate::from_info(&wgpu::AdapterInfo { vendor, name: name.into(), ..wgpu::AdapterInfo::new(T::Other, B::Gl) }, true, false);
+            assert!(!hardware.vmware_gl);
+            assert_eq!(pick(&[hardware, warp], Auto, Os::Windows), Some(0));
+        }
+    }
+
+    #[test]
+    fn successful_automatic_gl_selection_is_not_reported_as_a_fallback() {
+        use wgpu::{Backend as B, DeviceType as T};
+        let hardware = cand(INTEL, T::IntegratedGpu, B::Gl);
+        let warp = cand(0x1414, T::Cpu, B::Dx12);
+        let info = photocraft_ui_egui::gpu_canvas::GpuInfo {
+            adapter: "Intel(R) HD Graphics".into(),
+            backend: "gl".into(),
+            canvas: "gpu".into(),
+            selected: "auto".into(),
+            fallback: automatic_gl_fallback(&[warp, hardware], 1, Auto, Os::Windows).map(str::to_string),
+            ..Default::default()
+        };
+        assert!(info.fallback.is_none(), "healthy acceleration must not supply a CPU recovery reason");
+        assert!(!info.lines().iter().any(|line| line.starts_with("Fallback:")));
+    }
+
+    #[test]
+    fn windows_auto_prefers_native_apis_for_amd_and_nvidia_hardware() {
+        use wgpu::{Backend as B, DeviceType as T};
+        for vendor in [0x1002, 0x10de] {
+            let gl = cand(vendor, T::DiscreteGpu, B::Gl);
+            for backend in [B::Dx12, B::Vulkan] {
+                let native = cand(vendor, T::DiscreteGpu, backend);
+                assert_eq!(pick(&[gl, native], Auto, Os::Windows), Some(1));
+                assert_eq!(pick(&[native, gl], Auto, Os::Windows), Some(0));
+            }
+        }
+    }
+
+    #[test]
+    fn explicit_backend_keeps_control_of_windows_adapter_selection() {
+        // In particular, an explicit GL choice must be able to try VMware GL without
+        // Automatic's workaround replacing it with WARP.
+        for backend in [Gl, Dx12, Vulkan] {
+            let p = plan_with_mode(backend, RenderingMode::Gpu, None, None, false, Os::Windows);
+            let mut setup = egui_wgpu::WgpuSetup::without_display_handle();
+            configure(&mut setup, &p, Os::Windows, None, Arc::new(Mutex::new(None)), Arc::default());
+            let egui_wgpu::WgpuSetup::CreateNew(create) = setup else { panic!("a new instance") };
+            assert_eq!(Some(create.instance_descriptor.backends), backends(&p, Os::Windows));
+            assert!(create.native_adapter_selector.is_none(), "an explicit backend uses egui's selector");
+        }
+    }
+
+    #[test]
+    fn vmware_gl_is_identified_even_when_mesa_hides_its_pci_vendor() {
+        use wgpu::{Backend as B, DeviceType as T};
+        let warp = cand(0x1414, T::Cpu, B::Dx12);
+        for (vendor, name) in [(0, "SVGA3D; build: RELEASE; LLVM;"), (0x10005, "svga3d; build: RELEASE; LLVM;"), (0, "VMware SVGA II")] {
+            let info = wgpu::AdapterInfo { vendor, name: name.into(), ..wgpu::AdapterInfo::new(T::Other, B::Gl) };
+            let gl = Candidate::from_info(&info, true, false);
+            assert!(gl.vmware_gl);
+            assert_eq!(pick(&[gl, warp], Auto, Os::Windows), Some(1));
+            assert_eq!(pick(&[gl, warp], Auto, Os::Other), Some(0), "the workaround is Windows-only");
+            let dx12 = Candidate::from_info(&wgpu::AdapterInfo { backend: B::Dx12, ..info }, true, false);
+            assert!(!dx12.vmware_gl);
+            assert_eq!(pick(&[dx12, warp], Auto, Os::Windows), Some(0), "working VMware DX12 stays accelerated");
+        }
+        let hardware = cand(INTEL, T::IntegratedGpu, B::Gl);
+        let vmware = cand(0x15ad, T::Other, B::Gl);
+        assert_eq!(pick(&[vmware, warp, hardware], Auto, Os::Windows), Some(2));
+        assert!(automatic_gl_fallback(&[vmware, warp], 1, Auto, Os::Windows).is_some_and(|s| s.contains("VMware")));
+        assert_eq!(automatic_gl_fallback(&[vmware, warp], 1, Cpu, Os::Windows), None);
+        assert_eq!(automatic_gl_fallback(&[hardware, warp], 1, Auto, Os::Windows), None);
+        assert_eq!(automatic_gl_fallback(&[], 0, Auto, Os::Windows), None);
     }
 
     #[test]

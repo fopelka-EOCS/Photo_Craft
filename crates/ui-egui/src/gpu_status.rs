@@ -143,6 +143,8 @@ pub fn fall_back(app: &mut PhotocraftApp, fault: &photocraft_gpu::Fault) {
     // The CPU canvas has no GPU memory budget: GPU Memory Full no longer applies.
     app.perf.gpu_layer_fit = None;
     app.perf.gpu_info.canvas = "cpu".into();
+    app.perf.gpu_info.compositor = "cpu".into();
+    app.perf.gpu_info.compositor_fallback = Some(fault.to_string());
     app.perf.gpu_info.lost = Some(fault.to_string());
     let title = if fault.is_lost() { LOST_MESSAGE } else { ERROR_MESSAGE };
     queue_fallback_notice(app, fault.to_string());
@@ -246,6 +248,90 @@ pub fn show_fallback(app: &mut PhotocraftApp, ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gpu_canvas::Refresh;
+
+    #[test]
+    fn compositor_initialization_failure_reports_cpu_without_losing_gpu_presentation() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.perf.gpu_info.canvas = "gpu".into();
+        app.perf.gpu_info.compositor = "pending".into();
+        app.perf.gpu_info.adapter = "Intel HD Graphics 530".into();
+        app.perf.gpu_info.backend = "gl".into();
+        app.perf.gpu_info.fallback = Some("startup backend selection".into());
+        let rendering_mode = app.session.prefs().get("performance.renderingMode");
+        let reason = "compositor pipeline creation failed".to_string();
+        app.perf.record_compositor_refresh(
+            17,
+            &Refresh { kind: "full", px: 256, fallback: Some(reason.clone()), compositor_init_failure: Some(reason.clone()), ..Default::default() },
+        );
+
+        let info = system_info_json(&app);
+        assert_eq!(info["gpu"]["canvas"], "gpu");
+        assert_eq!(info["gpu"]["compositor"], "cpu");
+        assert_eq!(info["gpu"]["compositorFallback"], reason);
+        assert_eq!(info["gpu"]["fallback"], "startup backend selection");
+        assert!(system_info(&app).iter().any(|line| line == "Image compositor: CPU"));
+        assert!(system_info(&app).iter().any(|line| line.contains("compositor pipeline creation failed")));
+        app.perf.select_compositor_doc(18);
+        assert_eq!(app.perf.gpu_info.compositor, "cpu", "pipeline failure applies to every document");
+        assert_eq!(app.perf.gpu_info.compositor_fallback.as_deref(), Some(reason.as_str()));
+        app.perf.gpu_info.lost = Some("previous device lost".into());
+        app.perf.gpu_canvas_started();
+        assert_eq!(app.perf.gpu_info.compositor, "pending", "a new device may retry composition");
+        assert!(app.perf.gpu_info.compositor_fallback.is_none());
+        assert!(app.perf.gpu_info.lost.is_none());
+        assert_eq!(app.perf.gpu_info.fallback.as_deref(), Some("startup backend selection"));
+        assert_eq!(app.session.prefs().get("performance.renderingMode"), rendering_mode);
+    }
+
+    #[test]
+    fn compositor_result_tracks_success_and_document_switches() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.perf.gpu_info.canvas = "gpu".into();
+        app.perf.record_compositor_refresh(1, &Refresh { kind: "full", px: 20, fallback: Some("document feature".into()), ..Default::default() });
+        assert_eq!(app.perf.gpu_info.compositor, "cpu");
+        assert_eq!(app.perf.gpu_info.compositor_fallback.as_deref(), Some("document feature"));
+        assert_eq!(app.perf.gpu_fallback.as_deref(), Some("document feature"));
+        app.perf.record_compositor_refresh(1, &Refresh { kind: "gpu-full", px: 20, ..Default::default() });
+        assert_eq!(app.perf.gpu_info.compositor, "gpu");
+        assert!(app.perf.gpu_info.compositor_fallback.is_none());
+        assert!(app.perf.gpu_fallback.is_none());
+        app.perf.record_compositor_refresh(1, &Refresh { kind: "full", px: 20, fallback: Some("document feature".into()), ..Default::default() });
+        app.perf.select_compositor_doc(2);
+        assert_eq!(app.perf.gpu_info.compositor, "pending");
+        assert!(app.perf.gpu_info.compositor_fallback.is_none());
+        assert!(app.perf.gpu_fallback.is_none());
+        app.perf.compositor_unavailable(2, crate::gpu_canvas::OVER_CANVAS_BUDGET);
+        assert_eq!(app.perf.gpu_info.compositor, "cpu");
+        assert_eq!(app.perf.gpu_info.compositor_fallback.as_deref(), Some(crate::gpu_canvas::OVER_CANVAS_BUDGET));
+        app.perf.select_compositor_doc(1);
+        assert_eq!(app.perf.gpu_info.compositor, "pending");
+        assert!(app.perf.gpu_info.compositor_fallback.is_none());
+    }
+
+    #[test]
+    fn non_compositing_refreshes_and_device_loss_do_not_replace_confirmed_status() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.perf.gpu_info.canvas = "gpu".into();
+        app.perf.record_compositor_refresh(1, &Refresh { kind: "gpu-full", px: 20, ..Default::default() });
+        for r in [
+            Refresh { kind: "rect", fallback: Some("no-op".into()), ..Default::default() },
+            Refresh { kind: "full", fallback: Some("zero pixels".into()), ..Default::default() },
+            Refresh { kind: crate::gpu_canvas::REFRESH_DEFERRED, px: 20, fallback: Some("deferred".into()), ..Default::default() },
+        ] {
+            app.perf.record_compositor_refresh(1, &r);
+            assert_eq!(app.perf.gpu_info.compositor, "gpu");
+            assert!(app.perf.gpu_info.compositor_fallback.is_none());
+        }
+        app.perf.gpu_info.canvas = "cpu".into();
+        app.perf.gpu_info.compositor = "cpu".into();
+        app.perf.gpu_info.lost = Some("device lost".into());
+        app.perf.gpu_info.compositor_fallback = Some("device lost".into());
+        app.perf.record_compositor_refresh(1, &Refresh { kind: "gpu-full", px: 20, ..Default::default() });
+        assert_eq!(app.perf.gpu_info.compositor, "cpu");
+        assert_eq!(app.perf.gpu_info.compositor_fallback.as_deref(), Some("device lost"));
+        assert_eq!(app.perf.gpu_info.lost.as_deref(), Some("device lost"));
+    }
 
     #[test]
     fn system_info_copy_and_api_stay_english_in_czech_ui() {

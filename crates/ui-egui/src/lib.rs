@@ -1121,13 +1121,14 @@ impl PhotocraftApp {
                     .or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_string()))
                     .unwrap_or_else(|| "GPU canvas initialization failed".into());
                 self.perf.gpu_info.canvas = "cpu".into();
-                self.perf.gpu_info.fallback = Some(detail.clone());
+                self.perf.gpu_info.compositor = "cpu".into();
+                self.perf.gpu_info.compositor_fallback = Some(detail.clone());
                 gpu_status::queue_fallback_notice(self, detail);
                 self.watch_window_device(&rs.device);
                 return;
             }
         };
-        self.perf.gpu_info.canvas = "gpu".into();
+        self.perf.gpu_canvas_started();
         self.window_device = Some((rs.device.clone(), gpu.health().clone()));
         self.gpu = Some(gpu);
         self.prefs_rt.gpu_style = None;

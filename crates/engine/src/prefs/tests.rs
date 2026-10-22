@@ -1,5 +1,23 @@
 use super::*;
 
+#[test]
+fn native_backend_choices_are_preserved_by_startup_sanitization() {
+    for platform in [GpuPlatform::Windows, GpuPlatform::Mac, GpuPlatform::Other] {
+        assert!(platform.backends().contains(&GpuBackend::Auto));
+        assert!(!platform.backends().contains(&GpuBackend::Cpu), "CPU is selected through Rendering Mode");
+        for backend in platform.backends() {
+            assert_eq!(platform.sanitize(*backend), *backend, "an offered backend must not be silently changed at startup");
+        }
+        assert_eq!(platform.sanitize(GpuBackend::Cpu), GpuBackend::Cpu, "legacy CPU and recovery remain supported");
+        for name in GpuBackend::NAMES {
+            let backend = GpuBackend::parse(name).unwrap();
+            if backend != GpuBackend::Cpu && !platform.backends().contains(&backend) {
+                assert_eq!(platform.sanitize(backend), GpuBackend::Auto, "foreign preferences resolve to Automatic");
+            }
+        }
+    }
+}
+
 fn session() -> Session {
     let mut s = Session::new();
     s.execute("file.new", json!({"width": 32, "height": 32})).unwrap();
