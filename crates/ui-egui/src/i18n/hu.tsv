@@ -736,6 +736,7 @@
 	Proof Colors	Színpróba
 	Proof Setup	Színpróba beállítása
 	Properties	Tulajdonságok
+	Screentones	Rasztertónusok
 	Quick Export As PNG	Gyors exportálás PNG-be
 	Quit	Kilépés
 	Quit {app}	Kilépés: {app}
@@ -4224,3 +4225,22 @@ cameraRaw	Yellow	Sárga
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	GPU-adapter
+
+# Manga screentone generator (Filter › Pixelate)
+	Screentone…	Raszter…
+	Screentone:	Raszter:
+	Screentones (GenTonik)	Raszterminták (GenTonik)
+	Satellites	Szatellitok
+	Count:	Darabszám:
+	Distance:	Távolság:
+	Stretch:	Nyújtás:
+	Distortion & Jitter	Torzítás és szórás
+	Aspect X:	Képarány X:
+	Aspect Y:	Képarány Y:
+	Row Offset:	Sorkitolás:
+	Merge:	Összeolvasás:
+	Jitter Pos:	Szórás pozíció:
+	Jitter Size:	Szórás méret:
+	Midpoint:	Középpont:
+	Start Size:	Kezdő méret:
+	End Size:	Záró méret:

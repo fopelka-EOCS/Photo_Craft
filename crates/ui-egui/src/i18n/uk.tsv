@@ -496,6 +496,7 @@
 	Paths	Контури
 	Patterns	Візерунки
 	Properties	Властивості
+	Screentones	Скринтони
 	Styles	Стилі
 	Swatches	Зразки кольорів
 	Timeline	Шкала часу
@@ -4017,3 +4018,23 @@ curves	Smooth	Згладити
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Адаптер GPU
+
+# Manga screentone generator (Filter › Pixelate)
+	Screentone…	Півтон…
+	Screentone:	Півтон:
+	Screentones (GenTonik)	Растри (GenTonik)
+	Satellites	Супутники
+	Enable	Увімкнути
+	Count:	Кількість:
+	Distance:	Відстань:
+	Stretch:	Розтягування:
+	Distortion & Jitter	Спотворення та дрижання
+	Aspect X:	Пропорції X:
+	Aspect Y:	Пропорції Y:
+	Row Offset:	Зсув рядків:
+	Merge:	Зливання:
+	Jitter Pos:	Дрижання позиції:
+	Jitter Size:	Дрижання розміру:
+	Midpoint:	Середня точка:
+	Start Size:	Початковий розмір:
+	End Size:	Кінцевий розмір:

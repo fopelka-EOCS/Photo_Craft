@@ -519,6 +519,8 @@
 	Paths	Контуры
 	Patterns	Паттерны
 	Properties	Свойства
+	Screentones	Скринтоны
+	Screentones (GenTonik)	Скринтоны (GenTonik)
 	Styles	Стили
 	Swatches	Образцы
 	Timeline	Шкала времени
@@ -3286,3 +3288,22 @@ curves	Smooth	Сгладить
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Адаптер GPU
+
+# Manga screentone generator (Filter › Pixelate)
+	Screentone…	Полутон…
+	Screentone:	Полутон:
+	Satellites	Спутники
+	Enable	Включить
+	Count:	Количество:
+	Distance:	Расстояние:
+	Stretch:	Растяжение:
+	Distortion & Jitter	Искажение и джиттер
+	Aspect X:	Пропорции X:
+	Aspect Y:	Пропорции Y:
+	Row Offset:	Смещение рядов:
+	Merge:	Слияние:
+	Jitter Pos:	Дрожание позиции:
+	Jitter Size:	Дрожание размера:
+	Midpoint:	Средняя точка:
+	Start Size:	Начальный размер:
+	End Size:	Конечный размер:
