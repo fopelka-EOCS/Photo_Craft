@@ -187,7 +187,7 @@ fn expand(packed: &str, keys: &[&str]) -> Result<String, String> {
 }
 
 /// The registry. English first: it is the fallback and the source language.
-pub static LANGUAGES: [LangInfo; 21] = [
+pub static LANGUAGES: [LangInfo; 22] = [
     LangInfo { code: "en", name: "English", source: b"", plural: plural_one_other, complete_menus: false, catalog: OnceLock::new() },
     LangInfo { code: "ja", name: "日本語", source: catalog!("ja"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
     LangInfo { code: "zh-hans", name: "简体中文", source: catalog!("zh-hans"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
@@ -220,6 +220,8 @@ pub static LANGUAGES: [LangInfo; 21] = [
     LangInfo { code: "tr", name: "Türkçe", source: catalog!("tr"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
     // Vietnamese; `vi-VN` resolves here.
     LangInfo { code: "vi", name: "Tiếng Việt", source: catalog!("vi"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
+    // Norwegian Bokmål; `nb-NO`, the macrolanguage `no` and Nynorsk `nn` locales resolve here.
+    LangInfo { code: "nb", name: "Norsk bokmål", source: catalog!("nb"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new() },
 ];
 
 impl LangInfo {
@@ -317,6 +319,10 @@ fn candidates(tag: &str) -> Vec<String> {
     if primary == "pt" && !out.iter().any(|c| c == "pt-br") {
         // The only Portuguese catalog is Brazilian; other regions use it rather than English.
         out.insert(out.len() - 1, "pt-br".to_string());
+    }
+    if matches!(primary, "no" | "nn") && !out.iter().any(|c| c == "nb") {
+        // The only Norwegian catalog is Bokmål; the macrolanguage code and Nynorsk use it rather than English.
+        out.insert(out.len() - 1, "nb".to_string());
     }
     out
 }
@@ -436,6 +442,7 @@ mod tests {
     const CS: fn() -> Lang = || Lang::from_code("cs").expect("cs registered");
     const ID: fn() -> Lang = || Lang::from_code("id").expect("id registered");
     const VI: fn() -> Lang = || Lang::from_code("vi").expect("vi registered");
+    const NB: fn() -> Lang = || Lang::from_code("nb").expect("nb registered");
 
     #[test]
     fn indonesian_tags_resolve() {
@@ -454,6 +461,21 @@ mod tests {
         assert!(VI().complete_menus(), "Vietnamese translates every source key");
         assert_eq!(Lang::from_pref("vi"), VI());
         assert_eq!(Lang::from_pref("VI"), VI());
+    }
+
+    #[test]
+    fn norwegian_tags_resolve() {
+        for tag in ["nb", "nb-NO", "nb_NO", "nb_NO.UTF-8", "no", "no-NO", "no_NO.UTF-8", "nn", "nn-NO", "nn_NO.UTF-8"] {
+            assert_eq!(lang_from_tag(tag), Some(NB()), "{tag}");
+        }
+        assert_eq!(candidates("nn_NO"), ["nn-no", "nb", "nn"]);
+        assert_eq!(NB().name(), "Norsk bokmål");
+        assert!(NB().complete_menus(), "Norwegian Bokmål translates every source key");
+        assert_eq!(Lang::from_pref("nb"), NB());
+        assert_eq!(Lang::from_pref("NB"), NB());
+        assert_eq!(tr(NB(), "Layer"), "Lag");
+        assert_eq!(trn(NB(), 1, "{n} item", "{n} items"), "1 element");
+        assert_eq!(trn(NB(), 2, "{n} item", "{n} items"), "2 elementer");
     }
 
     #[test]
