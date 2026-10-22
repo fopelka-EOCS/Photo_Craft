@@ -276,16 +276,16 @@ const PAPER_ALIASES: &[(&str, &str)] = &[
     ("4切", "4cut"),
 ];
 
-/// The form [`paper_size`] matches names in: lower case, with whitespace, hyphens, underscores and
-/// parentheses ignored and `×`/`*` read as `x`, so `L判`, `l-size` and `l` are one name and
-/// `4 × 6` is `4x6`.
+/// The form [`paper_size`] matches names in: lower case, with whitespace and punctuation ignored
+/// and `×`/`*` read as `x`, so `L判`, `l-size` and `l` are one name, `4 × 6` is `4x6`, and
+/// `B5（JIS）` and `JIS B5.` are `b5`.
 fn normalize_paper(name: &str) -> String {
     name.chars()
-        .filter(|c| !c.is_whitespace() && !matches!(c, '-' | '_' | '(' | ')'))
         .map(|c| match c {
             '×' | '*' => 'x',
             c => c,
         })
+        .filter(|c| !c.is_whitespace() && !c.is_ascii_punctuation() && !matches!(c, '（' | '）' | '、' | '。' | '，' | '．'))
         .collect::<String>()
         .to_lowercase()
 }

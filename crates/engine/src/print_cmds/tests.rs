@@ -123,6 +123,9 @@ fn japanese_paper_sizes_and_aliases() {
         ("4切", "4cut"),
         ("A4", "a 4"),
         ("4 × 6", "4x6"),
+        ("B5（JIS）", "b5"),
+        ("JIS B5.", "b5"),
+        ("JIS B5。", "b5"),
     ] {
         assert_eq!(paper_size(a), paper_size(b), "{a} vs {b}");
     }
