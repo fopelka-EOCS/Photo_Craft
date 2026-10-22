@@ -51,14 +51,20 @@ fn has_ident(text: &str, prefix: &str, ident: &str) -> bool {
 fn production(text: &str) -> String {
     // Windows checkouts may use CRLF: compare lines without their line ending, keep them as is.
     let bare = |l: &str| l.trim_end_matches(['\r', '\n']).to_string();
+    // A line's code: without a trailing `// comment`.
+    let code = |l: &str| {
+        let l = bare(l);
+        l.split_once("//").map_or(l.as_str(), |(c, _)| c).trim_end().to_string()
+    };
     let mut out = String::with_capacity(text.len());
     let mut lines = text.split_inclusive('\n');
     while let Some(line) = lines.next() {
-        if bare(line) != "#[cfg(test)]" {
+        if code(line) != "#[cfg(test)]" {
             out.push_str(line);
             continue;
         }
-        // Further attributes, then the item: one line (`mod x;`) or a block up to `}` at column 0.
+        // Further attributes, then the item: one line (`mod x;`) or a block up to `}` (or a
+        // multi-line `use`'s `};`) at column 0.
         for item in lines.by_ref() {
             let item = bare(item);
             if item.starts_with("#[") {
@@ -67,7 +73,7 @@ fn production(text: &str) -> String {
             // `mod x;` and a one-line `mod tests {}` end on their own line.
             if !item.trim_end().ends_with([';', '}']) {
                 for l in lines.by_ref() {
-                    if bare(l) == "}" {
+                    if matches!(code(l).as_str(), "}" | "};") {
                         break;
                     }
                 }
@@ -210,6 +216,10 @@ fn production_keeps_code_after_an_inline_test_module() {
     // `canvas.rs` has test modules halfway down; the code after them is still production code.
     let one_line = "fn a() {}\n#[cfg(test)]\nmod tests {}\nfn b() { p.x.read }\n";
     assert_eq!(production(one_line), "fn a() {}\nfn b() { p.x.read }\n");
+    let commented = "#[cfg(test)] // helpers\nfn t() {\n    p.x.hidden\n}\nfn b() { p.x.read }\n";
+    assert_eq!(production(commented), "fn b() { p.x.read }\n");
+    let multiline_use = "#[cfg(test)]\nuse super::{\n    a,\n    b,\n};\nfn b() { p.x.read }\n";
+    assert_eq!(production(multiline_use), "fn b() { p.x.read }\n");
     for newline in ["\n", "\r\n"] {
         let source = format!(
             "fn a() {{}}{newline}#[cfg(test)]{newline}#[allow(dead_code)]{newline}mod inline_tests {{{newline}    fn t() {{ p.x.hidden }}{newline}}}{newline}{newline}fn b() {{ p.x.read }}{newline}#[cfg(test)]{newline}mod more;{newline}fn c() {{}}{newline}"
