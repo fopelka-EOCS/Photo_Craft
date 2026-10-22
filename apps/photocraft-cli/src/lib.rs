@@ -371,7 +371,9 @@ fn command_list(a: &Args) -> Result<Vec<(String, Value)>, String> {
 }
 
 /// A `--cmd` value that carries its parameters (`file.placeEmbedded {"path":…}`) gets a pointer
-/// to `--params`, rather than an "unknown command" for the whole string.
+/// to `--params`, rather than an "unknown command" for the whole string. The object need not be
+/// valid JSON yet: once it sits in `--params`, that flag reports the parse error and its position.
+/// Apostrophes are quoted, so the suggested flags paste into a POSIX shell as they are.
 fn inline_params_hint(cmd: &str) -> Option<String> {
     let cmd = cmd.trim();
     let split = cmd.find(|c: char| c == '{' || c.is_whitespace())?;
@@ -379,7 +381,8 @@ fn inline_params_hint(cmd: &str) -> Option<String> {
     if id.is_empty() || !params.starts_with('{') {
         return None;
     }
-    Some(format!("--cmd takes only a command id, not `{cmd}`; pass the parameters with --params: --cmd {id} --params '{params}'"))
+    let quoted = params.replace('\'', r"'\''");
+    Some(format!("--cmd takes only a command id, not `{cmd}`; pass the parameters with --params: --cmd {id} --params '{quoted}'"))
 }
 
 fn run_cmds(a: &Args, out: &mut dyn Write, err: &mut dyn Write) -> R {
@@ -903,6 +906,10 @@ mod inline_params_hint_tests {
         let hint = inline_params_hint(r#" file.placeEmbedded  {"path":"a.png"} "#).unwrap_or_default();
         assert!(hint.contains(r#"--cmd file.placeEmbedded --params '{"path":"a.png"}'"#), "{hint}");
         assert!(inline_params_hint(r#"file.placeEmbedded{"path":"a.png"}"#).is_some());
+        // Malformed JSON still belongs in --params, which then names the parse error.
+        assert!(inline_params_hint("layer.new.layer {oops").unwrap_or_default().contains("--params '{oops'"));
+        let hint = inline_params_hint(r#"file.placeEmbedded {"path":"O'Brien.png"}"#).unwrap_or_default();
+        assert!(hint.ends_with(r#"--params '{"path":"O'\''Brien.png"}'"#), "{hint}");
         for plain in ["file.placeEmbedded", "file.placeEmbedded extra", r#"{"path":"a.png"}"#, "  ", ""] {
             assert_eq!(inline_params_hint(plain), None, "{plain:?}");
         }
