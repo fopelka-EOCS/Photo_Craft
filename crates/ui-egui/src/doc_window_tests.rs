@@ -227,9 +227,10 @@ fn a_drag_whose_window_closes_ends_where_it_was() {
     }
     assert!(h.state().drag.is_some(), "the stroke is in flight");
     h.state_mut().ui.windows.clear();
-    // The pointer, still down, moves over the main canvas while the window's claim runs out.
+    // The pointer, still down, moves over the main canvas, which takes a pass to see the window
+    // stopped.
     h.event(egui::Event::PointerMoved(egui::pos2(300.0, 300.0)));
-    h.run_steps((crate::canvas::DRAG_OWNER_TTL * 60.0) as usize + 10);
+    h.run_steps(3);
     assert!(h.state().drag.is_none(), "the abandoned stroke ended");
     for (x, y) in stroke_points(&h) {
         assert!((119.0..=201.0).contains(&x) && (y - 150.0).abs() < 1.0, "only the window's points: ({x}, {y})");
@@ -253,14 +254,41 @@ fn every_tool_survives_a_drag_in_a_document_window() {
 }
 
 #[test]
-fn a_drag_belongs_to_its_canvas_until_that_canvas_stops_running() {
-    use crate::canvas::{DRAG_OWNER_TTL, drag_is_abandoned, drag_is_foreign};
+fn a_drag_held_still_in_a_window_carries_on() {
+    // egui runs no pass while the button is held still, so the first one after a pause can come
+    // seconds after the last: the window still owns its drag then.
+    let mut h = harness(Tool::Brush);
+    let (from, mid, to) = (in_window(&h, 120.0, 150.0), in_window(&h, 160.0, 150.0), in_window(&h, 200.0, 150.0));
+    h.event(egui::Event::PointerMoved(from));
+    h.run_steps(2);
+    button(&mut h, from, true);
+    h.event(egui::Event::PointerMoved(mid));
+    h.run_steps(1);
+    assert!(h.state().drag.is_some(), "the stroke is in flight");
+    // Five seconds in one step, then the next move.
+    let t = h.ctx.input(|i| i.time);
+    h.input_mut().time = Some(t + 5.0);
+    h.event(egui::Event::PointerMoved(to));
+    h.run_steps(1);
+    h.input_mut().time = None;
+    assert!(h.state().drag.is_some(), "the stroke is still in flight after the pause");
+    button(&mut h, to, false);
+    let points = stroke_points(&h);
+    assert!(points.iter().any(|&(x, _)| x > 199.0), "the stroke goes on to the move after the pause: {points:?}");
+}
+
+#[test]
+fn a_drag_belongs_to_its_canvas_until_that_canvas_misses_a_pass() {
+    use crate::canvas::{drag_is_abandoned, drag_is_foreign};
     let (a, b) = (egui::Id::new("a"), egui::Id::new("b"));
-    assert!(!drag_is_foreign(None, a, 10.0), "a drag no canvas started (the control channel's) is anyone's");
-    assert!(!drag_is_foreign(Some((a, 10.0)), a, 10.5), "its own canvas carries it on");
-    assert!(drag_is_foreign(Some((a, 10.0)), b, 10.5), "another canvas leaves it alone");
-    assert!(!drag_is_foreign(Some((a, 10.0)), b, 10.0 + DRAG_OWNER_TTL), "but not one whose canvas stopped running");
-    assert!(drag_is_abandoned(Some((a, 10.0)), b, 10.0 + DRAG_OWNER_TTL), "which is abandoned");
-    assert!(!drag_is_abandoned(Some((a, 10.0)), a, 10.0 + DRAG_OWNER_TTL), "a canvas never abandons its own drag");
-    assert!(!drag_is_abandoned(None, a, 100.0), "nor is a drag no canvas started");
+    assert!(!drag_is_foreign(None, a, 10), "a drag no canvas started (the control channel's) is anyone's");
+    assert!(!drag_is_foreign(Some((a, 10)), a, 10), "its own canvas carries it on");
+    assert!(drag_is_foreign(Some((a, 10)), b, 10), "another canvas leaves it alone");
+    assert!(drag_is_foreign(Some((a, 10)), b, 11), "also when drawn before the owner in the next pass");
+    assert!(!drag_is_abandoned(Some((a, 10)), b, 11), "which hasn't stopped");
+    assert!(!drag_is_foreign(Some((a, 10)), b, 12), "but not one whose canvas missed a pass");
+    assert!(drag_is_abandoned(Some((a, 10)), b, 12), "which is abandoned");
+    assert!(!drag_is_abandoned(Some((a, 10)), a, 12), "a canvas never abandons its own drag");
+    assert!(!drag_is_abandoned(None, a, 100), "nor is a drag no canvas started");
+    assert!(drag_is_foreign(Some((a, u64::MAX)), b, u64::MAX), "the pass count can't overflow");
 }

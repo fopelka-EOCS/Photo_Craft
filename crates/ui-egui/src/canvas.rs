@@ -3408,20 +3408,29 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     canvas_view_as(app, ui, idx, rect, view, if primary { CanvasRole::Main } else { CanvasRole::View })
 }
 
-/// How long (seconds of input time) a canvas that owns the drag in flight may go without running
-/// its tools before the drag is abandoned. A window closed mid-drag must not leave every other
-/// canvas waiting on a gesture only it could finish.
-pub(crate) const DRAG_OWNER_TTL: f64 = 2.0;
+/// The pass the canvases count their drag claims in: the main window's. A window in a viewport of
+/// its own is drawn inside the main window's pass, and its own counter numbers that viewport's
+/// passes. Passes, not seconds: egui runs none while the pointer is held still, so a pause in a
+/// drag is no sign that its canvas stopped.
+fn drag_pass(ctx: &egui::Context) -> u64 {
+    ctx.cumulative_pass_nr_for(egui::ViewportId::ROOT)
+}
+
+/// Did a canvas that last ran its tools in pass `last_run` miss a pass before `pass`? A canvas
+/// drawn earlier in the pass than the drag's owner sees the claim from the pass before.
+fn missed_a_pass(last_run: u64, pass: u64) -> bool {
+    last_run.saturating_add(1) < pass
+}
 
 /// Is the drag in flight another canvas's to carry on? `owner` is `PhotocraftApp::drag_canvas`.
-pub(crate) fn drag_is_foreign(owner: Option<(egui::Id, f64)>, me: egui::Id, now: f64) -> bool {
-    owner.is_some_and(|(canvas, last_run)| canvas != me && now - last_run < DRAG_OWNER_TTL)
+pub(crate) fn drag_is_foreign(owner: Option<(egui::Id, u64)>, me: egui::Id, pass: u64) -> bool {
+    owner.is_some_and(|(canvas, last_run)| canvas != me && !missed_a_pass(last_run, pass))
 }
 
 /// Did the canvas that owns the drag in flight stop running its tools (its window closed
 /// mid-gesture)? Then the drag is nobody's to carry on: [`end_abandoned_drag`] ends it.
-pub(crate) fn drag_is_abandoned(owner: Option<(egui::Id, f64)>, me: egui::Id, now: f64) -> bool {
-    owner.is_some_and(|(canvas, last_run)| canvas != me && now - last_run >= DRAG_OWNER_TTL)
+pub(crate) fn drag_is_abandoned(owner: Option<(egui::Id, u64)>, me: egui::Id, pass: u64) -> bool {
+    owner.is_some_and(|(canvas, last_run)| canvas != me && missed_a_pass(last_run, pass))
 }
 
 /// End an abandoned drag where it last was, as its release would have: what it drew is kept, and
@@ -3454,17 +3463,17 @@ pub(crate) fn canvas_view_as(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: us
     // A drag belongs to the canvas it started in (`PhotocraftApp::drag_canvas`), which keeps its
     // claim fresh while it runs tools. One whose canvas stopped ends here, before a canvas that
     // runs tools could take it over.
-    let now = ui.input(|i| i.time);
+    let pass = drag_pass(&ctx);
     if app.drag.is_none() {
         app.drag_canvas = None;
     }
     if tools && app.drag_canvas.is_some_and(|(c, _)| c == canvas_id) {
-        app.drag_canvas = Some((canvas_id, now));
+        app.drag_canvas = Some((canvas_id, pass));
     }
-    if tools && app.drag.is_some() && drag_is_abandoned(app.drag_canvas, canvas_id, now) {
+    if tools && app.drag.is_some() && drag_is_abandoned(app.drag_canvas, canvas_id, pass) {
         end_abandoned_drag(app);
     }
-    let foreign_drag = app.drag.is_some() && drag_is_foreign(app.drag_canvas, canvas_id, now);
+    let foreign_drag = app.drag.is_some() && drag_is_foreign(app.drag_canvas, canvas_id, pass);
     // The camera as the app holds it before this frame's input. The canvas works on its own copy
     // (`view`) and writes it back at the end; a tool that moves the camera itself meanwhile (the
     // Crop tool's default mode pans and turns the view with the image, `crop_mode`) must not be
@@ -4477,7 +4486,7 @@ pub(crate) fn canvas_view_as(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: us
         }
         // The canvas that starts a drag owns it, and keeps the claim fresh while it carries on.
         if app.drag.is_some() && (!had_drag || app.drag_canvas.is_some_and(|(c, _)| c == canvas_id)) {
-            app.drag_canvas = Some((canvas_id, now));
+            app.drag_canvas = Some((canvas_id, pass));
         }
     }
     if crop_camera && let (Some((center, rotation)), Some(now)) = (camera, app.ui.views.get(idx)) {
