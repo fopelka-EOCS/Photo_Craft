@@ -801,12 +801,7 @@ mod tests {
         s.execute("layer.select", json!({"layer": a})).unwrap();
         s.execute("layer.groupLayers", json!({})).unwrap();
         s.execute("layer.new.layer", json!({"name": "B"})).unwrap();
-        let cmds = [
-            ("layer.arrange.bringForward", 1),
-            ("layer.arrange.bringToFront", 1),
-            ("layer.arrange.sendBackward", -1),
-            ("layer.arrange.sendToBack", -1),
-        ];
+        let cmds = [("layer.arrange.bringForward", 1), ("layer.arrange.bringToFront", 1), ("layer.arrange.sendBackward", -1), ("layer.arrange.sendToBack", -1)];
         let ids: Vec<_> = s.active().unwrap().doc.walk().into_iter().map(|(_, _, l)| l.id).collect();
         let bg = crate::background_cmds::background_id(&s.active().unwrap().doc);
         for id in ids.into_iter().filter(|id| Some(*id) != bg) {
