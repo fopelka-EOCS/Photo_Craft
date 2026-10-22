@@ -20,7 +20,7 @@ impl Context for NoContext {
 
 fn read_fixture(directory: &Path, name: &str) -> Result<WorkerReply, Box<dyn Error>> {
     let mut file = File::open(directory.join(name))?;
-    Ok(protocol::read_response(&mut file, &NoContext)?)
+    protocol::read_response(&mut file, &NoContext).map_err(Into::into)
 }
 
 #[test]
@@ -100,14 +100,16 @@ fn rust_writer_generates_companion_request_fixtures() -> Result<(), Box<dyn Erro
     ] {
         // Synthetic ICC header only, not an actual characterization profile or a WIC
         // colour-conversion oracle. This suite only checks byte transport and parser fields.
-        let mut icc_profile = Vec::new();
-        if tagged {
-            icc_profile = vec![0; 128];
-            icc_profile[0..4].copy_from_slice(&128_u32.to_be_bytes());
-            icc_profile[12..16].copy_from_slice(b"mntr");
-            icc_profile[16..20].copy_from_slice(b"RGB ");
-            icc_profile[36..40].copy_from_slice(b"acsp");
-        }
+        let icc_profile = if tagged {
+            let mut bytes = vec![0_u8; 128];
+            bytes[0..4].copy_from_slice(&128_u32.to_be_bytes());
+            bytes[12..16].copy_from_slice(b"mntr");
+            bytes[16..20].copy_from_slice(b"RGB ");
+            bytes[36..40].copy_from_slice(b"acsp");
+            bytes
+        } else {
+            Vec::new()
+        };
         let image = Image {
             x: -7,
             y: 11,

@@ -1608,7 +1608,7 @@ mod tests {
                         device.id = format!("other.{}", device.id);
                     }
                 }
-                _ => unreachable!(),
+                _ => {}
             }
             let first = Arc::new(first);
             s.register_adapter(first.clone()).unwrap();
