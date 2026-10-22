@@ -251,6 +251,7 @@ fn options_bar_warp_button_is_disabled_for_a_stale_text_edit() {
     app.run("layer.delete", json!({"layer": id})).unwrap();
     app.ui.text_edit = Some(crate::state::TextEdit {
         layer: id,
+        document: None,
         caret: 0,
         anchor: 0,
         session: "stale".into(),
