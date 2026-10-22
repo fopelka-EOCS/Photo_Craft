@@ -3480,6 +3480,11 @@ cameraRaw	Yellow	Κίτρινο
 	250%	250%
 	300%	300%
 	50% Gray	50% γκρι
+	50%	50%
+	55%	55%
+	60%	60%
+	65%	65%
+	70%	70%
 	75%	75%
 	80%	80%
 	85%	85%
@@ -3973,6 +3978,28 @@ curves	Smooth	Εξομάλυνση
 	This document's layers: {needed} of {budget} for layers	Επίπεδα αυτού του εγγράφου: {needed} από {budget} για επίπεδα
 	This document's layers need {needed} but may hold {budget}: whole-document redraws use the CPU	Τα επίπεδα αυτού του εγγράφου χρειάζονται {needed} αλλά μπορούν να καταλάβουν {budget}: η επανασχεδίαση όλου του εγγράφου γίνεται στη CPU
 	GPU Memory (MB, 0 = Automatic)	Μνήμη GPU (MB, 0 = Αυτόματο)
+
+# Android in-app file browser (crates/ui-egui/src/android_file.rs)
+	(empty)	(κενό)
+	Allow "All files access" for PhotoCraft, then tap Shared storage.	Επιτρέψτε στο PhotoCraft πρόσβαση σε όλα τα αρχεία και μετά πατήστε «Κοινόχρηστος χώρος αποθήκευσης».
+	App storage	Χώρος αποθήκευσης εφαρμογής
+	Choose this folder	Επιλογή αυτού του φακέλου
+	Could not create the folder:	Δεν ήταν δυνατή η δημιουργία του φακέλου:
+	File name:	Όνομα αρχείου:
+	Grant access	Παραχώρηση πρόσβασης
+	Name the new folder first	Ονομάστε πρώτα τον νέο φάκελο
+	New folder	Νέος φάκελος
+	Select at least one file.	Επιλέξτε τουλάχιστον ένα αρχείο.
+	Shared storage	Κοινόχρηστος χώρος αποθήκευσης
+	Shared storage (grant access)	Κοινόχρηστος χώρος αποθήκευσης (παραχώρηση πρόσβασης)
+	Tap files to select them.	Πατήστε αρχεία για να τα επιλέξετε.
+	{name} already exists. Replace it?	Το {name} υπάρχει ήδη. Αντικατάσταση;
+	This build can't request shared-storage access.	Αυτή η έκδοση δεν μπορεί να ζητήσει πρόσβαση στον κοινόχρηστο χώρο αποθήκευσης.
+	This folder can't be read yet. Grant PhotoCraft access to all files.	Ο φάκελος δεν είναι ακόμη αναγνώσιμος. Παραχωρήστε στο PhotoCraft πρόσβαση σε όλα τα αρχεία.
+	Up	Πάνω
+	selected	επιλεγμένα
+	Picker view	Προβολή επιλογής
+	Could not remember the view.	Δεν ήταν δυνατή η απομνημόνευση της προβολής.
 	{name} was changed by another app after it was opened or saved here.	Το {name} άλλαξε από άλλη εφαρμογή αφού ανοίχτηκε ή αποθηκεύτηκε εδώ.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Αντικαταστήστε το με αυτό το έγγραφο ή ακυρώστε και χρησιμοποιήστε Αρχείο › Αποθήκευση ως για να κρατήσετε και τα δύο.
 	Decrease Brush Size	Μείωση μεγέθους πινέλου
@@ -3988,6 +4015,11 @@ curves	Smooth	Εξομάλυνση
 	Use	Χρήση
 	In Front	Μπροστά
 	Behind	Πίσω
+# Android launch-time "All files access" prompt (crates/ui-egui/src/android_access.rs)
+	Allow access to all files?	Να επιτραπεί η πρόσβαση σε όλα τα αρχεία;
+	Not now	Όχι τώρα
+	PhotoCraft needs "All files access" to open and save files in shared storage.	Το PhotoCraft χρειάζεται πρόσβαση σε όλα τα αρχεία για να ανοίγει και να αποθηκεύει αρχεία στον «Κοινόχρηστο χώρο αποθήκευσης».
+	Skip the all-files-access prompt at launch	Να μην ζητείται πρόσβαση σε όλα τα αρχεία κατά την εκκίνηση
 
 # DDS Options (#1327)
 	DDS Options	Επιλογές DDS

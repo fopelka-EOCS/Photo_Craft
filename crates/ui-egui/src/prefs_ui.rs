@@ -1235,6 +1235,11 @@ fn humanize(key: &str) -> String {
     if key == "gpuMemoryMb" {
         return "GPU Memory (MB, 0 = Automatic)".into();
     }
+    // Workspace: Android's launch-time "All files access" ask (shown on Android alone, where the
+    // dialog hides every other platform's preference; see `prefs::ANDROID_ONLY`).
+    if key == "androidSkipAllFilesAccessPrompt" {
+        return "Skip the all-files-access prompt at launch".into();
+    }
     let mut s = String::new();
     for (i, ch) in key.chars().enumerate() {
         if i == 0 {
@@ -1253,7 +1258,7 @@ fn choice_label(v: &str) -> String {
     match v {
         "cm" => "Centimeters".into(),
         "mm" => "Millimeters".into(),
-        "75" | "80" | "85" | "90" | "95" | "100" | "125" | "150" | "175" | "200" | "250" | "300" => format!("{v}%"),
+        "50" | "55" | "60" | "65" | "70" | "75" | "80" | "85" | "90" | "95" | "100" | "125" | "150" | "175" | "200" | "250" | "300" => format!("{v}%"),
         "8" => "8 Bits/Channel".into(),
         "16" => "16 Bits/Channel".into(),
         "postScript" => "PostScript (72 points/inch)".into(),
@@ -1379,7 +1384,7 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui
                 || tl!(&title).to_lowercase().contains(&search.trim().to_lowercase());
             let filter = if show_all { "" } else { search.trim() };
             ui.add_space(6.0);
-            egui::ScrollArea::vertical().max_height(content_height - 30.0).id_salt("prefs-scroll").show(ui, |ui| {
+            crate::widgets::panel_scroll().max_height(content_height - 30.0).id_salt("prefs-scroll").show(ui, |ui| {
                 let order: Vec<String> =
                     f.get("__order").and_then(|o| o.get(&section)).and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
                 if !has_visible_fields(&values, &section) {
@@ -2026,7 +2031,7 @@ fn shortcuts_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String
         }
     }
     let needle = filter.to_ascii_lowercase();
-    egui::ScrollArea::vertical().max_height(420.0).id_salt("shortcuts-scroll").show(ui, |ui| {
+    crate::widgets::panel_scroll().max_height(420.0).id_salt("shortcuts-scroll").show(ui, |ui| {
         let mut last_top = String::new();
         egui::Grid::new("shortcut-grid").num_columns(3).spacing([12.0, 3.0]).striped(true).show(ui, |ui| {
             for (id, label, path, def) in &items {
@@ -2400,7 +2405,7 @@ fn save_text(app: &mut PhotocraftApp, suggested: &str, text: String) -> Result<V
 
 fn toolbar_tab(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     let mut hidden: Vec<String> = f.get("toolbarHidden").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
-    egui::ScrollArea::vertical().max_height(380.0).id_salt("toolbar-scroll").show(ui, |ui| {
+    crate::widgets::panel_scroll().max_height(380.0).id_salt("toolbar-scroll").show(ui, |ui| {
         egui::Grid::new("toolbar-grid").num_columns(2).spacing([16.0, 4.0]).show(ui, |ui| {
             for tool in crate::state::Tool::ALL {
                 let name = format!("{tool:?}");
@@ -2439,7 +2444,7 @@ fn presets_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, 
         .and_then(|v| serde_json::from_value::<Vec<String>>(v).ok())
         .unwrap_or_default();
     let mut selected = f.get("selected").and_then(Value::as_u64).unwrap_or(0) as usize;
-    egui::ScrollArea::vertical().max_height(260.0).id_salt("preset-list").show(ui, |ui| {
+    crate::widgets::panel_scroll().max_height(260.0).id_salt("preset-list").show(ui, |ui| {
         for (i, name) in list.iter().enumerate() {
             if ui.selectable_label(i == selected, name).clicked() {
                 selected = i;
@@ -3378,6 +3383,31 @@ mod tests {
     }
 
     #[test]
+    fn scale_preferences_go_down_to_50_percent() {
+        use prefs::UiScale;
+        // Every fixed choice maps to its fraction, the whole 50–300 series included: a small or
+        // crowded screen (a tablet in split view) needs more than the 75% floor allowed.
+        for (pref, expected) in [
+            (UiScale::P50, 0.5),
+            (UiScale::P55, 0.55),
+            (UiScale::P60, 0.6),
+            (UiScale::P65, 0.65),
+            (UiScale::P70, 0.7),
+            (UiScale::P75, 0.75),
+            (UiScale::P100, 1.0),
+            (UiScale::P300, 3.0),
+        ] {
+            assert_eq!(display_scale(pref, Some(1.0)), expected, "{pref:?}");
+        }
+        let names: &[&str] = prefs::UiScale::NAMES;
+        assert_eq!(names.first(), Some(&"auto"));
+        assert!(names.contains(&"50") && names.contains(&"70"), "the 50–70 series is offered: {names:?}");
+        for v in ["45", "48", "55.5", "0", "500"] {
+            assert!(prefs::UiScale::parse(v).is_none(), "{v} is not a choice");
+        }
+    }
+
+    #[test]
     fn scale_preferences_and_monitor_changes_apply_live() {
         let (mut app, _) = app_with_store();
         let ctx = egui::Context::default();
@@ -3405,7 +3435,22 @@ mod tests {
             step(vec2(2560.0, 1440.0), 1.75, 1.75);
             step(vec2(3840.0, 2160.0), 1.0, 1.0);
         }
-        for (pref, expected) in [("200", 2.0), ("125", 1.25), ("150", 1.5), ("100", 1.0), ("95", 0.95), ("90", 0.9), ("85", 0.85), ("80", 0.8), ("auto", 1.5)] {
+        for (pref, expected) in [
+            ("200", 2.0),
+            ("125", 1.25),
+            ("150", 1.5),
+            ("100", 1.0),
+            ("95", 0.95),
+            ("90", 0.9),
+            ("85", 0.85),
+            ("80", 0.8),
+            ("auto", 1.5),
+            ("50", 0.5),
+            ("55", 0.55),
+            ("60", 0.6),
+            ("65", 0.65),
+            ("70", 0.7),
+        ] {
             app.run("prefs.set", json!({"values": {"interface.uiScale": pref}})).unwrap();
             let mut input = egui::RawInput::default();
             input.viewports.get_mut(&egui::ViewportId::ROOT).unwrap().native_pixels_per_point = Some(1.5);

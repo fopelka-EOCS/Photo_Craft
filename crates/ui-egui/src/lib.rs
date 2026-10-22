@@ -22,6 +22,10 @@ pub mod adjust_ui;
 mod alt_grab;
 pub mod analysis_ui;
 pub mod anchor_tools;
+// Android's launch-time ask for "All files access"; a no-op on hosts that cannot check or ask.
+pub mod android_access;
+// Android's in-app file dialogs (no system picker there); a no-op on hosts with a picker.
+pub mod android_file;
 pub mod artboard_tool;
 pub mod artboard_ui;
 pub(crate) mod background_redraw;
@@ -215,6 +219,7 @@ mod tab_strip;
 pub mod targa_options_ui;
 pub mod text_field_menu;
 pub mod theme;
+pub mod thumbs;
 pub mod tiff_options_ui;
 mod tile_overlay;
 mod timeline_ui;
@@ -493,6 +498,11 @@ pub type AppendTextFn = Box<dyn FnMut(&str, &str) -> Result<(), String>>;
 pub type OsEventsFn = Box<dyn FnMut() -> Vec<OsEvent>>;
 /// Ends the app the platform's own way (see [`Services::quit`]).
 pub type QuitFn = Box<dyn FnMut()>;
+/// Whether the shared-storage grant holds right now (Android's "All files access").
+pub type SharedStorageGrantedFn = Box<dyn Fn() -> bool>;
+/// Ask for the shared-storage grant (Android's "All files access" settings page / permission
+/// dialog); the in-app browser re-checks [`SharedStorageGrantedFn`] on the next visit.
+pub type SharedStorageGrantFn = Box<dyn Fn()>;
 /// Where the OS pointer is now, in egui points within the window; `None` when unknown.
 pub type CursorPosFn = Box<dyn FnMut(&egui::Context) -> Option<egui::Pos2>>;
 /// Whether Caps Lock is toggled on, read from the OS. `None` where the platform cannot
@@ -621,6 +631,19 @@ pub struct Services {
     /// while AppKit's run loop is still going crashes or hangs Touch Bar Macs (#1575, #1458).
     /// Without one, eframe closes the window and the app ends with it.
     pub quit: Option<QuitFn>,
+    /// Android (and any host with no system picker): the app-private storage directory. When set
+    /// and [`Self::file_dialog`] is `None`, [`PhotocraftApp::poll_file_dialog`] serves Open/Save/
+    /// Folder with PhotoCraft's own in-app browser (`android_file`) instead of failing.
+    pub app_files_dir: Option<std::path::PathBuf>,
+    /// The shared-storage (whole-tree) root the in-app browser may browse once the user grants
+    /// "All files access" (`/storage/emulated/0` on Android). `None` hides that root.
+    pub shared_storage_root: Option<std::path::PathBuf>,
+    /// Whether the shared-storage grant holds right now; the browser re-checks it on every visit
+    /// (`None`: shared storage is not offered).
+    pub shared_storage_granted: Option<SharedStorageGrantedFn>,
+    /// Ask the user for the shared-storage grant (the system settings page on Android 11+); the
+    /// browser re-checks [`Self::shared_storage_granted`] on the next visit.
+    pub shared_storage_grant: Option<SharedStorageGrantFn>,
 }
 
 /// A document histogram being computed off the UI thread: (document, revision, receiver of
@@ -799,6 +822,10 @@ pub struct PhotocraftApp {
     pub(crate) live_adjust_preview: Option<adjust_preview::LiveAdjust>,
     /// Synthetic input events queued by automation (`ui.click`, `ui.key`, …), injected next frame.
     pub(crate) synthetic: Vec<egui::Event>,
+    /// Modifier keys as this device's key events report them (Android only: winit reports no
+    /// modifier state there — see `stamp_android_modifiers`).
+    #[cfg(target_os = "android")]
+    android_modifiers: egui::Modifiers,
     /// True only while a frame is processing synthetic automation input. It
     /// makes shortcut- and dialog-triggered commands pass the same policy as
     /// direct control calls.
@@ -906,6 +933,12 @@ pub struct PhotocraftApp {
     pub(crate) discard: Option<discard_ui::Prompt>,
     /// The Open or Save dialog in progress, and the action waiting on it (see `file_dialog`).
     pub(crate) file_dialog: Option<file_dialog::Pending>,
+    /// The in-app file browser serving a pending dialog on a host with no system picker
+    /// (Android; see `android_file`). Empty on the desktop, where the platform dialogs run.
+    pub(crate) android_file: crate::android_file::State,
+    /// The launch-time ask for Android's "All files access" grant (Android; see
+    /// `android_access`). Idle on every host that cannot check or ask for it.
+    pub(crate) android_access: crate::android_access::State,
     /// A Save As to a layered TIFF parked behind the TIFF Options prompt (see `tiff_options_ui`).
     pub(crate) tiff_options: Option<tiff_options_ui::Prompt>,
     /// Where each document was last saved or exported to through a dialog (#1826): its next Save
@@ -1024,6 +1057,8 @@ impl PhotocraftApp {
             adjust_preview: None,
             live_adjust_preview: None,
             synthetic: Vec::new(),
+            #[cfg(target_os = "android")]
+            android_modifiers: egui::Modifiers::NONE,
             automation_input: false,
             channel_thumbs: None,
             channel_views: HashMap::new(),
@@ -1073,6 +1108,8 @@ impl PhotocraftApp {
             prefs_rt: Default::default(),
             discard: None,
             file_dialog: None,
+            android_file: Default::default(),
+            android_access: Default::default(),
             tiff_options: None,
             save_dirs: HashMap::new(),
             disk_stamps: HashMap::new(),
@@ -2184,12 +2221,18 @@ impl eframe::App for PhotocraftApp {
             let moves = raw_input.events.iter().filter(|e| matches!(e, egui::Event::PointerMoved(_))).count();
             self.stroke_trace.begin_frame(frame_start, moves);
         }
+        // Last, so it stamps every event the frame carries: Android's winit reports no modifier
+        // state and never emits `ModifiersChanged`, so egui's chords would never match without it.
+        #[cfg(target_os = "android")]
+        stamp_android_modifiers(&mut raw_input.events, &mut self.android_modifiers);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.hover_layer = None;
         i18n::set_current(i18n::Lang::from_pref(&self.session.prefs().interface.language));
+        // On a touch screen a fingertip has to be able to grab a scroll bar (widgets.rs).
+        widgets::touch_scroll_target(&ctx);
         // Fonts registered via set_fonts only take effect next frame; named families would panic now.
         if !self.fonts_ready {
             ctx.request_repaint();
@@ -2977,6 +3020,152 @@ impl PhotocraftApp {
         self.clip_external = true;
         self.clip_unmirrored = false;
         Ok(true)
+    }
+}
+
+/// winit's Android backend reports no modifier state at all: it ignores the meta state Android
+/// carries on every `KeyEvent` and never emits the `ModifiersChanged` event egui-winit learns
+/// `Ctrl`/`Shift`/`Alt` from, so every chord — Undo, Save, the panel shortcuts — sees empty
+/// modifiers and never matches. Track the modifier keys from the key events themselves, in the
+/// order they happen inside the frame, stamp them onto the frame's key events, and announce the
+/// result to egui with a `ModifiersChanged` of its own before any widget runs.
+///
+/// Called only on Android, from `raw_input_hook`; everywhere else winit reports the real
+/// modifiers, which this would only duplicate. `held` is the app's cross-frame copy, cleared by a
+/// lost focus so a modifier held while the app is backgrounded cannot stick. The frame's own
+/// `ModifiersChanged` describes the end of the frame; the per-event stamps carry the exact moment,
+/// which is what chord matching reads.
+///
+/// The function is pure, so its tests run on the host.
+#[cfg(any(target_os = "android", test))]
+fn stamp_android_modifiers(events: &mut Vec<egui::Event>, held: &mut egui::Modifiers) {
+    for event in events.iter_mut() {
+        match event {
+            // A lost focus clears the tracked state, so a modifier held while the app is
+            // backgrounded cannot stick.
+            egui::Event::WindowFocused(false) => *held = egui::Modifiers::NONE,
+            egui::Event::Key { key: egui::Key::ControlLeft | egui::Key::ControlRight, pressed, .. } => {
+                held.ctrl = *pressed;
+                // As egui-winit itself does on every platform but macOS: the command shortcut is
+                // Ctrl, and COMMAND chords need `command` set.
+                held.command = *pressed;
+            }
+            egui::Event::Key { key: egui::Key::ShiftLeft | egui::Key::ShiftRight, pressed, .. } => held.shift = *pressed,
+            egui::Event::Key { key: egui::Key::AltLeft | egui::Key::AltRight, pressed, .. } => held.alt = *pressed,
+            // The wheel and the buttons carry their own modifiers too (Alt/Ctrl + wheel and
+            // Ctrl + click read them), and egui-winit fills them from its own state — always
+            // empty here. Stamp them with what was held when they fired.
+            egui::Event::Key { modifiers, .. } => *modifiers = *held,
+            egui::Event::MouseWheel { modifiers, .. } | egui::Event::PointerButton { modifiers, .. } => {
+                *modifiers = *held;
+            }
+            _ => {}
+        }
+    }
+    // `held.command` mirrors ctrl here (COMMAND chords match). Appended last: egui applies
+    // `ModifiersChanged` events in order, so the frame-level modifiers end up as this frame's end
+    // state — not a stale value left in eframe's pending input buffer from an earlier frame.
+    events.push(egui::Event::ModifiersChanged(*held));
+}
+
+#[cfg(test)]
+mod android_modifier_tests {
+    use egui::{Event, Key, Modifiers};
+
+    fn key(key: Key, pressed: bool) -> Event {
+        Event::Key { key, physical_key: Some(key), pressed, repeat: false, modifiers: Modifiers::NONE }
+    }
+
+    fn stamp(events: Vec<Event>) -> (Vec<Event>, Modifiers) {
+        let mut events = events;
+        let mut held = Modifiers::NONE;
+        super::stamp_android_modifiers(&mut events, &mut held);
+        (events, held)
+    }
+
+    /// The modifiers each key event of the frame carries, in order.
+    fn stamped(events: &[Event]) -> Vec<Modifiers> {
+        events
+            .iter()
+            .filter_map(|e| match e {
+                Event::Key { modifiers, .. } => Some(*modifiers),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn ctrl_chord_gets_the_command_modifiers() {
+        let (events, held) = stamp(vec![key(Key::ControlLeft, true), key(Key::S, true)]);
+        // The Ctrl press itself is left alone; the S press under it carries Ctrl…
+        assert_eq!(stamped(&events), vec![Modifiers::NONE, Modifiers { ctrl: true, command: true, ..Modifiers::NONE }]);
+        assert!(held.ctrl && held.command);
+    }
+
+    #[test]
+    fn a_released_ctrl_ends_the_chord_within_the_frame() {
+        let ctrl = Modifiers { ctrl: true, command: true, ..Modifiers::NONE };
+        let (events, held) = stamp(vec![key(Key::Z, true), key(Key::ControlLeft, true), key(Key::Z, true), key(Key::ControlRight, false), key(Key::Z, true)]);
+        // Five key events, none of the modifier presses/releases stamped: the Z under Ctrl
+        // carries the chord, the Z after the release does not.
+        assert_eq!(stamped(&events), vec![Modifiers::NONE, Modifiers::NONE, ctrl, Modifiers::NONE, Modifiers::NONE]);
+        assert_eq!(held, Modifiers::NONE);
+    }
+
+    #[test]
+    fn shift_and_alt_are_tracked() {
+        let both = Modifiers { shift: true, alt: true, ..Modifiers::NONE };
+        let (events, held) = stamp(vec![key(Key::ShiftLeft, true), key(Key::AltRight, true), key(Key::F5, true)]);
+        assert_eq!(stamped(&events)[2], both);
+        assert_eq!(held, both);
+    }
+
+    #[test]
+    fn a_lost_focus_clears_a_stuck_modifier() {
+        let (events, held) = stamp(vec![key(Key::ControlLeft, true), Event::WindowFocused(false), key(Key::S, true)]);
+        // stamped() only collects key events: the Ctrl press, then the S press after the focus loss.
+        assert_eq!(stamped(&events)[1], Modifiers::NONE, "no chord may survive a focus loss");
+        assert_eq!(held, Modifiers::NONE);
+    }
+
+    #[test]
+    fn the_frame_announces_its_end_state() {
+        let (events, _) = stamp(vec![key(Key::ControlLeft, true)]);
+        assert!(matches!(events.last(), Some(Event::ModifiersChanged(m)) if m.ctrl && m.command));
+        let (events, _) = stamp(vec![]);
+        assert!(matches!(events.last(), Some(Event::ModifiersChanged(m)) if *m == Modifiers::NONE));
+    }
+
+    #[test]
+    fn stamped_modifiers_match_the_binding_patterns() {
+        // What the shortcut pass then does with them: Ctrl+S matches a COMMAND binding and not a
+        // plain-key one, and an unmodified key the other way around.
+        let (events, _) = stamp(vec![key(Key::ControlLeft, true), key(Key::S, true)]);
+        let chord = stamped(&events)[1];
+        assert!(chord.matches_logically(Modifiers::COMMAND));
+        assert!(!chord.matches_logically(Modifiers::NONE));
+        let (events, _) = stamp(vec![key(Key::Z, true)]);
+        let plain = stamped(&events)[0];
+        assert!(plain.matches_logically(Modifiers::NONE));
+        assert!(!plain.matches_logically(Modifiers::COMMAND));
+    }
+
+    #[test]
+    fn wheel_and_button_events_carry_the_held_modifiers() {
+        let (events, _) = stamp(vec![
+            key(Key::ControlLeft, true),
+            Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, 1.0), phase: egui::TouchPhase::Move, modifiers: Modifiers::NONE },
+            Event::PointerButton { pos: egui::Pos2::ZERO, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE },
+        ]);
+        let ctrl = Modifiers { ctrl: true, command: true, ..Modifiers::NONE };
+        let carried: Vec<Modifiers> = events
+            .iter()
+            .filter_map(|e| match e {
+                Event::MouseWheel { modifiers, .. } | Event::PointerButton { modifiers, .. } => Some(*modifiers),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(carried, vec![ctrl, ctrl]);
     }
 }
 

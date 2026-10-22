@@ -444,7 +444,7 @@ fn saved_presets(app: &mut crate::PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<
         return false;
     }
     let mut create = false;
-    egui::ScrollArea::vertical().id_salt("saved-document-presets").max_height(320.0).show(ui, |ui| {
+    crate::widgets::panel_scroll().id_salt("saved-document-presets").max_height(320.0).show(ui, |ui| {
         for preset in &presets {
             ui.push_id(&preset.name, |ui| {
                 ui.horizontal(|ui| {
@@ -572,7 +572,7 @@ pub fn body(app: &mut crate::PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<Strin
             ui.add_space(6.0);
             let card = vec2(164.0, 112.0);
             // Up to 20 recent documents: scroll past three rows rather than grow the dialog.
-            egui::ScrollArea::vertical().id_salt("new-document-presets").max_height(3.0 * (card.y + 8.0)).show(ui, |ui| {
+            crate::widgets::panel_scroll().id_salt("new-document-presets").max_height(3.0 * (card.y + 8.0)).show(ui, |ui| {
                 for row in presets.chunks(3) {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 8.0;
@@ -1664,6 +1664,50 @@ mod tests {
                     "hovering preset tab {tab:?} must show PointingHand instead of text caret"
                 );
             }
+        }
+
+        /// A phone in landscape is about 809x380 points (the TECNO KJ5's window measures 1532x720
+        /// px = 809x380 points at the window's own scale): there the dialog's body scrolls, so its
+        /// title and its Create / Cancel row stay inside the window. Measured on the device before
+        /// the body scrolled: the dialog ran past the window's lower edge, with Background Contents
+        /// cut and Create and Cancel below it, unreachable.
+        #[test]
+        fn a_phone_shaped_window_scrolls_the_body_and_keeps_create_inside() {
+            let size = egui::vec2(809.0, 380.0);
+            let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+            let mut h = Harness::builder().with_size(size).with_step_dt(1.0 / 60.0).build_ui_state(|ui, app| crate::dialogs::show(app, ui.ctx()), app);
+            PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ALL[0]);
+            h.state_mut().ui.open_dialog(DialogKind::NewDocument, UiState::new_document_fields());
+            h.run_steps(3);
+            for label in ["New Document", "Create", "Close"] {
+                let found: Vec<egui::Rect> = h.query_all_by_label(label).map(|n| n.rect()).collect();
+                assert!(!found.is_empty(), "the {label:?} widget is missing");
+                for r in found {
+                    assert!(r.top() >= 0.0 && r.bottom() <= size.y, "{label} at {r:?} is outside the {size:?} window");
+                }
+            }
+            // And a control further down the body — Save Preset… sits after every field — must be
+            // reachable by scrolling, not merely the fixed Create / Close row.
+            let over_body = h.get_by_label("Width").rect().center();
+            let before = h.get_by_label("Save Preset…").rect();
+            h.event(egui::Event::PointerMoved(over_body));
+            for _ in 0..8 {
+                h.event(egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::vec2(0.0, -120.0),
+                    modifiers: egui::Modifiers::NONE,
+                    phase: egui::TouchPhase::Move,
+                });
+                h.run_steps(2);
+            }
+            h.run_steps(4);
+            let after = h.get_by_label("Save Preset…").rect();
+            assert!(after.top() < before.top() - 1.0, "the body did not scroll: {before:?} -> {after:?}");
+            assert!(after.top() >= 0.0 && after.bottom() <= size.y, "Save Preset… at {after:?} is outside the {size:?} window");
+            // And Create is genuinely usable where it sits: it makes the default 1920 x 1080 document.
+            h.get_by_label("Create").click();
+            h.run_steps(3);
+            assert_eq!(created(&h), (1920, 1080, 72.0));
         }
     }
 }

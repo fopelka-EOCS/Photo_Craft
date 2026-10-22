@@ -61,7 +61,7 @@ choice!(DarkTheme { Pro = "pro", ProMedium = "proMedium", Studio = "studio", Sol
 choice!(LightTheme { ProLight = "proLight", ProLightGray = "proLightGray", StudioLight = "studioLight", Classic = "classic", Adwaita = "adwaita", BreezeLight = "breezeLight", SoftLight = "softLight" } default ProLight);
 choice!(CanvasColor { Default = "default", Black = "black", DarkGray = "darkGray", MediumGray = "mediumGray", LightGray = "lightGray", Custom = "custom" } default Default);
 choice!(CanvasBorder { DropShadow = "dropShadow", Line = "line", None = "none" } default DropShadow);
-choice!(UiScale { Auto = "auto", P75 = "75", P80 = "80", P85 = "85", P90 = "90", P95 = "95", P100 = "100", P125 = "125", P150 = "150", P175 = "175", P200 = "200", P250 = "250", P300 = "300" } default Auto);
+choice!(UiScale { Auto = "auto", P50 = "50", P55 = "55", P60 = "60", P65 = "65", P70 = "70", P75 = "75", P80 = "80", P85 = "85", P90 = "90", P95 = "95", P100 = "100", P125 = "125", P150 = "150", P175 = "175", P200 = "200", P250 = "250", P300 = "300" } default Auto);
 choice!(
     /// Graphics backend of the desktop app's window and GPU canvas (applies at next launch).
     /// `auto` lets PhotoCraft pick (DX12 for Intel adapters on Windows); `cpu` composites on the
@@ -83,6 +83,11 @@ choice!(
     LinuxDisplayServer { Auto = "auto", X11 = "x11" } default Auto
 );
 choice!(UiFontSize { Tiny = "tiny", Small = "small", Medium = "medium", Large = "large" } default Small);
+choice!(
+    /// The in-app file picker's view (Android and every host without a blocking dialog): a row
+    /// per entry, or icon tiles in three sizes.
+    PickerView { List = "list", SmallIcons = "small", MediumIcons = "medium", LargeIcons = "large" } default LargeIcons
+);
 choice!(LogDestination { Metadata = "metadata", TextFile = "textFile", Both = "both" } default Metadata);
 choice!(LogDetail { SessionsOnly = "sessionsOnly", Concise = "concise", Detailed = "detailed" } default Concise);
 choice!(Ask { Always = "always", Never = "never", Ask = "ask" } default Always);
@@ -338,6 +343,14 @@ pub struct Workspace {
     pub large_tabs: bool,
     pub enable_narrow_options_bar: bool,
     pub remember_workspace_changes: bool,
+    /// The in-app file picker's view: a row per entry (`list`) or icon tiles
+    /// (`small`, `medium`, `large`), changed with the picker's own View buttons and remembered.
+    pub picker_view: PickerView,
+    /// Android's launch-time ask for "All files access" (`MANAGE_EXTERNAL_STORAGE`): the prompt's
+    /// "Not now" sets it, so PhotoCraft stops asking at launch. The in-app browser's own
+    /// "Shared storage (grant access)" row asks on demand whatever this says. Android only
+    /// (`ANDROID_ONLY`): no other host ever asks, so it stays out of their Preferences dialog.
+    pub android_skip_all_files_access_prompt: bool,
 }
 
 impl Default for Workspace {
@@ -350,6 +363,8 @@ impl Default for Workspace {
             large_tabs: false,
             enable_narrow_options_bar: false,
             remember_workspace_changes: true,
+            picker_view: PickerView::default(),
+            android_skip_all_files_access_prompt: false,
         }
     }
 }
@@ -1075,7 +1090,9 @@ pub const HIDDEN_UNTIL_IMPLEMENTED: &[&str] = &[
 
 /// Is the preference at `path` (`"section.key"`) hidden from the Preferences dialog?
 pub fn is_hidden(path: &str) -> bool {
-    HIDDEN_UNTIL_IMPLEMENTED.contains(&path) || (!cfg!(target_os = "linux") && LINUX_ONLY.contains(&path))
+    HIDDEN_UNTIL_IMPLEMENTED.contains(&path)
+        || (!cfg!(target_os = "linux") && LINUX_ONLY.contains(&path))
+        || (!cfg!(target_os = "android") && ANDROID_ONLY.contains(&path))
 }
 
 /// Preferences that only do something on Linux; the dialog doesn't show them elsewhere. They
@@ -1091,6 +1108,10 @@ pub fn gpu_adapter_matches(name: &str, wanted: &str) -> bool {
     words.peek().is_some() && words.all(|w| name.contains(&w.to_lowercase()))
 }
 
+/// Preferences that only do something on Android (the launch-time ask for "All files access"):
+/// the dialog shows them on Android alone, and they load, save and round-trip everywhere.
+pub const ANDROID_ONLY: &[&str] = &["workspace.androidSkipAllFilesAccessPrompt"];
+
 /// Choices of an enumerated preference (dotted path, e.g. `"cursors.painting"`).
 pub fn choices(path: &str) -> Option<&'static [&'static str]> {
     Some(match path {
@@ -1103,6 +1124,7 @@ pub fn choices(path: &str) -> Option<&'static [&'static str]> {
         "interface.canvasColor" => CanvasColor::NAMES,
         "interface.canvasBorder" => CanvasBorder::NAMES,
         "interface.uiScale" => UiScale::NAMES,
+        "workspace.pickerView" => PickerView::NAMES,
         "interface.uiFontSize" => UiFontSize::NAMES,
         "historyLog.destination" => LogDestination::NAMES,
         "historyLog.detail" => LogDetail::NAMES,

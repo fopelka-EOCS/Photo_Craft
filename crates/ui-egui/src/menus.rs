@@ -13,7 +13,8 @@ pub(crate) fn modal_allows(app: &PhotocraftApp, id: &str) -> bool {
     if app.camera_raw.is_some() || crate::crop_ui::blocks(app, id) {
         return false;
     }
-    (app.ui.dialogs.is_empty() && app.ui.layers_panel_dialog.is_none() && app.discard.is_none()) || crate::shortcuts::NAV_COMMANDS.contains(&id)
+    (app.ui.dialogs.is_empty() && app.ui.layers_panel_dialog.is_none() && app.discard.is_none() && !app.android_file.is_open() && !app.android_access.is_open())
+        || crate::shortcuts::NAV_COMMANDS.contains(&id)
 }
 
 /// Top-level menus in Photoshop order.
@@ -2038,6 +2039,41 @@ mod tests {
 
         let after = harness.get_by_label_contains("Filter Gallery…").rect().top();
         assert!(after < before - 1.0, "mouse wheel should move tall menu content: {before} -> {after}");
+    }
+
+    #[test]
+    fn a_menu_taller_than_the_window_scrolls_by_drag() {
+        use egui_kittest::{Harness, kittest::Queryable};
+
+        let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let mut harness = Harness::builder().with_size(egui::vec2(900.0, 220.0)).build_ui_state(
+            |ui, app| {
+                menu_bar(app, ui);
+            },
+            app,
+        );
+        PhotocraftApp::setup_context(&harness.ctx, crate::theme::ThemeKind::ALL[0]);
+        harness.run_steps(3);
+        harness.get_by_label("Filter").click();
+        harness.run_steps(3);
+
+        // No wheel and no touch event — this harness sends neither, and a host window has no
+        // touch state — but a pointer drag down the open menu must still move its rows: the drag
+        // is not left to egui's touch detection (widgets.rs `drag_source`).
+        let item = harness.get_by_label_contains("Filter Gallery…");
+        let before = item.rect().top();
+        let mid = egui::pos2(450.0, before + 4.0);
+        harness.drag_at(mid);
+        harness.run();
+        for y in [before - 20.0, before - 45.0, before - 70.0] {
+            harness.hover_at(egui::pos2(450.0, y));
+            harness.run();
+        }
+        harness.drop_at(egui::pos2(450.0, before - 70.0));
+        harness.run_steps(4);
+
+        let after = harness.get_by_label_contains("Filter Gallery…").rect().top();
+        assert!(after < before - 1.0, "a drag should move tall menu content: {before} -> {after}");
     }
 
     #[test]

@@ -2278,6 +2278,11 @@
 	Show Skin Tone Indicator	Cilt Tonu Göstergesini Göster
 	Show Vectorscope	Vectorscope'u göster
 	Tone Histogram	Ton Histogramı
+	50%	50%
+	55%	55%
+	60%	60%
+	65%	65%
+	70%	70%
 	75%	75%
 	80%	80%
 	85%	85%
@@ -4001,6 +4006,28 @@ cameraData	Lens	Lens
 	This document's layers: {needed} of {budget} for layers	Bu belgenin katmanları: katmanlar için {budget} içinden {needed}
 	This document's layers need {needed} but may hold {budget}: whole-document redraws use the CPU	Bu belgenin katmanlarının {needed} belleğe ihtiyacı var ama en fazla {budget} kullanabilirler: tüm belgenin yeniden çizimi CPU'yu kullanır
 	GPU Memory (MB, 0 = Automatic)	GPU Belleği (MB, 0 = Otomatik)
+
+# Android in-app file browser (crates/ui-egui/src/android_file.rs)
+	(empty)	(boş)
+	Allow "All files access" for PhotoCraft, then tap Shared storage.	PhotoCraft'a tüm dosyalara erişim izni verin, ardından "Paylaşılan depolama"ya dokunun.
+	App storage	Uygulama depolaması
+	Choose this folder	Bu klasörü seç
+	Could not create the folder:	Klasör oluşturulamadı:
+	File name:	Dosya adı:
+	Grant access	Erişim ver
+	Name the new folder first	Önce yeni klasöre ad verin
+	New folder	Yeni klasör
+	Select at least one file.	En az bir dosya seçin.
+	Shared storage	Paylaşılan depolama
+	Shared storage (grant access)	Paylaşılan depolama (erişim ver)
+	Tap files to select them.	Seçmek için dosyalara dokunun.
+	{name} already exists. Replace it?	{name} zaten var. Değiştirilsin mi?
+	This build can't request shared-storage access.	Bu derleme paylaşılan depolama erişimi isteyemez.
+	This folder can't be read yet. Grant PhotoCraft access to all files.	Bu klasör henüz okunamıyor. PhotoCraft'a tüm dosyalara erişim izni verin.
+	Up	Yukarı
+	selected	seçili
+	Picker view	Seçici görünümü
+	Could not remember the view.	Görünüm hatırlanamadı.
 	{name} was changed by another app after it was opened or saved here.	{name}, burada açıldıktan veya kaydedildikten sonra başka bir uygulama tarafından değiştirildi.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Bu belgeyle değiştirin ya da iptal edip ikisini de korumak için Dosya › Farklı Kaydet'i kullanın.
 	Decrease Brush Size	Fırça boyutunu küçült
@@ -4016,6 +4043,11 @@ cameraData	Lens	Lens
 	Use	Kullan
 	In Front	Önde
 	Behind	Arkada
+# Android launch-time "All files access" prompt (crates/ui-egui/src/android_access.rs)
+	Allow access to all files?	Tüm dosyalara erişime izin verilsin mi?
+	Not now	Şimdi değil
+	PhotoCraft needs "All files access" to open and save files in shared storage.	PhotoCraft, "Paylaşılan depolama"daki dosyaları açmak ve kaydetmek için tüm dosyalara erişim gerektirir.
+	Skip the all-files-access prompt at launch	Başlangıçta tüm dosyalara erişim sorulmasın
 
 # DDS Options (#1327)
 	DDS Options	DDS Seçenekleri

@@ -378,6 +378,87 @@ release build of the benches alone takes longer than PR CI should. To give the n
 its own baseline, run the workflow by hand with `update_baseline` and commit the `perf-baseline`
 artifact as `perf/baseline.json`.
 
+## Android build
+
+`apps/photocraft-android` is a NativeActivity entry trampoline (`android_main`) that opens the same
+app library the desktop and web builds use (`photocraft::run_android`); the engine, panels and
+command registry are shared, not reimplemented. It builds an arm64-v8a APK with
+[`cargo-apk`](https://crates.io/crates/cargo-apk):
+
+```sh
+rustup target add aarch64-linux-android
+cargo install cargo-apk
+export ANDROID_HOME="$HOME/Android/Sdk"                 # platform tools + build-tools
+export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/<version>"   # e.g. 28.2.13676358
+cargo apk build -p photocraft-android                   # debug: target/debug/apk/photocraft.apk
+adb install -r target/debug/apk/photocraft.apk
+adb shell monkey -p ai.storyteller.photocraft -c android.intent.category.LAUNCHER 1
+```
+
+`cargo apk` reads `[package.metadata.android]` in `apps/photocraft-android/Cargo.toml` (arm64-v8a,
+minSdk 28, the launcher icon under `res/`, and the exhaustive `configChanges`). A `--release` build
+is signed from two environment variables — cargo-apk 0.10.0 reads no signing key out of the
+manifest. It derives them from the profile name (`CARGO_APK_<PROFILE>_KEYSTORE` plus `_PASSWORD`,
+so `CARGO_APK_RELEASE_KEYSTORE_PASSWORD` for `--release`), and hands `apksigner` only `--ks-pass`
+(the *store* password, no `--key-pass` and no alias), so the key password must match the store
+password and the store must hold a single key:
+
+```sh
+CARGO_APK_RELEASE_KEYSTORE="$HOME/photocraft-release.jks" \
+CARGO_APK_RELEASE_KEYSTORE_PASSWORD="$(cat "$HOME/keystore-password.txt")" \
+cargo apk build -p photocraft-android --release    # target/release/apk/photocraft.apk
+```
+
+The keystore is a PKCS12 store made with
+`keytool -genkeypair -storetype PKCS12 -keyalg RSA -keysize 4096 -validity 10000 -alias photocraft`
+(`-storepass` and `-keypass` the same), held outside the repository with its password file beside it
+(mode 600): nothing signing-related is committed.
+`apksigner verify --print-certs target/release/apk/photocraft.apk` prints the signer's SHA-256
+fingerprint to check it against the keystore's.
+
+Android specifics:
+
+- **No system file picker.** rfd has no Android backend, so on the phone the file dialogs are served
+  by PhotoCraft's own in-app browser, `crates/ui-egui/src/android_file.rs`, which `poll_file_dialog`
+  routes to when a host sets `Services::app_files_dir` and has no `file_dialog`. `Documents/` and
+  `config/` live below the app-private directory (`AndroidApp::internal_data_path`); `app_dirs`
+  resolves the settings directory there so preferences, preset stores and crash recovery work.
+- **Shared storage.** The browser offers `/storage/emulated/0` as a second root once the user grants
+  **All files access** (`MANAGE_EXTERNAL_STORAGE`). The app can only check and ask for it: the entry
+  crate does the JNI (`apps/photocraft-android/src/android_access.rs`, the project's one piece of
+  real `unsafe`) and hands the shared app plain closures in `photocraft::SharedStorageAccess`. When
+  the grant is missing at launch the shell asks once, with a short modal
+  (`crates/ui-egui/src/android_access.rs`, fired from the host's `started` hook): **Grant access**
+  opens Android's All-files-access page, and **Not now** is remembered
+  (`workspace.androidSkipAllFilesAccessPrompt`, an Android-only preference, so the desktop
+  Preferences dialog never shows it). The browser's own Grant access row keeps asking on demand
+  whatever that says.
+- **Input.** The vendored winit adds Android mouse and trackpad input
+  ([`third_party/winit/README.md`](../third_party/winit/README.md)), and `stamp_android_modifiers`
+  in `crates/ui-egui` supplies the keyboard modifiers winit never reports, so chords match.
+  Touch drags reach egui as real `Event::Touch`s: measured on the SM-X736B with 0.9.0 installed, a
+  finger drag already scrolled a dock panel and a menu taller than the window *before* the scroll
+  change in this branch, so `InputState::has_touch_screen` is satisfied on the tablet and egui's
+  `DragScroll::OnTouch` default was never what blocked it. Menus and panel bodies still force the
+  drag on (`widgets::drag_source`) so the gesture does not depend on that detection at all, and
+  `widgets::touch_scroll_target` widens the scroll bar's hit to 24 points on a touch screen (a
+  `ScrollStyle::thin` bar is ten points, four drawn while it floats). The port was exercised on a
+  phone too (TECNO KJ5, Android 13, landscape window 1532x720 px = 809x380 points): there a finger
+  drag scrolls a scrolling dialog body and the widened bar band pans it, while the Layers list does
+  not move — its rows are `Sense::click_and_drag` for reordering, so the row owns the drag. The drag
+  stops at a dialog that scrolls nothing itself: measured on the tablet, a finger drag inside the
+  in-app browser's grid leaves the listing where it is, where the same gesture pans a panel or a
+  menu. egui's `containers/area.rs` keeps drag hit-tests on the area's own widget over its body, so
+  the bar and the wheel are the way through a long listing in a dialog.
+- **Wasm is unaffected:** the app crate is not in the `cargo xtask wasm` set, and its desktop
+  dependencies (rfd, arboard, accesskit, X11/Wayland) are gated behind `cfg(not(target_os = "android"))`.
+- **Release signing** ([G18](gaps.md#g18-android-release-signing-and-store-packaging)): a
+  `--release` APK is signed from the two environment variables above, with a keystore held outside
+  the repository; debug builds stay on the throwaway debug key. It is a different signer than the
+  debug key, so `adb install -r` over a debug install fails — `adb uninstall` first (which drops the
+  app's private preferences and the All-files-access grant). Store packaging and accounts are still
+  open.
+
 ## Web build
 
 `apps/photocraft-web` runs the same `PhotocraftApp` in the browser through eframe's web runner. The renderer is wgpu: WebGPU where the browser has it, WebGL2 otherwise. It is Rust only. The only JavaScript is the glue that wasm-bindgen generates.

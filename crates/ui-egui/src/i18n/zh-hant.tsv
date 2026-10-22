@@ -663,6 +663,11 @@
 	Fit Artboard on Screen	使工作區域符合螢幕
 	100%	100%
 	200%	200%
+	50%	50%
+	55%	55%
+	60%	60%
+	65%	65%
+	70%	70%
 	75%	75%
 	80%	80%
 	85%	85%
@@ -2890,6 +2895,30 @@ curves	Smooth	平滑
 	This document's layers: {needed} of {budget} for layers	此文件的圖層：圖層可用 {budget} 中的 {needed}
 	This document's layers need {needed} but may hold {budget}: whole-document redraws use the CPU	此文件的圖層需要 {needed}，但只能佔用 {budget}：整份文件的重繪使用 CPU
 	GPU Memory (MB, 0 = Automatic)	GPU 記憶體（MB，0 = 自動）
+
+# Android in-app file browser (crates/ui-egui/src/android_file.rs)
+	(empty)	（空）
+	Allow "All files access" for PhotoCraft, then tap Shared storage.	允許 PhotoCraft 存取所有檔案，然後點一下「共享儲存空間」。
+	App storage	應用程式儲存空間
+	Change…	變更…
+	Choose this folder	選擇此資料夾
+	Could not create the folder:	無法建立資料夾：
+	File name:	檔案名稱：
+	Grant access	授予存取權
+	Name the new folder first	請先命名新資料夾
+	New folder	新增資料夾
+	Select at least one file.	請至少選擇一個檔案。
+	Shared storage	共享儲存空間
+	Shared storage (grant access)	共享儲存空間（授予存取權）
+	Tap files to select them.	點一下檔案來選取。
+	{name} already exists. Replace it?	{name} 已存在。要取代嗎？
+	This build can't request shared-storage access.	此版本無法要求共享儲存空間存取權。
+	This folder can't be read yet. Grant PhotoCraft access to all files.	目前無法讀取此資料夾。請授予 PhotoCraft 存取所有檔案的權限。
+	Up	上一層
+	selected	項已選
+	List	清單
+	Picker view	選擇器檢視
+	Could not remember the view.	無法記住檢視。
 	Replace	取代
 	{name} was changed by another app after it was opened or saved here.	{name} 在此處開啟或儲存後已被其他 App 更改。
 	Replace it with this document, or cancel and use File › Save As to keep both.	以此文件取代它，或取消並使用「檔案 › 另存新檔」以保留兩者。
@@ -2907,6 +2936,11 @@ curves	Smooth	平滑
 	In Front	前面
 	Behind	後面
 	Blend	混合
+# Android launch-time "All files access" prompt (crates/ui-egui/src/android_access.rs)
+	Allow access to all files?	允許存取所有檔案？
+	Not now	稍後再說
+	PhotoCraft needs "All files access" to open and save files in shared storage.	PhotoCraft 需要「所有檔案存取權」才能在「共享儲存空間」中開啟和儲存檔案。
+	Skip the all-files-access prompt at launch	啟動時不再提示所有檔案存取權
 
 # DDS Options (#1327)
 	DDS Options	DDS 選項

@@ -1398,6 +1398,11 @@ cameraRaw	Shadows	Vùng tối
 	175%	175%
 	250%	250%
 	300%	300%
+	50%	50%
+	55%	55%
+	60%	60%
+	65%	65%
+	70%	70%
 	75%	75%
 	Add disk	Thêm đĩa
 	Additional plugins folder	Thư mục plug-in bổ sung
@@ -3762,6 +3767,28 @@ curves	Smooth	Làm mượt
 	This document's layers: {needed} of {budget} for layers	Các lớp của tài liệu này: {needed} trên {budget} dành cho lớp
 	This document's layers need {needed} but may hold {budget}: whole-document redraws use the CPU	Các lớp của tài liệu này cần {needed} nhưng chỉ được dùng {budget}: vẽ lại toàn bộ tài liệu dùng CPU
 	GPU Memory (MB, 0 = Automatic)	Bộ nhớ GPU (MB, 0 = Tự động)
+
+# Android in-app file browser (crates/ui-egui/src/android_file.rs)
+	(empty)	(trống)
+	Allow "All files access" for PhotoCraft, then tap Shared storage.	Cho phép PhotoCraft truy cập mọi tệp, sau đó nhấn "Bộ nhớ chia sẻ".
+	App storage	Bộ nhớ ứng dụng
+	Change…	Thay đổi…
+	Choose this folder	Chọn thư mục này
+	Could not create the folder:	Không thể tạo thư mục:
+	File name:	Tên tệp:
+	Grant access	Cấp quyền truy cập
+	Name the new folder first	Đặt tên cho thư mục mới trước
+	New folder	Thư mục mới
+	Select at least one file.	Chọn ít nhất một tệp.
+	Shared storage	Bộ nhớ chia sẻ
+	Shared storage (grant access)	Bộ nhớ chia sẻ (cấp quyền truy cập)
+	Tap files to select them.	Nhấn vào tệp để chọn.
+	{name} already exists. Replace it?	{name} đã tồn tại. Thay thế?
+	This build can't request shared-storage access.	Bản dựng này không thể yêu cầu quyền truy cập bộ nhớ chia sẻ.
+	This folder can't be read yet. Grant PhotoCraft access to all files.	Chưa thể đọc thư mục này. Cấp cho PhotoCraft quyền truy cập mọi tệp.
+	selected	đã chọn
+	Picker view	Xem bộ chọn
+	Could not remember the view.	Không thể ghi nhớ chế độ xem.
 	Replace	Thay thế
 	{name} was changed by another app after it was opened or saved here.	{name} đã bị một ứng dụng khác thay đổi sau khi được mở hoặc lưu ở đây.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Thay thế bằng tài liệu này, hoặc hủy và dùng Tệp › Lưu thành để giữ cả hai.
@@ -3778,6 +3805,11 @@ curves	Smooth	Làm mượt
 	Use	Dùng
 	In Front	Phía trước
 	Behind	Phía sau
+# Android launch-time "All files access" prompt (crates/ui-egui/src/android_access.rs)
+	Allow access to all files?	Cho phép truy cập mọi tệp?
+	Not now	Để sau
+	PhotoCraft needs "All files access" to open and save files in shared storage.	PhotoCraft cần quyền truy cập mọi tệp để mở và lưu tệp trong "Bộ nhớ chia sẻ".
+	Skip the all-files-access prompt at launch	Không hỏi quyền truy cập mọi tệp khi khởi động
 
 # DDS Options (#1327)
 	DDS Options	Tùy chọn DDS

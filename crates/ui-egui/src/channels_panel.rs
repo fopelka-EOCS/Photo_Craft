@@ -92,7 +92,7 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let rows_h = if fill { ui.available_height() - footer } else { f32::INFINITY };
     let mut mask_click = None;
     let mut drawn = Vec::new();
-    egui::ScrollArea::vertical().max_height(rows_h).min_scrolled_height(if fill { rows_h } else { 0.0 }).auto_shrink([false, !fill]).show(ui, |ui| {
+    crate::widgets::panel_scroll().max_height(rows_h).min_scrolled_height(if fill { rows_h } else { 0.0 }).auto_shrink([false, !fill]).show(ui, |ui| {
         for row in rows {
             let (name, thumb_idx, slot, visible, selected) = match row {
                 Row::Composite => (
@@ -125,7 +125,9 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             };
             let row_h = if t.pro { 36.0 } else { 40.0 };
             let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::click_and_drag());
-            if resp.drag_started() {
+            // A finger that moves before the hold pans the list instead of dragging the row.
+            let scrolling = crate::widgets::touch_row(ui, &resp) == crate::widgets::TouchRow::Scroll;
+            if resp.drag_started() && !scrolling {
                 ctx.data_mut(|d| d.insert_temp(drag_id(), (row, name.clone())));
             }
             let painter = ui.painter_at(rect.expand(1.0));

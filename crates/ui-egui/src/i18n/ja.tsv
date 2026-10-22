@@ -652,6 +652,11 @@
 	Fit Artboard on Screen	アートボードを画面サイズに合わせる
 	100%	100%
 	200%	200%
+	50%	50%
+	55%	55%
+	60%	60%
+	65%	65%
+	70%	70%
 	75%	75%
 	80%	80%
 	85%	85%
@@ -3949,6 +3954,29 @@ curves	Smooth	スムーズ
 	This document's layers: {needed} of {budget} for layers	このドキュメントのレイヤー: レイヤー用 {budget} のうち {needed}
 	This document's layers need {needed} but may hold {budget}: whole-document redraws use the CPU	このドキュメントのレイヤーには {needed} が必要ですが、使えるのは {budget} です: ドキュメント全体の再描画は CPU で行われます
 	GPU Memory (MB, 0 = Automatic)	GPU メモリ（MB、0 = 自動）
+
+# Android in-app file browser (crates/ui-egui/src/android_file.rs)
+	(empty)	(空)
+	Allow "All files access" for PhotoCraft, then tap Shared storage.	PhotoCraft に「すべてのファイルへのアクセス」を許可し、「共有ストレージ」をタップしてください。
+	App storage	アプリのストレージ
+	Change…	変更…
+	Choose this folder	このフォルダーを選択
+	Could not create the folder:	フォルダーを作成できませんでした:
+	File name:	ファイル名:
+	Grant access	アクセスを許可
+	Name the new folder first	先に新しいフォルダーの名前を入力してください
+	New folder	新しいフォルダー
+	Select at least one file.	少なくとも 1 つのファイルを選択してください。
+	Shared storage	共有ストレージ
+	Shared storage (grant access)	共有ストレージ (アクセスを許可)
+	Tap files to select them.	ファイルをタップして選択します。
+	{name} already exists. Replace it?	{name} は既に存在します。置き換えますか？
+	This build can't request shared-storage access.	このビルドは共有ストレージへのアクセスを要求できません。
+	This folder can't be read yet. Grant PhotoCraft access to all files.	このフォルダーはまだ読み取れません。PhotoCraft にすべてのファイルへのアクセスを許可してください。
+	Up	上へ
+	selected	件選択
+	Picker view	ピッカーの表示
+	Could not remember the view.	表示を記憶できませんでした。
 	Replace	置き換え
 	{name} was changed by another app after it was opened or saved here.	{name} は、ここで開くか保存した後に別のアプリで変更されました。
 	Replace it with this document, or cancel and use File › Save As to keep both.	この書類で置き換えるか、キャンセルしてファイル › 名前を付けて保存で両方を残してください。
@@ -3965,6 +3993,11 @@ curves	Smooth	スムーズ
 	Use	使用
 	In Front	前面
 	Behind	背面
+# Android launch-time "All files access" prompt (crates/ui-egui/src/android_access.rs)
+	Allow access to all files?	すべてのファイルへのアクセスを許可しますか？
+	Not now	後で
+	PhotoCraft needs "All files access" to open and save files in shared storage.	PhotoCraft が「共有ストレージ」のファイルを開いたり保存したりするには、「すべてのファイルへのアクセス」が必要です。
+	Skip the all-files-access prompt at launch	起動時にすべてのファイルへのアクセスの確認を表示しない
 
 # DDS Options (#1327)
 	DDS Options	DDS オプション

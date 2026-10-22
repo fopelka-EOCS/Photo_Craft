@@ -651,6 +651,11 @@
 	Fit Artboard on Screen	Dopasuj obszar roboczy do ekranu
 	100%	100%
 	200%	200%
+	50%	50%
+	55%	55%
+	60%	60%
+	65%	65%
+	70%	70%
 	75%	75%
 	80%	80%
 	85%	85%
@@ -3871,6 +3876,29 @@ curves	Smooth	Wygładź
 	This document's layers: {needed} of {budget} for layers	Warstwy tego dokumentu: {needed} z {budget} na warstwy
 	This document's layers need {needed} but may hold {budget}: whole-document redraws use the CPU	Warstwy tego dokumentu potrzebują {needed}, ale mogą zająć {budget}: odświeżanie całego dokumentu używa CPU
 	GPU Memory (MB, 0 = Automatic)	Pamięć GPU (MB, 0 = Automatycznie)
+
+# Android in-app file browser (crates/ui-egui/src/android_file.rs)
+	(empty)	(puste)
+	Allow "All files access" for PhotoCraft, then tap Shared storage.	Zezwól PhotoCraftowi na dostęp do wszystkich plików, a następnie dotknij „Pamięć współdzielona”.
+	App storage	Pamięć aplikacji
+	Change…	Zmień…
+	Choose this folder	Wybierz ten folder
+	Could not create the folder:	Nie można utworzyć folderu:
+	File name:	Nazwa pliku:
+	Grant access	Przyznaj dostęp
+	Name the new folder first	Najpierw nazwij nowy folder
+	New folder	Nowy folder
+	Select at least one file.	Wybierz co najmniej jeden plik.
+	Shared storage	Pamięć współdzielona
+	Shared storage (grant access)	Pamięć współdzielona (przyznaj dostęp)
+	Tap files to select them.	Dotknij plików, aby je wybrać.
+	{name} already exists. Replace it?	{name} już istnieje. Zastąpić go?
+	This build can't request shared-storage access.	Ta kompilacja nie może zażądać dostępu do pamięci współdzielonej.
+	This folder can't be read yet. Grant PhotoCraft access to all files.	Nie można jeszcze odczytać tego folderu. Przyznaj PhotoCraftowi dostęp do wszystkich plików.
+	Up	W górę
+	selected	wybrano
+	Picker view	Widok selektora
+	Could not remember the view.	Nie można zapisać widoku.
 	Replace	Zastąp
 	{name} was changed by another app after it was opened or saved here.	Plik {name} został zmieniony przez inną aplikację po otwarciu lub zapisaniu go tutaj.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Zastąp go tym dokumentem albo anuluj i użyj Plik › Zapisz jako, aby zachować oba.
@@ -3887,6 +3915,11 @@ curves	Smooth	Wygładź
 	Use	Użyj
 	In Front	Z przodu
 	Behind	Z tyłu
+# Android launch-time "All files access" prompt (crates/ui-egui/src/android_access.rs)
+	Allow access to all files?	Zezwolić na dostęp do wszystkich plików?
+	Not now	Nie teraz
+	PhotoCraft needs "All files access" to open and save files in shared storage.	PhotoCraft potrzebuje dostępu do wszystkich plików, aby otwierać i zapisywać pliki w „Pamięci współdzielonej”.
+	Skip the all-files-access prompt at launch	Nie pokazuj przy starcie prośby o dostęp do wszystkich plików
 
 # DDS Options (#1327)
 	DDS Options	Opcje DDS

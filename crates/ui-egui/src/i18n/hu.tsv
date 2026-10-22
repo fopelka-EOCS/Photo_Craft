@@ -2625,6 +2625,11 @@ cameraRaw	Yellow	Sárga
 	32 bits/pixel	32 bit/pixel
 	3D	3D
 	5 Columns, 3 Rows	5 oszlop, 3 sor
+	50%	50%
+	55%	55%
+	60%	60%
+	65%	65%
+	70%	70%
 	75%	75%
 	8 bit	8 bites
 	8 Columns	8 oszlop
@@ -4190,6 +4195,27 @@ cameraRaw	Yellow	Sárga
 	This document's layers: {needed} of {budget} for layers	A dokumentum rétegei: {needed} / {budget} a rétegeknek
 	This document's layers need {needed} but may hold {budget}: whole-document redraws use the CPU	A dokumentum rétegeinek {needed} kell, de {budget} foglalhatnak: a teljes dokumentum újrarajzolása a CPU-n fut
 	GPU Memory (MB, 0 = Automatic)	GPU-memória (MB, 0 = Automatikus)
+
+# Android in-app file browser (crates/ui-egui/src/android_file.rs)
+	(empty)	(üres)
+	Allow "All files access" for PhotoCraft, then tap Shared storage.	Engedélyezze a PhotoCraftnak az összes fájl elérését, majd koppintson a „Megosztott tárhely” elemre.
+	App storage	Alkalmazástárhely
+	Choose this folder	Mappa kiválasztása
+	Could not create the folder:	A mappa nem hozható létre:
+	File name:	Fájlnév:
+	Grant access	Hozzáférés engedélyezése
+	Name the new folder first	Először nevezze el az új mappát
+	New folder	Új mappa
+	Select at least one file.	Jelöljön ki legalább egy fájlt.
+	Shared storage	Megosztott tárhely
+	Shared storage (grant access)	Megosztott tárhely (hozzáférés engedélyezése)
+	Tap files to select them.	Koppintson a fájlokra a kijelölésükhöz.
+	{name} already exists. Replace it?	{name} már létezik. Lecseréli?
+	This build can't request shared-storage access.	Ez a build nem kérhet hozzáférést a megosztott tárhelyhez.
+	This folder can't be read yet. Grant PhotoCraft access to all files.	Ez a mappa még nem olvasható. Engedélyezze a PhotoCraftnak az összes fájl elérését.
+	selected	kijelölve
+	Picker view	Választó nézete
+	Could not remember the view.	A nézet megjegyzése nem sikerült.
 	{name} was changed by another app after it was opened or saved here.	A(z) {name} fájlt egy másik alkalmazás módosította, miután itt megnyitották vagy mentették.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Cserélje le erre a dokumentumra, vagy válassza a Mégse gombot, és a Fájl › Mentés másként paranccsal tartsa meg mindkettőt.
 	Decrease Brush Size	Ecsetméret csökkentése
@@ -4205,6 +4231,11 @@ cameraRaw	Yellow	Sárga
 	Use	Használat
 	In Front	Elöl
 	Behind	Mögött
+# Android launch-time "All files access" prompt (crates/ui-egui/src/android_access.rs)
+	Allow access to all files?	Engedélyezi az összes fájl elérését?
+	Not now	Most nem
+	PhotoCraft needs "All files access" to open and save files in shared storage.	A PhotoCraftnak az összes fájl elérésére van szüksége a „Megosztott tárhely” fájljainak megnyitásához és mentéséhez.
+	Skip the all-files-access prompt at launch	Indításkor ne kérdezze az összes fájl elérését
 
 # DDS Options (#1327)
 	DDS Options	DDS-beállítások

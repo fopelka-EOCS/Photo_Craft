@@ -422,6 +422,11 @@
 	Fit on Screen	Умістити на екрані
 	100%	100%
 	200%	200%
+	50%	50%
+	55%	55%
+	60%	60%
+	65%	65%
+	70%	70%
 	75%	75%
 	80%	80%
 	85%	85%
@@ -3972,6 +3977,29 @@ curves	Smooth	Згладити
 	This document's layers: {needed} of {budget} for layers	Шари цього документа: {needed} з {budget} для шарів
 	This document's layers need {needed} but may hold {budget}: whole-document redraws use the CPU	Шарам цього документа потрібно {needed}, але займати вони можуть {budget}: увесь документ перемальовується на CPU
 	GPU Memory (MB, 0 = Automatic)	Пам'ять GPU (МБ, 0 = автоматично)
+
+# Android in-app file browser (crates/ui-egui/src/android_file.rs)
+	(empty)	(порожньо)
+	Allow "All files access" for PhotoCraft, then tap Shared storage.	Дозвольте PhotoCraft доступ до всіх файлів, потім торкніться «Спільне сховище».
+	App storage	Сховище програми
+	Change…	Змінити…
+	Choose this folder	Вибрати цю теку
+	Could not create the folder:	Не вдалося створити теку:
+	File name:	Ім'я файлу:
+	Grant access	Надати доступ
+	Name the new folder first	Спочатку назвіть нову теку
+	New folder	Нова тека
+	Select at least one file.	Виберіть принаймні один файл.
+	Shared storage	Спільне сховище
+	Shared storage (grant access)	Спільне сховище (надати доступ)
+	Tap files to select them.	Торкніться файлів, щоб вибрати їх.
+	{name} already exists. Replace it?	{name} вже існує. Замінити його?
+	This build can't request shared-storage access.	Ця збірка не може запросити доступ до спільного сховища.
+	This folder can't be read yet. Grant PhotoCraft access to all files.	Цю теку ще не вдається прочитати. Надайте PhotoCraft доступ до всіх файлів.
+	Up	Вгору
+	selected	вибрано
+	Picker view	Вигляд вибору
+	Could not remember the view.	Не вдалося запам'ятати вигляд.
 	Replace	Замінити
 	{name} was changed by another app after it was opened or saved here.	Файл {name} змінила інша програма після того, як його тут відкрили або зберегли.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Замініть його цим документом або скасуйте й скористайтеся Файл › Зберегти як, щоб зберегти обидва.
@@ -3996,6 +4024,11 @@ curves	Smooth	Згладити
 	Use	Використати
 	In Front	Спереду
 	Behind	Ззаду
+# Android launch-time "All files access" prompt (crates/ui-egui/src/android_access.rs)
+	Allow access to all files?	Надати доступ до всіх файлів?
+	Not now	Не зараз
+	PhotoCraft needs "All files access" to open and save files in shared storage.	Щоб відкривати та зберігати файли у «Спільному сховищі», PhotoCraft потрібен доступ до всіх файлів.
+	Skip the all-files-access prompt at launch	Не показувати запит доступу до всіх файлів під час запуску
 
 # DDS Options (#1327)
 	DDS Options	Параметри DDS

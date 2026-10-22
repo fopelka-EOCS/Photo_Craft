@@ -415,6 +415,11 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if app.camera_raw.is_some() {
         return;
     }
+    // The in-app file browser (a host with no system picker, e.g. Android) is modal: it owns the
+    // pointer, and no application shortcut should fire beneath it.
+    if app.android_file.is_open() {
+        return;
+    }
     // A foreground save (Save in Background off, #6207) blocks the app until the file is written;
     // only Esc reaches it, to cancel while it still encodes (see `jobs_ui::tick`).
     if crate::jobs_ui::foreground_save(app).is_some() {

@@ -635,6 +635,11 @@
 	Fit Artboard on Screen	Pas Artboard di Layar
 	100%	100%
 	200%	200%
+	50%	50%
+	55%	55%
+	60%	60%
+	65%	65%
+	70%	70%
 	75%	75%
 	80%	80%
 	85%	85%
@@ -3269,6 +3274,30 @@ curves	Smooth	Haluskan
 	This document's layers: {needed} of {budget} for layers	Layer dokumen ini: {needed} dari {budget} untuk layer
 	This document's layers need {needed} but may hold {budget}: whole-document redraws use the CPU	Layer dokumen ini membutuhkan {needed} tetapi boleh memakai {budget}: penggambaran ulang seluruh dokumen memakai CPU
 	GPU Memory (MB, 0 = Automatic)	Memori GPU (MB, 0 = Otomatis)
+
+# Android in-app file browser (crates/ui-egui/src/android_file.rs)
+	(empty)	(kosong)
+	Allow "All files access" for PhotoCraft, then tap Shared storage.	Izinkan PhotoCraft mengakses semua file, lalu ketuk "Penyimpanan bersama".
+	App storage	Penyimpanan aplikasi
+	Change…	Ubah…
+	Choose this folder	Pilih folder ini
+	Could not create the folder:	Tidak dapat membuat folder:
+	File name:	Nama file:
+	Grant access	Beri akses
+	Name the new folder first	Beri nama folder baru terlebih dahulu
+	New folder	Folder baru
+	Select at least one file.	Pilih setidaknya satu file.
+	Shared storage	Penyimpanan bersama
+	Shared storage (grant access)	Penyimpanan bersama (beri akses)
+	Tap files to select them.	Ketuk file untuk memilihnya.
+	{name} already exists. Replace it?	{name} sudah ada. Ganti?
+	This build can't request shared-storage access.	Build ini tidak dapat meminta akses penyimpanan bersama.
+	This folder can't be read yet. Grant PhotoCraft access to all files.	Folder ini belum dapat dibaca. Beri PhotoCraft akses ke semua file.
+	Up	Naik
+	selected	dipilih
+	List	Daftar
+	Picker view	Tampilan pemilih
+	Could not remember the view.	Tampilan tidak dapat diingat.
 	Replace	Ganti
 	{name} was changed by another app after it was opened or saved here.	{name} diubah oleh aplikasi lain setelah dibuka atau disimpan di sini.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Ganti dengan dokumen ini, atau batalkan dan gunakan Berkas › Simpan Sebagai untuk menyimpan keduanya.
@@ -3285,6 +3314,11 @@ curves	Smooth	Haluskan
 	Use	Gunakan
 	In Front	Di Depan
 	Behind	Di Belakang
+# Android launch-time "All files access" prompt (crates/ui-egui/src/android_access.rs)
+	Allow access to all files?	Izinkan akses ke semua file?
+	Not now	Nanti saja
+	PhotoCraft needs "All files access" to open and save files in shared storage.	PhotoCraft memerlukan akses ke semua file untuk membuka dan menyimpan file di "Penyimpanan bersama".
+	Skip the all-files-access prompt at launch	Jangan tanyakan akses semua file saat mulai
 
 # DDS Options (#1327)
 	DDS Options	Opsi DDS

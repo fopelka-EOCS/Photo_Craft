@@ -658,6 +658,11 @@
 	Fit Artboard on Screen	Přizpůsobit kreslicí plochu obrazovce
 	100%	100 %
 	200%	200 %
+	50%	50% %
+	55%	55% %
+	60%	60% %
+	65%	65% %
+	70%	70% %
 	75%	75 %
 	80%	80 %
 	85%	85 %
@@ -3884,6 +3889,28 @@ navigator	Zoom	Zvětšení
 	This document's layers: {needed} of {budget} for layers	Vrstvy tohoto dokumentu: {needed} z {budget} pro vrstvy
 	This document's layers need {needed} but may hold {budget}: whole-document redraws use the CPU	Vrstvy tohoto dokumentu potřebují {needed}, ale mohou zabrat {budget}: překreslení celého dokumentu probíhá na CPU
 	GPU Memory (MB, 0 = Automatic)	Paměť GPU (MB, 0 = Automaticky)
+
+# Android in-app file browser (crates/ui-egui/src/android_file.rs)
+	(empty)	(prázdné)
+	Allow "All files access" for PhotoCraft, then tap Shared storage.	Povolte PhotoCraftu přístup ke všem souborům a klepněte na „Sdílené úložiště“.
+	App storage	Úložiště aplikace
+	Change…	Změnit…
+	Choose this folder	Zvolit tuto složku
+	Could not create the folder:	Složku nelze vytvořit:
+	File name:	Název souboru:
+	Grant access	Udělit přístup
+	Name the new folder first	Nejprve pojmenujte novou složku
+	New folder	Nová složka
+	Select at least one file.	Vyberte alespoň jeden soubor.
+	Shared storage	Sdílené úložiště
+	Shared storage (grant access)	Sdílené úložiště (udělit přístup)
+	Tap files to select them.	Klepnutím na soubory je vyberte.
+	{name} already exists. Replace it?	{name} již existuje. Nahradit jej?
+	This build can't request shared-storage access.	Tato sestava nemůže požádat o přístup ke sdílenému úložišti.
+	This folder can't be read yet. Grant PhotoCraft access to all files.	Tuto složku zatím nelze přečíst. Povolte PhotoCraftu přístup ke všem souborům.
+	selected	vybráno
+	Picker view	Zobrazení výběru
+	Could not remember the view.	Zobrazení se nepodařilo zapamatovat.
 	{name} was changed by another app after it was opened or saved here.	Soubor {name} změnila jiná aplikace poté, co byl zde otevřen nebo uložen.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Nahraďte ho tímto dokumentem, nebo zrušte a použijte Soubor › Uložit jako, abyste zachovali obojí.
 	Decrease Brush Size	Zmenšit velikost štětce
@@ -3899,6 +3926,11 @@ navigator	Zoom	Zvětšení
 	Use	Použít
 	In Front	Vpředu
 	Behind	Vzadu
+# Android launch-time "All files access" prompt (crates/ui-egui/src/android_access.rs)
+	Allow access to all files?	Povolit přístup ke všem souborům?
+	Not now	Teď ne
+	PhotoCraft needs "All files access" to open and save files in shared storage.	PhotoCraft potřebuje přístup ke všem souborům, aby mohl otevírat a ukládat soubory ve „Sdíleném úložišti“.
+	Skip the all-files-access prompt at launch	Při spuštění nezobrazovat výzvu k přístupu ke všem souborům
 
 # DDS Options (#1327)
 	DDS Options	Možnosti DDS

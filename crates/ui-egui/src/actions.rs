@@ -508,13 +508,20 @@ struct DragRow {
 }
 
 /// Drops use an insertion line, converted to the final index expected by actions.move.
-fn drag_row(ui: &egui::Ui, response: &egui::Response, row: DragRow, t: &Tokens) -> Option<(DragRow, usize)> {
+/// `scrolling` is set while a finger pans the list: the row must not start a reorder, and the
+/// insertion line stays hidden.
+fn drag_row(ui: &egui::Ui, response: &egui::Response, row: DragRow, t: &Tokens, scrolling: bool) -> Option<(DragRow, usize)> {
+    if scrolling {
+        return None;
+    }
     response.dnd_set_drag_payload(row);
     let source = response.dnd_hover_payload::<DragRow>()?;
     if source.step.is_some() != row.step.is_some() || (source.step.is_some() && source.action != row.action) {
         return None;
     }
-    let after = ui.input(|i| i.pointer.hover_pos().is_some_and(|p| p.y >= response.rect.center().y));
+    // The interacting pointer first: on the touch-release frame `hover_pos` is already gone
+    // (`PointerGone`), and a finger's drop would land before the row instead of after it.
+    let after = ui.input(|i| i.pointer.interact_pos().or_else(|| i.pointer.hover_pos()).is_some_and(|p| p.y >= response.rect.center().y));
     let index = row.step.unwrap_or(row.action);
     let from = source.step.unwrap_or(source.action);
     let slot = index.saturating_add(usize::from(after));
@@ -686,7 +693,7 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             *expanded = true;
         }
     }
-    egui::ScrollArea::vertical().id_salt("actions-rows").max_height(max_h).min_scrolled_height(max_h).auto_shrink([false, false]).show(ui, |ui| {
+    crate::widgets::panel_scroll().id_salt("actions-rows").max_height(max_h).min_scrolled_height(max_h).auto_shrink([false, false]).show(ui, |ui| {
         if rows.is_empty() {
             ui.label(egui::RichText::new(tl!("Record ● a sequence of edits, then play ▶ it on any document.")).color(t.text_faint).size(11.5));
         }
@@ -753,6 +760,8 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             }
             let indent = if set.is_some() { 14.0 } else { 0.0 };
             let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::click_and_drag());
+            // A finger that moves before the hold pans the list instead of dragging the row.
+            let scrolling = crate::widgets::touch_row(ui, &resp) == crate::widgets::TouchRow::Scroll;
             let x0 = rect.left() + indent;
             if reveal == Some((i, 0)) {
                 ui.scroll_to_rect(rect, Some(egui::Align::BOTTOM));
@@ -767,7 +776,7 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             } else if resp.hovered() {
                 ui.painter().rect_filled(rect, 0.0, t.hover.gamma_multiply(0.5));
             }
-            if let Some(change) = drag_row(ui, &resp, DragRow { action: i, step: None }, &t) {
+            if let Some(change) = drag_row(ui, &resp, DragRow { action: i, step: None }, &t, scrolling) {
                 moved = Some(change);
             }
             let expanded = app.ui.actions.expanded.get(i).copied().unwrap_or(false) && !button_mode;
@@ -877,6 +886,7 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             if expanded {
                 for (step, (id, params)) in steps.iter().enumerate() {
                     let (r, response) = ui.allocate_exact_size(vec2(ui.available_width(), 20.0), Sense::click_and_drag());
+                    let scrolling = crate::widgets::touch_row(ui, &response) == crate::widgets::TouchRow::Scroll;
                     if reveal == Some((i, step + 1)) {
                         ui.scroll_to_rect(r, Some(egui::Align::BOTTOM));
                     }
@@ -888,7 +898,7 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     } else if response.hovered() {
                         ui.painter().rect_filled(r, 0.0, t.hover.gamma_multiply(0.5));
                     }
-                    if let Some(change) = drag_row(ui, &response, DragRow { action: i, step: Some(step) }, &t) {
+                    if let Some(change) = drag_row(ui, &response, DragRow { action: i, step: Some(step) }, &t, scrolling) {
                         moved = Some(change);
                     }
                     let on = !disabled.contains(&step);

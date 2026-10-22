@@ -1636,13 +1636,288 @@ fn combo_box_arrow_keys<T: PartialEq + Clone>(ui: &mut Ui, response: &Response, 
 /// off the bottom. egui moves a popup up to keep it in the window, so a menu opened low on the
 /// screen first shifts up and only scrolls when it is taller than the window.
 pub fn menu_scroll<R>(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui) -> R) -> R {
-    // The popup frame's margin and stroke, and a small gap to the window's edges.
-    let frame = ui.spacing().menu_margin.sum().y + 2.0 + 2.0 * MENU_EDGE;
-    let room = (crate::work_area::visible_rect(ui.ctx()).height() - frame).max(MENU_MIN_HEIGHT);
-    // A popup's Ui is only as tall as the popup was last frame (400 pt on the first), so ask for
-    // the whole room: the area still shrinks to its rows when they need less.
-    egui::ScrollArea::vertical().max_height(room).min_scrolled_height(room).show(ui, add_contents).inner
+    menu_scroll_area(
+        (crate::work_area::visible_rect(ui.ctx()).height()
+        // The popup frame's margin and stroke, and a small gap to the window's edges.
+        - ui.spacing().menu_margin.sum().y
+        - 2.0
+        - 2.0 * MENU_EDGE)
+            .max(MENU_MIN_HEIGHT),
+    )
+    .show(ui, add_contents)
+    .inner
 }
+
+/// The scroll area every menu body runs in: `max_height` points tall, and draggable to scroll with
+/// any pointer. See [`drag_source`] for why the drag does not depend on the touch detection.
+fn menu_scroll_area(max_height: f32) -> egui::ScrollArea {
+    egui::ScrollArea::vertical().scroll_source(drag_source()).max_height(max_height).min_scrolled_height(max_height)
+}
+
+/// The vertical scroll area every panel a finger may pan runs in (the dock's bodies — Layers,
+/// Brushes, Properties — and the taller dialogs): a drag scrolls it with whatever pointer is in
+/// the user's hand, not only once egui has detected a touch screen (see [`drag_source`]).
+///
+/// The scroll bar and the wheel behave exactly as egui's own area would; on a touch screen
+/// [`touch_scroll_target`] widens the bar's hit so a fingertip can land on it.
+pub fn panel_scroll() -> egui::ScrollArea {
+    egui::ScrollArea::vertical().scroll_source(drag_source())
+}
+
+/// How the contents of a scroll area a finger uses answer a drag: always, with the wheel and the
+/// scroll bar exactly as usual.
+///
+/// egui's own default (`DragScroll::OnTouch`) switches drag-to-scroll on only once
+/// `InputState::has_touch_screen` has seen an `Event::Touch`. On the SM-X736B (Galaxy Tab S11)
+/// that gate is open for the app's own finger input — measured on the pre-fix 0.9.0 build, a
+/// finger drag pans both a menu taller than the window and a dock panel body — so this is not the
+/// repair of a touch bug: it is the gesture not depending on a detection. A window with no touch
+/// screen (a host, a desktop, a docked trackpad, a mouse) has no touch state at all, and the
+/// harness drives these same widgets with a plain pointer, so the drag is on by construction.
+fn drag_source() -> egui::containers::scroll_area::ScrollSource {
+    use egui::containers::scroll_area::{DragScroll, ScrollSource};
+    ScrollSource { drag: DragScroll::Always, ..ScrollSource::ALL }
+}
+
+/// How long a finger must stay put before a move means "drag the row" rather than "scroll the
+/// list", and how far it may wander and still be a press.
+mod touch {
+    /// The distance a finger may wobble before the press is no longer a click
+    /// (matches egui's `max_click_dist`).
+    pub(super) const MOVED: f32 = 6.0;
+    /// The hold a finger keeps before a move becomes a drag instead of a scroll. Before egui's
+    /// own long-press timeout (0.8 s), so holding and then dragging beats the context menu.
+    pub(super) const HOLD: f64 = 0.55;
+}
+use touch::{HOLD, MOVED};
+
+/// What a finger's press turned out to mean. Latched for the rest of the press, so a scroll never
+/// turns back into a grab because the finger later travelled past the hold.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum TouchKind {
+    /// Not settled yet: still a candidate for a click, a scroll, the menu and a drag.
+    Undecided,
+    /// The finger moved before the hold expired: the enclosing list is scrolling.
+    Scroll,
+    /// The hold expired with the finger still: egui's long-press is on the press. A move before it
+    /// opens the row's menu turns the hold into the row's drag, a move after it does not.
+    Held,
+    /// The hold expired and the finger then moved: the row's drag.
+    Grab,
+}
+
+/// Which row a finger's press began on and where: temp data, gone after the lift. The row id is
+/// the gesture's identity (and gates the pan: one finger pans the list it went down in).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct TouchPress {
+    /// The `Response` id of the row the finger went down on.
+    row: egui::Id,
+    /// When the finger went down: the press's clock, so a *new* press is never mistaken for the
+    /// old one when the row that owned the old press was no longer drawn as the finger lifted.
+    start: f64,
+    /// Where the finger went down.
+    origin: egui::Pos2,
+    /// What the finger meant.
+    kind: TouchKind,
+    /// Whether egui's long-press opened the row's context menu during this press: under an open
+    /// menu a finger moving on must not pick the row up.
+    menu: bool,
+}
+
+fn touch_press_id() -> egui::Id {
+    egui::Id::new("photocraft-touch-row-press")
+}
+
+/// The pass that already spent this pass's pan (see [`touch_row`]).
+fn touch_pan_id() -> egui::Id {
+    egui::Id::new("photocraft-touch-row-pan")
+}
+
+/// Whether this pass has already spent the finger's pan. The pressed row is the only one that
+/// pans, and `Ui::scroll_with_delta_animation` *accumulates*: one pan per pass, not one per call.
+fn panned_this_pass(ctx: &egui::Context, pass: u64) -> bool {
+    if ctx.data(|d| d.get_temp::<u64>(touch_pan_id())) == Some(pass) {
+        return true;
+    }
+    ctx.data_mut(|d| d.insert_temp(touch_pan_id(), pass));
+    false
+}
+
+/// What the arbiter says this frame about a row's press (see [`touch_row`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TouchRow {
+    /// No arbitrated press this frame (a mouse press, or none).
+    None,
+    /// A finger press neither held long enough nor moved: keep waiting.
+    Pressing,
+    /// The finger moved before the hold expired: the row must not grab; the list is scrolling.
+    Scroll,
+    /// The hold expired with the finger still: the row must not grab; egui's own long-press
+    /// opens the row's context menu.
+    Hold,
+    /// The finger held and then moved: the row grabs now and keeps its drag while the finger is
+    /// down.
+    Grab,
+}
+
+/// A draggable row consults this every frame so a finger can scroll the panel instead of picking
+/// the row up.
+///
+/// A row that senses a drag (`Sense::click_and_drag`) becomes egui's drag target as soon as the
+/// pointer moves, which takes the gesture from the scroll area underneath it: on a touch screen a
+/// finger that wanted to pan a list of layers or brushes dragged a row instead (measured on a
+/// Galaxy Tab S11). egui offers no way to hand that gesture back, so the row asks this helper what
+/// the finger meant, and only acts on its own drag for [`TouchRow::Grab`]. One shared per-press
+/// state (there is one finger) settles the question once, for the rest of the press:
+///
+/// - moving more than [`MOVED`] points before the hold expires → [`TouchRow::Scroll`]: the row must
+///   not start its drag; this helper pans the enclosing scroll area with the finger. Only a
+///   *touch* press registers — `InputState::any_touches` is a finger and nothing else — so a mouse
+///   press keeps every existing instant-grab path unchanged.
+/// - holding [`HOLD`] seconds and then moving → [`TouchRow::Grab`]: the row starts its drag on that
+///   frame and keeps it while the finger is down. `HOLD` is shorter than egui's own long-press
+///   timeout, and the movement latches egui's "moved too much for a click", so the row's context
+///   menu never opens out of a drag.
+/// - holding [`HOLD`] seconds with the finger still → [`TouchRow::Hold`]: the row must not grab,
+///   and egui's own long-press opens the row's context menu as it always did. A move after the hold
+///   and before that long-press fires is the [`TouchRow::Grab`] above; a move after the menu has
+///   opened stays [`TouchRow::Hold`].
+/// - a quick release → [`TouchRow::Pressing`] until then; egui's click fires as usual.
+pub fn touch_row(ui: &Ui, row: &Response) -> TouchRow {
+    // Only a row that senses drags takes the gesture from the area underneath it: egui routes a
+    // press to the topmost widget that senses a drag, and never to the background — so the area
+    // cannot pan by itself then, and this arbiter is what pans. A click-only (or hover-only) row
+    // leaves the gesture to the area, which pans by its own account: panning here as well would
+    // scroll twice as fast.
+    if !row.sense.senses_drag() {
+        return TouchRow::None;
+    }
+    let ctx = ui.ctx().clone();
+    // All reads up front (no nested `data`/`input` calls — those lock for write):
+    let (touch, pressed, down, origin, press_start, pos, delta, time) = ctx.input(|i| {
+        (
+            i.any_touches(),
+            i.pointer.primary_pressed(),
+            i.pointer.any_down(),
+            i.pointer.press_origin(),
+            i.pointer.press_start_time(),
+            i.pointer.interact_pos().or(i.pointer.hover_pos()),
+            i.pointer.delta(),
+            i.time,
+        )
+    });
+    let pass = ctx.cumulative_pass_nr();
+    // A stored press belongs to the press it was recorded on. A new press is a new gesture, even
+    // if the row that owned the old one stopped being drawn before the finger lifted (then no row
+    // saw the lift, so nothing cleared it): its origin would otherwise scroll some other panel.
+    let press = ctx.data(|d| d.get_temp::<Option<TouchPress>>(touch_press_id())).flatten().filter(|p| press_start.is_none_or(|t| t == p.start));
+    let press = match press {
+        Some(p) => Some(p),
+        // `interact_rect` is the row clipped to its panel's viewport: a row scrolled out of a
+        // panel is still laid out below it, over the panel underneath — on the tablet the History
+        // panel's hidden rows took a swipe made on the Layers list below them, so the list neither
+        // scrolled nor dragged. A row the finger cannot see must not answer for it.
+        None if touch && pressed && origin.is_some_and(|o| row.interact_rect.contains(o)) => {
+            let p = TouchPress {
+                row: row.id,
+                start: press_start.unwrap_or(time),
+                origin: origin.unwrap_or_else(|| row.rect.center()),
+                kind: TouchKind::Undecided,
+                menu: false,
+            };
+            ctx.data_mut(|d| d.insert_temp(touch_press_id(), Some(p)));
+            Some(p)
+        }
+        None => None,
+    };
+    let Some(press) = press else { return TouchRow::None };
+
+    if !down {
+        // The finger lifted this frame (egui keeps interact_pos through a touch release, and the
+        // click answers from the row's own response): the arbitration is over.
+        ctx.data_mut(|d| d.remove::<Option<TouchPress>>(touch_press_id()));
+        return TouchRow::None;
+    }
+    if !touch {
+        // A mouse pressed while a press was arbitrated (or the touch state lost): this frame adds
+        // no meaning.
+        return TouchRow::None;
+    }
+    let Some(pos) = pos else {
+        // A `PointerGone` while held (touch release is such a frame): keep waiting.
+        return TouchRow::Pressing;
+    };
+    // Settle the press once: the finger decides what it meant by moving, and only *when* it moved
+    // against the hold says which — early is a scroll, after the hold is the row's drag. A finger
+    // that never moves leaves the press to egui, whose long-press opens the row's context menu; a
+    // move after that menu opened must not pick the row up under it.
+    let held = press_start.is_some_and(|t| time - t > HOLD);
+    let moved = press.origin.distance(pos) > MOVED;
+    let menu = row.long_touched() || press.menu;
+    let kind = match press.kind {
+        TouchKind::Undecided if moved => {
+            if held {
+                TouchKind::Grab
+            } else {
+                TouchKind::Scroll
+            }
+        }
+        TouchKind::Undecided if held => TouchKind::Held,
+        TouchKind::Held if moved && !menu => TouchKind::Grab,
+        settled => settled,
+    };
+    if kind != press.kind || menu != press.menu {
+        let settled = TouchPress { kind, menu, ..press };
+        ctx.data_mut(|d| d.insert_temp(touch_press_id(), Some(settled)));
+    }
+    if kind == TouchKind::Scroll {
+        // A scrolling finger: hand this pass's pointer delta to the enclosing scroll area
+        // (`scroll_with_delta` feeds the same pass_state the area consumes at its end, so the
+        // write cannot be clobbered the way a direct `State::store` mid-pass is), instantly —
+        // the drag *is* the animation. The content follows the finger: a finger moving up
+        // (negative delta.y, pressing the pointer down on the content) scrolls *down* (the
+        // offset grows), which `scroll_delta`'s inverted accounting produces from the same sign.
+        // Only the row the press began in pans (its `ui` is that area's content ui), and only once
+        // per pass: the row is drawn once, but a row that is asked twice in a pass must not pan
+        // twice.
+        if press.row == row.id && delta != egui::Vec2::ZERO && !panned_this_pass(&ctx, pass) {
+            ui.scroll_with_delta_animation(delta, egui::style::ScrollAnimation::none());
+        }
+    }
+    match kind {
+        TouchKind::Scroll => TouchRow::Scroll,
+        TouchKind::Grab => TouchRow::Grab,
+        TouchKind::Held => TouchRow::Hold,
+        TouchKind::Undecided => TouchRow::Pressing,
+    }
+}
+
+/// A fingertip cannot aim at a 10-point scroll bar: on a touch screen, widen the bar's interaction
+/// target to [`TOUCH_BAR_TARGET`] points.
+///
+/// The themes build a `ScrollStyle::thin`, whose `bar_width` is both the widest the bar draws and
+/// the whole width inside which egui hit-tests it — ten points, of which four are drawn while it
+/// floats untouched. A finger that must grab a bar instead of dragging the panel misses that band,
+/// so the target is widened. Because the bar floats it still draws four points until it is
+/// touched and only then widens to the target, so a desktop window looks unchanged.
+///
+/// Widening is re-checked every frame rather than remembered once: applying a theme replaces the
+/// styles outright (`theme::apply`), which would otherwise drop the wider bar until the next
+/// launch.
+pub fn touch_scroll_target(ctx: &egui::Context) {
+    if !(cfg!(target_os = "android") || ctx.input(|i| i.has_touch_screen())) {
+        return;
+    }
+    let narrower = |s: &egui::Style| s.spacing.scroll.bar_width < TOUCH_BAR_TARGET;
+    let narrow = narrower(&ctx.global_style()) || [egui::Theme::Dark, egui::Theme::Light].iter().any(|t| narrower(&ctx.style_of(*t)));
+    if !narrow {
+        return;
+    }
+    ctx.all_styles_mut(|s| s.spacing.scroll.bar_width = s.spacing.scroll.bar_width.max(TOUCH_BAR_TARGET));
+}
+
+/// The scroll bar's interaction target on a touch screen, in points.
+const TOUCH_BAR_TARGET: f32 = 24.0;
 
 /// Gap kept between a context menu and the window's edges, and the shortest it gets.
 const MENU_EDGE: f32 = 4.0;
@@ -2608,6 +2883,79 @@ mod tests {
         wheel(&mut h, egui::MouseWheelUnit::Line, egui::vec2(0.0, -1.0), Modifiers::NONE);
         assert_eq!(*h.state(), 0);
     }
+
+    #[test]
+    fn a_panel_body_scrolls_under_a_plain_pointer() {
+        use egui_kittest::{Harness, kittest::Queryable};
+
+        // What the dock's panels run in. The harness sends no touch event, which is the case
+        // egui's `DragScroll::OnTouch` default leaves inert: the drag has to pan the body anyway.
+        let mut h = Harness::builder().with_size(egui::vec2(240.0, 160.0)).build_ui(|ui| {
+            super::panel_scroll().id_salt("probe").max_height(150.0).auto_shrink([false, false]).show(ui, |ui| {
+                for row in 0..40 {
+                    ui.label(format!("row {row}"));
+                }
+            });
+        });
+        h.run_steps(3);
+        let before = h.get_by_label_contains("row 5").rect().top();
+        h.drag_at(egui::pos2(120.0, before + 4.0));
+        h.run();
+        for y in [before - 20.0, before - 45.0, before - 70.0] {
+            h.hover_at(egui::pos2(120.0, y));
+            h.run();
+        }
+        h.drop_at(egui::pos2(120.0, before - 70.0));
+        h.run_steps(4);
+        let after = h.get_by_label_contains("row 5").rect().top();
+        assert!(after < before - 1.0, "a drag should pan the panel body: {before} -> {after}");
+    }
+
+    #[test]
+    fn a_touch_screen_widens_the_scroll_bar_target() {
+        let bar_width = |events: Vec<egui::Event>| {
+            let ctx = egui::Context::default();
+            let idle = ctx.style_of(egui::Theme::Dark).spacing.scroll.bar_width;
+            ctx.begin_pass(egui::RawInput { events, ..Default::default() });
+            super::touch_scroll_target(&ctx);
+            let width = ctx.style_of(egui::Theme::Dark).spacing.scroll.bar_width;
+            ctx.end_pass().drop_without_applying_deltas();
+            (idle, width)
+        };
+        let (idle, plain) = bar_width(Vec::new());
+        assert_eq!(plain, idle, "a window with no touch screen keeps the theme's bar");
+        let touch = egui::Event::Touch {
+            device_id: egui::TouchDeviceId(3),
+            id: egui::TouchId(1),
+            phase: egui::TouchPhase::Start,
+            pos: egui::pos2(10.0, 10.0),
+            force: None,
+        };
+        let (_, wide) = bar_width(vec![touch]);
+        assert!(wide >= super::TOUCH_BAR_TARGET, "a finger has to be able to land on the bar: {wide}");
+        assert!(wide > plain, "the target only ever widens: {plain} -> {wide}");
+
+        // A theme switch replaces each style outright; the wider target has to come back.
+        let ctx = egui::Context::default();
+        let touch = egui::Event::Touch {
+            device_id: egui::TouchDeviceId(3),
+            id: egui::TouchId(1),
+            phase: egui::TouchPhase::Start,
+            pos: egui::pos2(10.0, 10.0),
+            force: None,
+        };
+        ctx.begin_pass(egui::RawInput { events: vec![touch.clone()], ..Default::default() });
+        super::touch_scroll_target(&ctx);
+        assert!(ctx.style_of(egui::Theme::Dark).spacing.scroll.bar_width >= super::TOUCH_BAR_TARGET);
+        ctx.end_pass().drop_without_applying_deltas();
+        crate::theme::apply(&ctx, crate::theme::ThemeKind::ALL[0]);
+        assert!(ctx.style_of(egui::Theme::Dark).spacing.scroll.bar_width < super::TOUCH_BAR_TARGET, "the theme rebuild starts from the thin bar again");
+        ctx.begin_pass(egui::RawInput { events: vec![touch], ..Default::default() });
+        super::touch_scroll_target(&ctx);
+        let after_theme = ctx.style_of(egui::Theme::Dark).spacing.scroll.bar_width;
+        ctx.end_pass().drop_without_applying_deltas();
+        assert!(after_theme >= super::TOUCH_BAR_TARGET, "a theme switch must not take the touch target away: {after_theme}");
+    }
 }
 
 /// A compact colour popup with the shared desktop eyedropper. Keep egui's colour cache so hue
@@ -2786,3 +3134,7 @@ mod screen_color_tests {
 #[cfg(test)]
 #[path = "widgets/numeric_input_tests.rs"]
 mod numeric_input_tests;
+
+#[cfg(test)]
+#[path = "widgets/touch_row_tests.rs"]
+mod touch_row_tests;

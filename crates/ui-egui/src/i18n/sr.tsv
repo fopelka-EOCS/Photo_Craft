@@ -630,6 +630,11 @@
 	Fit Artboard on Screen	Uklopi radnu tablu u ekran
 	100%	100%
 	200%	200%
+	50%	50%
+	55%	55%
+	60%	60%
+	65%	65%
+	70%	70%
 	75%	75%
 	80%	80%
 	85%	85%
@@ -4344,6 +4349,27 @@ shape	Appearance	Izgled
 	This document's layers: {needed} of {budget} for layers	Slojevi ovog dokumenta: {needed} od {budget} za slojeve
 	This document's layers need {needed} but may hold {budget}: whole-document redraws use the CPU	Slojevima ovog dokumenta treba {needed}, a smeju da zauzmu {budget}: ceo dokument se ponovo iscrtava na CPU-u
 	GPU Memory (MB, 0 = Automatic)	GPU memorija (MB, 0 = Automatski)
+
+# Android in-app file browser (crates/ui-egui/src/android_file.rs)
+	(empty)	(празно)
+	Allow "All files access" for PhotoCraft, then tap Shared storage.	Дозволите програми PhotoCraft приступ свим датотекама, затим додирните „Дељени простор“.
+	App storage	Простор апликације
+	Choose this folder	Изабери ову фасциклу
+	Could not create the folder:	Није могуће направити фасциклу:
+	File name:	Назив датотеке:
+	Grant access	Дозволи приступ
+	Name the new folder first	Прво назовите нову фасциклу
+	New folder	Нова фасцикла
+	Select at least one file.	Изаберите бар једну датотеку.
+	Shared storage	Дељени простор
+	Shared storage (grant access)	Дељени простор (дозволи приступ)
+	Tap files to select them.	Додирните датотеке да бисте их изабрали.
+	{name} already exists. Replace it?	{name} već postoji. Zameniti ga?
+	This build can't request shared-storage access.	Ова верзија не може да затражи приступ дељеном простору.
+	This folder can't be read yet. Grant PhotoCraft access to all files.	Ова фасцикла се још не може читати. Дозволите програми PhotoCraft приступ свим датотекама.
+	selected	изабрано
+	Picker view	Приказ бирача
+	Could not remember the view.	Приказ није могао да се запамти.
 	{name} was changed by another app after it was opened or saved here.	Datoteku {name} je izmenila druga aplikacija nakon što je ovde otvorena ili sačuvana.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Zameni je ovim dokumentom ili otkaži i koristi Datoteka › Sačuvaj kao da zadržiš obe.
 	Decrease Brush Size	Smanji veličinu četkice
@@ -4359,6 +4385,11 @@ shape	Appearance	Izgled
 	Use	Koristi
 	In Front	Ispred
 	Behind	Iza
+# Android launch-time "All files access" prompt (crates/ui-egui/src/android_access.rs)
+	Allow access to all files?	Дозволити приступ свим датотекама?
+	Not now	Не сада
+	PhotoCraft needs "All files access" to open and save files in shared storage.	PhotoCraft-у је потребан приступ свим датотекама да би отварао и чувао датотеке у „Дељеном простору“.
+	Skip the all-files-access prompt at launch	Не приказуј захтев за приступ свим датотекама при покретању
 
 # DDS Options (#1327)
 	DDS Options	DDS opcije

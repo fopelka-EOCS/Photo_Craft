@@ -5,10 +5,13 @@ use photocraft_color::{ColorMode, SampleType};
 use photocraft_doc::{Document, Layer, Size};
 use photocraft_format::RecoveryStore;
 use photocraft_geom::Rect;
-use photocraft_ui_egui::{FileDialogAnswer, FileDialogReply, FileDialogRequest, Recoverable, Services};
+#[cfg(not(target_os = "android"))]
+use photocraft_ui_egui::{FileDialogAnswer, FileDialogReply, FileDialogRequest};
+use photocraft_ui_egui::{Recoverable, Services};
 use std::cell::{Cell, RefCell};
 use std::future::Future;
 use std::path::{Path, PathBuf};
+#[cfg(not(target_os = "android"))]
 use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -19,17 +22,22 @@ mod recovery_tests;
 /// Everything File › Open reads: PhotoCraft, Photoshop, OpenRaster, Krita and Affinity documents, flat images, and
 /// Photoshop brushes (.abr), gradients (.grd), swatches (.aco, .act, .ase) and keyboard shortcut sets
 /// (.kys), which go to the preset libraries and Edit › Keyboard Shortcuts.
+/// Only the native (rfd) open dialog uses this filter list; Android's in-app browser matches by
+/// the document importer instead, so it is desktop-only.
+#[cfg(not(target_os = "android"))]
 const OPEN_EXTS: &[&str] = &[
     "pcraft", "pdn", "ora", "xcf", "xcfgz", "gz", "kra", "krz", "psd", "psb", "psdt", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "ico",
     "qoi", "exr", "hdr", "pbm", "pgm", "ppm", "pam", "pfm", "pcx", "dds", "xpm", "fits", "fit", "fts", "dpx", "cin", "heic", "heif", "hif", "dng", "cr2",
     "cr3", "nef", "nrw", "arw", "pef", "orf", "rw2", "raf", "abr", "grd", "svg", "svgz", "aco", "act", "ase", "kys", "af", "afdesign", "afphoto", "afpub",
 ];
+#[cfg(not(target_os = "android"))]
 const SVG_EXTS: &[&str] = &["svg", "svgz"];
 
 /// Open dialog extensions that also match uppercase and mixed-case names (`IMG_0001.JPG`).
 /// On Linux and the BSDs rfd turns each extension into a case-sensitive `*.ext` glob for the XDG
 /// portal or zenity, so every letter becomes a character class, as the portal spec suggests
 /// (`*.[iI][cC][oO]`). Windows and macOS take literal extensions and ignore case already.
+#[cfg(not(target_os = "android"))]
 fn open_filter_extensions(extensions: &[&str]) -> Vec<String> {
     let case_sensitive_globs = cfg!(all(unix, not(target_os = "macos")));
     let class = |c: char| if c.is_ascii_alphabetic() { format!("[{}{}]", c.to_ascii_lowercase(), c.to_ascii_uppercase()) } else { c.to_string() };
@@ -40,6 +48,7 @@ fn open_filter_extensions(extensions: &[&str]) -> Vec<String> {
 /// of mixed files can be narrowed to one kind (#6337). Together they cover every extension of
 /// [`OPEN_EXTS`]. An explicit SVG filter also keeps vector artwork discoverable when a native
 /// picker defaults to another filter.
+#[cfg(not(target_os = "android"))]
 const OPEN_FILTERS: &[(&str, &[&str])] = &[
     ("PhotoCraft", &["pcraft"]),
     ("Photoshop", &["psd", "psb", "psdt"]),
@@ -74,6 +83,7 @@ const OPEN_FILTERS: &[(&str, &[&str])] = &[
     ("Keyboard Shortcuts", &["kys"]),
 ];
 
+#[cfg(not(target_os = "android"))]
 fn open_filters() -> Vec<(&'static str, Vec<String>)> {
     std::iter::once(("All Formats", open_filter_extensions(OPEN_EXTS)))
         .chain(OPEN_FILTERS.iter().map(|(name, exts)| (*name, open_filter_extensions(exts))))
@@ -83,6 +93,10 @@ fn open_filters() -> Vec<(&'static str, Vec<String>)> {
 /// File › Save As formats: (filter name, extensions). The filter matching the suggested name's
 /// extension comes first, so a .pcraft document saves as .pcraft by default and everything else
 /// keeps defaulting to PSD.
+///
+/// Only the native (rfd) save dialog lists these; Android's in-app browser picks the format from
+/// the extension the user types, so it is desktop-only.
+#[cfg(not(target_os = "android"))]
 const SAVE_FILTERS: &[(&str, &[&str])] = &[
     ("PSD Document", &["psd", "psb"]),
     ("PDF", &["pdf"]),
@@ -106,9 +120,11 @@ const SAVE_FILTERS: &[(&str, &[&str])] = &[
 
 /// Non-document files the shell saves (Swatches panel exports): offered alone, so the dialog
 /// never swaps their extension for a document format's.
+#[cfg(not(target_os = "android"))]
 const OTHER_SAVE_FILTERS: &[(&str, &[&str])] = &[("Color Swatches", &["aco"]), ("Color Table", &["act"]), ("Swatch Exchange", &["ase"])];
 
 /// Lists the save dialog's file types with the `suggested` type first (added if unlisted), so the dialog keeps that extension instead of .psd.
+#[cfg(not(target_os = "android"))]
 fn save_filters(suggested: &str) -> Vec<(String, Vec<String>)> {
     let ext = Path::new(suggested).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
     if let Some((name, exts)) = OTHER_SAVE_FILTERS.iter().find(|(_, exts)| exts.contains(&ext.as_str())) {
@@ -169,6 +185,7 @@ pub(crate) fn with_chosen_type(path: &Path, opened_with: Option<&str>, chosen: &
 /// A stem that still has a dot (`scan.jpg.psd`: Windows could keep `scan.jpg`) or an upper-case
 /// extension (the user's spelling) keeps the whole name. Elsewhere the whole name is kept: the
 /// macOS panel has no type list, and rfd's Linux dialogs don't say which type was picked.
+#[cfg(not(target_os = "android"))]
 fn dialog_file_name(suggested: &str, adds_extension: bool) -> Option<String> {
     let path = Path::new(suggested);
     let name = path.file_name()?.to_string_lossy().into_owned();
@@ -180,6 +197,7 @@ fn dialog_file_name(suggested: &str, adds_extension: bool) -> Option<String> {
 /// Shows an Open or Save dialog without blocking the event loop (#673, #574): rfd's async dialog
 /// is created here, on the main thread, with the window as its parent (a sheet on macOS, an owned
 /// modal window elsewhere), and a helper thread waits for it and hands the answer to the app.
+#[cfg(not(target_os = "android"))]
 fn show_file_dialog(request: FileDialogRequest, parent: Option<&eframe::Frame>, reply: FileDialogReply) {
     let mut dialog = rfd::AsyncFileDialog::new();
     if let Some(parent) = parent {
@@ -270,6 +288,7 @@ fn show_file_dialog(request: FileDialogRequest, parent: Option<&eframe::Frame>, 
     }
 }
 
+#[cfg(not(target_os = "android"))]
 fn path_of(file: &rfd::FileHandle) -> String {
     file.path().to_string_lossy().into_owned()
 }
@@ -419,6 +438,7 @@ fn recovery_services(dir: Option<PathBuf>) -> Services {
 /// The pixels to paste when the clipboard holds copied files rather than an image (Copy in
 /// Files, Finder or Explorer puts paths on the clipboard, #338): the first file that decodes,
 /// upright, as RGBA8. Files that aren't images are skipped after reading only their header.
+#[cfg(not(target_os = "android"))]
 fn image_from_files(paths: &[PathBuf]) -> Option<(u32, u32, Vec<u8>)> {
     use std::io::Read;
     paths.iter().find_map(|path| {
@@ -496,6 +516,9 @@ fn shell_word(s: &str) -> String {
 }
 
 pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) -> Services {
+    // arboard has no Android backend (it doesn't compile there), so the clipboard-image service is
+    // built only on the desktop; Android's text clipboard is egui's own.
+    #[cfg(not(target_os = "android"))]
     let clip: Rc<RefCell<Option<arboard::Clipboard>>> = Rc::default();
     let clip_unreadable: Rc<Cell<bool>> = Rc::default();
     let automation_read = automation.clone().map(|workspace| {
@@ -538,6 +561,9 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) ->
             crate::crash_guard::guard("Export", || photocraft_io::export(doc, path, &opts).map(|r| (r.bytes, r.warnings)).map_err(|e| e.to_string()))
         })),
         save_file: Some(Arc::new(save_file)),
+        // No system file dialog on Android (rfd has no backend there): the commands' dialogs are
+        // served by PhotoCraft's own in-app browser instead (see `apps/photocraft-android`).
+        #[cfg(not(target_os = "android"))]
         file_dialog: Some(Box::new(show_file_dialog)),
         write: Some(Box::new(|path: &str, bytes: &[u8]| write_atomic(Path::new(path), bytes))),
         file_stamp: Some(Box::new(|path: &str| {
@@ -556,8 +582,14 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) ->
             photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &EncodeOptions::default()).map_err(|e| e.to_string())
         })),
         inbox: None,
+        // Links open in the system browser on the desktop; Android has no `ACTION_VIEW` intent
+        // without JNI, so they report why they can't (as effectcraft does).
+        #[cfg(not(target_os = "android"))]
         open_url: Some(Box::new(|url: &str| open::that(url).map_err(|e| e.to_string()))),
+        #[cfg(target_os = "android")]
+        open_url: Some(Box::new(|_url: &str| Err("opening links is unavailable on Android".into()))),
         beep: Some(platform_beep),
+        #[cfg(not(target_os = "android"))]
         clipboard_set_image: Some({
             let clip = clip.clone();
             Box::new(move |w: u32, h: u32, px: &[u8]| {
@@ -569,6 +601,9 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) ->
                 cb.set_image(arboard::ImageData { width: w as usize, height: h as usize, bytes: std::borrow::Cow::Borrowed(px) }).map_err(|e| e.to_string())
             })
         }),
+        #[cfg(target_os = "android")]
+        clipboard_set_image: None,
+        #[cfg(not(target_os = "android"))]
         clipboard_get_image: Some({
             let clip = clip.clone();
             let unreadable = clip_unreadable.clone();
@@ -612,6 +647,8 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) ->
             })
         }),
         clipboard_unreadable: Some(Box::new(move || clip_unreadable.get())),
+        #[cfg(target_os = "android")]
+        clipboard_get_image: None,
         load_prefs: Some(Box::new(|| std::fs::read_to_string(prefs_file()?).ok())),
         photoshop_shortcuts: Some(Box::new(|| crate::photoshop_settings::live_keyboard_shortcuts(&|k| std::env::var_os(k)))),
         save_prefs: Some(Box::new(|text: &str| write_atomic(&prefs_file().ok_or("no config directory")?, text.as_bytes()))),

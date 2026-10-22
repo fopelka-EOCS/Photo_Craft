@@ -2306,6 +2306,11 @@
 	Show Skin Tone Indicator	Huidtoonindicator tonen
 	Show Vectorscope	Vectorscoop tonen
 	Tone Histogram	Toonhistogram
+	50%	50%
+	55%	55%
+	60%	60%
+	65%	65%
+	70%	70%
 	75%	75%
 	80%	80%
 	85%	85%
@@ -4033,6 +4038,28 @@ curves	Smooth	Vloeiend maken
 	This document's layers: {needed} of {budget} for layers	Lagen van dit document: {needed} van {budget} voor lagen
 	This document's layers need {needed} but may hold {budget}: whole-document redraws use the CPU	De lagen van dit document hebben {needed} nodig maar mogen {budget} gebruiken: het hele document wordt op de CPU opnieuw getekend
 	GPU Memory (MB, 0 = Automatic)	GPU-geheugen (MB, 0 = Automatisch)
+
+# Android in-app file browser (crates/ui-egui/src/android_file.rs)
+	(empty)	(leeg)
+	Allow "All files access" for PhotoCraft, then tap Shared storage.	Sta PhotoCraft toegang tot alle bestanden toe en tik dan op "Gedeelde opslag".
+	App storage	App-opslag
+	Choose this folder	Deze map kiezen
+	Could not create the folder:	Kan de map niet aanmaken:
+	File name:	Bestandsnaam:
+	Grant access	Toegang verlenen
+	Name the new folder first	Geef eerst de nieuwe map een naam
+	New folder	Nieuwe map
+	Select at least one file.	Selecteer ten minste één bestand.
+	Shared storage	Gedeelde opslag
+	Shared storage (grant access)	Gedeelde opslag (toegang verlenen)
+	Tap files to select them.	Tik op bestanden om ze te selecteren.
+	{name} already exists. Replace it?	{name} bestaat al. Vervangen?
+	This build can't request shared-storage access.	Deze build kan geen toegang tot gedeelde opslag aanvragen.
+	This folder can't be read yet. Grant PhotoCraft access to all files.	Deze map kan nog niet worden gelezen. Verleen PhotoCraft toegang tot alle bestanden.
+	Up	Omhoog
+	selected	geselecteerd
+	Picker view	Keuzeweergave
+	Could not remember the view.	De weergave kon niet worden onthouden.
 	{name} was changed by another app after it was opened or saved here.	{name} is door een andere app gewijzigd nadat het hier is geopend of bewaard.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Vervang het door dit document, of annuleer en gebruik Bestand › Opslaan als om beide te houden.
 	Decrease Brush Size	Penseelgrootte verkleinen
@@ -4048,6 +4075,11 @@ curves	Smooth	Vloeiend maken
 	Use	Gebruiken
 	In Front	Voor
 	Behind	Achter
+# Android launch-time "All files access" prompt (crates/ui-egui/src/android_access.rs)
+	Allow access to all files?	Toegang tot alle bestanden verlenen?
+	Not now	Niet nu
+	PhotoCraft needs "All files access" to open and save files in shared storage.	PhotoCraft heeft toegang tot alle bestanden nodig om bestanden in "Gedeelde opslag" te openen en op te slaan.
+	Skip the all-files-access prompt at launch	Bij het starten niet om toegang tot alle bestanden vragen
 
 # DDS Options (#1327)
 	DDS Options	DDS-opties

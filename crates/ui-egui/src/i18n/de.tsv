@@ -2329,6 +2329,11 @@
 	Show Skin Tone Indicator	Hautton-Indikator anzeigen
 	Show Vectorscope	Vektorskop anzeigen
 	Tone Histogram	Tonwerthistogramm
+	50%	50% %
+	55%	55% %
+	60%	60% %
+	65%	65% %
+	70%	70% %
 	75%	75 %
 	80%	80 %
 	85%	85 %
@@ -3284,6 +3289,29 @@ curves	Smooth	Glätten
 	This document's layers: {needed} of {budget} for layers	Ebenen dieses Dokuments: {needed} von {budget} für Ebenen
 	This document's layers need {needed} but may hold {budget}: whole-document redraws use the CPU	Die Ebenen dieses Dokuments brauchen {needed}, dürfen aber {budget} belegen: Das ganze Dokument wird auf der CPU neu gezeichnet
 	GPU Memory (MB, 0 = Automatic)	GPU-Speicher (MB, 0 = Automatisch)
+
+# Android in-app file browser (crates/ui-egui/src/android_file.rs)
+	(empty)	(leer)
+	Allow "All files access" for PhotoCraft, then tap Shared storage.	Erlaube PhotoCraft den Zugriff auf alle Dateien und tippe dann auf „Gemeinsamer Speicher“.
+	App storage	App-Speicher
+	Change…	Ändern…
+	Choose this folder	Diesen Ordner wählen
+	Could not create the folder:	Ordner konnte nicht erstellt werden:
+	File name:	Dateiname:
+	Grant access	Zugriff erlauben
+	Name the new folder first	Benennen Sie zuerst den neuen Ordner
+	New folder	Neuer Ordner
+	Select at least one file.	Wählen Sie mindestens eine Datei aus.
+	Shared storage	Gemeinsamer Speicher
+	Shared storage (grant access)	Gemeinsamer Speicher (Zugriff erlauben)
+	Tap files to select them.	Tippen Sie auf Dateien, um sie auszuwählen.
+	{name} already exists. Replace it?	{name} existiert bereits. Ersetzen?
+	This build can't request shared-storage access.	Diese Version kann keinen Zugriff auf den gemeinsamen Speicher anfordern.
+	This folder can't be read yet. Grant PhotoCraft access to all files.	Dieser Ordner kann noch nicht gelesen werden. Erlaube PhotoCraft den Zugriff auf alle Dateien.
+	selected	ausgewählt
+	List	Liste
+	Picker view	Auswahlansicht
+	Could not remember the view.	Die Ansicht konnte nicht gemerkt werden.
 	{name} was changed by another app after it was opened or saved here.	{name} wurde von einer anderen App geändert, nachdem es hier geöffnet oder gespeichert wurde.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Ersetze die Datei durch dieses Dokument oder brich ab und nutze Datei › Speichern unter, um beide zu behalten.
 	Memory Usage	Speichernutzung
@@ -3296,6 +3324,11 @@ curves	Smooth	Glätten
 	In Front	Davor
 	Behind	Dahinter
 	Blend	Mischen
+# Android launch-time "All files access" prompt (crates/ui-egui/src/android_access.rs)
+	Allow access to all files?	Zugriff auf alle Dateien erlauben?
+	Not now	Jetzt nicht
+	PhotoCraft needs "All files access" to open and save files in shared storage.	PhotoCraft benötigt Zugriff auf alle Dateien, um Dateien im „Gemeinsamen Speicher“ zu öffnen und zu speichern.
+	Skip the all-files-access prompt at launch	Beim Start nicht nach dem Zugriff auf alle Dateien fragen
 
 # DDS Options (#1327)
 	DDS Options	DDS-Optionen

@@ -649,6 +649,11 @@
 	Fit Artboard on Screen	Adatta tavola a schermo
 	100%	100%
 	200%	200%
+	50%	50%
+	55%	55%
+	60%	60%
+	65%	65%
+	70%	70%
 	75%	75%
 	80%	80%
 	85%	85%
@@ -4394,6 +4399,27 @@ shape	Appearance	Aspetto
 	This document's layers: {needed} of {budget} for layers	Livelli di questo documento: {needed} su {budget} per i livelli
 	This document's layers need {needed} but may hold {budget}: whole-document redraws use the CPU	I livelli di questo documento richiedono {needed} ma possono occupare {budget}: i ridisegni dell'intero documento usano la CPU
 	GPU Memory (MB, 0 = Automatic)	Memoria GPU (MB, 0 = Automatico)
+
+# Android in-app file browser (crates/ui-egui/src/android_file.rs)
+	(empty)	(vuoto)
+	Allow "All files access" for PhotoCraft, then tap Shared storage.	Consenti a PhotoCraft l'accesso a tutti i file, poi tocca "Archiviazione condivisa".
+	App storage	Archiviazione dell'app
+	Choose this folder	Scegli questa cartella
+	Could not create the folder:	Impossibile creare la cartella:
+	File name:	Nome file:
+	Grant access	Concedi accesso
+	Name the new folder first	Assegna prima un nome alla nuova cartella
+	New folder	Nuova cartella
+	Select at least one file.	Seleziona almeno un file.
+	Shared storage	Archiviazione condivisa
+	Shared storage (grant access)	Archiviazione condivisa (concedi accesso)
+	Tap files to select them.	Tocca i file per selezionarli.
+	{name} already exists. Replace it?	{name} esiste già. Sostituirlo?
+	This build can't request shared-storage access.	Questa build non può richiedere l'accesso all'archiviazione condivisa.
+	This folder can't be read yet. Grant PhotoCraft access to all files.	Impossibile leggere questa cartella. Concedi a PhotoCraft l'accesso a tutti i file.
+	selected	selezionati
+	Picker view	Vista del selettore
+	Could not remember the view.	Impossibile memorizzare la vista.
 	{name} was changed by another app after it was opened or saved here.	{name} è stato modificato da un'altra app dopo essere stato aperto o salvato qui.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Sostituiscilo con questo documento, oppure annulla e usa File › Salva con nome per tenerli entrambi.
 	Memory Usage	Utilizzo memoria
@@ -4405,6 +4431,11 @@ shape	Appearance	Aspetto
 	Use	Usa
 	In Front	Davanti
 	Behind	Dietro
+# Android launch-time "All files access" prompt (crates/ui-egui/src/android_access.rs)
+	Allow access to all files?	Consentire l'accesso a tutti i file?
+	Not now	Non ora
+	PhotoCraft needs "All files access" to open and save files in shared storage.	PhotoCraft deve accedere a tutti i file per aprire e salvare file in "Archiviazione condivisa".
+	Skip the all-files-access prompt at launch	Non chiedere l'accesso a tutti i file all'avvio
 
 # DDS Options (#1327)
 	DDS Options	Opzioni DDS

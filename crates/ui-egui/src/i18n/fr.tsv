@@ -642,6 +642,11 @@
 	Fit Artboard on Screen	Adapter le plan de travail à l'écran
 	100%	100 %
 	200%	200 %
+	50%	50% %
+	55%	55% %
+	60%	60% %
+	65%	65% %
+	70%	70% %
 	75%	75 %
 	80%	80 %
 	85%	85 %
@@ -3282,6 +3287,30 @@ curves	Smooth	Lisser
 	This document's layers: {needed} of {budget} for layers	Calques de ce document : {needed} sur {budget} pour les calques
 	This document's layers need {needed} but may hold {budget}: whole-document redraws use the CPU	Les calques de ce document ont besoin de {needed} mais peuvent occuper {budget} : le document entier se redessine sur le CPU
 	GPU Memory (MB, 0 = Automatic)	Mémoire GPU (Mo, 0 = Automatique)
+
+# Android in-app file browser (crates/ui-egui/src/android_file.rs)
+	(empty)	(vide)
+	Allow "All files access" for PhotoCraft, then tap Shared storage.	Autorisez PhotoCraft à accéder à tous les fichiers, puis touchez « Stockage partagé ».
+	App storage	Stockage de l'application
+	Change…	Modifier…
+	Choose this folder	Choisir ce dossier
+	Could not create the folder:	Impossible de créer le dossier :
+	File name:	Nom du fichier :
+	Grant access	Autoriser l'accès
+	Name the new folder first	Nommez d'abord le nouveau dossier
+	New folder	Nouveau dossier
+	Select at least one file.	Sélectionnez au moins un fichier.
+	Shared storage	Stockage partagé
+	Shared storage (grant access)	Stockage partagé (autoriser l'accès)
+	Tap files to select them.	Touchez des fichiers pour les sélectionner.
+	{name} already exists. Replace it?	{name} existe déjà. Le remplacer ?
+	This build can't request shared-storage access.	Cette version ne peut pas demander l'accès au stockage partagé.
+	This folder can't be read yet. Grant PhotoCraft access to all files.	Ce dossier n'est pas encore accessible en lecture. Autorisez PhotoCraft à accéder à tous les fichiers.
+	Up	Monter
+	selected	sélectionnés
+	List	Liste
+	Picker view	Affichage du sélecteur
+	Could not remember the view.	Impossible de retenir l'affichage.
 	Replace	Remplacer
 	{name} was changed by another app after it was opened or saved here.	{name} a été modifié par une autre application après avoir été ouvert ou enregistré ici.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Remplacez-le par ce document, ou annulez et utilisez Fichier › Enregistrer sous pour garder les deux.
@@ -3298,6 +3327,11 @@ curves	Smooth	Lisser
 	Use	Utiliser
 	In Front	Devant
 	Behind	Derrière
+# Android launch-time "All files access" prompt (crates/ui-egui/src/android_access.rs)
+	Allow access to all files?	Autoriser l'accès à tous les fichiers ?
+	Not now	Plus tard
+	PhotoCraft needs "All files access" to open and save files in shared storage.	PhotoCraft doit accéder à tous les fichiers pour ouvrir et enregistrer des fichiers dans « Stockage partagé ».
+	Skip the all-files-access prompt at launch	Ne plus demander l'accès à tous les fichiers au démarrage
 
 # DDS Options (#1327)
 	DDS Options	Options DDS
