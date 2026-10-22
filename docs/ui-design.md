@@ -1,5 +1,8 @@
 # UI design system
 
+> KDE integration update: 2026-10-21. Linux decoration defaults now follow the shared
+> compositor policy; saved choices are retained. Native multi-monitor acceptance remains a manual check.
+
 ## Themes
 
 | Theme | Intent |
@@ -96,7 +99,8 @@ missing-glyph boxes. Check every new panel with the offscreen snapshot tool (`do
 
 The app's top bar (`panels::title_bar`) starts with the brand mark (the app icon, `brand.rs`), then the menus, the document title and the workspace controls, like Photoshop's Ps tile and menu row.
 
-- **Windows and Linux:** the window has no OS decorations, so there is one bar, not two stacked. The top bar is the title bar (`titlebar.rs`): Minimize, Maximize/Restore and Close (red on hover, `caption_close` tokens) sit flush in the window's top-right corner, the free gap between the menus and the controls drags the window and a double-click there maximizes it, and invisible 5 pt edges (12 pt corners) resize it. Close runs File › Exit, so unsaved documents are asked about first.
+- **Linux:** a new preference file follows `craft-window`: KWin and other compositors offering server-side decorations keep their native title bar; X11/XWayland keeps the window manager frame. Compositors without server-side decorations use the app's controls. An explicitly saved System Title Bar value, including false, is preserved. Without a saved value, `PHOTOCRAFT_TITLEBAR=app` or `system` overrides the probe. The initial checkbox follows the chosen frame, so saving another preference does not change the next launch's decorations.
+- **Windows, and Linux with app decorations selected:** the window has no OS decorations, so there is one bar, not two stacked. The top bar is the title bar (`titlebar.rs`): Minimize, Maximize/Restore and Close (red on hover, `caption_close` tokens) sit flush in the window's top-right corner, the free gap between the menus and the controls drags the window and a double-click there maximizes it, and invisible 5 pt edges (12 pt corners) resize it. Close runs File › Exit, so unsaved documents are asked about first.
 - **macOS:** the traffic lights sit over the integrated title strip (`integrated_titlebar`).
 - **Narrow windows** drop controls that are also in a menu before anything overlaps: the theme toggle (Preferences), then search (Edit › Search), then the workspace switcher narrows (Window › Workspace).
 
@@ -188,6 +192,12 @@ Tiny, Small (the default), Medium and Large use 10/12, 1, 14/12 and 16/12 of the
 font sizes, preserving the relative sizes of headings, captions and numeric fields. Apply or OK
 updates text immediately; the choice persists across launches and theme changes. CJK fallback
 fonts use the same size, including fonts loaded after the preference changes.
+
+## KDE manual acceptance
+
+See [KDE validation](KDE.md) for isolated launch commands, regression tests and the native
+Global Menu/appearance/DPI checklist. These checks require a real Plasma session; model
+tests and `cargo check` do not establish compositor acceptance.
 
 ## Localisation
 

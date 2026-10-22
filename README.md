@@ -309,6 +309,24 @@ Maintainers: [`docs/releasing.md`](docs/releasing.md) explains how releases are 
 > [!IMPORTANT]
 > **Status:** PhotoCraft is in early alpha, and we want to be straight about where it stands: much of Photoshop's feature surface exists in some form, but **it is not yet a Photoshop replacement for daily professional work**. The biggest gaps are AI/generative features, 15 missing tools, depth in typography and pro workflows, and plug-in compatibility. Every Photoshop menu item is wired to a command ([`docs/parity-checklist.md`](docs/parity-checklist.md)), but that measures wiring, not behaviour. The honest, dimension-by-dimension picture and where we're going next are in the [roadmap](ROADMAP.md) and [parity assessment](docs/target-app-parity.md). Expect rough edges, and please file issues (include your OS, document size, layer count and a screenshot). You can also tell us what broke on [Discord](https://discord.gg/artcraft).
 
+## KDE Plasma integration (fork)
+
+The Linux desktop host can export the existing text menus to Plasma's Global Menu widget.
+The local menu remains visible, including when no widget or session bus is available.
+Commands use the normal interactive dispatcher, preserving dialogs, saved shortcuts and
+enabled/checked states. Set `PHOTOCRAFT_NO_GLOBAL_MENU=1` to disable export.
+
+Wayland association uses KDE's appmenu protocol on the window's own connection; X11 uses
+window properties and the AppMenu registrar. The vendored winit extension is required for
+Wayland; see `vendor/winit/CRAFT_PATCH.md`. Unsupported compositors retain local menus.
+Flatpak manifests allow the registrar, but packaged Flatpak runtime acceptance is separate.
+
+New Linux preference files default to the compositor's decorations (native KWin title bar);
+explicit existing System Title Bar choices remain unchanged. Breeze Light/Dark and Automatic
+appearance already exist under Preferences › Interface. Multi-monitor DPI and native theme
+checks are described in [UI design](docs/ui-design.md). See [KDE validation](docs/KDE.md) for
+build/test commands and the manual acceptance checklist; unit tests are not GUI acceptance.
+
 ## Community packages
 
 These installers are maintained by community members, not by the PhotoCraft team.

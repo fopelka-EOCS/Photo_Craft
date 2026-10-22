@@ -6,7 +6,19 @@ code and original assets are MIT OR Apache-2.0 (see [`LICENSE-MIT`](LICENSE-MIT)
 in the same change; third-party assets must be permissively licensed and keep their license file
 next to them.
 
-## Bundled in the app
+## Vendored window backend (examples and documentation only)
+
+These upstream assets are retained with the winit source; they are not application artwork.
+The Apache-2.0 license is retained at `vendor/winit/LICENSE`.
+
+| Path | Title | Author | Source | License |
+|---|---|---|---|---|
+| `vendor/winit/examples/data/icon.png` | Example icon | Winit contributors | https://github.com/rust-windowing/winit/tree/v0.30.13/examples/data | Apache-2.0 |
+| `vendor/winit/examples/data/gradient.png` | Example gradient | Winit contributors | https://github.com/rust-windowing/winit/tree/v0.30.13/examples/data | Apache-2.0 |
+| `vendor/winit/examples/data/cross.png` | Example cursor | Winit contributors | https://github.com/rust-windowing/winit/tree/v0.30.13/examples/data | Apache-2.0 |
+| `vendor/winit/examples/data/cross2.png` | Example cursor | Winit contributors | https://github.com/rust-windowing/winit/tree/v0.30.13/examples/data | Apache-2.0 |
+
+## Application assets
 
 | Path | Title | Author | Source | License |
 |---|---|---|---|---|

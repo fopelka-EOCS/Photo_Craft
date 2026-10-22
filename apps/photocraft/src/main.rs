@@ -45,6 +45,8 @@ mod caption_style;
 mod control_server;
 mod crash_guard;
 mod cursor;
+#[cfg(target_os = "linux")]
+mod desktop;
 mod file_dialog_probe;
 mod gpu_startup;
 #[cfg(target_os = "linux")]
@@ -82,18 +84,36 @@ use photocraft_ui_egui::PhotocraftApp;
 /// Matches the `.desktop` file and hicolor icon name, so Wayland docks pick up the icon.
 const APP_ID: &str = "ai.storyteller.photocraft";
 
-/// Windows and Linux: no OS title bar; the app's top bar is the title bar, with its own caption
-/// buttons and edge resizing (`photocraft_ui_egui::titlebar`), as Photoshop does on Windows. macOS
-/// keeps its traffic lights over the integrated title strip.
+/// The legacy default, retained outside Linux and for explicitly saved preferences.
 const CUSTOM_TITLEBAR: bool = !cfg!(target_os = "macos");
 
-/// Whether this start draws its own title bar: Windows and Linux do, unless Preferences ›
-/// Interface › System Title Bar asks for the system's (#1271, #1316). Read from the saved
-/// preferences before the window opens; a missing or unreadable file keeps the default.
-fn custom_titlebar(prefs_file: Option<&std::path::Path>) -> bool {
-    let prefs: photocraft_engine::prefs::Preferences =
-        prefs_file.and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
-    CUSTOM_TITLEBAR && !prefs.interface.system_title_bar
+/// Keep an explicit saved choice (including false); new Linux installs follow the compositor.
+/// Reading the field's presence matters: deserializing Preferences would turn an absent value
+/// into false and silently keep the old custom-titlebar default for every new install.
+fn saved_system_title_bar(prefs_file: Option<&std::path::Path>) -> Option<bool> {
+    let prefs: serde_json::Value = prefs_file.and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok())?;
+    prefs.get("interface")?.get("systemTitleBar")?.as_bool()
+}
+
+fn custom_titlebar_policy(saved: Option<bool>, desktop_wants_app: bool) -> bool {
+    if cfg!(target_os = "linux") { saved.map_or(desktop_wants_app, |system| !system) } else { CUSTOM_TITLEBAR && !saved.unwrap_or(false) }
+}
+
+/// Probe only once, before creating the window. The selected display backend wins over a
+/// Wayland-session probe when a tablet or preference selected XWayland. Explicit titlebar
+/// environment overrides still apply, unless a saved System Title Bar preference exists.
+fn custom_titlebar(prefs_file: Option<&std::path::Path>, _x11: bool) -> bool {
+    let saved = saved_system_title_bar(prefs_file);
+    #[cfg(target_os = "linux")]
+    let desktop_wants_app = if saved.is_some() {
+        false
+    } else {
+        let choice = craft_window::Choice::probe(craft_window::Prefix::new("PHOTOCRAFT"));
+        choice.overridden().unwrap_or(!_x11 && matches!(choice.frame(), craft_window::Frame::App(_)))
+    };
+    #[cfg(not(target_os = "linux"))]
+    let desktop_wants_app = false;
+    custom_titlebar_policy(saved, desktop_wants_app)
 }
 
 /// The main window: 1440 × 900 (shrunk to fit the monitor, and maximized on the first frame
@@ -643,7 +663,12 @@ fn main() -> eframe::Result {
     let monitor = monitor_profile::detect_async();
     // Brush presets load in the background; the app attaches them when they arrive.
     let presets = services::presets_dir().map(photocraft_engine::preset_store::open_dir_async);
-    let custom_titlebar = custom_titlebar(services::prefs_file().as_deref());
+    #[cfg(target_os = "linux")]
+    let x11_window = session == linux_libs::DisplaySession::X11;
+    #[cfg(not(target_os = "linux"))]
+    let x11_window = false;
+    let custom_titlebar = custom_titlebar(services::prefs_file().as_deref(), x11_window);
+    let initialize_system_title_bar = cfg!(target_os = "linux") && saved_system_title_bar(services::prefs_file().as_deref()).is_none();
     let mut options = native_options(custom_titlebar);
     // winit picks Wayland whenever `WAYLAND_DISPLAY` is set; open on X11 when that was chosen.
     #[cfg(target_os = "linux")]
@@ -742,6 +767,12 @@ fn main() -> eframe::Result {
             app.min_frame_ms = uncapped.then_some(1000.0 / 240.0);
             app.integrated_titlebar = cfg!(target_os = "macos");
             app.custom_titlebar = custom_titlebar;
+            if initialize_system_title_bar {
+                // Keep the checkbox and subsequent preference saves consistent with the frame
+                // chosen on this first launch; otherwise saving an unrelated setting would
+                // persist the legacy false default and restore CSD at the next start.
+                app.session.edit_prefs(|prefs| prefs.interface.system_title_bar = !custom_titlebar);
+            }
             // Only the title bar's free gap drags the window, never the menus (mac_window.rs).
             #[cfg(target_os = "macos")]
             mac_window::disable_native_title_drag();
@@ -889,6 +920,8 @@ fn main() -> eframe::Result {
             if let Some(w) = &app_dirs::current().warning {
                 photocraft_ui_egui::notices::post(&mut app, "Portable mode is off", vec![w.clone()], false, None);
             }
+            #[cfg(target_os = "linux")]
+            let app = desktop::App::new(app, cc);
             Ok(Box::new(app))
         }),
     );
@@ -1049,18 +1082,32 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pc-titlebar-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("prefs.json");
-        assert_eq!(super::custom_titlebar(None), super::CUSTOM_TITLEBAR, "no preferences file: the default");
+        assert_eq!(super::saved_system_title_bar(None), None);
         std::fs::write(&file, "not json").unwrap();
-        assert_eq!(super::custom_titlebar(Some(&file)), super::CUSTOM_TITLEBAR, "an unreadable file: the default");
+        assert_eq!(super::saved_system_title_bar(Some(&file)), None);
+        std::fs::write(&file, r#"{"interface":{}}"#).unwrap();
+        assert_eq!(super::saved_system_title_bar(Some(&file)), None);
         std::fs::write(&file, r#"{"interface":{"systemTitleBar":true}}"#).unwrap();
-        assert!(!super::custom_titlebar(Some(&file)));
+        assert!(!super::custom_titlebar(Some(&file), false));
         assert_eq!(super::native_options(false).viewport.decorations, Some(true));
         std::fs::write(&file, r#"{"interface":{"systemTitleBar":false}}"#).unwrap();
-        assert_eq!(super::custom_titlebar(Some(&file)), super::CUSTOM_TITLEBAR);
+        assert_eq!(super::custom_titlebar(Some(&file), false), super::CUSTOM_TITLEBAR);
         if super::CUSTOM_TITLEBAR {
             assert_eq!(super::native_options(true).viewport.decorations, Some(false));
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn linux_new_windows_use_desktop_decorations_without_overwriting_saved_choices() {
+        if cfg!(target_os = "linux") {
+            assert!(!super::custom_titlebar_policy(None, false), "KDE and X11 keep the native frame");
+            assert!(super::custom_titlebar_policy(None, true), "a compositor without decorations needs controls");
+            for desktop_wants_app in [false, true] {
+                assert!(!super::custom_titlebar_policy(Some(true), desktop_wants_app));
+                assert!(super::custom_titlebar_policy(Some(false), desktop_wants_app));
+            }
+        }
     }
 
     /// X11 startup notification and docks match a window to its launcher by `StartupWMClass`,

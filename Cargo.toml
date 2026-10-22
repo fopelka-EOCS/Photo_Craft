@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "apps/*", "xtask"]
+exclude = ["vendor/craft-desktop", "vendor/winit"]
 default-members = ["crates/*", "apps/photocraft", "apps/photocraft-cli", "xtask"]
 
 [workspace.package]
@@ -65,6 +66,9 @@ getrandom = "0.3"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+
+[patch.crates-io]
+winit = { path = "vendor/winit" }
 
 [workspace.lints.clippy]
 dbg_macro = "warn"

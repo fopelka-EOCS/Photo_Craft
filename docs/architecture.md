@@ -1,5 +1,8 @@
 # PhotoCraft architecture
 
+> **Linux integration update:** 2026-10-21. The desktop host uses pinned `craft-window` for new-install
+> frame selection; explicit saved choices and Windows/macOS behavior remain unchanged.
+
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-20 · **Change:** minor (accurate GPU matrix/TRC display conversion; original design plan retained) · **Target:** Adobe Photoshop 2026
 
 ## Current state (2026-10-10)
@@ -589,6 +592,7 @@ Each phase ends with a demoable build and green CI on all targets. Phases 8–10
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | Linux frame selection reuses craft-window; compositor/server decorations on KDE and X11, custom controls where required, explicit preference preservation. Policy tests added; no parity score change. |
 | 2026-10-20 | minor | GPU display matrix/shaper path preserves near-black ICC values; complex transforms retain the 3D LUT fallback (#7958) |
 | 2026-10-13 | minor | Workspace size and `#[test]` counts recounted (393k → 539k lines, 5,460 → 8,040 tests); other current-state figures unchanged |
 | 2026-10-10 | minor | Current-state summary and deviations from the plan; status line; broken link to `photoshop-parity.md` repointed to `target-app-parity.md` |

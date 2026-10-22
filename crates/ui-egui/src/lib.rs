@@ -73,6 +73,7 @@ pub mod crop_straighten;
 pub mod crop_ui;
 pub mod dds_options_ui;
 pub mod delete_layer_prompt;
+pub mod desktop_menu;
 pub mod dialog_alt_reset;
 pub mod dialog_blend_ui;
 pub mod dialogs;

@@ -64,6 +64,9 @@ dispatch2 = { version = "=0.3.1", default-features = false, features = ["std"] }
 
 # Drop position on X11 (`cursor.rs`): pure-Rust X client, already in Cargo.lock; pinned exactly.
 [target.'cfg(target_os = "linux")'.dependencies]
+craft-desktop = { path = "../../vendor/craft-desktop", features = ["linux", "portal"] }
+# The same compositor-decoration policy as VectorCraft; no egui dependency is needed here.
+craft-window = { git = "https://github.com/storytold/craft-libs", rev = "1f805378d454dac48b5c214029d254055fdf961b" }
 photocraft-cms = { workspace = true }
 # The print portal's PDF: a private (0600) temporary file, removed when the dialog is done.
 tempfile = "3"

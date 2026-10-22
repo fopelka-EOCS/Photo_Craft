@@ -1,5 +1,7 @@
 # PhotoCraft roadmap
 
+- 2026-10-21: Linux new-install window frames follow the shared compositor policy; existing titlebar choices stay intact. Fractional-DPI monitor regression includes 200%. Scores and estimates unchanged; live KDE acceptance is tracked separately.
+
 **Stage: alpha** · next: beta, ~30 points (ready for real work ~45% → ~75%, with reliable PSD) and ~1,100–1,800 h away
 
 > **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-13 · **Change:** minor (oracle floor 145 of 258 and 953 open issues, as in gaps.md and on GitHub; toolbox count 56 of 68, 12 missing) · **Target:** Adobe Photoshop 2026

@@ -880,7 +880,7 @@ pub(crate) fn reveal_label() -> &'static str {
 
 /// Translate the fixed command label and substitute the currently configured export format.
 /// Reuse the existing translated PNG sentence, so dynamic formats work in every UI language.
-fn translated_menu_label(lang: crate::i18n::Lang, item: &MenuItem) -> String {
+pub(crate) fn translated_menu_label(lang: crate::i18n::Lang, item: &MenuItem) -> String {
     // A document's name is shown as it is.
     if item.id.starts_with(DOCUMENT_ITEM) {
         return item.label.clone();
