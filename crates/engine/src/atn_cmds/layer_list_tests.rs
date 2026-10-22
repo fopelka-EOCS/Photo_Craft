@@ -134,7 +134,12 @@ fn export_refuses_a_rename_carrying_a_layers_list() {
 /// aim the step at the active layer instead (#7246, review).
 #[test]
 fn export_refuses_a_numeric_layer_beyond_the_idnt_range() {
-    let action = Action::new("Targets", vec![("layer.setProps".into(), json!({"layer": u32::MAX as u64 + 1, "opacity": 0.5}))]);
-    let e = export("S", &[&action], &[], false).unwrap_err();
-    assert!(e.contains("layer.setProps"), "{e}");
+    for bad in [json!(u32::MAX as u64 + 1), json!(-5)] {
+        let action = Action::new("Targets", vec![("layer.setProps".into(), json!({"layer": bad, "opacity": 0.5}))]);
+        let e = export("S", &[&action], &[], false).unwrap_err();
+        assert!(e.contains("layer.setProps"), "{e}");
+    }
+    let skipped_action = Action::new("Targets", vec![("layer.setProps".into(), json!({"layer": -5, "opacity": 0.5}))]);
+    let (_, skipped) = export("S", &[&skipped_action], &[], true).unwrap();
+    assert_eq!(skipped, [Skipped { action: "Targets".into(), step: 0, id: "layer.setProps".into() }]);
 }

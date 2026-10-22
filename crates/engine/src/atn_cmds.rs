@@ -1636,10 +1636,13 @@ fn set_to(id: &str, p: &Value) -> Option<Descriptor> {
             if p.as_object().is_some_and(|m| m.iter().any(|(k, v)| !v.is_null() && !MAPPED.contains(&k.as_str()))) {
                 return None;
             }
-            // A numeric `layer` is an imported `Idnt`; one beyond the u32 the reference holds
-            // exports as nothing, rather than drift to the target layer.
-            if p.get("layer").and_then(Value::as_u64).is_some_and(|i| i > u32::MAX as u64) {
-                return None;
+            // A numeric `layer` is an imported `Idnt`; one the reference cannot hold (negative,
+            // or beyond u32) exports as nothing, rather than drift to the target layer.
+            if let Some(Value::Number(n)) = p.get("layer") {
+                let i = n.as_u64()?;
+                if i > u32::MAX as u64 {
+                    return None;
+                }
             }
             let mut t = desc("Lyr ");
             if let Some(n) = jstr(p, "name") {
