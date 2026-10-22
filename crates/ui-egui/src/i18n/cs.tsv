@@ -3939,6 +3939,7 @@ navigator	Zoom	Zvětšení
 	Increase Brush Size	Zvětšit velikost štětce
 	Decrease Brush Hardness	Snížit tvrdost štětce
 	Increase Brush Hardness	Zvýšit tvrdost štětce
+	Collapse Layer Effects on Open	Sbalit efekty vrstev při otevření
 	Demosaic	Demozaikování
 	How the camera's colour filter mosaic is filled in. It is applied when the file opens; the preview shows the method it was opened with.	Jak se doplňuje mozaika barevného filtru fotoaparátu. Použije se při otevření souboru; náhled ukazuje metodu, se kterou byl otevřen.
 	AHD (adaptive homogeneity)	AHD (adaptivní homogenita)

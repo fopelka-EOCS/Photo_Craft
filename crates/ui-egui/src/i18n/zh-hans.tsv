@@ -2983,6 +2983,7 @@ curves	Smooth	平滑
 	Increase Brush Size	增大画笔大小
 	Decrease Brush Hardness	减小画笔硬度
 	Increase Brush Hardness	增大画笔硬度
+	Collapse Layer Effects on Open	打开文档时折叠图层效果
 	Demosaic	去马赛克
 	How the camera's colour filter mosaic is filled in. It is applied when the file opens; the preview shows the method it was opened with.	如何填补相机彩色滤镜阵列的马赛克。在打开文件时应用；预览显示打开时所用的方法。
 	AHD (adaptive homogeneity)	AHD（自适应同质性）

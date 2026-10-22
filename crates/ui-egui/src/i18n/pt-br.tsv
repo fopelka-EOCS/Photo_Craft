@@ -4116,6 +4116,7 @@ layerLabel	No Color	Sem cor
 	Increase Brush Size	Aumentar tamanho do pincel
 	Decrease Brush Hardness	Diminuir dureza do pincel
 	Increase Brush Hardness	Aumentar dureza do pincel
+	Collapse Layer Effects on Open	Recolher efeitos de camada ao abrir
 	Demosaic	Demosaico
 	How the camera's colour filter mosaic is filled in. It is applied when the file opens; the preview shows the method it was opened with.	Como o mosaico do filtro de cor da câmera é preenchido. É aplicado ao abrir o arquivo; a visualização mostra o método com que ele foi aberto.
 	AHD (adaptive homogeneity)	AHD (homogeneidade adaptativa)

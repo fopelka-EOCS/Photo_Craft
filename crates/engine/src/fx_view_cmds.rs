@@ -22,7 +22,7 @@ fn has_effects(s: &Session) -> std::result::Result<(), String> {
 }
 
 /// Whether the layer has a list to disclose: effects, or Smart Filters on a Smart Object.
-fn has_children(l: &Layer) -> bool {
+pub(crate) fn has_children(l: &Layer) -> bool {
     !l.effects.items.is_empty() || matches!(&l.content, LayerContent::Smart(sm) if !sm.smart_filters.is_empty())
 }
 
@@ -164,5 +164,73 @@ mod tests {
         assert!(empty.execute(ID, json!({})).is_err());
         empty.execute("file.new", json!({"width": 8, "height": 8})).unwrap();
         assert!(empty.execute(ID, json!({"all": true})).is_err(), "no effects: disabled");
+    }
+
+    /// #5320: a saved preference seeds view state on admission, including nested layers.
+    #[test]
+    fn opening_documents_can_collapse_effects_without_changing_the_document() {
+        let (mut source, a, b) = session();
+        source.execute("layer.select", json!({"layer": a})).unwrap();
+        source.execute("layer.select", json!({"layer": b, "mode": "toggle"})).unwrap();
+        source.execute("layer.groupLayers", json!({"name": "Styled group"})).unwrap();
+        source.execute("layer.layerStyle.dropShadow", json!({})).unwrap();
+        let doc = (*source.active().unwrap().doc).clone();
+        let styled: Vec<_> = doc.walk().into_iter().filter(|(_, _, l)| !l.effects.items.is_empty()).map(|(_, _, l)| l.id).collect();
+        assert_eq!(styled.len(), 3, "the group and both nested layers have effects");
+        let mut s = Session::new();
+        s.add_document(doc.clone(), Some("first.pcraft".into()));
+        assert!(s.active().unwrap().fx_collapsed.is_empty(), "default remains expanded");
+        s.execute("prefs.set", json!({"path": "interface.collapseLayerEffectsOnOpen", "value": true})).unwrap();
+        assert!(s.active().unwrap().fx_collapsed.is_empty(), "existing documents keep their view state");
+        let mut restored = Session::new();
+        restored.load_prefs_json(&s.prefs_to_json()).unwrap();
+        for name in ["first.psd", "second.pcraft"] {
+            restored.add_document(doc.clone(), Some(name.into()));
+            let st = restored.active().unwrap();
+            assert_eq!(st.fx_collapsed, styled);
+            assert!(!st.is_dirty());
+            assert_eq!(st.history.past_len(), 0);
+            assert_eq!(st.doc.layers, doc.layers, "effects and pixels are unchanged");
+            restored.execute(ID, json!({"layer": a, "expanded": true})).unwrap();
+            assert!(open(&restored, a) && !open(&restored, b));
+            assert!(!restored.active().unwrap().is_dirty());
+            assert!(restored.prefs().interface.collapse_layer_effects_on_open);
+        }
+        restored.execute("prefs.reset", json!({"path": "interface.collapseLayerEffectsOnOpen"})).unwrap();
+        restored.add_document(doc, None);
+        assert!(restored.active().unwrap().fx_collapsed.is_empty());
+    }
+
+    /// Smart Filter-only layers use the same disclosure and saved admission preference.
+    #[test]
+    fn opening_smart_filter_only_layers_honors_the_collapse_preference() {
+        for depth in [8, 16, 32] {
+            let mut source = Session::new();
+            source.execute("file.new", json!({"width": 8, "height": 8, "depth": depth})).unwrap();
+            source.execute("layer.new.layer", json!({"name": "Smart"})).unwrap();
+            source.execute("edit.fill", json!({"contents": "color", "color": "#ff0000"})).unwrap();
+            source.execute("layer.smartObjects.convertToSmartObject", json!({})).unwrap();
+            source.execute("image.adjustments.invert", json!({})).unwrap();
+            let smart = source.active().unwrap().active_layer.unwrap();
+            let doc = (*source.active().unwrap().doc).clone();
+            let layer = doc.layer(smart).unwrap();
+            assert!(layer.effects.items.is_empty(), "the fixture has no layer styles");
+            assert!(matches!(&layer.content, LayerContent::Smart(sm) if !sm.smart_filters.is_empty()));
+            for enabled in [false, true] {
+                let mut restored = Session::new();
+                restored.execute("prefs.set", json!({"path": "interface.collapseLayerEffectsOnOpen", "value": enabled})).unwrap();
+                restored.add_document(doc.clone(), Some("smart.pcraft".into()));
+                let st = restored.active().unwrap();
+                assert_eq!(st.fx_collapsed.contains(&smart), enabled, "{depth}-bit, enabled={enabled}");
+                assert!(!st.is_dirty());
+                assert_eq!(st.history.past_len(), 0);
+                assert_eq!(st.doc.layers, doc.layers, "admission preserves filters and pixels");
+                let admitted = st.doc.clone();
+                restored.execute(ID, json!({"layer": smart.0, "expanded": true})).unwrap();
+                assert!(open(&restored, smart.0));
+                assert!(std::sync::Arc::ptr_eq(&admitted, &restored.active().unwrap().doc));
+                assert_eq!(restored.active().unwrap().history.past_len(), 0);
+            }
+        }
     }
 }

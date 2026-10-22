@@ -4003,6 +4003,7 @@ curves	Smooth	スムーズ
 	Increase Brush Size	ブラシサイズを大きく
 	Decrease Brush Hardness	ブラシの硬さを下げる
 	Increase Brush Hardness	ブラシの硬さを上げる
+	Collapse Layer Effects on Open	開くときにレイヤー効果を折りたたむ
 	Demosaic	デモザイク
 	How the camera's colour filter mosaic is filled in. It is applied when the file opens; the preview shows the method it was opened with.	カメラのカラーフィルター配列をどのように補間するか。ファイルを開くときに適用されます。プレビューは開いたときの方式で表示されます。
 	AHD (adaptive homogeneity)	AHD（適応的均質性）

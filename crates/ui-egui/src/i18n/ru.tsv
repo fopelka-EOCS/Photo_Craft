@@ -3805,6 +3805,7 @@ curves	Smooth	Сгладить
 	In Black	Входной чёрный
 	In White	Входной белый
 	Increase Brush Hardness	Увеличить жёсткость кисти
+	Collapse Layer Effects on Open	Сворачивать эффекты слоёв при открытии
 	Demosaic	Демозаик
 	How the camera's colour filter mosaic is filled in. It is applied when the file opens; the preview shows the method it was opened with.	Как восстанавливается мозаика цветного фильтра камеры. Применяется при открытии файла; превью показывает метод, с которым файл был открыт.
 	AHD (adaptive homogeneity)	AHD (адаптивная однородность)
