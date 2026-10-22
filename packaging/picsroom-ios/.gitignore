@@ -1,0 +1,6 @@
+vendor/
+App/Models/*.mlpackage/
+**/xcuserdata/
+**/target/
+.DS_Store
+DerivedData/

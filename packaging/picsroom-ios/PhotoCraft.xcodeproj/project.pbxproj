@@ -1,0 +1,68 @@
+// !$*UTF8*$!
+{ archiveVersion = 1; classes = {}; objectVersion = 56; objects = {
+000000000000000000000001 = { isa = PBXProject; attributes = { LastUpgradeCheck = 1600; }; buildConfigurationList = 00000000000000000000000A; compatibilityVersion = "Xcode 14.0"; developmentRegion = de; knownRegions = (de, en, Base); mainGroup = 000000000000000000000002; productRefGroup = 000000000000000000000003; projectDirPath = ""; projectRoot = ""; targets = (000000000000000000000004, 000000000000000000000064); };
+000000000000000000000002 = { isa = PBXGroup; children = (000000000000000000000014, 00000000000000000000006E, 000000000000000000000003); sourceTree = "<group>"; };
+000000000000000000000003 = { isa = PBXGroup; children = (000000000000000000000005, 000000000000000000000065); name = Products; sourceTree = "<group>"; };
+000000000000000000000004 = { isa = PBXNativeTarget; buildConfigurationList = 00000000000000000000000B; buildPhases = (000000000000000000000006, 000000000000000000000007, 000000000000000000000008, 000000000000000000000009); buildRules = (); dependencies = (); name = PhotoCraft; productName = PhotoCraft; productReference = 000000000000000000000005; productType = "com.apple.product-type.application"; };
+000000000000000000000005 = { isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PhotoCraft.app; sourceTree = BUILT_PRODUCTS_DIR; };
+000000000000000000000006 = { isa = PBXShellScriptBuildPhase; alwaysOutOfDate = 1; buildActionMask = 2147483647; files = (); inputPaths = (); outputPaths = (); runOnlyForDeploymentPostprocessing = 0; name = "Build PhotoCraft engine"; shellPath = /bin/bash; shellScript = "\"${SRCROOT}/scripts/build-rust.sh\""; };
+000000000000000000000007 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (000000000000000000000209, 000000000000000000000205, 000000000000000000000207, 000000000000000000000203, 000000000000000000000201, 0000000000000000000000E7, 0000000000000000000000E8, 0000000000000000000000E6, 000000000000000000000028, 000000000000000000000029, 00000000000000000000002A, 0000000000000000000000D2, 0000000000000000000000D3, 00000000000000000000002B); runOnlyForDeploymentPostprocessing = 0; };
+000000000000000000000008 = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+000000000000000000000009 = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (000000000000000000000136, 000000000000000000000137, 000000000000000000000138, 000000000000000000000079); runOnlyForDeploymentPostprocessing = 0; };
+00000000000000000000000A = { isa = XCConfigurationList; buildConfigurations = (00000000000000000000000C, 00000000000000000000000D); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+00000000000000000000000B = { isa = XCConfigurationList; buildConfigurations = (00000000000000000000000E, 00000000000000000000000F); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+00000000000000000000000C = { isa = XCBuildConfiguration; name = Debug; buildSettings = { CLANG_ENABLE_MODULES = YES; SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; }; };
+00000000000000000000000D = { isa = XCBuildConfiguration; name = Release; buildSettings = { CLANG_ENABLE_MODULES = YES; SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; }; };
+00000000000000000000000E = { isa = XCBuildConfiguration; name = Debug; buildSettings = { CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = ""; ENABLE_USER_SCRIPT_SANDBOXING = NO; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = App/Info.plist; ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; LIBRARY_SEARCH_PATHS = ("$(inherited)", "$(BUILT_PRODUCTS_DIR)/Rust"); OTHER_LDFLAGS = ("$(inherited)", "-lphotocraft_ios_bridge", "-liconv", "-lSystem", "-lc", "-lm"); PRODUCT_BUNDLE_IDENTIFIER = local.photocraft.iphone; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SWIFT_OBJC_BRIDGING_HEADER = App/Bridge.h; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG"; ONLY_ACTIVE_ARCH = YES; }; };
+00000000000000000000000F = { isa = XCBuildConfiguration; name = Release; buildSettings = { CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = ""; ENABLE_USER_SCRIPT_SANDBOXING = NO; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = App/Info.plist; ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; LIBRARY_SEARCH_PATHS = ("$(inherited)", "$(BUILT_PRODUCTS_DIR)/Rust"); OTHER_LDFLAGS = ("$(inherited)", "-lphotocraft_ios_bridge", "-liconv", "-lSystem", "-lc", "-lm"); PRODUCT_BUNDLE_IDENTIFIER = local.photocraft.iphone; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SWIFT_OBJC_BRIDGING_HEADER = App/Bridge.h; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; SWIFT_OPTIMIZATION_LEVEL = "-O"; ONLY_ACTIVE_ARCH = YES; }; };
+000000000000000000000014 = { isa = PBXGroup; children = (000000000000000000000208, 000000000000000000000204, 000000000000000000000206, 000000000000000000000202, 000000000000000000000200, 00000000000000000000012C, 00000000000000000000012D, 00000000000000000000012E, 0000000000000000000000DD, 0000000000000000000000DE, 0000000000000000000000DC, 00000000000000000000001E, 00000000000000000000001F, 000000000000000000000020, 000000000000000000000021, 0000000000000000000000C8, 0000000000000000000000C9, 000000000000000000000078); path = App; sourceTree = "<group>"; };
+00000000000000000000001E = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoCraftApp.swift; sourceTree = "<group>"; };
+000000000000000000000028 = { isa = PBXBuildFile; fileRef = 00000000000000000000001E; };
+00000000000000000000001F = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorView.swift; sourceTree = "<group>"; };
+000000000000000000000029 = { isa = PBXBuildFile; fileRef = 00000000000000000000001F; };
+000000000000000000000020 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Engine.swift; sourceTree = "<group>"; };
+00000000000000000000002A = { isa = PBXBuildFile; fileRef = 000000000000000000000020; };
+000000000000000000000021 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZoomCanvas.swift; sourceTree = "<group>"; };
+00000000000000000000002B = { isa = PBXBuildFile; fileRef = 000000000000000000000021; };
+
+0000000000000000000000C8 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevelopRenderer.swift; sourceTree = "<group>"; };
+0000000000000000000000D2 = { isa = PBXBuildFile; fileRef = 0000000000000000000000C8; };
+
+0000000000000000000000C9 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaskEditor.swift; sourceTree = "<group>"; };
+0000000000000000000000D3 = { isa = PBXBuildFile; fileRef = 0000000000000000000000C9; };
+
+000000000000000000000064 = { isa = PBXNativeTarget; buildConfigurationList = 000000000000000000000068; buildPhases = (000000000000000000000066); buildRules = (); dependencies = (000000000000000000000067); name = PhotoCraftUITests; productName = PhotoCraftUITests; productReference = 000000000000000000000065; productType = "com.apple.product-type.bundle.ui-testing"; };
+000000000000000000000065 = { isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = PhotoCraftUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+000000000000000000000066 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (00000000000000000000006D); runOnlyForDeploymentPostprocessing = 0; };
+000000000000000000000067 = { isa = PBXTargetDependency; target = 000000000000000000000004; };
+000000000000000000000068 = { isa = XCConfigurationList; buildConfigurations = (000000000000000000000069,00000000000000000000006A); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+00000000000000000000006C = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudioTests.swift; sourceTree = "<group>"; };
+00000000000000000000006D = { isa = PBXBuildFile; fileRef = 00000000000000000000006C; };
+00000000000000000000006E = { isa = PBXGroup; children = (00000000000000000000006C); path = UITests; sourceTree = "<group>"; };
+000000000000000000000069 = { isa = XCBuildConfiguration; name = Debug; buildSettings = { CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = ""; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = local.photocraft.iphone.uitests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0; TEST_TARGET_NAME = PhotoCraft; TARGETED_DEVICE_FAMILY = "1,2"; }; };
+00000000000000000000006A = { isa = XCBuildConfiguration; name = Release; buildSettings = { CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = ""; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = local.photocraft.iphone.uitests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0; TEST_TARGET_NAME = PhotoCraft; TARGETED_DEVICE_FAMILY = "1,2"; }; };
+000000000000000000000078 = { isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+000000000000000000000079 = { isa = PBXBuildFile; fileRef = 000000000000000000000078; };
+0000000000000000000000DC = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AutomaticMasks.swift"; sourceTree = "<group>"; };
+0000000000000000000000E6 = { isa = PBXBuildFile; fileRef = 0000000000000000000000DC; };
+0000000000000000000000DD = { isa = PBXFileReference; lastKnownFileType = folder.mlpackage; path = "Models/FaceParsing.mlpackage"; sourceTree = "<group>"; };
+0000000000000000000000E7 = { isa = PBXBuildFile; fileRef = 0000000000000000000000DD; };
+0000000000000000000000DE = { isa = PBXFileReference; lastKnownFileType = folder.mlpackage; path = "Models/DETRResnet50SemanticSegmentationF16.mlpackage"; sourceTree = "<group>"; };
+0000000000000000000000E8 = { isa = PBXBuildFile; fileRef = 0000000000000000000000DE; };
+00000000000000000000012C = { isa = PBXFileReference; lastKnownFileType = text; path = "Models/DETR-LICENSE.txt"; sourceTree = "<group>"; };
+000000000000000000000136 = { isa = PBXBuildFile; fileRef = 00000000000000000000012C; };
+00000000000000000000012D = { isa = PBXFileReference; lastKnownFileType = text; path = "Models/FaceParsing-LICENSE.txt"; sourceTree = "<group>"; };
+000000000000000000000137 = { isa = PBXBuildFile; fileRef = 00000000000000000000012D; };
+00000000000000000000012E = { isa = PBXFileReference; lastKnownFileType = text; path = "Models/README.md"; sourceTree = "<group>"; };
+000000000000000000000138 = { isa = PBXBuildFile; fileRef = 00000000000000000000012E; };
+000000000000000000000208 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReferenceLook.swift; sourceTree = "<group>"; };
+000000000000000000000209 = { isa = PBXBuildFile; fileRef = 000000000000000000000208; };
+000000000000000000000204 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CropTools.swift; sourceTree = "<group>"; };
+000000000000000000000205 = { isa = PBXBuildFile; fileRef = 000000000000000000000204; };
+000000000000000000000206 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIExpansion.swift; sourceTree = "<group>"; };
+000000000000000000000207 = { isa = PBXBuildFile; fileRef = 000000000000000000000206; };
+000000000000000000000202 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportView.swift; sourceTree = "<group>"; };
+000000000000000000000203 = { isa = PBXBuildFile; fileRef = 000000000000000000000202; };
+000000000000000000000200 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvancedEditing.swift; sourceTree = "<group>"; };
+000000000000000000000201 = { isa = PBXBuildFile; fileRef = 000000000000000000000200; };
+}; rootObject = 000000000000000000000001; }

@@ -1,0 +1,20 @@
+[package]
+name = "photocraft-ios-bridge"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+[workspace]
+[lib]
+crate-type = ["staticlib", "rlib"]
+[dependencies]
+photocraft-engine = { path = "../vendor/photocraft/crates/engine" }
+photocraft-compose = { path = "../vendor/photocraft/crates/compose" }
+photocraft-format = { path = "../vendor/photocraft/crates/format" }
+photocraft-io = { path = "../vendor/photocraft/crates/io" }
+serde_json = "1"
+base64 = "0.22"
+image = { version = "0.25", default-features = false, features = ["png"] }
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "unwind"

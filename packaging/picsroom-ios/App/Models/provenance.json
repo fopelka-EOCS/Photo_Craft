@@ -1,0 +1,32 @@
+[
+  {
+    "repo": "apple/coreml-detr-semantic-segmentation",
+    "revision": "7c771f8867a479d1441ac5fb0a8de31feea76bb6",
+    "file": "DETRResnet50SemanticSegmentationF16.mlpackage/Data/com.apple.CoreML/model.mlmodel",
+    "sha256": "61e05678150bcae26deac589b998dffe13c2977a9ba6f802938a9f3a60bfdcce"
+  },
+  {
+    "repo": "apple/coreml-detr-semantic-segmentation",
+    "revision": "7c771f8867a479d1441ac5fb0a8de31feea76bb6",
+    "file": "DETRResnet50SemanticSegmentationF16.mlpackage/Data/com.apple.CoreML/weights/weight.bin",
+    "sha256": "2f4de3dfed1aeced35ad7096d7c8721fcfb59571110a9e9138d73a7e56480408"
+  },
+  {
+    "repo": "apple/coreml-detr-semantic-segmentation",
+    "revision": "7c771f8867a479d1441ac5fb0a8de31feea76bb6",
+    "file": "DETRResnet50SemanticSegmentationF16.mlpackage/Manifest.json",
+    "sha256": "0749549c6b11139e11a40aaab82add4843a9977010337e596cce3dbb35c98512"
+  },
+  {
+    "repo": "mlboydaisuke/Face-Parsing-CoreML",
+    "revision": "6af21c2f8341fcebf9bf81f37bf13dd12aae302c",
+    "file": "FaceParsing.mlpackage/Data/com.apple.CoreML/model.mlmodel",
+    "sha256": "e7ebd6cc3f53486becc0dbf3b74027bc045aa4158402936ea09c3625682be6bb"
+  },
+  {
+    "repo": "mlboydaisuke/Face-Parsing-CoreML",
+    "revision": "6af21c2f8341fcebf9bf81f37bf13dd12aae302c",
+    "file": "FaceParsing.mlpackage/Manifest.json",
+    "sha256": "4faf3700dad0497c6efd622ca031cb04d17ad8b685477403c8cd573effdb4a1a"
+  }
+]
