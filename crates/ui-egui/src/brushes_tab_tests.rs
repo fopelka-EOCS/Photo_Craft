@@ -214,6 +214,49 @@ fn brush_picker_cards_follow_the_part_boxes() {
     h.state_mut().ui.brush_picker_list.show_stroke = true;
     h.run_steps(2);
     assert!(cards(&h).iter().all(|r| (r.height() - one_row).abs() < 0.5), "tip + stroke: one row");
+
+    // #8046: the docked panel offers the same menu, independently of the popup, and both its
+    // layouts actually hide the unchecked parts (a name-only preview has no image meshes).
+    let picker = h.state().ui.brush_picker_list.clone();
+    h.state_mut().ui.brush_picker = None;
+    h.state_mut().ui.panels.brush_settings = true;
+    h.state_mut().ui.brush_tab = 1;
+    for view in [BrushesView::List, BrushesView::Grid] {
+        h.state_mut().ui.brushes_panel = BrushesPanelState { view, ..Default::default() };
+        h.run_steps(4);
+        h.get_by_label("Brush Preset Options").click();
+        h.run_steps(2);
+        for label in ["Brush Name", "Brush Stroke"] {
+            h.get_by_role_and_label(Role::CheckBox, label).click();
+            h.run_steps(2);
+        }
+        let st = &h.state().ui.brushes_panel;
+        assert!(!st.show_name && !st.show_stroke && st.show_tip);
+        h.get_by_role_and_label(Role::CheckBox, "Brush Tip").click();
+        h.run_steps(2);
+        assert!(h.state().ui.brushes_panel.show_tip, "the last visible part stays on");
+        h.get_by_role_and_label(Role::CheckBox, "Brush Name").click();
+        h.run_steps(2);
+        h.get_by_role_and_label(Role::CheckBox, "Brush Tip").click();
+        h.run_steps(2);
+        let st = &h.state().ui.brushes_panel;
+        assert!(st.show_name && !st.show_stroke && !st.show_tip);
+        assert_eq!(h.state().ui.brush_picker_list, picker, "panel options leave the popup alone");
+        h.key_press(egui::Key::Escape);
+        h.run_steps(2);
+        let rect = h.get_by_role_and_label(Role::Button, &presets[0].name).rect();
+        fn has_image(shape: &egui::Shape, rect: Rect) -> bool {
+            match shape {
+                egui::Shape::Vec(shapes) => shapes.iter().any(|s| has_image(s, rect)),
+                egui::Shape::Mesh(mesh) => mesh.texture_id != egui::TextureId::default() && mesh.vertices.iter().any(|v| rect.contains(v.pos)),
+                _ => false,
+            }
+        }
+        assert!(!h.output().shapes.iter().any(|s| has_image(&s.shape, rect)), "{view:?}: hidden tip and stroke must not be drawn");
+        h.get_by_role_and_label(Role::Button, &presets[1].name).click();
+        h.run_steps(2);
+        assert_eq!(h.state().session.tools.current_preset.as_deref(), Some(presets[1].name.as_str()), "hidden previews remain selectable");
+    }
 }
 
 /// The footer slider's widths take the raw scale; heights, padding and text stop at

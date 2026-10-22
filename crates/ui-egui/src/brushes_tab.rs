@@ -347,12 +347,13 @@ pub(crate) fn grid_cell_width(cell: f32, scale: f32) -> f32 {
     cell * if scale.is_finite() { scale.clamp(*PREVIEW_SCALE_RANGE.start(), *PREVIEW_SCALE_RANGE.end()) } else { 1.0 }
 }
 
-fn list_row(ui: &mut egui::Ui, p: &BrushPreset, current: bool, presets: &[BrushPreset], indent: f32, scale: f32, acts: &mut Vec<Action>) {
+fn list_row(ui: &mut egui::Ui, p: &BrushPreset, d: &Draw<'_>, indent: f32, acts: &mut Vec<Action>) {
     let t = Tokens::get(ui.ctx());
-    let k = list_row_height(scale) / 44.0;
-    let (full, resp) = ui.allocate_exact_size(vec2(ui.available_width(), list_row_height(scale)), Sense::click_and_drag());
+    let k = list_row_height(d.scale) / 44.0;
+    let (full, resp) = ui.allocate_exact_size(vec2(ui.available_width(), list_row_height(d.scale)), Sense::click_and_drag());
     // Rows inside nested folders are indented; the whole width stays the drop target.
     let r = egui::Rect::from_min_max(full.min + vec2(indent.min(full.width() / 2.0), 0.0), full.max);
+    let current = d.current.is_some_and(|n| p.name.eq_ignore_ascii_case(n));
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, current, &p.name));
     if !ui.is_rect_visible(r) {
         return;
@@ -363,25 +364,37 @@ fn list_row(ui: &mut egui::Ui, p: &BrushPreset, current: bool, presets: &[BrushP
         ui.painter().rect_filled(r, t.radius_sm, t.hover);
     }
     let pb = &p.brush;
-    let tip = brush_preview::tip_texture(ui.ctx(), &format!("brushes-tip:{}", p.name), &pb.tip, (pb.hardness, pb.angle, pb.roundness), 36, t.text);
-    let cell = egui::Rect::from_min_size(r.left_top() + vec2(22.0, 2.0), vec2(36.0, 30.0) * k);
-    let tr = egui::Rect::from_center_size(cell.center(), vec2(30.0, 30.0) * k * crate::brush_sections::thumb_scale(pb.size));
-    ui.painter().image(tip.id(), tr, full_uv(), Color32::WHITE);
-    ui.painter().text(
-        pos2(cell.center().x, r.bottom() - 1.0),
-        egui::Align2::CENTER_BOTTOM,
-        format!("{}", pb.size.round() as i64),
-        egui::FontId::proportional(9.0),
-        t.text_faint,
-    );
-    // The stroke preview gives up width so a narrow list (the picker) still shows the name; its
-    // texture slot carries the width, so lists of different widths don't re-render each other's.
-    let w = (r.width() - (cell.right() - r.left()) - STROKE_NAME_ROOM).clamp(60.0, 170.0).round();
-    let stroke = brush_preview::stroke_texture(ui.ctx(), &format!("brushes-stroke-{w}:{}", p.name), pb, w as u32, 36, t.text);
-    let sr = egui::Rect::from_min_size(pos2(cell.right() + 8.0, r.top() + 4.0 * k), vec2(w, 36.0 * k));
-    ui.painter().image(stroke.id(), sr, full_uv(), Color32::WHITE);
-    crate::layer_row_ui::label(ui.painter(), sr.right() + 12.0, r.center().y, r.right() - 4.0, &p.name, egui::FontId::proportional(12.0), t.text_dim);
-    preset_interactions(ui, &resp, r, p, presets, false, acts);
+    let (show_name, show_stroke, show_tip) = d.show;
+    let mut left = r.left() + 22.0;
+    if show_tip {
+        let tip = brush_preview::tip_texture(ui.ctx(), &format!("brushes-tip:{}", p.name), &pb.tip, (pb.hardness, pb.angle, pb.roundness), 36, t.text);
+        let cell = egui::Rect::from_min_size(pos2(left, r.top() + 2.0), vec2(36.0, 30.0) * k);
+        let tr = egui::Rect::from_center_size(cell.center(), vec2(30.0, 30.0) * k * crate::brush_sections::thumb_scale(pb.size));
+        ui.painter().image(tip.id(), tr, full_uv(), Color32::WHITE);
+        ui.painter().text(
+            pos2(cell.center().x, r.bottom() - 1.0),
+            egui::Align2::CENTER_BOTTOM,
+            format!("{}", pb.size.round() as i64),
+            egui::FontId::proportional(9.0),
+            t.text_faint,
+        );
+        left = cell.right() + 8.0;
+    }
+    if show_stroke {
+        // Hidden parts give their room to the stroke. Its texture slot carries the width so
+        // differently sized panels don't re-render each other's previews.
+        let room = (r.right() - left - 4.0).max(1.0);
+        let w = if show_name { (room - STROKE_NAME_ROOM).clamp(1.0, 170.0) } else { room }.round();
+        let stroke = brush_preview::stroke_texture(ui.ctx(), &format!("brushes-stroke-{w}:{}", p.name), pb, w as u32, 36, t.text);
+        let sr = egui::Rect::from_min_size(pos2(left, r.top() + 4.0 * k), vec2(w, 36.0 * k));
+        ui.painter().image(stroke.id(), sr, full_uv(), Color32::WHITE);
+        left = sr.right() + 12.0;
+    }
+    if show_name {
+        crate::layer_row_ui::label(ui.painter(), left, r.center().y, r.right() - 4.0, &p.name, egui::FontId::proportional(12.0), t.text_dim);
+    }
+    let resp = resp.on_hover_text(&p.name);
+    preset_interactions(ui, &resp, r, p, d.presets, false, acts);
 }
 
 /// The gap between grid cells, across and down.
@@ -402,35 +415,6 @@ pub(crate) fn grid_columns(width: f32, cell: f32, indent: f32, gap: f32) -> (f32
     // Whole points keep the tiles' edges crisp.
     let left = indent + ((room - used) / 2.0).max(0.0).floor();
     (if left.is_finite() { left } else { 0.0 }, cols)
-}
-
-fn grid_cell(ui: &mut egui::Ui, p: &BrushPreset, current: bool, presets: &[BrushPreset], cell: f32, acts: &mut Vec<Action>) {
-    let t = Tokens::get(ui.ctx());
-    let (r, resp) = ui.allocate_exact_size(vec2(cell, cell + 6.0), Sense::click_and_drag());
-    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, current, &p.name));
-    if !ui.is_rect_visible(r) {
-        return;
-    }
-    if current {
-        ui.painter().rect_filled(r, 3.0, t.accent_soft);
-        ui.painter().rect_stroke(r, 3.0, Stroke::new(1.0, t.accent), egui::StrokeKind::Inside);
-    } else if resp.hovered() {
-        ui.painter().rect_filled(r, 3.0, t.hover);
-    }
-    let pb = &p.brush;
-    let tip = brush_preview::tip_texture(ui.ctx(), &format!("brushes-tip:{}", p.name), &pb.tip, (pb.hardness, pb.angle, pb.roundness), 36, t.text);
-    let side = (cell - 14.0).max(8.0);
-    let ir = egui::Rect::from_center_size(pos2(r.center().x, r.top() + side / 2.0 + 4.0), vec2(side, side) * crate::brush_sections::thumb_scale(pb.size));
-    ui.painter().image(tip.id(), ir, full_uv(), Color32::WHITE);
-    ui.painter().text(
-        pos2(r.center().x, r.bottom() - 7.0),
-        egui::Align2::CENTER_CENTER,
-        format!("{}", pb.size.round() as i64),
-        egui::FontId::proportional(9.5),
-        t.text_dim,
-    );
-    let resp = resp.on_hover_text(&p.name);
-    preset_interactions(ui, &resp, r, p, presets, true, acts);
 }
 
 /// Padding, tip cell width and name row height, at scale 1; the footer slider multiplies them
@@ -749,7 +733,7 @@ struct Draw<'a> {
     collapsed: &'a [String],
     grid: bool,
     layout: ListLayout,
-    /// The picker cards' parts — name, stroke, tip — from the gear's boxes.
+    /// The preview parts — name, stroke, tip — from the shared gear menu.
     show: (bool, bool, bool),
     /// The picker cards' size scale (its footer slider, 1 = standard): multiplies [`CARD_MAX_W`]
     /// and [`CARD_MAX_H`], or [`CARD_TIP_ONLY_W`]/[`CARD_TIP_ONLY_H`] for tip-only cards and
@@ -814,28 +798,24 @@ fn draw_nodes(ui: &mut egui::Ui, d: &Draw, nodes: &[Node], depth: usize, acts: &
         } else if d.grid {
             // Rows of whole columns, each with the same margin: a wrapped row indented only
             // its first line and left the spare width on the right.
-            let (left, cols) = grid_columns(ui.available_width(), grid_cell_width(d.layout.cell, d.scale), d.layout.indent + indent, GRID_GAP);
+            let base = if d.show.0 || d.show.1 { CARD_TIP_NAME_W } else { d.layout.cell };
+            let cell = grid_cell_width(base, d.scale);
+            let scale = list_row_height(d.scale) / 44.0;
+            let (left, cols) = grid_columns(ui.available_width(), cell, d.layout.indent + indent, GRID_GAP);
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing = vec2(GRID_GAP, GRID_GAP);
                 for row in run.chunks(cols) {
                     ui.horizontal(|ui| {
                         ui.add_space(left);
                         for p in row {
-                            grid_cell(
-                                ui,
-                                p,
-                                d.current.is_some_and(|n| p.name.eq_ignore_ascii_case(n)),
-                                d.presets,
-                                grid_cell_width(d.layout.cell, d.scale),
-                                acts,
-                            );
+                            preset_card(ui, p, d.current.is_some_and(|n| p.name.eq_ignore_ascii_case(n)), d.presets, d.show, cell, scale, acts);
                         }
                     });
                 }
             });
         } else {
             for p in run.iter() {
-                list_row(ui, p, d.current.is_some_and(|n| p.name.eq_ignore_ascii_case(n)), d.presets, indent, d.scale, acts);
+                list_row(ui, p, d, indent, acts);
             }
         }
         run.clear();
@@ -1025,6 +1005,7 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             }
         });
     });
+    let mut picks = Vec::new();
     // The size of the previews in the list below (Photoshop's Brushes panel slider), apart from the
     // Size of the current brush above.
     ui.horizontal(|ui| {
@@ -1038,7 +1019,11 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 *scale = (*scale * 100.0).round() / 100.0;
             }
         });
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            crate::brush_picker::gear_menu(ui, app.session.tools.current_preset.as_deref(), &app.session.tools.presets, &mut app.ui.brushes_panel, &mut picks);
+        });
     });
+    crate::brush_picker::apply(app, ui.ctx(), picks);
     ui.add_space(6.0);
     let acts = preset_list(ui, &app.session.tools.presets, app.session.tools.current_preset.as_deref(), &mut app.ui.brushes_panel, responsive_list_layout(ui));
     apply(app, acts);
