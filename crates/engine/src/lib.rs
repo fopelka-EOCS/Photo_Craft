@@ -53,6 +53,7 @@ mod frame_cmds;
 pub mod fx_view_cmds;
 pub mod fx_visibility_cmds;
 pub mod gallery_cmds;
+pub mod genai_cmds;
 pub mod gradient_fill_cmds;
 pub mod group_view_cmds;
 pub mod guide_layout;
@@ -131,6 +132,7 @@ pub use variables_cmds::{export_data_sets_with, import_data_sets_text};
 pub mod vector_cmds;
 mod video_cmds;
 pub use video_cmds::render_video_with;
+pub use video_cmds::sync as sync_video_preview;
 pub mod vp_cmds;
 pub mod warp_cmds;
 pub mod web_cmds;
@@ -542,6 +544,9 @@ pub struct Session {
     /// document, source read-only)`. The shell takes them with [`Session::take_held_open`].
     held_opens: Vec<(u64, Document, bool)>,
     next_held_open: u64,
+    /// The generative image provider the app configured (see [`genai_cmds`]); `None` keeps
+    /// generative commands off and the session network-free.
+    genai: Option<genai_cmds::SharedProvider>,
 }
 
 /// Move item `i` of `v` to position `to`, clamped to the end. Returns where it went; `None` when
