@@ -335,6 +335,8 @@ fn quick_selection_chip_toggles_the_picker_and_right_click_opens_the_selection_m
 #[test]
 fn brush_preset_menu_action_outside_the_picker_keeps_it_open() {
     let mut h = harness(Tool::Brush, true, 1.0);
+    // The card geometry here is the standard scale; the picker's own default is compact.
+    h.state_mut().ui.brush_picker_list.scale = 1.0;
     let before = document_state(&h);
     let at = fractional_point(&h, 1.0);
     tap(&mut h, at, Modifiers::NONE, true);
