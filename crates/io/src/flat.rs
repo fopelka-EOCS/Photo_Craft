@@ -716,9 +716,11 @@ fn export_png_streamed(doc: &Document, opts: &ExportOptions, ctl: &photocraft_ra
         Some(s) => opaque_surface(s, doc.bounds()),
         None => opaque_bottom(doc),
     };
-    match stream_png(doc, opts, ctl, !opaque, rows)? {
+    // Progress never goes back: a second pass reports nothing new until it passes the first.
+    let mut progress = 0.0;
+    match stream_png(doc, opts, ctl, !opaque, rows, &mut progress)? {
         Some(r) => Ok(r),
-        None => stream_png(doc, opts, ctl, true, rows)?.ok_or_else(|| IoError::Unsupported("PNG export lost its alpha channel".into())),
+        None => stream_png(doc, opts, ctl, true, rows, &mut progress)?.ok_or_else(|| IoError::Unsupported("PNG export lost its alpha channel".into())),
     }
 }
 
@@ -729,8 +731,16 @@ fn opaque_bottom(doc: &Document) -> bool {
 }
 
 /// [`export_png_streamed`] with or without `alpha`, in bands of `rows` rows (0: sized to the
-/// document). `None` when a translucent pixel shows up without `alpha`.
-fn stream_png(doc: &Document, opts: &ExportOptions, ctl: &photocraft_raster::Interrupt, alpha: bool, rows: i32) -> Result<Option<ExportResult>, IoError> {
+/// document). `None` when a translucent pixel shows up without `alpha`. `progress` is the most
+/// reported so far, by this pass or an earlier one.
+fn stream_png(
+    doc: &Document,
+    opts: &ExportOptions,
+    ctl: &photocraft_raster::Interrupt,
+    alpha: bool,
+    rows: i32,
+    progress: &mut f32,
+) -> Result<Option<ExportResult>, IoError> {
     let format = Format::Png;
     let (w, h) = (doc.size.width, doc.size.height);
     let mut warnings = Vec::new();
@@ -780,7 +790,8 @@ fn stream_png(doc: &Document, opts: &ExportOptions, ctl: &photocraft_raster::Int
         note(&band)?;
         png.push(&band)?;
         done += u64::from(rows);
-        ctl.progress(done as f32 / h as f32);
+        *progress = progress.max(done as f32 / h as f32);
+        ctl.progress(*progress);
         Ok(())
     });
     if translucent {
@@ -1256,19 +1267,28 @@ mod streamed_png_tests {
     }
 
     /// A knockout through an opaque bottom layer makes the guess wrong: the export starts again
-    /// with alpha and keeps the hole.
+    /// with alpha and keeps the hole, and its progress never goes back.
     #[test]
     fn a_wrong_opacity_guess_starts_again_with_alpha() {
-        let mut doc = Document::new("knockout", Size::new(64, 600), ColorMode::Rgb, SampleType::U8);
+        // The hole is in the fourth band: three are written before the guess turns out wrong.
+        let mut doc = Document::new("knockout", Size::new(64, 1000), ColorMode::Rgb, SampleType::U8);
         let bottom = layer(&doc, &[(doc.bounds(), &[0.2, 0.4, 0.6, 1.0])]);
-        let mut hole = layer(&doc, &[(Rect::new(8, 400, 56, 560), &[1.0, 1.0, 1.0, 1.0])]);
+        let mut hole = layer(&doc, &[(Rect::new(8, 800, 56, 960), &[1.0, 1.0, 1.0, 1.0])]);
         hole.fill_opacity = 0.0;
         hole.advanced.knockout = photocraft_doc::Knockout::Deep;
         doc.layers = vec![bottom, hole];
         assert!(opaque_bottom(&doc));
-        assert!(stream_png(&doc, &ExportOptions::default(), &Interrupt::NONE, false, 256).unwrap().is_none());
+        assert!(stream_png(&doc, &ExportOptions::default(), &Interrupt::NONE, false, 256, &mut 0.0).unwrap().is_none());
         let r = same_as_whole(&doc, 256, &ExportOptions::default());
         assert_eq!(decoded(&r.bytes).layout(), ChannelLayout::Rgba);
+
+        let seen = std::sync::Mutex::new(Vec::new());
+        let report = |f: f32| seen.lock().unwrap().push(f);
+        let never = || false;
+        export_png_streamed(&doc, &ExportOptions::default(), &Interrupt::new(&never, &report), 256).unwrap();
+        let seen = seen.into_inner().unwrap();
+        assert!(seen.windows(2).all(|w| w[0] <= w[1]), "progress went back: {seen:?}");
+        assert_eq!(seen.last(), Some(&1.0));
     }
 
     #[test]
