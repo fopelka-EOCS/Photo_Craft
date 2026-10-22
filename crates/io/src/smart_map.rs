@@ -144,7 +144,7 @@ const fn code(c: &[u8; 4]) -> i32 {
     i32::from_be_bytes(*c)
 }
 
-const KNOWN: [Known; 14] = [
+const KNOWN: [Known; 17] = [
     Known { class: "GsnB", filter_id: code(b"GsnB"), name: "Gaussian Blur...", command: "filter.blur.gaussianBlur" },
     Known { class: "boxblur", filter_id: 840, name: "Box Blur...", command: "filter.blur.boxBlur" },
     Known { class: "MtnB", filter_id: code(b"MtnB"), name: "Motion Blur...", command: "filter.blur.motionBlur" },
@@ -160,6 +160,10 @@ const KNOWN: [Known; 14] = [
     Known { class: "Crvs", filter_id: code(b"Crvs"), name: "Curves...", command: "image.adjustments.curves" },
     // Shadows/Highlights at its defaults stores no `Fltr` (`hasoptions` false).
     Known { class: "adaptCorrect", filter_id: 781, name: "Shado&ws/Highlights...", command: "image.adjustments.shadowsHighlights" },
+    // Desaturate and Equalize have no dialog; Photoshop writes them without `Fltr`.
+    Known { class: "Dstt", filter_id: code(b"Dstt"), name: "Desaturate", command: "image.adjustments.desaturate" },
+    Known { class: "Eqlz", filter_id: code(b"Eqlz"), name: "Equalize", command: "image.adjustments.equalize" },
+    Known { class: "Rplc", filter_id: code(b"Rplc"), name: "Replace Color...", command: "image.adjustments.replaceColor" },
 ];
 
 fn known_by_command(command: &str) -> Option<&'static Known> {
@@ -258,12 +262,24 @@ fn curves_params(f: &Descriptor) -> Option<J> {
     Some(J::Object(out))
 }
 
+fn replace_color_params(f: &Descriptor) -> Option<J> {
+    let color = get_desc(f, "Clr ").and_then(rgbc_colour)?;
+    Some(json!({
+        "color": color,
+        "fuzziness": int(f, "Fzns").or_else(|| px(f, "Fzns").map(|v| v.round() as i32))?,
+        "hue": int(f, "Hue ").or_else(|| px(f, "Hue ").map(|v| v.round() as i32)).unwrap_or(0),
+        "saturation": int(f, "Strt").or_else(|| px(f, "Strt").map(|v| v.round() as i32)).unwrap_or(0),
+        "lightness": int(f, "Lght").or_else(|| px(f, "Lght").map(|v| v.round() as i32)).unwrap_or(0),
+    }))
+}
+
 /// Our command and parameters for a known Photoshop filter; `None` when the filter (or one of its
 /// settings) is not modelled.
 fn known_params(class: &str, f: Option<&Descriptor>) -> Option<(&'static str, J)> {
     let k = KNOWN.iter().find(|k| k.class == class)?;
     let params = match (class, f) {
-        ("adaptCorrect", None) => json!({}),
+        ("adaptCorrect" | "Dstt" | "Eqlz", None) => json!({}),
+        ("Dstt" | "Eqlz", Some(_)) => json!({}),
         (_, None) => return None,
         ("GsnB" | "boxblur" | "Mdn " | "HghP" | "Mxm " | "Mnm ", Some(f)) => json!({"radius": px(f, "Rds ")?}),
         ("MtnB", Some(f)) => json!({"angle": int(f, "Angl")?, "distance": px(f, "Dstn")?}),
@@ -284,6 +300,7 @@ fn known_params(class: &str, f: Option<&Descriptor>) -> Option<(&'static str, J)
         ("Embs", Some(f)) => json!({"angle": int(f, "Angl")?, "height": int(f, "Hght")?, "amount": int(f, "Amnt")?}),
         ("Lvls", Some(f)) => levels_params(f)?,
         ("Crvs", Some(f)) => curves_params(f)?,
+        ("Rplc", Some(f)) => replace_color_params(f)?,
         _ => return None,
     };
     Some((k.command, params))
@@ -597,11 +614,28 @@ fn fltr_for(k: &Known, p: &J) -> Result<Option<Descriptor>, String> {
         "Embs" => d.with("Angl", pi(p, "angle", 135.0)).with("Hght", pi(p, "height", 3.0)).with("Amnt", pi(p, "amount", 100.0)),
         "Lvls" => d.with("Adjs", adjustments(p, false)?),
         "Crvs" => d.with("Adjs", adjustments(p, true)?),
-        "adaptCorrect" => {
+        "adaptCorrect" | "Dstt" | "Eqlz" => {
             if p.as_object().is_some_and(|o| o.keys().any(|k| !is_meta(k))) {
-                return Err("only default Shadows/Highlights settings are written to PSD".into());
+                let what = match k.class {
+                    "adaptCorrect" => "only default Shadows/Highlights settings are written to PSD",
+                    "Dstt" => "Desaturate has no PSD settings",
+                    _ => "Equalize has no PSD settings",
+                };
+                return Err(what.into());
             }
             return Ok(None);
+        }
+        "Rplc" => {
+            let obj = p.as_object().ok_or("parameters are not an object")?;
+            const ALLOWED: &[&str] = &["color", "fuzziness", "hue", "saturation", "lightness"];
+            if let Some(key) = obj.keys().find(|k| !is_meta(k) && !ALLOWED.contains(&k.as_str())) {
+                return Err(format!("setting `{key}` has no PSD equivalent"));
+            }
+            d.with("Clr ", colour_rgbc(p.get("color"), 0.0)?)
+                .with("Fzns", pi(p, "fuzziness", 40.0))
+                .with("Hue ", pi(p, "hue", 0.0))
+                .with("Strt", pi(p, "saturation", 0.0))
+                .with("Lght", pi(p, "lightness", 0.0))
         }
         _ => return Err("not a recognized filter".into()),
     }))
@@ -1066,6 +1100,9 @@ mod tests {
             sf("image.adjustments.levels", json!({"inBlack": 20, "inWhite": 220, "gamma": 1.4, "red": {"inBlack": 0, "inWhite": 255, "gamma": 0.8}})),
             sf("image.adjustments.curves", json!({"points": [[0.0, 0.0], [64.0, 40.0], [255.0, 255.0]], "blue": [[0.0, 20.0], [255.0, 235.0]]})),
             sf("image.adjustments.shadowsHighlights", json!({})),
+            sf("image.adjustments.desaturate", json!({})),
+            sf("image.adjustments.equalize", json!({})),
+            sf("image.adjustments.replaceColor", json!({"color": [0.4, 0.5, 0.8, 1.0], "fuzziness": 180, "hue": 40, "saturation": 10, "lightness": -5})),
             // A pencil-drawn curve: 256 output levels (`Mpng`).
             sf("image.adjustments.curves", json!({"pencil": true, "points": (0..256).rev().collect::<Vec<i32>>()})),
         ];
@@ -1267,12 +1304,13 @@ mod tests {
                 sf(UNSUPPORTED_FILTER, json!({"psd": "zz"})),
                 sf("image.adjustments.levels", json!({"cyan": {"gamma": 2.0}})),
                 sf("image.adjustments.shadowsHighlights", json!({"shadowAmount": 50})),
+                sf("image.adjustments.replaceColor", json!({"localized": true, "color": [1.0, 0.0, 0.0, 1.0]})),
             ],
             ..Default::default()
         };
         let mut w = Vec::new();
         let d = filter_fx(&stack, "L", &mut w);
-        assert_eq!(w.len(), 4, "{w:?}");
+        assert_eq!(w.len(), 5, "{w:?}");
         let back = filter_stack(&d);
         assert_eq!(back.filters, vec![stack.filters[1].clone()]);
     }
