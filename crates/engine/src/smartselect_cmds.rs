@@ -425,8 +425,10 @@ fn subject_adapter(s: &Session, p: &SubjectParams) -> Result<Option<std::sync::A
             // Automatic routing must not let an alphabetically earlier, incompatible or
             // unprepared package shadow another usable provider. Consult cached readiness;
             // selecting a subject must never implicitly probe workers or prepare models.
-            let input_mode =
-                s.active().and_then(|st| subject_format(&st.doc, st.active_layer, p.all_layers).ok()).and_then(|format| subject_color_mode(format.mode).ok());
+            let input_mode = s
+                .active()
+                .and_then(|st| subject_format(&st.doc, st.active_layer, p.all_layers).ok())
+                .and_then(|format| subject_color_mode(format.mode).ok());
             s.adapters
                 .list()
                 .iter()
@@ -439,10 +441,10 @@ fn subject_adapter(s: &Session, p: &SubjectParams) -> Result<Option<std::sync::A
                         op.id == SUBJECT_OPERATION
                             && op.output_kind == OutputKind::Mask
                             && input_mode.is_some_and(|mode| op.color_modes.iter().any(|m| m == mode))
-                    }) && p
-                        .device
-                        .as_ref()
-                        .is_none_or(|id| descriptor.devices.iter().any(|device| device.id == *id && device.operations.iter().any(|op| op == SUBJECT_OPERATION)))
+                    })
+                        && p.device.as_ref().is_none_or(|id| {
+                            descriptor.devices.iter().any(|device| device.id == *id && device.operations.iter().any(|op| op == SUBJECT_OPERATION))
+                        })
                 })
                 .and_then(|descriptor| s.adapters.get(&descriptor.id))
         }
@@ -1610,11 +1612,11 @@ mod tests {
             let first = Arc::new(first);
             s.register_adapter(first.clone()).unwrap();
             let working = register_subject(&mut s, "test.b.compatible", MockMask::LeftHalf);
-            let result = s.execute(SUBJECT, json!({"device":CPU_DEVICE})).unwrap();
+            let result = s.execute(SUBJECT, json!({ "device": CPU_DEVICE })).unwrap();
             assert_eq!(result["provider"], "test.b.compatible", "{incompatible}");
             assert!(first.requests().is_empty(), "incompatible providers must not run");
             assert_eq!(working.requests().len(), 1);
-            assert!(s.execute(SUBJECT, json!({"provider":"test.a.incompatible","device":CPU_DEVICE})).is_err(), "explicit choice stays strict");
+            assert!(s.execute(SUBJECT, json!({ "provider": "test.a.incompatible", "device": CPU_DEVICE })).is_err(), "explicit choice stays strict");
             assert_eq!(working.requests().len(), 1, "explicit failure must not retry another provider");
         }
     }
@@ -1628,7 +1630,7 @@ mod tests {
         s.register_adapter(adapter.clone()).unwrap();
         assert_eq!(s.execute(SUBJECT, json!({})).unwrap()["changed"], false);
         assert!(adapter.requests().is_empty());
-        assert!(s.execute(SUBJECT, json!({"resource":"model.explicit"})).is_err(), "opaque model options must not be silently ignored");
+        assert!(s.execute(SUBJECT, json!({ "resource": "model.explicit" })).is_err(), "opaque model options must not be silently ignored");
     }
 
     #[test]

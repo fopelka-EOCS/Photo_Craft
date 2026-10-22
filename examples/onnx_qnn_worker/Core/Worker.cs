@@ -38,8 +38,8 @@ internal static class Worker
             var tensor = Imaging.Preprocess(image, profile);
             var output = session.Run(profile.input.name, profile.output.name, tensor);
             var mask = Imaging.Postprocess(output, profile, image.Header.image);
-            return new(new(1, "ok", "", new("mask", Protocol.MaskMetadata(image.Header.image)),
-                new([Protocol.Device], Protocol.Backend, null)), mask);
+            return new Reply(new ResponseHeader(1, "ok", "", new MaskOutput("mask", Protocol.MaskMetadata(image.Header.image)),
+                new Execution([Protocol.Device], Protocol.Backend, null)), mask);
         }
         catch (NeedsModelException error) { return Reply.Status("needs_model", error.Message); }
     }

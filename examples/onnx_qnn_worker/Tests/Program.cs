@@ -55,7 +55,7 @@ internal static partial class Program
     {
         var meta = Metadata(depth, alpha);
         var samples = Enumerable.Range(0, 4).SelectMany(_ => alpha ? new[] { 0f, 0.5f, 1f, 0.25f } : [0f, 0.5f, 1f]).ToArray();
-        return new(new(1, Protocol.Operation, null, JsonSerializer.SerializeToElement(new { colorPolicy = "assume-srgb" }), Protocol.Device, false, meta, null), samples);
+        return new InputImage(new RunHeader(1, Protocol.Operation, null, JsonSerializer.SerializeToElement(new { colorPolicy = "assume-srgb" }), Protocol.Device, false, meta, null), samples);
     }
     private static ModelProfile InstallSynthetic(string root)
     {

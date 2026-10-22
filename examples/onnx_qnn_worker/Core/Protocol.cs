@@ -16,7 +16,7 @@ internal sealed record ResponseHeader(int protocol, string status, string messag
     MaskOutput? output = null, Execution? execution = null);
 internal sealed record Reply(ResponseHeader Header, float[]? Mask = null)
 {
-    internal static Reply Status(string status, string message) => new(new(1, status, message));
+    internal static Reply Status(string status, string message) => new(new ResponseHeader(1, status, message));
 }
 
 internal static class Protocol

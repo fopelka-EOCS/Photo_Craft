@@ -124,7 +124,7 @@ internal static partial class Program
                 Check(data.Length == 12 + length && doc.RootElement.GetProperty("output").ValueKind == JsonValueKind.Null);
             }
             Reject<WorkerException>(() => Protocol.Write(new MemoryStream(), Reply.Status("ready", new string('x', 1025))));
-            Reject<WorkerException>(() => Protocol.Write(new MemoryStream(), new(new(1, "error", "bad"), [0])));
+            Reject<WorkerException>(() => Protocol.Write(new MemoryStream(), new Reply(new ResponseHeader(1, "error", "bad"), [0])));
         });
         Run("protocol/ok-response-f32le-and-no-fallback", () =>
         {

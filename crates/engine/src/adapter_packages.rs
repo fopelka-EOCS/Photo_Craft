@@ -595,6 +595,7 @@ mod tests {
         assert!(next.adapters.get(&id).is_none());
         assert!(next.execute("plugin.adapter.enable", json!({"provider":id,"enabled":true})).is_err());
     }
+
     #[test]
     fn automatic_routing_requires_explicit_cached_readiness_for_packages() {
         let mut store = PackageStore::default();
@@ -604,7 +605,7 @@ mod tests {
         store.packages.insert(id.clone(), Installed { record, status: not_checked() });
         assert!(!store.ready_for_automatic_run(&id));
         for state in ["needs_model", "unavailable", "error", "not_checked", "ready"] {
-            store.packages.get_mut(&id).unwrap().status = json!({"state":state,"message":"synthetic status; no worker started"});
+            store.packages.get_mut(&id).unwrap().status = json!({ "state": state, "message": "synthetic status; no worker started" });
             assert_eq!(store.ready_for_automatic_run(&id), state == "ready");
         }
         store.packages.get_mut(&id).unwrap().record.enabled = false;

@@ -8,7 +8,7 @@ use std::io::{Cursor, Read};
 use std::path::Path;
 
 use photocraft_plugins::adapter::{Context, Image, OutputKind, Request};
-use photocraft_plugins::worker::{WorkerReply, WorkerState, protocol};
+use photocraft_plugins::worker::{protocol, WorkerReply, WorkerState};
 
 struct NoContext;
 impl Context for NoContext {
@@ -135,7 +135,7 @@ fn rust_writer_generates_companion_request_fixtures() -> Result<(), Box<dyn Erro
         let request = Request {
             operation: "select-subject".into(),
             resource: None,
-            params: if tagged { serde_json::json!({}) } else { serde_json::json!({"colorPolicy":"assume-srgb"}) },
+            params: if tagged { serde_json::json!({}) } else { serde_json::json!({ "colorPolicy": "assume-srgb" }) },
             device: (!automatic).then(|| "windows-ai.npu".into()),
             allow_fallback: false,
             image,
