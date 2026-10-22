@@ -176,6 +176,9 @@ sync_github_name = true
 display_name = "Netter"
 sync_github_name = false
 
+[people.Myosh1]
+sync_github_name = true
+
 [people.Byxis]
 sync_github_name = true
 

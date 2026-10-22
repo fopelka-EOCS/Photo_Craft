@@ -1790,6 +1790,12 @@ pub(crate) fn target_text(app: &PhotocraftApp) -> Option<&TextLayer> {
     text_layer(&app.session.active()?.doc, LayerId(id))
 }
 
+/// Whether the shown type layer has a Warp Text style: the options bar's Warp Text button is
+/// drawn pressed, as in Photoshop.
+pub(crate) fn warp_active(app: &PhotocraftApp) -> bool {
+    target_text(app).is_some_and(|t| t.warp.is_some())
+}
+
 /// Snapshot the mutation scope separately from the representative used to display properties.
 /// An inline edit remains on its layer/range; layer selection formats every selected type layer.
 pub(crate) fn formatting_params(app: &PhotocraftApp) -> Option<serde_json::Value> {
@@ -1981,6 +1987,18 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     if resp.clicked() {
         open_color_picker(app, [c[0], c[1], c[2]]);
     }
+    // Warp Text, beside the colour swatch as in Photoshop; pressed when the layer has a warp.
+    crate::widgets::vline(ui, 22.0);
+    let can_warp = target_text(app).is_some();
+    let warped = warp_active(app);
+    ui.add_enabled_ui(can_warp, |ui| {
+        if crate::icons::button_with_icon_size(ui, "warp-text", 24.0, 15.0, warped, tl!("Warp Text…")).clicked()
+            && let Err(e) = crate::menus::invoke(app, ui.ctx(), "type.warpText", serde_json::Value::Null)
+        {
+            app.ui.status = e;
+            app.ui.status_error = true;
+        }
+    });
     if app.ui.text_edit.is_some() {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add_space(8.0);
