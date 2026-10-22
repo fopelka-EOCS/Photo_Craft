@@ -1043,7 +1043,7 @@
 	Darks	Tmavé tóny
 	Data Sets	Datové sady
 	Default	Výchozí
-	Default Foreground and Background Colors (D)	Výchozí barvy (D)
+	Default Foreground and Background Colors (D)	Výchozí barvy popředí a pozadí (D)
 	Default printer	Výchozí tiskárna
 	Default restored.	Výchozí hodnota obnovena.
 	Define	Definovat
@@ -1544,7 +1544,7 @@
 	Subtract from Sample	Odebrat ze vzorku
 	Subtract from selection  ({key})	Odebrat z výběru  ({key})
 	Suggestions:	Návrhy:
-	Switch Foreground and Background Colors (X)	Prohodit barvy (X)
+	Switch Foreground and Background Colors (X)	Prohodit barvy popředí a pozadí (X)
 	Swaps height and width	Prohodí výšku a šířku
 	Switch between free transform and warp modes	Přepnout mezi volnou transformací a deformací
 	Switch theme	Přepnout motiv

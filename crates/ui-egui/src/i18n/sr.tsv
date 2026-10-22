@@ -1000,7 +1000,7 @@
 	Darks	Tamni tonovi
 	Data Sets	Skupovi podataka
 	Default	Podrazumevano
-	Default Foreground and Background Colors (D)	Podrazumevane boje (D)
+	Default Foreground and Background Colors (D)	Podrazumevane boje prednjeg plana i pozadine (D)
 	Default printer	Podrazumevani štampač
 	Default restored.	Podrazumevano stanje je vraćeno.
 	Define	Definiši
@@ -1490,7 +1490,7 @@
 	Subtract from Sample	Oduzmi od uzorka
 	Subtract from selection  ({key})	Oduzmi od selekcije  ({key})
 	Suggestions:	Predlozi:
-	Switch Foreground and Background Colors (X)	Zameni boje (X)
+	Switch Foreground and Background Colors (X)	Zameni boje prednjeg plana i pozadine (X)
 	Swaps height and width	Zamenjuje visinu i širinu
 	Switch between free transform and warp modes	Prebaci između režima slobodne transformacije i krivljenja
 	Switch theme	Promeni temu

@@ -1031,7 +1031,7 @@
 	Darks	暗部
 	Data Sets	データセット
 	Default	既定
-	Default Foreground and Background Colors (D)	初期カラーに戻す(D)
+	Default Foreground and Background Colors (D)	前景色と背景色を既定に戻す (D)
 	Default printer	既定のプリンター
 	Default restored.	既定に戻しました。
 	Define	定義
@@ -1529,7 +1529,7 @@
 	Subtract from Sample	サンプルから削除
 	Subtract from selection  ({key})	選択範囲から削除 ({key})
 	Suggestions:	候補:
-	Switch Foreground and Background Colors (X)	描画色と背景色を入れ替え(X)
+	Switch Foreground and Background Colors (X)	前景色と背景色を入れ替え (X)
 	Swaps height and width	高さと幅を入れ替えます
 	Switch between free transform and warp modes	自由変形とワープのモードを切り替え
 	Switch theme	テーマを切り替え

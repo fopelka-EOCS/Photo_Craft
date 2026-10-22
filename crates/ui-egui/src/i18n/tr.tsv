@@ -994,7 +994,7 @@
 	Darks	Karanlıklar
 	Data Sets	Veri Setleri
 	Default	Varsayılan
-	Default Foreground and Background Colors (D)	Varsayılan renkler (D)
+	Default Foreground and Background Colors (D)	Varsayılan Ön Plan ve Arka Plan Renkleri (D)
 	Default printer	Varsayılan yazıcı
 	Default restored.	Varsayılan geri yüklendi.
 	Define	Tanımla
@@ -1485,7 +1485,7 @@
 	Subtract from Sample	Örnekten Çıkart
 	Subtract from selection  ({key})	Seçimden çıkar ({key})
 	Suggestions:	Öneriler:
-	Switch Foreground and Background Colors (X)	Renkleri değiştir (X)
+	Switch Foreground and Background Colors (X)	Ön Plan ve Arka Plan Renklerini Değiştir (X)
 	Swaps height and width	Yüksekliği ve genişliği değiştirir
 	Switch between free transform and warp modes	Serbest dönüştürme ve çarpıtma modları arasında geçiş yapın
 	Switch theme	Temayı değiştir

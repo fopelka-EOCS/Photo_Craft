@@ -1026,7 +1026,7 @@
 	Darks	Dunkle
 	Data Sets	Datensätze
 	Default	Standard
-	Default Foreground and Background Colors (D)	Standardfarben (D)
+	Default Foreground and Background Colors (D)	Standardfarben für Vorder- und Hintergrund (D)
 	Default printer	Standarddrucker
 	Default restored.	Standard wiederhergestellt.
 	Define	Definieren
@@ -1526,7 +1526,7 @@
 	Subtract from Sample	Von der Probe abziehen
 	Subtract from selection  ({key})	Von Auswahl abziehen  ({key})
 	Suggestions:	Vorschläge:
-	Switch Foreground and Background Colors (X)	Farben tauschen (X)
+	Switch Foreground and Background Colors (X)	Vorder- und Hintergrundfarbe vertauschen (X)
 	Swaps height and width	Tauscht Höhe und Breite
 	Switch between free transform and warp modes	Zwischen freier Transformation und Verkrümmen wechseln
 	Switch theme	Design wechseln

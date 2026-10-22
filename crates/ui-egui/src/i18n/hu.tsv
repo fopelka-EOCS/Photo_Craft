@@ -1763,7 +1763,7 @@ layerLabel	Magenta	Bíbor
 	Dark	Sötét
 	Data Set: {name}  ({index}/{total})	Adatkészlet: {name}  ({index}/{total})
 	Data Sets	Adatkészletek
-	Default Foreground and Background Colors (D)	Alapértelmezett színek (D)
+	Default Foreground and Background Colors (D)	Alapértelmezett előtér- és háttérszín (D)
 	Define	Megadás
 	Define at least one variable first.	Előbb adj meg legalább egy változót.
 	Delete Cropped Pixels	Levágott pixelek törlése
@@ -1908,7 +1908,7 @@ layerLabel	Magenta	Bíbor
 	Source: set	Forrás: beállítva
 	Style	Stílus
 	Subtract from selection  ({key})	Kivonás a kijelölésből  ({key})
-	Switch Foreground and Background Colors (X)	Színek cseréje (X)
+	Switch Foreground and Background Colors (X)	Előtér- és háttérszín cseréje (X)
 	System title bar	Rendszer címsora
 	Text Replacement	Szövegcsere
 	Thumbnail size (smallest: list)	Bélyegképméret (a legkisebb: lista)

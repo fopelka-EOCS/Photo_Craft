@@ -1033,7 +1033,7 @@
 	Darks	Oscuros
 	Data Sets	Conjuntos de datos
 	Default	Predeterminado
-	Default Foreground and Background Colors (D)	Colores predeterminados (D)
+	Default Foreground and Background Colors (D)	Colores frontal y de fondo predeterminados (D)
 	Default printer	Impresora predeterminada
 	Default restored.	Se restauraron los valores predeterminados.
 	Define	Definir
@@ -1533,7 +1533,7 @@
 	Subtract from Sample	Restar de la muestra
 	Subtract from selection  ({key})	Restar de la selección  ({key})
 	Suggestions:	Sugerencias:
-	Switch Foreground and Background Colors (X)	Intercambiar colores (X)
+	Switch Foreground and Background Colors (X)	Intercambiar colores frontal y de fondo (X)
 	Swaps height and width	Intercambia la altura y el ancho
 	Switch between free transform and warp modes	Cambiar entre los modos de transformación libre y deformación
 	Switch theme	Cambiar tema
