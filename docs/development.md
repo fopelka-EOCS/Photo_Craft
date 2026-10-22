@@ -473,6 +473,9 @@ PhotoCraft equivalent.
 Events outside the table load as `actions.photoshopStep` steps that keep the descriptor
 verbatim (so Save Actions writes them back) and fail at playback with the step's Photoshop name.
 
+The focused native parser matrix, public-API contract fixtures, scheduled fuzzing and local
+commands are described in [ATN parser tests and CI](atn-testing.md).
+
 ## Remove Tool quality
 
 `cargo run --release -p photocraft-engine --example remove_quality -- <dir> [out dir]` fills
