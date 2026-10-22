@@ -2,6 +2,10 @@
 
 This proposal adds the existing PicsRoom Build 13 iOS application as an isolated Xcode project. It uses SwiftUI, Core Image, Vision/Core ML and a Rust FFI bridge. This is **not** a pure-Rust UI and does not satisfy the current upstream architecture policy; it is offered for maintainer discussion, not as a merge-ready replacement for PhotoCraft.
 
+## Screenshots
+
+[View example screenshots of editing, cropping and export](docs/screenshots/README.md). These show Build 11/12 with synthetic demo artwork.
+
 ## Reproduce the build
 
 1. On macOS install Xcode, Python 3 and Rust 1.95.0.
