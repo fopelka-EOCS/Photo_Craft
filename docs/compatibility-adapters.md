@@ -1,8 +1,10 @@
 # Compatibility adapters: shared compute and unchanged plug-in resources
 
-> **Status:** experimental Rust host API, version 1. This is separate from the sandboxed
-> [WebAssembly ABI v1](plugins.md); it is **not** a native binary ABI, a worker wire protocol,
-> a Photoshop SDK implementation, or a claim of GPU/NPU support on a particular machine.
+> **Status (2026-10-22):** experimental Rust host API v1, with a separate bounded native
+> worker protocol v1 and explicit package management. This is separate from the sandboxed
+> [WebAssembly ABI v1](plugins.md); it is **not** a stable native binary ABI, a Photoshop SDK
+> implementation, or proof of GPU/NPU execution on a particular machine. The audit and proposed
+> next-version work are tracked in [adapter evolution](adapter-evolution.md).
 
 ## Purpose
 
@@ -29,9 +31,10 @@ is recognized. Existing sandboxed `.wasm` plug-ins keep their existing loader an
 
 The contract is implemented in `photocraft_plugins::adapter`. Its data types do not contain a
 `Session`, `Document`, `Surface`, GPU handle, ONNX graph or vendor-specific runtime type. Other
-hosts can map their own image APIs to the same request and response types. Serde derives help
-such bridges, but their framing, binary transport, authentication and process lifecycle remain
-separate work: serializing a large image as JSON is not the proposed high-performance IPC format.
+hosts can map their own image APIs to the same request and response types. The native
+`photocraft_plugins::worker` module supplies a separate bounded file-framed transport and direct
+child lifecycle; it is not a network/authenticated service. Samples are binary f32, not a large
+JSON pixel array. A reusable worker does not implement another editor's host bridge automatically.
 
 ## What is, and is not, provided
 
@@ -39,10 +42,10 @@ separate work: serializing a large image as JSON is not the proposed high-perfor
 |---|---|---|
 | Discovery | Adapter, operation, accepted colour modes, resource-format claims and device descriptors | Hardware detection or validation of third-party device claims |
 | Execution | Opaque resource and parameter forwarding; image/mask/depth result types | `.8bf`, UXP, CEP, Adobe protected-model or arbitrary ONNX loaders |
-| Devices | Explicit device id, CPU/GPU/NPU classification, fallback policy, execution report | Bundled CUDA, DirectML, QNN, Metal or an inference runtime |
-| PhotoCraft | Session registration, list/run commands, jobs, progress, cancellation and transactional writes | Automatic DLL loading, arbitrary executable installation, a new plug-in preferences UI |
+| Devices | Explicit device id, CPU/GPU/NPU classification, fallback policy, execution report | Runtime/driver or physical-device validation merely from a descriptor; runtimes remain separate worker packages |
+| PhotoCraft | Session registration, explicit-consent native package install/enable UI, list/run commands, jobs and transactional writes | Automatic DLL loading or arbitrary shell execution; general model/operation preferences UI |
 | Cross-host reuse | A host-neutral data boundary and no requirement to modify original resources | An existing plug-in binary working in every host/CPU/OS without an adapter |
-| Safety | Input/result validation, limits, cancellation checkpoints and caught Rust unwinds | A sandbox for trusted native code, forced termination of hung code or recovery from process abort |
+| Safety | Input/result validation, limits, cancellation checkpoints, caught Rust unwinds and direct-child worker timeout/termination | An OS sandbox, full descendant-process containment, or recovery from an in-process abort |
 
 No models, proprietary SDK files, plug-in binaries or new vendor runtime dependencies are included.
 
@@ -98,8 +101,17 @@ Framing format:
 - Response magic: `PCADRES1` (8 bytes), followed by LE u32 JSON header length, UTF-8 JSON status/metadata, and raw LE f32 samples.
 - Actions:
   - `probe`: checks worker and model readiness state without starting inference or downloads.
-  - `prepare`: explicitly downloads/configures models with user consent.
+  - `prepare`: explicitly prepares models with user consent. The Windows system-AI worker may
+    trigger OS downloads; a local QNN worker need not have any network/download implementation.
   - `run`: performs inference and outputs the result buffer.
+
+The control header is only `{"protocol":1}`. It cannot target a specific resource/device, so
+probe/prepare applies to the worker's package/default model, **not every model** an adapter may
+accept in a run request. Response headers contain exactly `protocol`, `status`, `message`,
+`output` and `execution`; unknown fields are errors, even if null. Manifest descriptors are the
+host's capability authority, not extra fields returned by the worker. The 1 MiB header cap is
+combined metadata including parameters and ICC bytes; a valid core request can still exceed
+this transport cap. No silent ICC truncation or profile substitution is permitted.
 
 ## Engine commands
 
@@ -183,14 +195,19 @@ runtimes or probe files; it describes adapters already registered by trusted app
 
 When the user triggers **Select › Subject** (`select.subject`), the host automatically inspects the session's
 adapter registry:
-- If an adapter is registered that declares the `select-subject` operation (`output_kind: mask`), the command
-  prioritizes dispatching to that adapter (enabling NPU/GPU/CPU AI subject segmentation, similar to Affinity Photo's
-  on-device ML selection pipeline).
-- The returned single-channel mask is converted into a selection region, optionally refined with edge smoothing
-  (`enhanceEdge: true`), and applied to the document selection under the requested mode (`replace`, `add`, `subtract`,
-  `intersect`) with full undo support.
-- If no adapter is registered, or if `forceClassical: true` / `"method": "classical"` is passed, the engine
-  transparently falls back to the classical saliency and GrabCut algorithm.
+- Automatic routing filters the declared mask operation, actual native input color mode, requested device,
+  and an installed package's cached `ready` state. It never implicitly probes/prepares a worker. This v1
+  cache covers a package/default model only, can become stale, and does not prove a selected model or NPU.
+- A requested provider/device is strict: incompatible or unavailable choices fail rather than trying another
+  provider. With no matching adapter and no explicit adapter options, the command retains classical saliency
+  and GrabCut; `forceClassical: true` / `"method": "classical"` explicitly selects the classical path.
+- **Precision limitation remains:** the subject bridge still converts the returned F32 mask to a u8 `Region`
+  even with `enhanceEdge: false`. F32-aware combine/undo regressions are pending; the existing generic
+  `plugin.adapter.run` selection destination retains F32. Do not describe these two paths as equivalent.
+- Untagged images are not silently treated as sRGB. A worker requiring `params.colorPolicy` still needs an
+  explicit command parameter; a general user color-policy/default-model preference UI is not implemented.
+- Package hashing remains synchronous in some paths, and total cancellation/deadline coverage of that I/O
+  is still incomplete. Routing improvements do not resolve those P4 tasks.
 
 This first bridge accepts an explicit raster-layer pixel target and the canvas rectangle in
 RGB, Gray, CMYK and Lab documents at 8/16/32-bit depth. Indexed, Bitmap, Duotone and Multichannel
@@ -234,7 +251,8 @@ include `rgb`, `gray`, `cmyk`, `lab`, `bitmap`, `indexed`, `duotone` and `multic
 - Default limits bound images to 32 Mi pixels (33,554,432), 128 Mi samples (134,217,728) and ICC
   data to 4 MiB; metadata is also bounded. The engine also checks the combined input-plus-selection
   sample budget before allocating dense buffers. Callers may use smaller limits. Large-image tiling, zero-copy GPU
-  interop, cached model residency and process transport are future adapter-specific work.
+  interop and cached model residency remain future adapter-specific work. The implemented
+  worker v1 uses file-framed process transport with additional combined metadata limits.
 
 `Limits::check_params(&Value)` exposes the same iterative metadata preflight used by execution:
 object root, depth counted from 1, and exact compact-JSON byte accounting, including escapes.
@@ -302,8 +320,9 @@ is not PhotoCraft's MIT/Apache licence. No SDK header or example is copied into 
 
 ## Community work that can build on this boundary
 
-1. A native worker client with bounded binary image transport, authentication, explicit installation,
-   process timeouts and cancellation; add capability-scoped automation only after that review.
+1. Extend the existing bounded native worker/package path with version negotiation, resource-specific
+   controls and transport fixtures; authentication for a future service transport and adapter-scoped
+   automation remain separate reviewed work.
 2. A tested traditional filter compatibility adapter, keeping original plug-in binaries unchanged
    and addressing SDK terms, CPU architecture, supported suites, dialogs and per-filter quirks.
 3. Independently deployable model/runtime adapters (ONNX/QNN/DirectML/Metal/etc.), with correct
