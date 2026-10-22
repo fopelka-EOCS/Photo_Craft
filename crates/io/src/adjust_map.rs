@@ -7,7 +7,7 @@
 //! Every [`Adjustment`] kind is written (`vibA`, `blnc`, `blwh`, `phfl` and `mixr` included);
 //! a Color Lookup without a table is written as an identity cube and a Gradient Map with fewer
 //! than two stops as the equivalent two-stop gradient, so nothing is dropped on save. Blocks
-//! that cannot be read (noise gradients, profile lookups, CMYK channel mixers, unknown versions)
+//! that cannot be read (noise gradients, profile lookups, ink channel mixers outside CMYK documents, unknown versions)
 //! stay [`Adjustment::Unsupported`] and are written back verbatim.
 
 use photocraft_doc::Adjustment;
@@ -152,9 +152,13 @@ pub fn unreadable_reason(key: &[u8; 4], data: &[u8]) -> Option<String> {
 /// (modern brightness/contrast parameters). Levels/Curves store the
 /// composite record first, then one per document channel (see [`Channels`]).
 pub fn parse(key: &[u8; 4], data: &[u8], cged: Option<&[u8]>, channels: Channels) -> Adjustment {
-    // A CMYK Channel Mixer (any record using the fourth, black, source) has no RGB meaning:
-    // keep it raw. Mixers written by `write` leave that source at 0 and map in every mode.
-    if key == b"mixr" && matches!(channels, Channels::Cmyk | Channels::Other) && (0..).map_while(|r| bei16(data, 4 + r * 10 + 6)).any(|k| k != 0) {
+    // A CMYK document's mixer has Photoshop's four ink outputs.
+    if key == b"mixr" && channels == Channels::Cmyk {
+        return parse_cmyk_mixer(data).unwrap_or_else(|| unsupported(key, data));
+    }
+    // In other modes a mixer using the fourth (black) source has no RGB meaning: keep it raw.
+    // Mixers written by `write` from RGB outputs leave that source at 0.
+    if key == b"mixr" && channels != Channels::Cmyk && (0..).map_while(|r| bei16(data, 4 + r * 10 + 6)).any(|k| k != 0) {
         return unsupported(key, data);
     }
     let mut a = parse_any(key, data, cged);
@@ -584,7 +588,33 @@ fn parse_channel_mixer(d: &[u8]) -> Option<Adjustment> {
     let first = rec(0)?;
     // A monochrome block may carry only the gray record.
     let (g, b) = if monochrome { (rec(1).unwrap_or([0.0; 4]), rec(2).unwrap_or([0.0; 4])) } else { (rec(1)?, rec(2)?) };
-    Some(Adjustment::ChannelMixer { matrix: [first, g, b], monochrome })
+    Some(Adjustment::ChannelMixer { matrix: [first, g, b], monochrome, cmyk: None })
+}
+
+/// `mixr` in a CMYK document: the same layout with four output records (cyan, magenta,
+/// yellow, black), each using all four sources (cyan, magenta, yellow, black) and the constant.
+/// A monochrome block may carry only its first record (the mix the black ink gets).
+fn parse_cmyk_mixer(d: &[u8]) -> Option<Adjustment> {
+    if be16(d, 0)? != 1 {
+        return None;
+    }
+    let monochrome = be16(d, 2)? != 0;
+    let rec = |r: usize| -> Option<[f32; 5]> {
+        let at = 4 + r * 10;
+        let v = |k: usize| bei16(d, at + k * 2).map(|x| f32::from(x).clamp(-200.0, 200.0) / 100.0);
+        Some([v(0)?, v(1)?, v(2)?, v(3)?, v(4)?])
+    };
+    let identity = photocraft_doc::adjust::CMYK_MIXER_IDENTITY;
+    let mut rows = identity;
+    for (r, row) in rows.iter_mut().enumerate() {
+        *row = match rec(r) {
+            Some(v) => v,
+            None if monochrome && r > 0 => identity[r],
+            None => return None,
+        };
+    }
+    let matrix = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
+    Some(Adjustment::ChannelMixer { matrix, monochrome, cmyk: Some(rows) })
 }
 
 fn put16(v: &mut Vec<u8>, x: u16) {
@@ -796,7 +826,18 @@ pub fn write(adj: &Adjustment) -> Vec<([u8; 4], Vec<u8>)> {
             v.extend_from_slice(&[0, 0, 0]);
             return vec![(*b"phfl", v)];
         }
-        Adjustment::ChannelMixer { matrix, monochrome } => {
+        Adjustment::ChannelMixer { cmyk: Some(rows), monochrome, .. } => {
+            put16(&mut v, 1);
+            put16(&mut v, u16::from(*monochrome));
+            // Cyan, magenta, yellow, black, then the monochrome record (the first row).
+            for row in rows.iter().chain(std::iter::once(&rows[0])) {
+                for x in row {
+                    v.extend_from_slice(&clamp_i16((x * 100.0).clamp(-200.0, 200.0)).to_be_bytes());
+                }
+            }
+            return vec![(*b"mixr", v)];
+        }
+        Adjustment::ChannelMixer { matrix, monochrome, cmyk: None } => {
             put16(&mut v, 1);
             put16(&mut v, u16::from(*monochrome));
             // Red, green, blue, then the gray record (the first row, which monochrome uses).
@@ -1046,8 +1087,8 @@ mod tests {
         let q = |v: u16| f32::from(v) / 65535.0;
         rt(Adjustment::PhotoFilter { color: [q(60000), q(30000), q(0)], density: 0.25, preserve_luminosity: true });
         rt(Adjustment::PhotoFilter { color: [q(0), q(40000), q(65535)], density: 1.0, preserve_luminosity: false });
-        rt(Adjustment::ChannelMixer { matrix: [[0.5, 0.3, 0.2, 0.0], [0.1, 0.8, 0.1, 0.05], [0.0, 0.2, 0.9, -0.05]], monochrome: false });
-        rt(Adjustment::ChannelMixer { matrix: [[0.4, 0.4, 0.2, 0.1], [0.0, 1.0, 0.0, 0.0], [-2.0, 0.0, 2.0, 0.0]], monochrome: true });
+        rt(Adjustment::ChannelMixer { matrix: [[0.5, 0.3, 0.2, 0.0], [0.1, 0.8, 0.1, 0.05], [0.0, 0.2, 0.9, -0.05]], monochrome: false, cmyk: None });
+        rt(Adjustment::ChannelMixer { matrix: [[0.4, 0.4, 0.2, 0.1], [0.0, 1.0, 0.0, 0.0], [-2.0, 0.0, 2.0, 0.0]], monochrome: true, cmyk: None });
         let id = photocraft_cms::lutfile::LutFile::identity(5);
         rt(Adjustment::ColorLookup { name: "Look.cube".into(), lut: Some(std::sync::Arc::new(id.data)), size: 5, tetrahedral: false, dither: true });
     }
@@ -1121,15 +1162,26 @@ mod tests {
         assert!(matches!(parse(b"vibA", &[0, 0, 0, 15, 0], None, Channels::Rgb), Adjustment::Unsupported { .. }));
         assert!(matches!(parse(b"blwh", &[], None, Channels::Rgb), Adjustment::Unsupported { .. }));
         assert!(matches!(parse(b"mixr", &[0, 2, 0, 0], None, Channels::Rgb), Adjustment::Unsupported { .. }));
-        // A CMYK mixer (black source used) stays raw in CMYK documents; our own RGB layout maps.
+        // A CMYK mixer (black source used) maps to ink outputs in CMYK documents and stays raw
+        // in modes without inks; our own RGB layout maps there.
         let mut cmyk = i16s(&[1, 0]);
         for r in 0..4 {
             cmyk.extend(i16s(&std::array::from_fn::<i16, 5, _>(|k| if k == r { 100 } else { 0 })));
         }
-        assert!(matches!(parse(b"mixr", &cmyk, None, Channels::Cmyk), Adjustment::Unsupported { .. }));
+        assert!(
+            matches!(parse(b"mixr", &cmyk, None, Channels::Cmyk), Adjustment::ChannelMixer { cmyk: Some(rows), .. } if rows == photocraft_doc::adjust::CMYK_MIXER_IDENTITY)
+        );
         assert!(matches!(parse(b"mixr", &cmyk, None, Channels::Other), Adjustment::Unsupported { .. }));
-        let ours = write(&Adjustment::ChannelMixer { matrix: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]], monochrome: false });
-        assert!(matches!(parse(b"mixr", &ours[0].1, None, Channels::Cmyk), Adjustment::ChannelMixer { .. }));
+        // Truncated CMYK blocks stay raw (a monochrome one may carry its first record alone).
+        assert!(matches!(parse(b"mixr", &cmyk[..4 + 3 * 10], None, Channels::Cmyk), Adjustment::Unsupported { .. }));
+        assert!(matches!(parse(b"mixr", &[0, 1, 0, 1, 0, 100], None, Channels::Cmyk), Adjustment::Unsupported { .. }));
+        let mut mono = i16s(&[1, 1]);
+        mono.extend(i16s(&[30, 30, 30, 100, 0]));
+        assert!(
+            matches!(parse(b"mixr", &mono, None, Channels::Cmyk), Adjustment::ChannelMixer { cmyk: Some(rows), monochrome: true, .. } if rows[0] == [0.3, 0.3, 0.3, 1.0, 0.0])
+        );
+        let ours =
+            write(&Adjustment::ChannelMixer { matrix: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]], monochrome: false, cmyk: None });
         assert!(matches!(parse(b"mixr", &ours[0].1, None, Channels::Other), Adjustment::ChannelMixer { .. }));
         assert!(matches!(parse(b"mixr", &[0, 1, 0, 0, 0, 100], None, Channels::Rgb), Adjustment::Unsupported { .. }));
         // Photo Filter: unknown version, HSB colour space, out-of-range version-3 XYZ, truncated.
@@ -1273,7 +1325,7 @@ mod tests {
         let mut d = i16s(&[1, 0]);
         d.extend(i16s(&[100, 0, 0, 0, 20, 50, 50, 0, 0, 0, 0, -50, 150, 0, -10]));
         let a = parse(b"mixr", &d, None, Channels::Rgb);
-        assert_eq!(a, Adjustment::ChannelMixer { matrix: [[1.0, 0.0, 0.0, 0.2], [0.5, 0.5, 0.0, 0.0], [0.0, -0.5, 1.5, -0.1]], monochrome: false });
+        assert_eq!(a, Adjustment::ChannelMixer { matrix: [[1.0, 0.0, 0.0, 0.2], [0.5, 0.5, 0.0, 0.0], [0.0, -0.5, 1.5, -0.1]], monochrome: false, cmyk: None });
         // Written with the trailing gray record (a copy of the first row).
         let w = write(&a);
         assert_eq!(w[0].1[..d.len()], d[..]);
@@ -1281,8 +1333,35 @@ mod tests {
         // Monochrome with only the gray record: 30/59/11.
         let mut m = i16s(&[1, 1]);
         m.extend(i16s(&[30, 59, 11, 0, 0]));
-        let Adjustment::ChannelMixer { matrix, monochrome: true } = parse(b"mixr", &m, None, Channels::Rgb) else { panic!() };
+        let Adjustment::ChannelMixer { matrix, monochrome: true, .. } = parse(b"mixr", &m, None, Channels::Rgb) else { panic!() };
         assert_eq!(matrix[0], [0.3, 0.59, 0.11, 0.0]);
+    }
+
+    #[test]
+    fn cmyk_channel_mixer_blocks_round_trip_with_four_ink_outputs() {
+        // Cyan = 100 % C + 20 % K - 10 % const; magenta = 50 % M + 50 % Y; yellow = 100 % Y;
+        // black = 30 % C + 30 % M + 30 % Y + 100 % K.
+        let rows = [[1.0, 0.0, 0.0, 0.2, -0.1], [0.0, 0.5, 0.5, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0, 0.0], [0.3, 0.3, 0.3, 1.0, 0.0]];
+        let mut d = i16s(&[1, 0]);
+        d.extend(i16s(&[100, 0, 0, 20, -10, 0, 50, 50, 0, 0, 0, 0, 100, 0, 0, 30, 30, 30, 100, 0]));
+        let a = parse(b"mixr", &d, None, Channels::Cmyk);
+        let Adjustment::ChannelMixer { cmyk: Some(got), monochrome: false, .. } = &a else { panic!("{a:?}") };
+        assert_eq!(*got, rows);
+        // Written as the four ink records plus the monochrome record (the first row), and read back.
+        let w = write(&a);
+        assert_eq!(w[0].0, *b"mixr");
+        assert_eq!(w[0].1[..d.len()], d[..]);
+        assert_eq!(w[0].1[d.len()..], i16s(&[100, 0, 0, 20, -10])[..]);
+        assert_eq!(parse(b"mixr", &w[0].1, None, Channels::Cmyk), a);
+        for mono in [false, true] {
+            let m = Adjustment::ChannelMixer {
+                matrix: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]],
+                monochrome: mono,
+                cmyk: Some([[0.3, 0.3, 0.3, 1.0, 0.05], [0.0, 1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0, 0.0], [-2.0, 0.0, 0.0, 2.0, 0.0]]),
+            };
+            let b = write(&m);
+            assert_eq!(parse(&b[0].0, &b[0].1, None, Channels::Cmyk), m, "monochrome {mono}");
+        }
     }
 
     fn vdesc(d: Descriptor) -> Vec<u8> {
