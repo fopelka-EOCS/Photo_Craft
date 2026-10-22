@@ -328,6 +328,21 @@ fn alt_clicking_the_last_corner_of_a_small_shape_does_not_close_it() {
     assert!(close_to(b.x0, 100) && close_to(b.y0, 100) && close_to(b.x1, 106) && close_to(b.y1, 106), "a square, not a triangle: {b:?}");
 }
 
+#[test]
+fn shift_drag_constrains_freeform_pen_to_a_straight_line() {
+    let mut app = app();
+    app.ui.tool = Tool::FreeformPen;
+    let shift = Modifiers::SHIFT;
+    event(&mut app, "down", 10.0, 60.0, shift);
+    for (x, y) in [(30.0, 63.0), (50.0, 55.0), (80.0, 68.0), (100.0, 52.0)] {
+        event(&mut app, "move", x, y, shift);
+    }
+    let pts = &app.drag.as_ref().unwrap().points;
+    assert!(pts.len() >= 2, "{pts:?}");
+    let y0 = pts[0][1];
+    assert!(pts.iter().all(|p| (p[1] - y0).abs() < 1e-6), "⇧ keeps the freehand segment horizontal: {pts:?}");
+}
+
 /// ⌘ (Ctrl) with the Lasso is the Move tool for the drag: through the real canvas, a ⌘-drag outside
 /// the selection (here: without one) moves the layer and draws no outline (`canvas::command_moves_layer`).
 #[test]

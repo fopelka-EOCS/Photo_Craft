@@ -138,6 +138,45 @@ fn double_click_closes_the_polygon_after_quickly_placed_vertices() {
     assert!(selection(&h).is_some_and(|r| near(r, 50, 50, 150, 150)), "{:?}", selection(&h));
 }
 
+/// The Lasso's ⌥ (straight-segment) mode could not draw a segment shorter than the radius for
+/// grabbing the first vertex: the click that should have placed the next vertex counted as the
+/// last one clicked again and closed the outline, so a small outline could not be traced at all
+/// (#7629). Clicking the same point again still closes it, within a jitter of where it is.
+#[test]
+fn a_short_alt_lasso_segment_places_a_vertex_instead_of_closing() {
+    let mut app = polygon_app();
+    app.ui.tool = Tool::Lasso;
+    let alt = Modifiers::ALT;
+    let click = |app: &mut PhotocraftApp, x: f64, y: f64| {
+        ev(app, "down", x, y, alt);
+        ev(app, "up", x, y, alt);
+    };
+    for (x, y) in [(50.0, 50.0), (90.0, 50.0), (90.0, 90.0)] {
+        click(&mut app, x, y);
+    }
+    // 5 document units from the last vertex, inside the 8-unit reach at 100 %.
+    click(&mut app, 85.0, 91.0);
+    let points = app.drag.as_ref().map(|d| d.points.len());
+    assert_eq!(points, Some(4), "the short segment placed a vertex: {:?}", app.drag.as_ref().map(|d| d.points.clone()));
+    assert!(app.session.active().unwrap().doc.selection.is_none(), "and the outline is still being drawn");
+
+    // Clicking the last vertex again, within a jitter of it, still closes the outline.
+    click(&mut app, 86.0, 92.0);
+    assert!(app.drag.is_none(), "the same point clicked again closes it");
+    let r = app.session.active().unwrap().doc.selection.as_ref().map(|s| s.content_bounds());
+    assert!(r.is_some_and(|r| near(r, 50, 50, 90, 91)), "{r:?}");
+
+    // And so does a click on the first vertex, which is a grab rather than a repeat.
+    let mut app = polygon_app();
+    app.ui.tool = Tool::Lasso;
+    for (x, y) in [(50.0, 50.0), (90.0, 50.0), (90.0, 90.0), (85.0, 91.0)] {
+        click(&mut app, x, y);
+    }
+    click(&mut app, 54.0, 53.0);
+    assert!(app.drag.is_none(), "the first vertex closes it from a few points away");
+    assert!(app.session.active().unwrap().doc.selection.is_some());
+}
+
 /// Double-clicking on the first vertex: the first click closes the polygon, and the second must
 /// not start a new one (which would deselect what was just made).
 #[test]
@@ -523,15 +562,28 @@ fn the_last_corner_of_a_small_polygon_does_not_close_it() {
     assert!(near(bounds, 100, 100, 106, 106), "a square, not a triangle: {bounds:?}");
 }
 
-/// Large outlines keep the full 8-point reach; tiny ones still close on their first vertex.
+/// Large outlines keep the full 8-point reach; tiny ones still close on their first vertex. The
+/// reach follows the size of the whole outline, not its shortest edge (#7629).
 #[test]
 fn polygon_close_reach_scales_with_small_outlines_only() {
     let reach = crate::canvas::polygon_close_reach;
-    assert_eq!(reach([[0.0, 0.0], [100.0, 0.0], [100.0, 100.0]], 1.0), 8.0);
-    assert_eq!(reach([[0.0, 0.0], [100.0, 0.0], [100.0, 100.0]], 2.0), 4.0);
-    assert_eq!(reach([[0.0, 0.0], [6.0, 0.0], [6.0, 6.0]], 1.0), 1.5);
-    assert_eq!(reach([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]], 1.0), 1.0);
+    let square = |s: f64| [[0.0, 0.0], [s, 0.0], [s, s], [0.0, s]];
+    assert_eq!(reach(square(100.0), 1.0), 8.0);
+    assert_eq!(reach(square(100.0), 2.0), 4.0);
+    assert_eq!(reach(square(32.0), 1.0), 8.0);
+    assert_eq!(reach(square(6.0), 1.0), 1.5);
+    assert_eq!(reach(square(1.0), 1.0), 1.0);
     assert_eq!(crate::canvas::polygon_close_reach([[f64::NAN, 0.0]], 1.0), 8.0);
+    assert_eq!(crate::canvas::polygon_close_reach([[f64::NAN, 0.0], [0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]], 1.0), 2.5);
+}
+
+/// A large polygon with one short edge keeps the full reach: only a small outline shrinks it.
+#[test]
+fn polygon_close_reach_ignores_one_short_edge_of_a_large_outline() {
+    let reach = crate::canvas::polygon_close_reach;
+    assert_eq!(reach([[0.0, 0.0], [100.0, 0.0], [100.0, 100.0], [96.0, 101.0]], 1.0), 8.0);
+    // The outline of #7629's test (about 40 points across): the click 5 points from the first vertex still closes.
+    assert!(reach([[50.0, 50.0], [90.0, 50.0], [90.0, 90.0], [85.0, 91.0]], 1.0) > 5.0);
 }
 
 #[test]
