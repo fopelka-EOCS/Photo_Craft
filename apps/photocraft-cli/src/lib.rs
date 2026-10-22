@@ -622,7 +622,14 @@ fn mcp(a: &Args) -> R {
         None => PhotocraftMcp::headless_with_workspace(automation_workspace(a)?),
     };
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().map_err(|e| e.to_string())?;
-    rt.block_on(server.serve_stdio()).map_err(|e| e.to_string())
+    let result = rt.block_on(server.serve_stdio());
+    // Tokio's stdio reader runs on a blocking thread. On Windows a pending read on
+    // stdin can outlive the cancelled async task even after the idle deadline fires.
+    // Dropping the runtime normally waits forever for that read to finish, preventing
+    // main from reaching process exit when the client leaves its pipe open (#3660).
+    // Give cooperative tasks a chance to finish, but do not wait indefinitely for stdin.
+    rt.shutdown_timeout(std::time::Duration::from_secs(1));
+    result.map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

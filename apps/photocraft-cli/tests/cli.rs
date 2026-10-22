@@ -670,6 +670,58 @@ fn mcp_stdio_handshake_and_tool_call() {
     let _ = child.wait();
 }
 
+/// #3660: a real MCP process must exit after inactivity while its parent's
+/// stdin pipe remains open. Duplex-stream unit tests cannot detect Tokio's blocking
+/// stdin worker holding the runtime alive during shutdown, especially on Windows.
+#[cfg(debug_assertions)]
+#[test]
+fn mcp_stdio_idle_exits_real_process_without_stdin_eof() {
+    use std::time::{Duration, Instant};
+
+    let mut child = bin()
+        .arg("mcp")
+        .env("PHOTOCRAFT_MCP_TEST_IDLE_MS", "400")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    // Keep ownership of stdin until the child has exited: no EOF is sent.
+    let mut stdin = child.stdin.take().unwrap();
+    let init = json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+        "protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"idle-process-test","version":"1"}
+    }});
+    writeln!(stdin, "{init}").unwrap();
+    stdin.flush().unwrap();
+
+    let start = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if start.elapsed() >= Duration::from_secs(8) {
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+            panic!(
+                "MCP process survived idle expiry with stdin held open; stderr: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    };
+    let output = child.wait_with_output().unwrap();
+    drop(stdin);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(status.success() && output.status.success(), "status {status:?}; stderr: {stderr}");
+    assert!(
+        stdout.lines().filter_map(|line| serde_json::from_str::<Value>(line).ok()).any(|reply| {
+            reply["id"] == 1 && reply["result"]["serverInfo"]["name"] == "photocraft"
+        }),
+        "the real MCP CLI must initialize before the idle-exit assertion; stdout: {stdout}; stderr: {stderr}"
+    );
+}
+
 /// `--format` mapping two inputs to one name fails the second instead of overwriting the first (#420).
 #[test]
 fn batch_fails_inputs_that_share_an_output_name() {
