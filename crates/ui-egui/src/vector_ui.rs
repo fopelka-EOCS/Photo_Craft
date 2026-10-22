@@ -560,14 +560,29 @@ pub(crate) fn pen_resume_on_undo(app: &mut PhotocraftApp) -> Result<bool, String
     Ok(true)
 }
 
+/// The finish [`pen_resume_on_undo`] took back, while the Pen still draws that path.
+fn resumed_finish(app: &PhotocraftApp) -> Option<usize> {
+    app.ui.pen.as_ref()?;
+    app.finished_pens.iter().rposition(|f| f.resumed && is_current(app, &f.doc))
+}
+
+/// Edit › Redo would put back the finish of the path the Pen is drawing, edited since Undo gave
+/// it back: the finished path would sit beside its own draft. Redo does nothing until the draft is
+/// finished (a new step, clearing Redo) or undone back to what Undo gave back.
+pub(crate) fn pen_blocks_redo(app: &PhotocraftApp) -> bool {
+    !box_steps(app, "edit.redo") && resumed_finish(app).and_then(|i| app.finished_pens.get(i)).is_some_and(|f| app.ui.pen.as_ref() != Some(&f.draft))
+}
+
 /// Edit › Redo after [`pen_resume_on_undo`], with the path untouched since: finish it again.
+/// Edited since, Redo does nothing ([`pen_blocks_redo`]).
 pub(crate) fn pen_finish_on_redo(app: &mut PhotocraftApp) -> Result<bool, String> {
     if box_steps(app, "edit.redo") {
         return Ok(false);
     }
-    let Some(i) = app.finished_pens.iter().rposition(|f| f.resumed && is_current(app, &f.doc) && app.ui.pen.as_ref() == Some(&f.draft)) else {
-        return Ok(false);
-    };
+    if pen_blocks_redo(app) {
+        return Ok(true);
+    }
+    let Some(i) = resumed_finish(app) else { return Ok(false) };
     let (pen, pen_doc) = (app.ui.pen.take(), app.ui.pen_doc);
     if let Err(e) = app.run("edit.redo", json!({})) {
         app.ui.pen = pen;
@@ -585,7 +600,7 @@ pub(crate) fn pen_finish_on_redo(app: &mut PhotocraftApp) -> Result<bool, String
 
 /// Do Free Transform's or the Crop tool's own box steps take `id` (Undo/Redo) rather than History
 /// (`transform_tool::intercept`, `crop_ui::intercept`)?
-fn box_steps(app: &PhotocraftApp, id: &str) -> bool {
+pub(crate) fn box_steps(app: &PhotocraftApp, id: &str) -> bool {
     crate::transform_tool::is_enabled(app, id).is_some() || crate::crop_ui::is_enabled(app, id).is_some()
 }
 
@@ -3621,6 +3636,43 @@ mod tests {
         menu(&mut app, "edit.redo");
         assert!(app.ui.transform.is_some() && app.ui.pen.is_some(), "the box took the Redo");
         assert!(app.session.active().unwrap().doc.work_path.is_none());
+
+        // Nor do ⌘/Ctrl+Z or Edit › Undo take an anchor off the draft under the box.
+        let knots = app.ui.pen.as_ref().unwrap().knots.clone();
+        press(&mut app, egui::Key::Z, egui::Modifiers::COMMAND);
+        menu(&mut app, "edit.undo");
+        assert!(app.ui.transform.is_some());
+        assert_eq!(app.ui.pen.as_ref().unwrap().knots, knots, "the box took the Undo");
+        crate::transform_tool::cancel(&mut app);
+        press(&mut app, egui::Key::Z, egui::Modifiers::COMMAND);
+        assert_eq!(app.ui.pen.as_ref().unwrap().knots, knots[..knots.len() - 1].to_vec(), "then Undo takes the last anchor");
+    }
+
+    #[test]
+    fn redo_does_not_put_a_finished_path_beside_its_edited_draft() {
+        let ctx = egui::Context::default();
+        let mut app = app();
+        app.ui.tool = Tool::Pen;
+        for (x, y) in [(20.0, 20.0), (120.0, 20.0), (120.0, 120.0)] {
+            pen_down(&mut app, x, y, false);
+            pen_up(&mut app);
+        }
+        press(&mut app, egui::Key::Enter, egui::Modifiers::NONE);
+        menu(&mut app, "edit.undo");
+        pen_down(&mut app, 20.0, 120.0, false);
+        pen_up(&mut app);
+        let knots = app.ui.pen.as_ref().unwrap().knots.clone();
+        assert!(!crate::menus::is_enabled(&app, "edit.redo"), "Redo greys out over the edited draft");
+        crate::menus::invoke(&mut app, &ctx, "edit.redo", json!({})).unwrap();
+        assert!(app.session.active().unwrap().doc.work_path.is_none(), "no finished path beside the draft");
+        assert_eq!(app.ui.pen.as_ref().unwrap().knots, knots);
+
+        // Back to what Undo gave back, Redo finishes it again.
+        press(&mut app, egui::Key::Z, egui::Modifiers::COMMAND);
+        assert!(crate::menus::is_enabled(&app, "edit.redo"));
+        menu(&mut app, "edit.redo");
+        assert!(app.ui.pen.is_none());
+        assert_eq!(app.session.active().unwrap().doc.work_path.as_ref().unwrap().subpaths[0].knots.len(), 3);
     }
 
     #[test]
