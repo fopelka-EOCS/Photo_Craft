@@ -702,86 +702,90 @@ struct Draw<'a> {
 /// grid, nested folders as headers with their content below when open. `depth` is bounded by
 /// [`folder_tree`] (paths are cut at [`MAX_VIEW_DEPTH`]).
 fn draw_nodes(ui: &mut egui::Ui, d: &Draw, nodes: &[Node], depth: usize, acts: &mut Vec<Action>) {
-    let actions = std::cell::RefCell::new(acts);
-    let mut is_open = |folder: &FolderNode<'_>| {
-        let key = folder_view_key(d.label, &folder.path);
-        // Searching auto-expands the top-level groups, but nested folders remain explicitly
-        // collapsible so a large matching subtree can still be hidden by the user.
-        !d.collapsed.contains(&key)
-    };
-    let mut draw_folder = |ui: &mut egui::Ui, folder: &FolderNode<'_>, open: bool, _depth: usize| {
-        group_header(ui, d.label, d.key, &folder.path, open, folder.count, &mut actions.borrow_mut());
-    };
-    let mut draw_items = |ui: &mut egui::Ui, items: &[&BrushPreset], depth: usize| {
-        draw_item_run(ui, d, items, depth, &mut actions.borrow_mut());
-    };
-    crate::preset_panels::draw_hierarchy(ui, nodes, depth, MAX_VIEW_DEPTH, &mut is_open, &mut draw_folder, &mut draw_items);
-}
-
-/// Paint a contiguous run of presets. The shared hierarchy traversal decides where runs begin/end
-/// and handles recursive folder order; this consumer keeps its specialised brush cards/previews.
-fn draw_item_run(ui: &mut egui::Ui, d: &Draw, run: &[&BrushPreset], depth: usize, acts: &mut Vec<Action>) {
-    if run.is_empty() {
-        return;
-    }
     let indent = FOLDER_INDENT * depth as f32;
-    if d.layout.cards {
-        // The picker's cards: [`card_columns`] cards sharing each row, a centred grid of small
-        // [`CARD_TIP_ONLY_W`] cells, or card-wide [`CARD_TIP_NAME_W`] cells snapped to the indent.
-        let scale = d.scale.max(*crate::brush_picker::SCALE_RANGE.start());
-        ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing = vec2(CARD_GAP, GRID_GAP);
-            let fixed = if tip_only(d.show) {
-                Some(CARD_TIP_ONLY_W * scale)
-            } else if tip_and_name(d.show) {
-                Some(CARD_TIP_NAME_W * scale)
-            } else {
-                None
-            };
-            if let Some(cell) = fixed {
-                let (mut left, cols) = grid_columns(ui.available_width(), cell, indent, CARD_GAP);
-                if tip_and_name(d.show) {
-                    left = indent;
+    let mut run: Vec<&BrushPreset> = Vec::new();
+    let flush = |ui: &mut egui::Ui, run: &mut Vec<&BrushPreset>, acts: &mut Vec<Action>| {
+        if run.is_empty() {
+            return;
+        }
+        if d.layout.cards {
+            // The picker's cards: [`card_columns`] cards sharing each row, a centred grid of
+            // small [`CARD_TIP_ONLY_W`] cells, or card-wide [`CARD_TIP_NAME_W`] cells snapped
+            // to the indent like the full-card rows. The scale floors at the slider's own
+            // bottom end.
+            let scale = d.scale.max(*crate::brush_picker::SCALE_RANGE.start());
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing = vec2(CARD_GAP, GRID_GAP);
+                let fixed = if tip_only(d.show) {
+                    Some(CARD_TIP_ONLY_W * scale)
+                } else if tip_and_name(d.show) {
+                    Some(CARD_TIP_NAME_W * scale)
+                } else {
+                    None
+                };
+                if let Some(cell) = fixed {
+                    // Tip-only cells centre their whole columns like a grid; the card-sized
+                    // tip-and-name cells start at the indent.
+                    let (mut left, cols) = grid_columns(ui.available_width(), cell, indent, CARD_GAP);
+                    if tip_and_name(d.show) {
+                        left = indent;
+                    }
+                    for row in run.chunks(cols) {
+                        ui.horizontal(|ui| {
+                            ui.add_space(left);
+                            for p in row {
+                                preset_card(ui, p, d.current.is_some_and(|n| p.name.eq_ignore_ascii_case(n)), d.presets, d.show, cell, scale, acts);
+                            }
+                        });
+                    }
+                } else {
+                    let (card_w, cols) = card_columns(ui.available_width(), indent, scale);
+                    for row in run.chunks(cols) {
+                        ui.horizontal(|ui| {
+                            ui.add_space(indent);
+                            for p in row {
+                                preset_card(ui, p, d.current.is_some_and(|n| p.name.eq_ignore_ascii_case(n)), d.presets, d.show, card_w, scale, acts);
+                            }
+                        });
+                    }
                 }
+            });
+        } else if d.grid {
+            // Rows of whole columns, each with the same margin: a wrapped row indented only
+            // its first line and left the spare width on the right.
+            let (left, cols) = grid_columns(ui.available_width(), d.layout.cell, d.layout.indent + indent, GRID_GAP);
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing = vec2(GRID_GAP, GRID_GAP);
                 for row in run.chunks(cols) {
                     ui.horizontal(|ui| {
                         ui.add_space(left);
                         for p in row {
-                            preset_card(ui, p, d.current.is_some_and(|n| p.name.eq_ignore_ascii_case(n)), d.presets, d.show, cell, scale, acts);
+                            grid_cell(ui, p, d.current.is_some_and(|n| p.name.eq_ignore_ascii_case(n)), d.presets, d.layout.cell, acts);
                         }
                     });
                 }
-            } else {
-                let (card_w, cols) = card_columns(ui.available_width(), indent, scale);
-                for row in run.chunks(cols) {
-                    ui.horizontal(|ui| {
-                        ui.add_space(indent);
-                        for p in row {
-                            preset_card(ui, p, d.current.is_some_and(|n| p.name.eq_ignore_ascii_case(n)), d.presets, d.show, card_w, scale, acts);
-                        }
-                    });
+            });
+        } else {
+            for p in run.iter() {
+                list_row(ui, p, d.current.is_some_and(|n| p.name.eq_ignore_ascii_case(n)), d.presets, indent, acts);
+            }
+        }
+        run.clear();
+    };
+    for n in nodes {
+        match n {
+            Node::Preset(p) => run.push(p),
+            Node::Folder(f) => {
+                flush(ui, &mut run, acts);
+                let open = !d.collapsed.contains(&folder_view_key(d.label, &f.path));
+                group_header(ui, d.label, d.key, &f.path, open, f.count, acts);
+                if open && depth < MAX_VIEW_DEPTH {
+                    draw_nodes(ui, d, &f.children, depth + 1, acts);
                 }
             }
-        });
-    } else if d.grid {
-        // Rows of whole columns, each with the same margin, preserving the Brushes grid layout.
-        let (left, cols) = grid_columns(ui.available_width(), d.layout.cell, d.layout.indent + indent, GRID_GAP);
-        ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing = vec2(GRID_GAP, GRID_GAP);
-            for row in run.chunks(cols) {
-                ui.horizontal(|ui| {
-                    ui.add_space(left);
-                    for p in row {
-                        grid_cell(ui, p, d.current.is_some_and(|n| p.name.eq_ignore_ascii_case(n)), d.presets, d.layout.cell, acts);
-                    }
-                });
-            }
-        });
-    } else {
-        for p in run {
-            list_row(ui, p, d.current.is_some_and(|n| p.name.eq_ignore_ascii_case(n)), d.presets, indent, acts);
         }
     }
+    flush(ui, &mut run, acts);
 }
 
 /// The rename bar shown while a preset or group is being renamed. Enter or OK renames, Escape or
