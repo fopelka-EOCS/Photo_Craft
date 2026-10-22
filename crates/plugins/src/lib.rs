@@ -22,8 +22,12 @@
 //! Image bytes never cross into the interpreter at all: a panel passes [`blobs`] ids around, and
 //! the host does the encoding.
 //!
-//! A panel never touches the document itself: it returns [`ops::Operation`]s (`doc.capture`,
-//! `doc.commit`, …) which the host validates against the manifest's [`Capabilities`] and performs.
+//! A panel never touches the document *itself* — no import reaches one: it returns
+//! [`ops::Operation`]s, which the host validates against the manifest's [`Capabilities`] and either
+//! performs or refuses. `doc.command` is how a panel really edits the document (the allow-listed
+//! engine commands, each an ordinary edit with its own undo step); `doc.capture`, `doc.commit` and
+//! `http.request` are refused in this build.
+//!
 //! The process-wide [`registry`] holds the installed plug-ins.
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]

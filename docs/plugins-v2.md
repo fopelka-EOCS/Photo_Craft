@@ -392,10 +392,21 @@ its cap) — stops the instance and counts towards the failure window. A reply i
 before any of it is applied; an operation that fails while being carried out stops the panel partway
 through that reply instead, so what came before it stands and the panel is stopped rather than left
 running on the rest of a batch it cannot see. Its queue, timers and blobs are dropped and it stays
-stopped, reporting the same reason on every later event until restarted. Nothing a panel does touches
-the document: the only operations that would change it are refused in this build, so a failed panel
-leaves the document exactly as it was. The user sees the panel's window replaced by "This plug-in
-stopped.", the reason, and a **Restart Plug-in** button.
+stopped, reporting the same reason on every later event until restarted. The user sees the panel's
+window replaced by "This plug-in stopped.", the reason, and a **Restart Plug-in** button.
+
+A failure is not an undo, and the document is not off limits: **a panel does change the document.**
+`doc.command` runs the allow-listed `type.*` commands for real (see [`doc.command`](#doccommand)) —
+the same commands the Type tool runs, each an ordinary edit with its own history entry and its own
+undo step — so the edits a panel made before it failed stay on the document, as undoable as any
+other, and only the operations the host had not carried out yet are dropped. What a panel cannot do
+is reach *past* the document: `doc.capture`, `doc.commit` and `http.request` are refused in this build
+(see below), so it can neither see pixels nor add them, nor reach the network.
+
+Ordering is what bounds a failing reply, and why the host stops a panel rather than carry on: the
+commands a reply asks for are run only once that whole reply has been applied, so an operation that
+fails partway through one ends that reply — the operations before it stand, what follows it is
+dropped, and the commands it had asked for are not carried out with it.
 
 **Panels are process-wide.** There is one instance per plug-in id for the whole process, shared by
 every session (the installed plug-ins and the failure windows are process-wide too, as in v1). The
