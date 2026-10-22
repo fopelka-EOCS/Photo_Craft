@@ -268,6 +268,9 @@ pub type ImportFn = Box<dyn Fn(&str, &[u8], usize) -> Result<(Document, Vec<Stri
 pub struct ExportSettings {
     /// JPEG quality 1–100 (None = codec default).
     pub jpeg_quality: Option<u8>,
+    /// JPEG chroma sampling: `true` is 4:2:0, `false` keeps full 4:4:4 colour detail.
+    /// Export As keeps full chroma so saturated text and graphics stay sharp.
+    pub jpeg_chroma_subsampling: bool,
     /// WebP: lossless (VP8L) rather than lossy (VP8 at [`Self::webp_quality`]).
     pub webp_lossless: bool,
     /// Lossy WebP quality 1–100 (None = codec default).
@@ -307,6 +310,7 @@ impl Default for ExportSettings {
     fn default() -> Self {
         ExportSettings {
             jpeg_quality: None,
+            jpeg_chroma_subsampling: true,
             webp_lossless: true,
             webp_quality: None,
             tiff_layers: true,
@@ -331,6 +335,7 @@ impl ExportSettings {
         if let Some(q) = self.jpeg_quality {
             opts.encode.jpeg_quality = q;
         }
+        opts.encode.jpeg_chroma_subsampling = self.jpeg_chroma_subsampling;
         opts.encode.webp_lossless = self.webp_lossless;
         if let Some(q) = self.webp_quality {
             opts.encode.webp_quality = q;
