@@ -64,7 +64,8 @@ fn production(text: &str) -> String {
             if item.starts_with("#[") {
                 continue;
             }
-            if !item.trim_end().ends_with(';') {
+            // `mod x;` and a one-line `mod tests {}` end on their own line.
+            if !item.trim_end().ends_with([';', '}']) {
                 for l in lines.by_ref() {
                     if bare(l) == "}" {
                         break;
@@ -207,6 +208,8 @@ fn production_excludes_test_modules_with_lf_or_crlf() {
 #[test]
 fn production_keeps_code_after_an_inline_test_module() {
     // `canvas.rs` has test modules halfway down; the code after them is still production code.
+    let one_line = "fn a() {}\n#[cfg(test)]\nmod tests {}\nfn b() { p.x.read }\n";
+    assert_eq!(production(one_line), "fn a() {}\nfn b() { p.x.read }\n");
     for newline in ["\n", "\r\n"] {
         let source = format!(
             "fn a() {{}}{newline}#[cfg(test)]{newline}#[allow(dead_code)]{newline}mod inline_tests {{{newline}    fn t() {{ p.x.hidden }}{newline}}}{newline}{newline}fn b() {{ p.x.read }}{newline}#[cfg(test)]{newline}mod more;{newline}fn c() {{}}{newline}"
