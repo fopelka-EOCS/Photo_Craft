@@ -742,12 +742,19 @@ fn with_panel_target(s: &Session, p: &Value) -> Value {
 fn transform(s: &mut Session, p: &Value) -> Result<Value> {
     let p = &with_panel_target(s, p);
     let st = s.active().ok_or(EngineError::NoDocument)?;
-    let id = crate::commands::explicit_layer(s, p)?.or(st.active_layer);
+    let explicit = crate::commands::explicit_layer(s, p)?;
+    let id = explicit.or(st.active_layer);
     let lone = lone_target(&st.doc, id, p)?;
     let id = match (id, lone.is_some() && crate::channel_cmds::is_channel_target(p)) {
         (_, true) => None,
         (Some(id), false) => Some(id),
         (None, false) => return Err(EngineError::Other("no active layer".into())),
+    };
+    // Free Transform moves every selected layer with the one box (#8458); an explicit layer, or a
+    // targeted mask or channel, moves alone.
+    let ids: Vec<LayerId> = match id {
+        Some(_) if explicit.is_none() && lone.is_none() => st.selected_layers(),
+        _ => id.into_iter().collect(),
     };
     let rect = match p.get("rect").and_then(Value::as_array) {
         Some(r) if r.len() == 4 => {
@@ -794,7 +801,7 @@ fn transform(s: &mut Session, p: &Value) -> Result<Value> {
     crate::jobs::edit_job(
         s,
         "Free Transform",
-        move |doc, _, ctx| ctx.stage(0.0, 1.0, "Transforming", |ctl| transform_doc(doc, id, &p, lone, &h, affine, interp, ctl)),
+        move |doc, _, ctx| ctx.stage(0.0, 1.0, "Transforming", |ctl| transform_doc(doc, &ids, &p, lone, &h, affine, interp, ctl)),
         move |()| json!({"rect": rect}),
     )
 }
@@ -803,7 +810,7 @@ fn transform(s: &mut Session, p: &Value) -> Result<Value> {
 #[allow(clippy::too_many_arguments)]
 fn transform_doc(
     doc: &mut Document,
-    id: Option<LayerId>,
+    ids: &[LayerId],
     p: &Value,
     lone: bool,
     h: &Homography,
@@ -819,7 +826,7 @@ fn transform_doc(
     if lone {
         // A targeted unlinked mask, alpha channel or Quick Mask transforms by itself.
         if !h.is_identity() {
-            let (surf, _) = crate::channel_cmds::target_surface(doc, id, p)?;
+            let (surf, _) = crate::channel_cmds::target_surface(doc, ids.first().copied(), p)?;
             let src = sel.as_ref().map_or_else(|| surf.content_bounds(), Surface::content_bounds);
             check_budget(src, h, "mask or channel", surf.format())?;
             *surf = match &sel {
@@ -832,18 +839,24 @@ fn transform_doc(
         }
         return Ok(());
     }
-    let id = id.ok_or_else(|| EngineError::Other("no active layer".into()))?;
-    let is_group = doc.layer(id).is_some_and(Layer::is_group);
-    let group = group_locks(doc, id);
-    // Photoshop turns the Background into a normal layer before transforming it.
-    crate::extra_cmds::background_to_layer(doc, id);
-    let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
-    transform_layer_with(if is_group { None } else { sel.as_ref() }, group, l, h, affine, interp, ctl)?;
+    if ids.is_empty() {
+        return Err(EngineError::Other("no active layer".into()));
+    }
+    for &id in ids {
+        let is_group = doc.layer(id).is_some_and(Layer::is_group);
+        let group = group_locks(doc, id);
+        // Photoshop turns the Background into a normal layer before transforming it.
+        crate::extra_cmds::background_to_layer(doc, id);
+        let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
+        transform_layer_with(if is_group { None } else { sel.as_ref() }, group, l, h, affine, interp, ctl)?;
+    }
     if !h.is_identity() {
         // Type layers re-render from their new transform.
         let snapshot = doc.clone();
-        if let Some(l) = doc.layer_mut(id) {
-            refresh_text(&snapshot, l);
+        for &id in ids {
+            if let Some(l) = doc.layer_mut(id) {
+                refresh_text(&snapshot, l);
+            }
         }
         // The selection outline moves with the pixels.
         if let Some(sel) = &doc.selection {
