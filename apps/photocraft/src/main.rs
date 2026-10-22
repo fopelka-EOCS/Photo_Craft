@@ -911,7 +911,9 @@ fn main() -> eframe::Result {
                         }
                         None => log::warn!("tablet pressure: this window has no Win32 handle; the Wintab reader cannot start"),
                     }
-                } else if use_ink.is_some() {
+                } else if var("PHOTOCRAFT_WINTAB").as_deref() == Some("0") {
+                    log::info!("tablet pressure: wintab off (PHOTOCRAFT_WINTAB=0 disables the reader)");
+                } else if use_ink == Some(true) {
                     log::info!("tablet pressure: the Wacom driver serves Windows Ink; wintab off (PHOTOCRAFT_WINTAB=1 forces it on)");
                 }
             }

@@ -116,18 +116,19 @@ pub(crate) fn turned_axes(axes: [Vec2; 2], deg: f32) -> [Vec2; 2] {
 
 /// The axes to draw the brush outline with: [`pen_axes`]' pen orientation and projection for the
 /// live hover pose — or, while a stroke is down, the pose the pen had just before it touched (the
-/// outline turns with the hover, then locks through the stroke, as Photoshop). A mouse (no sample)
-/// keeps the brush's own angle.
+/// outline turns with the hover, then locks through the stroke, as Photoshop) still projected
+/// through the *current* view, so zooming or rotating mid-stroke resizes the outline with it. A
+/// mouse (no sample) keeps the brush's own angle.
 pub(crate) fn follow_axes(ctx: &egui::Context, xf: &crate::canvas::ViewXform, brush: &BrushSettings, painting: bool, sample: Option<PenSample>) -> [Vec2; 2] {
     let id = egui::Id::new("photocraft-tip-follow-pose");
-    let axes = if painting {
+    let pose = if painting {
         // The hover left this pose behind: hold it, never re-read mid-stroke.
-        ctx.data(|d| d.get_temp::<Option<[Vec2; 2]>>(id).flatten())
+        ctx.data(|d| d.get_temp::<Option<PenSample>>(id).flatten())
     } else {
-        let axes = sample.map(|s| pen_axes(xf, brush, Some(s)));
-        ctx.data_mut(|d| d.insert_temp(id, axes));
-        axes
+        ctx.data_mut(|d| d.insert_temp(id, sample));
+        sample
     };
+    let axes = pose.map(|s| pen_axes(xf, brush, Some(s)));
     axes.unwrap_or_else(|| pen_axes(xf, brush, sample))
 }
 
@@ -343,6 +344,10 @@ mod tests {
         // Touching down, even with a different live sample, holds the pre-touch pose.
         let stroke = follow_axes(&ctx, &xf, &b, true, Some(pen(45.0)));
         assert!(close(stroke[0], hover[0]) && close(stroke[1], hover[1]), "{stroke:?}");
+        // The pose is held, not its screen projection: zooming mid-stroke resizes the outline.
+        let zoomed = ViewXform { zoom: xf.zoom * 2.0, ..xf };
+        let bigger = follow_axes(&ctx, &zoomed, &b, true, Some(pen(45.0)));
+        assert!(close(bigger[0], hover[0] * 2.0) && close(bigger[1], hover[1] * 2.0), "{bigger:?}");
         // Lifted: live again, and a mouse keeps the brush's own angle.
         let after = follow_axes(&ctx, &xf, &b, false, Some(pen(45.0)));
         assert!(!close(after[0], hover[0]), "{after:?}");
