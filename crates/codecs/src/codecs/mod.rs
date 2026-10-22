@@ -9,6 +9,7 @@ pub(crate) mod gif_frames;
 pub(crate) mod gif_palette;
 pub(crate) mod heif;
 pub(crate) mod jpeg;
+pub(crate) mod jxl;
 pub(crate) mod pcx;
 pub(crate) mod png;
 pub(crate) mod pnm;
