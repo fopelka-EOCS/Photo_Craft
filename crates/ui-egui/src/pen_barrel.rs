@@ -78,6 +78,12 @@ impl BarrelRightClick {
                     let pos = if r.dragging { pos } else { r.origin };
                     out.push(Event::PointerButton { pos, button: PointerButton::Secondary, pressed: false, modifiers });
                 }
+                // The pointer left or the window lost focus with the press still down: it is over,
+                // so a later, unrelated left release stays a left release.
+                Event::PointerGone | Event::WindowFocused(false) => {
+                    self.press = None;
+                    out.push(e);
+                }
                 e => out.push(e),
             }
         }
@@ -161,6 +167,21 @@ mod tests {
         let mut b = BarrelRightClick::default();
         assert_eq!(run(&mut b, NONE, vec![button(50.0, PointerButton::Primary, true)]), vec![button(50.0, PointerButton::Primary, true)]);
         assert_eq!(run(&mut b, HELD, vec![button(50.0, PointerButton::Primary, false)]), vec![button(50.0, PointerButton::Primary, false)]);
+    }
+
+    #[test]
+    fn a_press_ends_when_the_pointer_leaves_or_the_window_loses_focus() {
+        for end in [Event::PointerGone, Event::WindowFocused(false)] {
+            let mut b = BarrelRightClick::default();
+            run(&mut b, HELD, vec![button(50.0, PointerButton::Primary, true)]);
+            assert_eq!(run(&mut b, NONE, vec![end.clone()]), vec![end.clone()], "passed on");
+            // A later left release (the mouse, a new press) is not turned into a right one.
+            assert_eq!(
+                run(&mut b, NONE, vec![button(60.0, PointerButton::Primary, false)]),
+                vec![button(60.0, PointerButton::Primary, false)],
+                "after {end:?}"
+            );
+        }
     }
 
     #[test]
