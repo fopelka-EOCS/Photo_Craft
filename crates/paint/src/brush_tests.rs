@@ -399,7 +399,7 @@ fn hover_preview_angle_matches_the_first_dab() {
     }
     // Brush Pose overrides the sample, as it does for the dabs.
     let mut b = mk(true);
-    b.pose = Pose { enabled: true, override_tilt: true, tilt_x: 0.0, tilt_y: -45.0, ..Default::default() };
+    b.pose = Pose { enabled: true, override_tilt_x: true, override_tilt_y: true, tilt_x: 0.0, tilt_y: -45.0, ..Default::default() };
     let first = dabs_of(&b, &[p])[0].angle.to_degrees() - b.angle;
     assert!((preview_angle(&b, &p) - first).abs() < 1e-3);
     assert!((first - 115.0).abs() < 1e-3, "pose up 45° (90) plus rotation 25: {first}");
