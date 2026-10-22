@@ -849,6 +849,54 @@ fn select_subject_leaves_a_background_coloured_gap_open() {
     assert!(v > 0.9, "IoU {v}");
 }
 
+/// The pixel-by-pixel anti-aliasing `antialias_u8` replaced with uniform-run skipping.
+fn antialias_reference(mask: &mut [u8], w: usize, h: usize) {
+    let src = mask.to_vec();
+    let at = |x: i32, y: i32, v: u8| if x < 0 || y < 0 || x >= w as i32 || y >= h as i32 { v } else { src[y as usize * w + x as usize] };
+    for y in 0..h {
+        for x in 0..w {
+            let v = src[y * w + x];
+            let (mut sum, mut edge) = (0u32, false);
+            for dy in -1..=1 {
+                for dx in -1..=1 {
+                    let n = at(x as i32 + dx, y as i32 + dy, v);
+                    edge |= n != v;
+                    sum += n as u32;
+                }
+            }
+            if edge {
+                let avg = sum as f32 / (9.0 * 255.0);
+                let f = if v > 127 { 0.5 + 0.5 * avg } else { 0.5 * avg };
+                mask[y * w + x] = (f * 255.0).round() as u8;
+            }
+        }
+    }
+}
+
+#[test]
+fn antialias_matches_the_per_pixel_rule() {
+    let mut rng = Rng::new(11);
+    // Widths around the 64-pixel run, single rows and columns, discs, noise and stripes.
+    for (w, h) in [(1usize, 1usize), (1, 9), (9, 1), (63, 4), (64, 3), (65, 5), (127, 2), (129, 70), (300, 200)] {
+        let (cx, cy, r) = (w as f32 * 0.6, h as f32 * 0.4, w.min(h) as f32 / 3.0);
+        let masks: Vec<Vec<u8>> = vec![
+            vec![255; w * h],
+            vec![0; w * h],
+            (0..w * h).map(|i| if ((i % w) as f32 - cx).hypot((i / w) as f32 - cy) < r { 255 } else { 0 }).collect(),
+            (0..w * h).map(|_| if rng.f32() < 0.02 { 255 } else { 0 }).collect(),
+            (0..w * h).map(|_| if rng.f32() < 0.5 { 255 } else { 0 }).collect(),
+            (0..w * h).map(|i| if (i % w) / 64 % 2 == 0 { 255 } else { 0 }).collect(),
+            (0..w * h).map(|i| if i % w == w - 1 || i / w == h / 2 { 255 } else { 0 }).collect(),
+        ];
+        for (k, m) in masks.into_iter().enumerate() {
+            let (mut fast, mut slow) = (m.clone(), m);
+            antialias_u8(&mut fast, w, h);
+            antialias_reference(&mut slow, w, h);
+            assert!(fast == slow, "{w}×{h} mask {k}");
+        }
+    }
+}
+
 /// Timing on a 6 MP figure, for before/after numbers (`cargo test --release -- --ignored select_subject_timing --nocapture`).
 #[test]
 #[ignore = "timing only"]

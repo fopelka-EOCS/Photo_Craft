@@ -525,22 +525,37 @@ fn components4(mask: &[bool], w: usize, h: usize) -> (Vec<u32>, Vec<usize>) {
 pub fn antialias_u8(mask: &mut [u8], w: usize, h: usize) {
     let src = mask.to_vec();
     let at = |x: i32, y: i32, v: u8| if x < 0 || y < 0 || x >= w as i32 || y >= h as i32 { v } else { src[y as usize * w + x as usize] };
+    // A run whose 3×3 neighbourhood holds one value has no edge pixel. Most of a full-resolution
+    // mask is far from its boundary, so most runs are only compared.
+    const RUN: usize = 64;
+    let rows = |y: usize| y.saturating_sub(1)..(y + 2).min(h);
+    let uniform = |y: usize, x0: usize, x1: usize| {
+        let (a, b, v) = (x0.saturating_sub(1), (x1 + 1).min(w), src[y * w + x0]);
+        rows(y).all(|ny| src[ny * w + a..ny * w + b].iter().all(|n| *n == v))
+    };
     let row = |y: usize, out: &mut [u8]| {
-        for (x, o) in out.iter_mut().enumerate() {
-            let v = src[y * w + x];
-            let mut sum = 0u32;
-            let mut edge = false;
-            for dy in -1..=1 {
-                for dx in -1..=1 {
-                    let n = at(x as i32 + dx, y as i32 + dy, v);
-                    edge |= n != v;
-                    sum += n as u32;
-                }
+        for (c, run) in out.chunks_mut(RUN).enumerate() {
+            let x0 = c * RUN;
+            if uniform(y, x0, x0 + run.len()) {
+                continue;
             }
-            if edge {
-                let avg = sum as f32 / (9.0 * 255.0);
-                let f = if v > 127 { 0.5 + 0.5 * avg } else { 0.5 * avg };
-                *o = (f * 255.0).round() as u8;
+            for (i, o) in run.iter_mut().enumerate() {
+                let x = x0 + i;
+                let v = src[y * w + x];
+                let mut sum = 0u32;
+                let mut edge = false;
+                for dy in -1..=1 {
+                    for dx in -1..=1 {
+                        let n = at(x as i32 + dx, y as i32 + dy, v);
+                        edge |= n != v;
+                        sum += n as u32;
+                    }
+                }
+                if edge {
+                    let avg = sum as f32 / (9.0 * 255.0);
+                    let f = if v > 127 { 0.5 + 0.5 * avg } else { 0.5 * avg };
+                    *o = (f * 255.0).round() as u8;
+                }
             }
         }
     };
