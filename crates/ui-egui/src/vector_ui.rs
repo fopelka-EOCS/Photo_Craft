@@ -642,18 +642,42 @@ pub fn curvature_toggle(app: &mut PhotocraftApp, x: f64, y: f64) {
     curvature_refresh(pen, false);
 }
 
+/// The command id's key for a Paths panel row: "work", "layer", or a saved path's name.
+fn row_key(r: &PathEntry) -> String {
+    match r.kind {
+        PathRow::Work => "work".to_string(),
+        PathRow::Layer => "layer".to_string(),
+        PathRow::Saved => r.name.clone(),
+    }
+}
+
 /// The path that path commands act on without a name: the one selected in the Paths panel, else
 /// the work path, else the selected layer's shape path or vector mask; `None` when there's none.
 pub fn active_path_name(app: &PhotocraftApp) -> Option<String> {
     let st = app.session.active()?;
     let rows = path_rows(&st.doc, st.active_layer);
-    let key = |r: &PathEntry| match r.kind {
-        PathRow::Work => "work".to_string(),
-        PathRow::Layer => "layer".to_string(),
-        PathRow::Saved => r.name.clone(),
-    };
-    let selected = app.ui.selected_path.as_deref().filter(|s| rows.iter().any(|r| key(r) == *s)).map(str::to_string);
-    selected.or_else(|| rows.iter().find(|r| r.kind == PathRow::Work).map(key)).or_else(|| rows.iter().find(|r| r.kind == PathRow::Layer).map(key))
+    let selected = app.ui.selected_path.as_deref().filter(|s| rows.iter().any(|r| row_key(r) == *s)).map(str::to_string);
+    selected.or_else(|| rows.iter().find(|r| r.kind == PathRow::Work).map(row_key)).or_else(|| rows.iter().find(|r| r.kind == PathRow::Layer).map(row_key))
+}
+
+/// The path whose outline the canvas draws as the target path. The Paths panel's active row (a
+/// clicked row: "work", a saved path, or the active layer's shape path / vector-mask row) wins,
+/// else the targeted vector mask, else the active shape layer's path — exactly one path at a
+/// time, as in Photoshop. Path *data* is not visibility: a work path or saved path that the panel
+/// no longer targets shows nothing (deselecting a row in the panel hides its outline, and the
+/// work path hides after Make Selection deselects it).
+pub(crate) fn visible_target_path(app: &PhotocraftApp, doc: &Document) -> Option<Path> {
+    let st = app.session.active()?;
+    let rows = path_rows(doc, st.active_layer);
+    if let Some(selected) = app.ui.selected_path.as_deref()
+        && let Some(row) = rows.iter().find(|r| row_key(r) == selected)
+    {
+        return Some(row.path.clone());
+    }
+    if let Some((_, p)) = targeted_vector_mask(app) {
+        return Some(p);
+    }
+    active_shape_path(app).map(|(_, p)| p)
 }
 
 /// The commands that create a fill or adjustment layer and take a `"path"` as its vector mask.
@@ -697,9 +721,16 @@ pub fn with_active_path(app: &PhotocraftApp, id: &str, params: Value) -> Value {
 pub fn path_to_selection(app: &mut PhotocraftApp, params: Value) -> Result<Value, String> {
     if app.ui.pen.as_ref().is_some_and(|p| p.knots.len() >= 2) {
         // The finished path becomes the work path, or a shape layer's path or a vector mask.
-        let on_layer = app.ui.tool_options.vector_mode == "shape" || targeted_vector_mask(app).is_some();
-        pen_commit(app, false);
-        app.ui.selected_path = Some(if on_layer { "layer" } else { "work" }.into());
+        // Only the layer-owned path stays the Paths panel's target: after an ordinary path's
+        // selection is made, Photoshop deselects it and `run`'s lifecycle clears the target.
+        if app.ui.tool_options.vector_mode == "shape" || targeted_vector_mask(app).is_some() {
+            pen_commit(app, false);
+            app.ui.selected_path = Some("layer".into());
+        } else {
+            // `pen_commit` targets the work path it makes; the Make Selection below then
+            // deselects it, as in Photoshop, so only the selection outline stays visible.
+            pen_commit(app, false);
+        }
     }
     let name = active_path_name(app)
         .ok_or_else(|| tl!("No path to make a selection from: draw one with the Pen tool or select one in the Paths panel.").to_string())?;
@@ -1001,20 +1032,13 @@ pub fn draw_overlay(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform
             crate::anchor_tools::draw_hover(app, painter, &to_scr, accent, painter.ctx().input(|i| i.modifiers));
         }
     } else if paths {
-        // Paths remain visible as outlines with any tool. Path Selection adds anchor squares; Direct
-        // Selection has its own overlay above.
-        if let Some(wp) = &doc.work_path {
-            draw_path(wp, tool == Tool::PathSelection);
-        }
-        let st = app.session.active();
-        if let Some(l) = st.and_then(|s| s.active_layer.and_then(|id| s.doc.layer(id)))
-            && let LayerContent::Shape(sh) = &l.content
-        {
-            draw_path(&sh.path, tool == Tool::PathSelection);
-        }
-        // A targeted vector mask shows its path with any tool (#196).
-        if let Some((_, p)) = targeted_vector_mask(app) {
-            draw_path(&p, tool == Tool::PathSelection);
+        // Photoshop draws the one active path: the Paths panel's target row, else the targeted
+        // vector mask, else the active shape layer's path. Any tool shows it; Path Selection adds
+        // anchor squares; Direct Selection has its own overlay above. Path data alone is not
+        // visible: the work path hidden by Make Selection, or a path deselected in the Paths
+        // panel, shows nothing even while the document still holds it.
+        if let Some(path) = visible_target_path(app, doc) {
+            draw_path(&path, tool == Tool::PathSelection);
         }
         // The segment the Pen's Auto Add/Delete would add an anchor to, or the anchor it would delete.
         crate::anchor_tools::draw_pen_hover(app, painter, &to_scr, accent, painter.ctx().input(|i| i.modifiers));
@@ -2064,6 +2088,97 @@ mod tests {
         app.ui.pen = Some(PenPath { knots: vec![[[20.0, 20.0]; 3], [[60.0, 40.0]; 3]], ..Default::default() });
         toggle(&mut app, "view.show.targetPath");
         assert!(overlay_shapes(&app, &ctx) > 0, "the pen path in progress is still drawn");
+    }
+
+    /// Path data is not visibility, as in Photoshop: the Work Path only draws its outline while
+    /// the Paths panel targets it. After Make Selection the panel deselects it, so the outline
+    /// must hide — while the document keeps the path's data — with the selection's own edges
+    /// showing instead.
+    #[test]
+    fn work_path_outlines_draw_only_while_the_panel_targets_them() {
+        let ctx = egui::Context::default();
+        let mut app = app();
+        let path = json!({"subpaths": [{"closed": true, "knots": [
+            {"anchor": [10, 10], "in": [10, 10], "out": [10, 10]},
+            {"anchor": [80, 10], "in": [80, 10], "out": [80, 10]},
+            {"anchor": [80, 80], "in": [80, 80], "out": [80, 80]}
+        ]}]});
+        app.run("path.set", json!({"path": path})).unwrap();
+        let has_work_path = |app: &PhotocraftApp| app.session.active().unwrap().doc.work_path.is_some();
+        assert!(has_work_path(&app));
+        app.ui.tool = Tool::Brush;
+        // Not targeted (nothing selected in the Paths panel): no outline, but the data stays.
+        assert_eq!(overlay_shapes(&app, &ctx), 0, "an untargeted work path draws nothing");
+        assert!(has_work_path(&app));
+        // Explicitly targeted: the outline shows, with any tool.
+        app.ui.selected_path = Some("work".into());
+        assert!(overlay_shapes(&app, &ctx) > 0, "the targeted work path is drawn");
+        // Deselected (clicking the panel's empty area, or Make Selection): hidden again, data intact.
+        app.ui.selected_path = None;
+        assert_eq!(overlay_shapes(&app, &ctx), 0, "the deselected work path hides its outline");
+        assert!(has_work_path(&app), "the work path's data survives the deselection");
+        // Targeted once more: visible again (the fix must not just disable work path drawing).
+        app.ui.selected_path = Some("work".into());
+        assert!(overlay_shapes(&app, &ctx) > 0);
+    }
+
+    /// A saved path shows its outline while its row is targeted in the Paths panel and hides when
+    /// the panel targets nothing; its data is never touched by the deselection.
+    #[test]
+    fn saved_path_outlines_draw_only_while_targeted() {
+        let ctx = egui::Context::default();
+        let mut app = app();
+        let path = json!({"subpaths": [{"closed": true, "knots": [
+            {"anchor": [10, 10], "in": [10, 10], "out": [10, 10]},
+            {"anchor": [80, 10], "in": [80, 10], "out": [80, 10]},
+            {"anchor": [80, 80], "in": [80, 80], "out": [80, 80]}
+        ]}]});
+        app.run("path.set", json!({"name": "Shown", "path": path})).unwrap();
+        app.ui.tool = Tool::Brush;
+        app.ui.selected_path = Some("Shown".into());
+        assert!(overlay_shapes(&app, &ctx) > 0, "the targeted saved path is drawn");
+        app.ui.selected_path = None;
+        assert_eq!(overlay_shapes(&app, &ctx), 0, "the deselected saved path draws nothing");
+        let st = app.session.active().unwrap();
+        assert!(st.doc.paths.iter().any(|p| p.name == "Shown"), "the saved path keeps its data");
+        app.ui.selected_path = Some("Shown".into());
+        assert!(overlay_shapes(&app, &ctx) > 0, "targeted again: visible again");
+    }
+
+    /// A vector mask's path shows while the mask is targeted (its Layers thumbnail, or the Paths
+    /// panel row that adding it selects) and hides after the pixels are targeted again, as in
+    /// Photoshop (#196). The mask itself is untouched.
+    #[test]
+    fn targeted_vector_mask_draws_until_the_pixels_are_targeted() {
+        let ctx = egui::Context::default();
+        let mut app = app();
+        let path = json!({"subpaths": [{"closed": true, "knots": [
+            {"anchor": [10, 10], "in": [10, 10], "out": [10, 10]},
+            {"anchor": [80, 10], "in": [80, 10], "out": [80, 10]},
+            {"anchor": [80, 80], "in": [80, 80], "out": [80, 80]}
+        ]}]});
+        app.run("path.set", json!({"path": path})).unwrap();
+        app.run("layer.vectorMask.fromPath", json!({"name": "work"})).unwrap();
+        assert!(app.ui.vector_mask_target, "the new mask is the Layers panel's target");
+        assert!(overlay_shapes(&app, &ctx) > 0, "the targeted vector mask's path is drawn");
+        // Target the pixels again (clicking the layer thumbnail, `ui.maskTarget` false): hidden.
+        app.ui.vector_mask_target = false;
+        app.ui.selected_path = None;
+        assert_eq!(overlay_shapes(&app, &ctx), 0, "the untargeted vector mask draws nothing");
+        let st = app.session.active().unwrap();
+        assert!(st.doc.layers[0].vector_mask.is_some(), "the mask keeps its path");
+    }
+
+    /// Selecting a shape layer in the Layers panel makes its path the active one, as in
+    /// Photoshop; switching to a raster layer takes the outline away.
+    #[test]
+    fn shape_path_follows_the_layers_selection() {
+        let ctx = egui::Context::default();
+        let mut app = app();
+        finish_shape(&mut app, Tool::Rectangle, [10.0, 10.0], [110.0, 110.0], Default::default());
+        assert!(overlay_shapes(&app, &ctx) > 0, "the active shape layer's path is drawn");
+        app.run("layer.new.layer", json!({})).unwrap();
+        assert_eq!(overlay_shapes(&app, &ctx), 0, "a raster layer's selection shows no shape path");
     }
 
     #[test]

@@ -259,6 +259,9 @@ fn path_overlay_drawn_for_non_vector_tools() {
     app.sync_views();
     // Place a work path whose top edge runs exactly along y=10 in document space.
     app.run("path.set", json!({"name": "work", "path": rect_path(50.0, 10.0, 100.0, 80.0)})).unwrap();
+    // Target the row in the Paths panel, as Photoshop does: the outline follows the panel's
+    // active path, not the mere existence of the data.
+    app.ui.selected_path = Some("work".into());
     // Switch to a non-vector tool — before the fix this hid the path outline.
     app.ui.tool = Tool::Brush;
 
@@ -330,4 +333,121 @@ fn path_overlay_drawn_for_non_vector_tools() {
          (accent = #{accent_r:02x}{accent_g:02x}{accent_b:02x}); \
          the path must be drawn regardless of the active tool",
     );
+}
+
+/// Is anything targeted as the canvas's path overlay (a Paths panel row, a targeted vector mask,
+/// or the active shape layer's path)?
+fn path_outline_target(h: &Harness<'_, PhotocraftApp>) -> Option<photocraft_doc::vector::Path> {
+    let app = h.state();
+    let doc = app.session.active().unwrap().doc.clone();
+    crate::vector_ui::visible_target_path(app, &doc)
+}
+
+/// Make Selection (⌘↩) deselects the path it converted, as in Photoshop: the marching ants are
+/// all that stays, and the Work Path keeps its data. Layer via Copy (⌘J) then copies the
+/// selection — one undoable step, selection gone, new layer — with no path target coming back,
+/// and switching layers brings no stale outline.
+#[test]
+fn make_selection_deselects_the_path_and_layer_via_copy_leaves_no_overlay() {
+    let mut h = harness();
+    h.state_mut().run("path.set", json!({"name": "work", "path": rect_path(10.0, 10.0, 50.0, 40.0)})).unwrap();
+    h.state_mut().ui.selected_path = Some("work".into());
+    h.state_mut().ui.tool = Tool::Brush;
+    h.run_steps(2);
+    assert!(path_outline_target(&h).is_some(), "the targeted work path shows");
+
+    press(&mut h, Key::Enter, command());
+    let app = h.state();
+    let st = app.session.active().unwrap();
+    assert!(st.doc.selection.is_some(), "{}", app.ui.status);
+    assert!(st.doc.work_path.is_some(), "the Work Path keeps its data");
+    assert!(app.ui.selected_path.is_none(), "the Paths panel deselects the converted path");
+    assert!(path_outline_target(&h).is_none(), "no path outline: the ant border is the selection's");
+
+    press(&mut h, Key::J, command());
+    let app = h.state();
+    let st = app.session.active().unwrap();
+    assert_eq!(st.doc.layers.len(), 2, "Layer via Copy made the raster layer");
+    assert!(st.doc.selection.is_none(), "#1096: the selection is gone, in the same step");
+    assert!(st.doc.work_path.is_some(), "the Work Path's data is still there");
+    assert!(app.ui.selected_path.is_none(), "and the path stays deselected");
+    assert!(path_outline_target(&h).is_none(), "no stale target after Ctrl+J");
+
+    // Switching layers brings no overlay back; the data is there but the panel targets nothing.
+    let background = st.doc.layers[0].id.0;
+    h.state_mut().run("layer.select", json!({"layer": background})).unwrap();
+    h.run_steps(2);
+    assert!(path_outline_target(&h).is_none(), "no stale outline after switching layers");
+    assert!(h.state().session.active().unwrap().doc.work_path.is_some(), "the data is still there");
+
+    // Re-targeting the Work Path (clicking its row again) shows the outline again.
+    h.state_mut().ui.selected_path = Some("work".into());
+    h.run_steps(2);
+    assert!(path_outline_target(&h).is_some(), "explicitly targeted again: visible again");
+}
+
+/// The whole Pen route: a draft finished by ⌘↩ becomes the Work Path, makes the selection, and
+/// ends deselected; ⌘J cuts the seam without the target coming back.
+#[test]
+fn pen_to_selection_to_layer_via_copy_ends_deselected() {
+    let mut h = harness();
+    h.state_mut().ui.tool = Tool::Pen;
+    let p = |x: f64, y: f64| [[x, y], [x, y], [x, y]];
+    h.state_mut().ui.pen = Some(PenPath { knots: vec![p(20.0, 20.0), p(120.0, 20.0), p(120.0, 80.0)], ..Default::default() });
+    h.run_steps(2);
+
+    press(&mut h, Key::Enter, command());
+    let app = h.state();
+    let st = app.session.active().unwrap();
+    assert!(app.ui.pen.is_none(), "the draft is finished");
+    assert!(st.doc.work_path.is_some(), "into the work path");
+    assert!(st.doc.selection.is_some(), "{}", app.ui.status);
+    assert!(app.ui.selected_path.is_none(), "Photoshop deselects the path after the conversion");
+    assert!(path_outline_target(&h).is_none(), "only the ants show");
+    assert!(app.ui.pen.is_none(), "no draft outline lingers either");
+
+    press(&mut h, Key::J, command());
+    let st = h.state().session.active().unwrap();
+    assert_eq!(st.doc.layers.len(), 2, "the copy layer");
+    assert!(st.doc.selection.is_none() && st.doc.work_path.is_some());
+    assert_eq!(h.state().ui.selected_path, None);
+}
+
+/// A selection made from a row that the Paths panel is not targeting leaves the target alone
+/// (converting another row's path must not re-point the panel).
+#[test]
+fn make_selection_from_another_row_keeps_the_target() {
+    let mut h = harness();
+    h.state_mut().run("path.set", json!({"name": "work", "path": rect_path(0.0, 0.0, 30.0, 40.0)})).unwrap();
+    h.state_mut().run("path.set", json!({"name": "Saved", "path": rect_path(100.0, 40.0, 60.0, 50.0)})).unwrap();
+    h.state_mut().ui.selected_path = Some("work".into());
+    h.state_mut().run("path.toSelection", json!({"name": "Saved"})).unwrap();
+    assert!(h.state().session.active().unwrap().doc.selection.is_some());
+    assert_eq!(h.state().ui.selected_path.as_deref(), Some("work"), "the work path stays targeted");
+    assert!(path_outline_target(&h).is_some(), "and its outline keeps showing");
+    // The same conversion on the targeted row does deselect it.
+    h.state_mut().run("select.deselect", json!({})).unwrap();
+    h.state_mut().run("path.toSelection", json!({"name": "work"})).unwrap();
+    assert!(h.state().ui.selected_path.is_none(), "the work path's own conversion deselects it");
+}
+
+/// Saving (renaming) the Work Path keeps it the panel's target under its new name, as Photoshop's
+/// Save Path does; deleting the targeted path deselects it; data follows the commands.
+#[test]
+fn save_and_delete_keep_the_paths_panel_target_accurate() {
+    let mut h = harness();
+    h.state_mut().run("path.set", json!({"name": "work", "path": rect_path(10.0, 10.0, 50.0, 40.0)})).unwrap();
+    h.state_mut().ui.selected_path = Some("work".into());
+    h.state_mut().run("path.rename", json!({"name": "work", "to": "My Path"})).unwrap();
+    assert_eq!(h.state().ui.selected_path.as_deref(), Some("My Path"), "the saved path is the target now");
+    assert!(h.state().session.active().unwrap().doc.work_path.is_none());
+    let doc = h.state().session.active().unwrap().doc.clone();
+    assert!(crate::vector_ui::visible_target_path(h.state(), &doc).is_some(), "the outline follows the row");
+
+    h.state_mut().run("path.delete", json!({"name": "My Path"})).unwrap();
+    assert!(h.state().ui.selected_path.is_none(), "the deleted path stops being the target");
+    h.state_mut().run("path.set", json!({"name": "work", "path": rect_path(10.0, 10.0, 50.0, 40.0)})).unwrap();
+    h.state_mut().ui.selected_path = Some("work".into());
+    h.state_mut().run("path.delete", json!({"name": "work"})).unwrap();
+    assert!(h.state().ui.selected_path.is_none(), "deleting the Work Path deselects it too");
 }

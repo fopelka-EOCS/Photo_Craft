@@ -1086,6 +1086,16 @@ impl PhotocraftApp {
             id,
             "layer.vectorMask.add" | "layer.vectorMask.fromPath" | "layer.vectorMask.revealAll" | "layer.vectorMask.hideAll" | "layer.vectorMask.currentPath"
         ) && on_active_layer;
+        // The paths these commands act on, captured before `params` moves into the runner:
+        // `path.toSelection` and `path.delete` default to the work path, `path.rename` reads
+        // `name` (the path being renamed, also defaulting to the work path) and `to`.
+        let path_arg = |key: &str| params.get(key).and_then(Value::as_str).filter(|v| !v.is_empty()).map(str::to_string);
+        let (to_selection_target, delete_target, rename_from, rename_to) = match id {
+            "path.toSelection" => (Some(path_arg("name").unwrap_or_else(|| "work".into())), None, None, None),
+            "path.delete" => (None, Some(path_arg("name").unwrap_or_else(|| "work".into())), None, None),
+            "path.rename" => (None, None, Some(path_arg("name").unwrap_or_else(|| "work".into())), path_arg("to")),
+            _ => (None, None, None, None),
+        };
         // A draft Pen path belongs to the current document, not the one about to be created.
         if id == "file.new" && self.ui.pen.is_some() {
             vector_ui::pen_commit(self, false);
@@ -1119,6 +1129,39 @@ impl PhotocraftApp {
         if r.is_ok() && id == "select.toWorkPath" {
             // Make Work Path selects the new work path in the Paths panel, as in Photoshop.
             self.ui.selected_path = Some("work".into());
+        }
+        if r.is_ok() && id == "path.toSelection" {
+            // Photoshop deselects the path in the Paths panel after making a selection from it:
+            // the marching ants are all that stays on the canvas, and the Work Path keeps its
+            // data. Clear the target only when the command acted on the path the panel targets;
+            // a selection made from another row leaves the target alone. (`"layer"` is the
+            // temporary shape-path / vector-mask row: the mask stays targeted.)
+            if let Some(target) = to_selection_target
+                && target != "layer"
+                && self.ui.selected_path.as_deref() == Some(target.as_str())
+            {
+                self.ui.selected_path = None;
+            }
+        }
+        if r.is_ok() && id == "path.rename" {
+            // The renamed path stays the panel's target under its new name (Photoshop's Save
+            // Path keeps the path active); renaming another path leaves the target alone. The
+            // engine rejects a rename to the work path, so `to` names a saved path.
+            if let (Some(from), Some(to)) = (rename_from, rename_to)
+                && self.ui.selected_path.as_deref() == Some(from.as_str())
+            {
+                self.ui.selected_path = Some(to);
+            }
+        }
+        if r.is_ok() && id == "path.delete" {
+            // A deleted path stops being the panel's target: the row is gone, so the overlay
+            // (and the highlight) must not lean on a stale name.
+            if let Some(target) = delete_target
+                && target != "layer"
+                && self.ui.selected_path.as_deref() == Some(target.as_str())
+            {
+                self.ui.selected_path = None;
+            }
         }
         if r.is_ok() && path_mask {
             // The new layer's vector mask becomes the active path, as in Photoshop: the path it
