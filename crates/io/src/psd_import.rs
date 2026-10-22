@@ -55,7 +55,7 @@ pub(crate) struct Ctx<'a> {
     pub dpi: f32,
     /// The parsed `Txt2` block (type settings EngineData lacks, e.g. optical kerning).
     pub txt2: Option<photocraft_text::engine_data::Value>,
-    /// Smart-filter caches from the global `FEid`/`FXid` blocks (filter masks, by placed id).
+    /// Smart-filter caches from the global `FEid`/`FXid`/`FELS` blocks (filter masks, by placed id).
     pub filter_effects: Vec<photocraft_psd::filter_effects::FilterEffectsItem>,
     /// Placed layers naming the same source share editable contents, not their placement.
     pub smart_contents: std::collections::HashMap<String, SmartContentsId>,
@@ -933,7 +933,8 @@ pub(crate) fn psd_to_document_decoded(
         done: 0,
         total: file.layers().len(),
     };
-    for b in file.global_blocks.iter().filter(|b| matches!(&b.key, b"FEid" | b"FXid")) {
+    // Photoshop keeps the filter masks of linked smart objects in `FELS`, laid out as `FEid` (#8260).
+    for b in file.global_blocks.iter().filter(|b| matches!(&b.key, b"FEid" | b"FXid" | b"FELS")) {
         // Smart-filter caches can be large: a cancelled open stops between blocks.
         if ctl.cancelled() {
             return None;

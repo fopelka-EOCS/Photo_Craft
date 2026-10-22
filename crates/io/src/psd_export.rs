@@ -180,6 +180,9 @@ struct SmartOut {
     keep_fx: std::collections::HashSet<String>,
     /// Regenerated `FEid` items.
     new_fx: Vec<photocraft_psd::filter_effects::FilterEffectsItem>,
+    /// Placed ids whose filter cache the file kept in `FELS` (linked smart objects, #8260):
+    /// their regenerated items go back there.
+    fels_ids: std::collections::HashSet<String>,
     /// The unfiltered pixels of each smart object whose filter mask shows: its layer record holds
     /// the filtered pixels without the mask, as Photoshop's do (`compose::filter_mask`).
     unfiltered: std::collections::HashMap<photocraft_doc::LayerId, Surface>,
@@ -199,7 +202,8 @@ fn padded_fx(fx: &photocraft_psd::filter_effects::FilterEffects) -> Vec<u8> {
 }
 
 const LINK_KEYS: [&[u8; 4]; 4] = [b"lnk2", b"lnk3", b"lnkD", b"lnkE"];
-const FX_KEYS: [&[u8; 4]; 2] = [b"FEid", b"FXid"];
+/// Smart-filter caches: `FELS` holds linked smart objects' (#8260), with `FEid`'s layout.
+const FX_KEYS: [&[u8; 4]; 3] = [b"FEid", b"FXid", b"FELS"];
 
 impl SmartOut {
     fn new(doc: &Document, depth: u32) -> Self {
@@ -210,6 +214,12 @@ impl SmartOut {
             .filter(|(_, k, _)| FX_KEYS.contains(&k))
             .filter_map(|(_, _, d)| photocraft_psd::filter_effects::FilterEffects::parse(d).ok())
             .flat_map(|fx| fx.items)
+            .collect();
+        let fels_ids = globals
+            .iter()
+            .filter(|(_, k, _)| k == b"FELS")
+            .filter_map(|(_, _, d)| photocraft_psd::filter_effects::FilterEffects::parse(d).ok())
+            .flat_map(|fx| fx.items.into_iter().map(|i| i.id))
             .collect();
         let mut linked_contents = std::collections::HashMap::new();
         let mut placed_owners = std::collections::HashMap::new();
@@ -231,7 +241,7 @@ impl SmartOut {
                 }
             }
         }
-        SmartOut { depth, globals, known, prune_ok: true, old_fx, linked_contents, placed_owners, unplaced_owners, ..Default::default() }
+        SmartOut { depth, globals, known, prune_ok: true, old_fx, fels_ids, linked_contents, placed_owners, unplaced_owners, ..Default::default() }
     }
 
     /// The document's global blocks with the linked-layer files and filter caches brought up to
@@ -243,6 +253,9 @@ impl SmartOut {
         let mut out = Vec::with_capacity(blocks.len() + 2);
         let mut added = false;
         let mut fx_placed = false;
+        let mut fels_placed = false;
+        // Regenerated items go to the first `FEid` / `FXid`, those of a `FELS` item back to `FELS`.
+        let (to_fels, to_fx): (Vec<_>, Vec<_>) = self.new_fx.iter().cloned().partition(|i| self.fels_ids.contains(&i.id));
         for (sig, key, data) in blocks {
             if LINK_KEYS.contains(&&key) {
                 let add: &[crate::linked::LinkedFile] = if !added && &key == b"lnk2" { &self.add } else { &[] };
@@ -259,10 +272,12 @@ impl SmartOut {
                 };
                 let before = fx.items.len();
                 fx.items.retain(|i| self.keep_fx.contains(&i.id));
-                let fresh = !fx_placed && !self.new_fx.is_empty();
+                let placed = if &key == b"FELS" { &mut fels_placed } else { &mut fx_placed };
+                let add = if &key == b"FELS" { &to_fels } else { &to_fx };
+                let fresh = !*placed && !add.is_empty();
                 if fresh {
-                    fx.items.extend(self.new_fx.iter().cloned());
-                    fx_placed = true;
+                    fx.items.extend(add.iter().cloned());
+                    *placed = true;
                 }
                 if fx.items.len() == before && !fresh {
                     out.push((sig, key, data));
@@ -284,8 +299,12 @@ impl SmartOut {
                 out.push((*sig, *key, data.clone()));
             }
         }
-        if !fx_placed && !self.new_fx.is_empty() {
-            let fx = photocraft_psd::filter_effects::FilterEffects { version: 3, items: self.new_fx.clone() };
+        if !fels_placed && !to_fels.is_empty() {
+            let fx = photocraft_psd::filter_effects::FilterEffects { version: 3, items: to_fels };
+            out.push((*b"8BIM", *b"FELS", Arc::new(padded_fx(&fx))));
+        }
+        if !fx_placed && !to_fx.is_empty() {
+            let fx = photocraft_psd::filter_effects::FilterEffects { version: 3, items: to_fx };
             out.push((*b"8BIM", *b"FEid", Arc::new(padded_fx(&fx))));
             if !out.iter().any(|(_, k, _)| k == b"FMsk") {
                 // Filter mask overlay: RGB red at 50 %, Photoshop's default.
@@ -861,8 +880,21 @@ impl Ex {
             match item {
                 Some(i) => self.smart.new_fx.push(i),
                 // Without the unfiltered pixels Photoshop re-renders from the source itself; only
-                // the filter mask has nowhere to go.
-                None if sm.filter_mask.is_some() => self.warnings.push(format!("layer \"{}\": the smart filter mask was not written to PSD", l.name)),
+                // the filter mask needs the item. A source that can't be read (a linked file
+                // that's gone) still keeps its mask: written over the layer's own pixels, rather
+                // than dropping the file's only copy of it (#8260).
+                None if sm.filter_mask.is_some() => {
+                    match sm.cache.as_ref().and_then(|c| crate::smart_map::feid_item(&placed, c, sm.filter_mask.as_ref(), bounds, self.fmt)) {
+                        Some(i) => {
+                            self.smart.new_fx.push(i);
+                            self.warnings.push(format!(
+                                "layer \"{}\": the smart filter mask was written without the source's unfiltered pixels (the source can't be read)",
+                                l.name
+                            ));
+                        }
+                        None => self.warnings.push(format!("layer \"{}\": the smart filter mask was not written to PSD", l.name)),
+                    }
+                }
                 None => {}
             }
         }

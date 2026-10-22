@@ -774,3 +774,96 @@ fn hue_saturation_smart_filter_survives_psd_and_re_renders() {
         }
     }
 }
+
+/// #8260: Photoshop keeps the smart filter masks of linked smart objects in a `FELS` global
+/// block, laid out as `FEid`. A filter mask stored there opens (it used to be dropped, and the
+/// filter covered the whole layer), and saving the file again keeps it in `FELS`.
+#[test]
+fn a_filter_mask_in_fels_opens_and_saves_back() {
+    let mut s = session(8);
+    s.execute("layer.smartObjects.convertToSmartObject", json!({})).unwrap();
+    s.execute("select.rect", json!({"x": 0, "y": 0, "width": 40, "height": 64})).unwrap();
+    s.execute("filter.blur.gaussianBlur", json!({"radius": 2})).unwrap();
+    s.execute("select.deselect", json!({})).unwrap();
+    let doc = s.active().unwrap().doc.clone();
+    let (_, before) = smart(&doc);
+    let mask = before.filter_mask.as_ref().expect("a filter mask");
+    let out = photocraft_io::export(&doc, "psd", &Default::default()).unwrap();
+    let mut file = photocraft_psd::PsdFile::from_bytes(&out.bytes).unwrap();
+    let block = file.global_blocks.iter_mut().find(|b| &b.key == b"FEid").expect("the filter cache");
+    block.key = *b"FELS";
+    let bytes = file.to_bytes().unwrap();
+    assert_eq!(structure_errors(&bytes), Vec::<String>::new());
+
+    let back = photocraft_io::import("x.psd", &bytes).unwrap().document;
+    let (_, after) = smart(&back);
+    let got = after.filter_mask.as_ref().expect("the filter mask from FELS");
+    let area = doc.bounds();
+    let (mut va, mut vb) = (Vec::new(), Vec::new());
+    got.values_into(area, &mut va);
+    mask.values_into(area, &mut vb);
+    assert_eq!(va, vb, "the same mask");
+
+    let again = photocraft_io::export(&back, "psd", &Default::default()).unwrap();
+    let keys: Vec<[u8; 4]> = photocraft_psd::PsdFile::from_bytes(&again.bytes).unwrap().global_blocks.iter().map(|b| b.key).collect();
+    assert!(keys.contains(b"FELS") && !keys.contains(b"FEid"), "{:?}", keys.iter().map(|k| String::from_utf8_lossy(k).into_owned()).collect::<Vec<_>>());
+    let reopened = photocraft_io::import("y.psd", &again.bytes).unwrap().document;
+    assert!(smart(&reopened).1.filter_mask.is_some(), "still masked after saving");
+}
+
+/// #8260 review: a linked smart object whose filter mask is in `FELS`, moved while its source
+/// file is gone, keeps the mask through a save: the cache can't be rebuilt from the source, so
+/// the mask is written over the layer's own pixels, back into `FELS`, rather than dropped.
+#[test]
+fn a_fels_mask_survives_a_move_with_its_source_gone() {
+    let dir = std::env::temp_dir().join(format!("photocraft-fels-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let png = dir.join("linked.png");
+    let mut px = Vec::new();
+    for y in 0..40u32 {
+        for x in 0..60u32 {
+            px.extend([(x * 4) as u8, (y * 6) as u8, 128]);
+        }
+    }
+    let image = photocraft_codecs::Image::from_u8(60, 40, photocraft_codecs::ChannelLayout::Rgb, px).unwrap();
+    std::fs::write(&png, photocraft_codecs::encode(&image, photocraft_codecs::Format::Png, &Default::default()).unwrap()).unwrap();
+
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": W, "height": H})).unwrap();
+    s.execute("file.placeLinked", json!({"path": png.to_string_lossy()})).unwrap();
+    s.execute("select.rect", json!({"x": 0, "y": 0, "width": 40, "height": 64})).unwrap();
+    s.execute("filter.blur.gaussianBlur", json!({"radius": 2})).unwrap();
+    s.execute("select.deselect", json!({})).unwrap();
+    assert!(smart(&s.active().unwrap().doc).1.filter_mask.is_some(), "a filter mask");
+    let out = photocraft_io::export(&s.active().unwrap().doc, "psd", &Default::default()).unwrap();
+    // As Photoshop stores a linked smart object's cache: in `FELS`.
+    let mut file = photocraft_psd::PsdFile::from_bytes(&out.bytes).unwrap();
+    file.global_blocks.iter_mut().find(|b| &b.key == b"FEid").expect("the filter cache").key = *b"FELS";
+    // The source is gone: no copy of the linked file in the PSD, nor on disk.
+    file.global_blocks.retain(|b| !matches!(&b.key, b"lnk2" | b"lnk3" | b"lnkD" | b"lnkE"));
+    let bytes = file.to_bytes().unwrap();
+
+    // Reopened with the linked file gone, then moved.
+    std::fs::remove_dir_all(&dir).unwrap();
+    let mut s = Session::new();
+    s.add_document(photocraft_io::import("x.psd", &bytes).unwrap().document, None);
+    let (id, before) = smart(&s.active().unwrap().doc);
+    let mask = before.filter_mask.clone().expect("the mask from FELS");
+    s.execute("edit.transform", json!({"layer": id, "matrix": [1, 0, 0, 1, 7, 3]})).unwrap();
+    let doc = s.active().unwrap().doc.clone();
+    let again = photocraft_io::export(&doc, "psd", &Default::default()).unwrap();
+    let keys: Vec<[u8; 4]> = photocraft_psd::PsdFile::from_bytes(&again.bytes).unwrap().global_blocks.iter().map(|b| b.key).collect();
+    assert!(keys.contains(b"FELS"), "the cache stays in FELS: {:?}", keys.iter().map(|k| String::from_utf8_lossy(k).into_owned()).collect::<Vec<_>>());
+    assert!(again.warnings.iter().any(|w| w.contains("without the source's unfiltered pixels")), "{:?}", again.warnings);
+
+    let reopened = photocraft_io::import("y.psd", &again.bytes).unwrap().document;
+    let got = smart(&reopened).1.filter_mask.expect("the mask survives the save");
+    let moved = smart(&doc).1.filter_mask.unwrap();
+    let area = doc.bounds();
+    let (mut va, mut vb) = (Vec::new(), Vec::new());
+    got.values_into(area, &mut va);
+    moved.values_into(area, &mut vb);
+    assert_eq!(va, vb, "the mask as it is now");
+    let _ = mask;
+}
