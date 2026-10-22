@@ -351,14 +351,14 @@ fn press(app: &mut PhotocraftApp, p: [f64; 2], mods: Modifiers, convert: bool) -
     true
 }
 
-/// What the idle Curvature Pen has under document point `p` on the active paths: an anchor or a
-/// segment, with the path it is on. Handles don't count.
+/// What the idle Curvature Pen has under document point `p` on the active path: an anchor or a
+/// segment, with the path it is on. Handles don't count. The active path is the one the canvas
+/// draws; a deselected work path is invisible and inert, so the press starts a new path, as on
+/// empty canvas.
 fn curvature_target(app: &PhotocraftApp, p: [f64; 2]) -> Option<(PathRef, Path, Hit)> {
     let tol = 6.0 / f64::from(app.point_zoom().max(0.01));
-    active_paths(app).into_iter().find_map(|(r, path)| match edit::hit(&path, Point::new(p[0], p[1]), tol, &[]) {
-        Some(h @ (Hit::Anchor(_) | Hit::Segment(..))) => Some((r, path, h)),
-        _ => None,
-    })
+    let (r, path, hit) = crate::vector_ui::drawn_path(app).and_then(|(r, path)| edit::hit(&path, Point::new(p[0], p[1]), tol, &[]).map(|h| (r, path, h)))?;
+    matches!(hit, Hit::Anchor(_) | Hit::Segment(..)).then_some((r, path, hit))
 }
 
 /// What a Curvature Pen press at `p` would do to an existing point, for its cursor: the anchor

@@ -28,6 +28,10 @@ fn with_path(app: &mut PhotocraftApp) {
         [40, 120],
     ]}]});
     app.run("path.set", json!({"name": "work", "path": path})).unwrap();
+    // The pen family edits the active path: the one the canvas draws, the Paths panel's
+    // targeted row (`path.set` alone doesn't target it — a row click does). `app.ui.selected_path
+    // = None` below is "deselected, as Make Selection leaves it", and its tests show that state.
+    app.ui.selected_path = Some("work".into());
 }
 
 fn work(app: &PhotocraftApp) -> Path {
@@ -206,6 +210,7 @@ fn the_pen_leaves_open_end_points_alone() {
     let mut app = app(Tool::Pen);
     let path = json!({"subpaths": [{"closed": false, "knots": [[40, 40], [120, 40], [120, 120]]}]});
     app.run("path.set", json!({"name": "work", "path": path})).unwrap();
+    app.ui.selected_path = Some("work".into());
     let before = work(&app);
     for end in [[40.0, 40.0], [120.0, 120.0]] {
         click(&mut app, end, Modifiers::NONE);
@@ -214,6 +219,49 @@ fn the_pen_leaves_open_end_points_alone() {
     }
     click(&mut app, [120.0, 40.0], Modifiers::NONE);
     assert_eq!(work(&app).subpaths[0].knots.len(), 2);
+}
+
+/// #phase3: with the work path deselected (as Make Selection with ⌘/Ctrl+Enter leaves it) the
+/// Pen's Auto Add/Delete reaches nothing: the hidden path never changes — no silent anchor
+/// added, none deleted — and the click starts a new, visible path instead, as on empty canvas.
+#[test]
+fn the_pen_leaves_a_deselected_work_path_alone() {
+    let mut app = app(Tool::Pen);
+    with_path(&mut app);
+    app.ui.selected_path = None;
+    let (before, n) = (work(&app), steps(&app));
+    click(&mut app, [80.0, 120.0], Modifiers::NONE);
+    assert_eq!(work(&app), before, "no silent anchor added to the hidden path");
+    assert_eq!(steps(&app), n, "and nothing in history either");
+    let pen = app.ui.pen.as_ref().unwrap();
+    assert_eq!(pen.knots.len(), 1, "the click starts a visible new path instead");
+    assert_eq!(pen.knots[0][0], [80.0, 120.0]);
+    app.ui.pen = None;
+    click(&mut app, [120.0, 120.0], Modifiers::NONE);
+    assert_eq!(work(&app), before, "no silent anchor deleted from the hidden path");
+    assert_eq!(app.ui.pen.as_ref().map(|p| p.knots[0][0]), Some([120.0, 120.0]));
+    // The Auto Add/Delete cursor preview has nothing to preview over the hidden path either.
+    app.hover_doc = Some([80.0, 120.0]);
+    use crate::tool_feedback::badge;
+    assert_eq!(badge(&app, Tool::Pen, Modifiers::NONE), None, "no Auto Add/Delete cursor over a deselected path");
+    app.hover_doc = None;
+    app.ui.pen = None;
+}
+
+/// The Add/Delete Anchor Point tools edit what Direct Selection shows, and Direct Selection
+/// shows the path the canvas draws: with the work path deselected they edit nothing, exactly
+/// like Path Selection (the old fallback highlighted and edited the invisible path).
+#[test]
+fn the_anchor_tools_leave_a_deselected_work_path_alone() {
+    let mut app = app(Tool::AddAnchorPoint);
+    with_path(&mut app);
+    app.ui.selected_path = None;
+    let (before, n) = (work(&app), steps(&app));
+    click(&mut app, [80.0, 120.0], Modifiers::NONE);
+    app.ui.tool = Tool::DeleteAnchorPoint;
+    click(&mut app, [120.0, 120.0], Modifiers::NONE);
+    click(&mut app, [80.0, 120.0], Modifiers::NONE);
+    assert_eq!((work(&app), steps(&app)), (before, n), "hidden path: no add, no delete");
 }
 
 #[test]

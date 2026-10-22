@@ -38,8 +38,15 @@ pub fn effective(tool: Tool, mods: Modifiers) -> Option<Tool> {
 /// edits nothing.
 fn target(app: &PhotocraftApp, tool: Tool, p: [f64; 2]) -> Option<(PathRef, Path, Hit)> {
     let tol = 6.0 / f64::from(app.point_zoom().max(0.01));
-    let (r, path, hit) =
-        crate::direct_select::candidates(app).into_iter().find_map(|(r, path)| edit::hit(&path, Point::new(p[0], p[1]), tol, &[]).map(|h| (r, path, h)))?;
+    // What Direct Selection shows — except a deselected work path, which is invisible and
+    // inert here too, as for Path Selection: only a work path the canvas draws (a targeted
+    // Paths-panel row) counts.
+    let work_drawn = crate::vector_ui::drawn_path(app).is_some_and(|(r, _)| r == PathRef::Work);
+    let mut paths = crate::direct_select::candidates(app);
+    if !work_drawn {
+        paths.retain(|(r, _)| *r != PathRef::Work);
+    }
+    let (r, path, hit) = paths.into_iter().find_map(|(r, path)| edit::hit(&path, Point::new(p[0], p[1]), tol, &[]).map(|h| (r, path, h)))?;
     match (tool, hit) {
         (Tool::AddAnchorPoint, Hit::Segment(..)) | (Tool::DeleteAnchorPoint, Hit::Anchor(_)) => Some((r, path, hit)),
         _ => None,
@@ -56,8 +63,10 @@ pub fn pen_auto(app: &PhotocraftApp, tool: Tool, mods: Modifiers, p: [f64; 2]) -
         return None;
     }
     let tol = 6.0 / f64::from(app.point_zoom().max(0.01));
-    let (r, path, hit) =
-        crate::direct_select::active_paths(app).into_iter().find_map(|(r, path)| edit::hit(&path, Point::new(p[0], p[1]), tol, &[]).map(|h| (r, path, h)))?;
+    // The active path: the one the canvas draws ([`visible_target_path`]). A deselected work
+    // path (Make Selection, a panel deselect) is invisible AND inert, as for Path Selection:
+    // Auto Add/Delete reaches nothing here and the click starts a new path instead.
+    let (r, path, hit) = crate::vector_ui::drawn_path(app).and_then(|(r, path)| edit::hit(&path, Point::new(p[0], p[1]), tol, &[]).map(|h| (r, path, h)))?;
     let tool = match hit {
         Hit::Segment(..) => Tool::AddAnchorPoint,
         Hit::Anchor([s, k]) => {

@@ -463,14 +463,15 @@ fn commit_path(app: &mut PhotocraftApp, pen: &PenPath, closed: bool) {
         app.run("layer.vectorMask.edit", json!({"layer": id, "path": p}))
     } else {
         // Photoshop adds the new subpath to the path selected in the Paths panel, which is the
-        // Work Path right after drawing one, so path after path builds up there (#4721). With no
-        // path selected, a new Work Path replaces the old one. The drawn path ends up selected.
+        // Work Path right after drawing one, so path after path builds up there (#4721). With
+        // no path selected the Work Path stays the pen's landing pad: the new subpath joins it
+        // (op combine — the engine creates it when there is none), so a deselected Work Path is
+        // never silently replaced by an invisible commit (that destroyed hidden work; a fresh
+        // Work Path is the Paths panel's New Path, as in Photoshop). The drawn path ends up
+        // selected.
         let target = app.ui.selected_path.clone().filter(|n| app.session.active().is_some_and(|st| path_exists(&st.doc, n)));
         let name = target.clone().unwrap_or_else(|| "work".into());
-        let mut params = json!({"name": name, "path": path});
-        if target.is_some() {
-            params["op"] = json!("combine");
-        }
+        let params = json!({"name": name, "path": path, "op": "combine"});
         app.run("path.set", params).inspect(|_| app.ui.selected_path = Some(name))
     };
     if let Err(e) = r {
@@ -816,6 +817,21 @@ fn target_path(app: &PhotocraftApp) -> Option<(PathTarget, Path)> {
         return Some((PathTarget::VectorMask(id), p));
     }
     active_shape_path(app).map(|(id, p)| (PathTarget::Shape(id), p))
+}
+
+/// The path the Pen's Auto Add/Delete and the idle Curvature Pen may act on: the one the canvas
+/// draws ([`target_path`]), as a Direct Selection candidate — the Paths panel's active row, else
+/// the targeted vector mask, else the active shape layer's path. A deselected work path (Make
+/// Selection, a panel deselect) is invisible AND inert here: a pen click on it starts a new
+/// path instead of silently editing it. A targeted saved path isn't a Direct Selection
+/// candidate and stays untouched, as before.
+pub(crate) fn drawn_path(app: &PhotocraftApp) -> Option<(crate::direct_select::PathRef, Path)> {
+    match target_path(app) {
+        Some((PathTarget::Shape(id), p)) => Some((crate::direct_select::PathRef::Layer(id), p)),
+        Some((PathTarget::VectorMask(id), p)) => Some((crate::direct_select::PathRef::Layer(id), p)),
+        Some((PathTarget::Work, p)) => Some((crate::direct_select::PathRef::Work, p)),
+        Some((PathTarget::Saved(_), _)) | None => None,
+    }
 }
 
 /// Edit › Free Transform Path (⌘T with Path Selection or Direct Selection): the path the
@@ -2434,12 +2450,14 @@ mod tests {
         assert_eq!(saved.subpaths.len(), 2);
         assert_eq!(work(&app).subpaths.len(), 2, "the Work Path is left alone");
         assert_eq!(app.ui.selected_path.as_deref(), Some("Saved"));
-        // No path selected: a new Work Path replaces the old one.
+        // No path selected: the Work Path stays the pen's landing pad — the new subpath joins
+        // it, as in Photoshop (#4721), and the deselected subpaths survive. A silent
+        // replacement was destroying invisible work.
         app.ui.selected_path = None;
         draw(&mut app, 320.0);
         let wp = work(&app);
-        assert_eq!(wp.subpaths.len(), 1);
-        assert_eq!(wp.subpaths[0].knots[0].anchor.x, 320.0);
+        assert_eq!(wp.subpaths.len(), 3, "the two old subpaths stay; the new one joins");
+        assert_eq!(wp.subpaths[2].knots[0].anchor.x, 320.0);
         assert_eq!(app.ui.selected_path.as_deref(), Some("work"));
     }
 

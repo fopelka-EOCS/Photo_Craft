@@ -29,6 +29,10 @@ fn with_path(app: &mut PhotocraftApp) {
         [40, 120],
     ]}]});
     app.run("path.set", json!({"name": "work", "path": path})).unwrap();
+    // The active path is the one the canvas draws, the Paths panel's targeted row, as
+    // everywhere else since the deselected-path rule (a deselected row draws nothing AND is
+    // inert — see the deselected tests).
+    app.ui.selected_path = Some("work".into());
 }
 
 fn work(app: &PhotocraftApp) -> Path {
@@ -365,6 +369,23 @@ fn the_curvature_pen_drags_an_anchor_of_the_active_path_without_a_modifier() {
     assert_eq!(work(&app), before);
 }
 
+/// A deselected work path is invisible and inert for the Curvature Pen too: a press on its
+/// segment must not silently add an anchor to it but start a new path, as on empty canvas.
+#[test]
+fn the_curvature_pen_starts_a_new_path_off_a_deselected_work_path() {
+    let mut app = app(Tool::CurvaturePen);
+    with_path(&mut app);
+    app.ui.selected_path = None;
+    let (before, n) = (work(&app), steps(&app));
+    click(&mut app, [80.0, 120.0], Modifiers::NONE);
+    assert_eq!(work(&app), before, "no silent anchor added to the hidden path");
+    assert_eq!(steps(&app), n, "and nothing in history either");
+    let pen = app.ui.pen.as_ref().unwrap();
+    assert!(pen.curvature, "a visible new Curvature Pen path started instead");
+    assert_eq!(pen.knots[0][0], [80.0, 120.0]);
+    assert!(app.ui.direct_selection.target.is_none(), "the hidden path isn't adopted either");
+}
+
 #[test]
 fn the_curvature_pen_off_an_anchor_still_draws_and_edits_its_own_path() {
     let mut app = app(Tool::CurvaturePen);
@@ -409,6 +430,8 @@ fn a_closed_curvature_pen_path_stays_editable_with_the_curvature_pen() {
 fn with_corner_square(app: &mut PhotocraftApp) {
     let path = json!({"subpaths": [{"closed": true, "knots": [[40, 40], [160, 40], [160, 160], [40, 160]]}]});
     app.run("path.set", json!({"name": "work", "path": path})).unwrap();
+    // The active path these tests edit is the one the canvas draws, the Paths panel's row.
+    app.ui.selected_path = Some("work".into());
 }
 
 #[test]
