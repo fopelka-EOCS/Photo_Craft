@@ -797,7 +797,8 @@ fn turn_driver(app: &mut PhotocraftApp, f: &mut Map<String, Value>, landscape: b
 
 /// The turned settings and the paper they give, both from the one `file.print.page` answer, as
 /// `driver_page` takes a page: asking the driver again could fail and leave new settings with the
-/// old paper. An answer without both leaves the dialog as it was, with the reason shown.
+/// old paper. An answer without both leaves the dialog as it was, with the reason shown. The
+/// printable area comes from the same answer, so the old orientation's area is never kept (#7782).
 fn take_turned_page(f: &mut Map<String, Value>, r: &Value) {
     let paper = r.get("paper").and_then(Value::as_array).and_then(|a| Some((a.first()?.as_f64()?, a.get(1)?.as_f64()?)));
     let (Some(settings), Some((w, h))) = (r.get("printerSettings").and_then(Value::as_str), paper) else {
@@ -807,10 +808,15 @@ fn take_turned_page(f: &mut Map<String, Value>, r: &Value) {
     f.insert("printerSettings".into(), json!(settings));
     f.insert("paper".into(), json!([w, h]));
     f.insert("orientation".into(), json!("portrait"));
+    match r.get("printable").filter(|v| v.is_array()) {
+        Some(area) => f.insert("printable".into(), area.clone()),
+        None => f.remove("printable"),
+    };
     f.remove("__pageError");
 }
 
-/// Takes the paper from the printer's driver settings (Windows), as Photoshop does.
+/// Takes the paper from the printer's driver settings (Windows), as Photoshop does, and the area it
+/// can print, which Scale to Fit Media fills (the whole sheet when borderless, #7782).
 fn driver_page(f: &mut Map<String, Value>) {
     let printer = s(f, "printer", "");
     let settings = f.get("printerSettings").and_then(Value::as_str).and_then(|h| craft_print::rgb::DevMode::from_hex(h).ok());
@@ -818,9 +824,14 @@ fn driver_page(f: &mut Map<String, Value>) {
         Ok(pg) => {
             f.insert("paper".into(), json!([pg.paper.0, pg.paper.1]));
             f.insert("orientation".into(), json!("portrait"));
+            let (x, y, w, h) = pg.printable;
+            f.insert("printable".into(), json!([x, y, w, h]));
             f.remove("__pageError");
         }
         Err(e) => {
+            // No page from this driver: no printable area either, so the print falls back to the
+            // paper less its safety margin rather than another printer's area.
+            f.remove("printable");
             f.insert("__pageError".into(), json!(e.to_string()));
         }
     }
@@ -919,12 +930,12 @@ fn browse_pdf(app: &mut PhotocraftApp, id: u64, suggested: &str) {
     }
 }
 
-fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>, id: u64) {
-    let t = Tokens::get(ui.ctx());
-    let Some(doc) = app.session.active().map(|d| d.doc.clone()) else { return };
-    // PDF exports and previews retain editable paper on Windows too. Only a real native
-    // submission takes its media from the printer; entering that mode refreshes the driver
-    // geometry after any export-only paper edits.
+/// The printers when the dialog is printing to one (Windows, not a dry run or PDF), else `None`.
+/// PDF exports and previews retain editable paper on Windows too. Only a real native submission
+/// takes its media from the printer; entering that mode refreshes the driver geometry after any
+/// export-only paper edits. Leaving it drops the driver's printable area, so a PDF keeps the
+/// paper's safety margin (#7782).
+fn printer_mode(f: &mut Map<String, Value>) -> Option<Vec<String>> {
     let printers: Option<Vec<String>> = if !b(f, "dryRun", false) && s(f, "output", "").is_empty() {
         f.get("__printers").and_then(Value::as_array).map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
     } else {
@@ -937,7 +948,15 @@ fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
         }
     } else {
         f.remove("__driverPageInitialized");
+        f.remove("printable");
     }
+    printers
+}
+
+fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>, id: u64) {
+    let t = Tokens::get(ui.ctx());
+    let Some(doc) = app.session.active().map(|d| d.doc.clone()) else { return };
+    let printers = printer_mode(f);
     let p = params(f);
     let mut browse = false;
     ui.horizontal_top(|ui| {
@@ -1580,6 +1599,34 @@ mod tests {
         }
     }
 
+    /// #7782: a printer whose driver gives no page leaves no printable area behind, so a fitted
+    /// print falls back to the paper's safety margin rather than another printer's area.
+    #[test]
+    fn a_printer_without_a_driver_page_has_no_printable_area() {
+        let mut f = Map::new();
+        f.insert("printer".into(), json!("photocraft-no-such-printer"));
+        f.insert("printable".into(), json!([0.0, 0.0, 595.28, 841.89]));
+        driver_page(&mut f);
+        assert!(f.get("printable").is_none());
+        assert!(f.get("__pageError").is_some());
+    }
+
+    /// #7782: switching the dialog to print to PDF, or to a dry run, leaves printer mode and drops
+    /// the driver's printable area with it, so the PDF keeps the paper's safety margin.
+    #[test]
+    fn leaving_printer_mode_drops_the_driver_printable_area() {
+        for (k, v) in [("output", json!("C:/out/print.pdf")), ("dryRun", json!(true))] {
+            let mut f = Map::new();
+            f.insert("__printers".into(), json!(["Canon PRO-1000 series"]));
+            f.insert("__driverPageInitialized".into(), json!(true));
+            f.insert("printable".into(), json!([0.0, 0.0, 841.89, 1190.55]));
+            f.insert(k.into(), v);
+            assert!(printer_mode(&mut f).is_none(), "{k}");
+            assert!(f.get("printable").is_none(), "{k}");
+            assert!(f.get("__driverPageInitialized").is_none(), "{k}: printer mode refreshes on return");
+        }
+    }
+
     /// The Orientation buttons show the driver paper's shape: landscape when it is wider than tall.
     #[test]
     fn orientation_follows_the_driver_paper() {
@@ -1637,6 +1684,18 @@ mod tests {
             assert_eq!((f.get("printerSettings"), f.get("paper")), (Some(&json!("old")), Some(&json!([595.28, 841.89]))), "{partial}");
             assert!(f.get("__pageError").is_some(), "{partial}");
         }
+    }
+
+    /// #7782: a turn takes the printable area from the same answer, so the portrait area never
+    /// stays behind on a landscape paper; an answer without one leaves no area.
+    #[test]
+    fn a_turn_takes_the_printable_area_too() {
+        let mut f = Map::new();
+        f.insert("printable".into(), json!([0.0, 0.0, 841.89, 1190.55]));
+        take_turned_page(&mut f, &json!({"printerSettings": "new", "paper": [1190.55, 841.89], "printable": [0.0, 0.0, 1190.55, 841.89]}));
+        assert_eq!(f.get("printable"), Some(&json!([0.0, 0.0, 1190.55, 841.89])));
+        take_turned_page(&mut f, &json!({"printerSettings": "newer", "paper": [841.89, 1190.55]}));
+        assert!(f.get("printable").is_none());
     }
 }
 

@@ -280,6 +280,24 @@ fn a_portrait_driver_turns_for_a_landscape_layout() {
     assert!((page.paper.0 - a4.0).abs() <= 2.0, "{:?}", page.paper);
 }
 
+/// #7782 with #7847: a fitted landscape print on a driver's portrait settings fits the printable
+/// area of the settings as they will print, turned, not the portrait one (which the paper check
+/// would drop, leaving the 0.25 in margin). Needs "Microsoft Print to PDF", like the test above:
+/// `cargo test -p photocraft-engine --lib a_turned_print -- --ignored`.
+#[cfg(windows)]
+#[test]
+#[ignore]
+fn a_turned_print_fits_the_turned_printable_area() {
+    let printer = "Microsoft Print to PDF";
+    let defaults = craft_print::rgb::default_settings(printer).unwrap();
+    let a4 = craft_print::rgb::page(printer, Some(&defaults)).unwrap().paper;
+    let p = json!({"printer": printer, "paper": [a4.1, a4.0], "orientation": "portrait", "scaleToFit": true});
+    let q = with_driver_printable(&p, true);
+    let area = q.get("printable").and_then(Value::as_array).expect("the turned page's printable area");
+    let (w, h) = (area[2].as_f64().unwrap(), area[3].as_f64().unwrap());
+    assert!(w > h, "a landscape area for a landscape layout: {area:?}");
+}
+
 #[test]
 fn printer_profile_can_be_an_installed_icc_file() {
     let dir = tmp("icc");
@@ -339,6 +357,155 @@ fn a_vanished_remembered_printer_falls_back_to_the_default() {
     let mut q = json!({"printer": "", "paper": "a5"});
     drop_vanished_printer(&mut q, &["Studio"]);
     assert_eq!(q, json!({"printer": "", "paper": "a5"}), "the default printer stays the default");
+}
+
+/// #7782: Scale to Fit Media fits the printable area the printer reports, not the paper less a
+/// fixed margin: a borderless paper fills the sheet, an uneven unprintable edge keeps the image off
+/// it, and marks keep their room inside the area.
+#[test]
+fn scale_to_fit_fills_the_printable_area() {
+    let mut s = session("rgb", 8);
+    let (pw, ph) = (595.28, 841.89);
+    let mut fit = |extra: Value| -> Vec<f64> {
+        let mut p = json!({"paper": "a4", "scaleToFit": true, "dryRun": true, "send": false});
+        for (k, v) in extra.as_object().unwrap() {
+            p[k] = v.clone();
+        }
+        serde_json::from_value(s.execute("file.print", p).unwrap()["imageRect"].clone()).unwrap()
+    };
+    let near = |a: &[f64], b: &[f64]| a.len() == b.len() && a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-6);
+    // Borderless: the whole sheet is printable. The 2:1 image spans the full width, centred.
+    let full = fit(json!({"printable": [0.0, 0.0, pw, ph]}));
+    assert!(near(&full, &[0.0, (ph - pw / 2.0) / 2.0, pw, pw / 2.0]), "{full:?}");
+    // A driver's paper a fraction of a point over the named size (as a Canon PRO-1000 reports A3,
+    // 0.40 × 0.59 pt over) is clipped to the sheet, and so is anything within 2 pt on every side.
+    for over in [json!([0.0, 0.0, pw + 0.4, ph + 0.59]), json!([-2.0, -2.0, pw + 4.0, ph + 4.0])] {
+        let r = fit(json!({"printable": over}));
+        assert!(near(&r, &full), "{over}: {r:?}");
+    }
+    // Uneven edges: fitted to and centred in the area. 500 wide gives 500 × 250, 20 + 225 from the top.
+    let r = fit(json!({"printable": [10.0, 20.0, 500.0, 700.0]}));
+    assert!(near(&r, &[10.0, ph - 20.0 - 700.0 + 225.0, 500.0, 250.0]), "{r:?}");
+    // Marks keep their 36 pt inside the area.
+    let r = fit(json!({"printable": [0.0, 0.0, pw, ph], "cornerCropMarks": true}));
+    assert!((r[0] - 36.0).abs() < 1e-6 && (r[2] - (pw - 72.0)).abs() < 1e-6, "{r:?}");
+    // No printable area: the paper less 18 pt, as before.
+    let r = fit(json!({}));
+    assert!((r[0] - 18.0).abs() < 1e-6 && (r[2] - (pw - 36.0)).abs() < 1e-6, "{r:?}");
+    // Without Scale to Fit Media the area changes nothing: 100 %, centred on the paper.
+    let r = fit(json!({"scaleToFit": false, "printable": [10.0, 20.0, 500.0, 700.0]}));
+    assert!(near(&r, &[(pw - 300.0) / 2.0, (ph - 150.0) / 2.0, 300.0, 150.0]), "{r:?}");
+    // A bad area is an error, never a panic; so are marks that leave no room in a small one.
+    let print = |s: &mut Session, extra: Value| {
+        let mut p = json!({"paper": "a4", "scaleToFit": true, "dryRun": true, "send": false});
+        for (k, v) in extra.as_object().unwrap() {
+            p[k] = v.clone();
+        }
+        s.execute("file.print", p)
+    };
+    // A refused print changes nothing: the last print settings stay those of the last good one.
+    let before = last_print(&s);
+    let refused = |s: &mut Session, extra: Value| {
+        assert!(print(s, extra.clone()).is_err(), "{extra}");
+        assert_eq!(last_print(s), before, "{extra} changed the remembered settings");
+    };
+    // A member that isn't a number rejects the area, rather than being dropped and the rest read
+    // as another rectangle. An area that doesn't fit the paper beyond 2 pt (another paper, the
+    // other orientation, or off the sheet) is refused rather than clipped into a strip.
+    for bad in [
+        json!("everywhere"),
+        json!([0, 0, 100]),
+        json!([0, 0, 10, 10]),
+        json!([700, 0, 100, 100]),
+        json!(["a", "b", "c", "d"]),
+        json!([0, "bad", 0, 500, 700]),
+        json!([0, 0, "500", 700]),
+        json!([-1.0, -1.0, 600.0, 850.0]),
+        json!([-3.0, 0.0, pw, ph]),
+        json!([0.0, 0.0, 841.89, 1190.55]),
+    ] {
+        refused(&mut s, json!({"printable": bad}));
+    }
+    // A portrait area on a landscape layout of the same paper.
+    refused(&mut s, json!({"printable": [0.0, 0.0, pw, ph], "orientation": "landscape"}));
+    refused(&mut s, json!({"printable": [0, 0, 60, 60], "cornerCropMarks": true}));
+    // A print that doesn't fit to the media never reads the area, so even a bad one can't fail it.
+    for unused in [json!("everywhere"), json!([0, 0, 60, 60])] {
+        let r = print(&mut s, json!({"scaleToFit": false, "cornerCropMarks": true, "printable": unused})).unwrap();
+        let rect: Vec<f64> = serde_json::from_value(r["imageRect"].clone()).unwrap();
+        assert!(near(&rect, &[(pw - 300.0) / 2.0, (ph - 150.0) / 2.0, 300.0, 150.0]), "{rect:?}");
+    }
+    // The area is the driver's to say at print time, so it is not remembered.
+    print(&mut s, json!({"printable": [0, 0, 595, 841]})).unwrap();
+    assert!(last_print(&s).unwrap().get("printable").is_none());
+}
+
+/// #7782: Emulsion Down mirrors the page after layout, so a fitted image is placed in the mirror
+/// of the printable area and lands in the area itself once flipped, also with uneven margins
+/// (10 pt unprintable on the left, 40 pt on the right).
+#[test]
+fn emulsion_down_fits_into_the_printable_area_once_mirrored() {
+    let mut s = session("rgb", 8);
+    let pw = 595.28;
+    let area = json!([10.0, 0.0, pw - 50.0, 841.89]);
+    let rect = |s: &mut Session, mirror: bool| -> Vec<f64> {
+        let p = json!({"paper": "a4", "scaleToFit": true, "printable": area, "emulsionDown": mirror, "dryRun": true, "send": false});
+        serde_json::from_value(s.execute("file.print", p).unwrap()["imageRect"].clone()).unwrap()
+    };
+    // Unmirrored: the 2:1 image fills the area's width from its left edge, 10 pt in.
+    let plain = rect(&mut s, false);
+    assert!((plain[0] - 10.0).abs() < 1e-6 && (plain[2] - (pw - 50.0)).abs() < 1e-6, "{plain:?}");
+    // Mirrored: laid out 40 pt in, so the flip (x -> pw - x - w, as the PDF and GDI routes draw it)
+    // puts it back at 10 pt, inside the area, rather than 30 pt into the right margin.
+    let mirrored = rect(&mut s, true);
+    assert!((mirrored[0] - 40.0).abs() < 1e-6 && (mirrored[2] - plain[2]).abs() < 1e-6, "{mirrored:?}");
+    let printed_left = pw - mirrored[0] - mirrored[2];
+    assert!((printed_left - 10.0).abs() < 1e-6, "{printed_left}");
+}
+
+/// #7782: a driver page whose paper is the one laid out lends its printable area, and the fit
+/// follows it; a page of another paper (or of the same paper turned) lends nothing.
+#[test]
+fn a_matching_driver_page_lends_its_printable_area_to_the_fit() {
+    // Borderless A3 as a Canon PRO-1000 driver reports it: a hair over A3, printable to the edge.
+    let (page, area) = ((842.29, 1191.14), (0.0, 0.0, 842.29, 1191.14));
+    let p = json!({"paper": "a3", "scaleToFit": true, "dryRun": true, "send": false});
+    let q = with_page_printable(&p, page, area);
+    assert_eq!(q["printable"], json!([0.0, 0.0, 842.29, 1191.14]));
+    // The fit then fills the sheet: the 2:1 image spans the whole A3 width from the left edge.
+    let mut s = session("rgb", 8);
+    let rect: Vec<f64> = serde_json::from_value(s.execute("file.print", q).unwrap()["imageRect"].clone()).unwrap();
+    assert!(rect[0].abs() < 1e-6 && (rect[2] - 841.89).abs() < 1e-6, "{rect:?}");
+    // Landscape A3 is the sheet turned: a portrait page of it lends nothing.
+    let landscape = json!({"paper": "a3", "orientation": "landscape", "scaleToFit": true});
+    assert!(with_page_printable(&landscape, page, area).get("printable").is_none());
+    // An A4 page for an A3 layout lends nothing, nor does a layout without a valid paper.
+    assert!(with_page_printable(&p, (595.32, 841.92), (9.6, 14.16, 576.0, 813.6)).get("printable").is_none());
+    assert!(with_page_printable(&json!({"paper": "napkin"}), page, area).get("printable").is_none());
+}
+
+/// #7782: the driver is asked for its printable area only for a fitted print to a local printer
+/// that names no area itself, an explicit `null` included (it names none, as `printable` reads
+/// it); anything else, odd params included, passes through unchanged. The decision is tested on
+/// every platform, not only where the driver call exists.
+#[test]
+fn only_a_fitted_print_to_a_printer_asks_the_driver_for_its_printable_area() {
+    for p in [json!({"scaleToFit": true}), json!({"scaleToFit": true, "printable": null}), json!({"scaleToFit": true, "printServer": ""})] {
+        assert!(asks_driver_for_printable(&p, true), "{p}");
+    }
+    let skipped = [
+        json!({"scaleToFit": false}),
+        json!({"scaleToFit": true, "printable": [0, 0, 100, 100]}),
+        json!({"scaleToFit": true, "printServer": "print.example:631"}),
+        json!("not an object"),
+        json!(null),
+    ];
+    for p in &skipped {
+        assert!(!asks_driver_for_printable(p, true), "{p}");
+        assert_eq!(&with_driver_printable(p, true), p, "{p}");
+    }
+    assert!(!asks_driver_for_printable(&json!({"scaleToFit": true}), false), "print to PDF");
+    assert_eq!(with_driver_printable(&json!({"scaleToFit": true}), false), json!({"scaleToFit": true}), "print to PDF");
 }
 
 #[test]
