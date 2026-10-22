@@ -878,3 +878,19 @@ fn size_readout_follows_the_ruler_unit() {
     ur.rulers = Unit::Millimeters;
     assert_eq!(crate::canvas::readout_in(&ur, 150.0, [1644.0, 2659.0], [0.0, 0.0, 3425.0, 100.0])[0], "579.97 mm");
 }
+
+/// A Fixed Ratio drag past the canvas edge stops there with the ratio intact, instead of being
+/// clipped to a different shape when committed.
+#[test]
+fn a_fixed_ratio_drag_past_the_canvas_keeps_its_ratio() {
+    let mut h = harness(Tool::RectMarquee);
+    let o = &mut h.state_mut().ui.tool_options;
+    o.marquee_style = "fixedRatio".into();
+    o.marquee_width = 2.0;
+    o.marquee_height = 1.0;
+    press_at(&mut h, 100.0, 100.0, Modifiers::NONE);
+    move_to(&mut h, 500.0, 150.0);
+    release_at(&mut h, 500.0, 150.0, Modifiers::NONE);
+    let r = selection(&h);
+    assert_eq!((r.x1 - r.x0, r.y1 - r.y0), (300, 150), "{r:?}");
+}

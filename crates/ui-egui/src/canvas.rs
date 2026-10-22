@@ -173,6 +173,8 @@ pub struct Drag {
     /// every Move-tool drag with a selection does (`move_ui::moves_selected_pixels_with`).
     pub sel_move: Option<bool>,
     pub lasso: Option<crate::lasso_ui::Lasso>,
+    /// Size of the document the gesture started in; a Fixed Ratio marquee stops at its edge.
+    pub doc_size: Option<[f64; 2]>,
 }
 
 impl Drag {
@@ -190,6 +192,7 @@ impl Drag {
             reposition: false,
             sel_move: None,
             lasso: None,
+            doc_size: None,
         }
     }
 
@@ -230,7 +233,27 @@ impl Drag {
 /// style (fixed ratio / fixed size), ⇧ for a square or circle, ⌥ to draw from the centre.
 pub fn marquee_corners(o: &crate::state::ToolOptions, d: &Drag, end: [f64; 2]) -> ([f64; 2], [f64; 2]) {
     let (shift, alt) = d.marquee_mods();
-    let e = crate::chrome_ui::marquee_end(&o.marquee_style, o.marquee_width as f64, o.marquee_height as f64, shift, d.start, end);
+    let mut e = crate::chrome_ui::marquee_end(&o.marquee_style, o.marquee_width as f64, o.marquee_height as f64, shift, d.start, end);
+    // A Fixed Ratio drag past the canvas stops at its edge with the ratio intact, rather than
+    // being clipped to a different shape on commit.
+    if o.marquee_style == "fixedRatio"
+        && let Some(size) = d.doc_size
+    {
+        let (dx, dy) = (e[0] - d.start[0], e[1] - d.start[1]);
+        let room = |i: usize, delta: f64| {
+            let (lo, hi) = (d.start[i], size[i] - d.start[i]);
+            (if alt {
+                lo.min(hi)
+            } else if delta < 0.0 {
+                lo
+            } else {
+                hi
+            })
+            .max(0.0)
+        };
+        let f = [(room(0, dx), dx), (room(1, dy), dy)].iter().filter(|(_, v)| v.abs() > 0.0).map(|(r, v)| r / v.abs()).fold(1.0, f64::min);
+        e = [d.start[0] + dx * f, d.start[1] + dy * f];
+    }
     if !alt {
         return (d.start, e);
     }
@@ -5728,7 +5751,8 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
             }
             // ⌥ flips Dodge/Burn and Blur/Sharpen for this stroke.
             let tool = crate::retouch_ui::alt_flipped(tool, mods.alt);
-            app.drag = Some(Drag { clear, ..Drag::new(tool, from.map_or([x, y], |p| [p[0], p[1]]), points, mods, erase) });
+            let doc_size = app.session.active().map(|st| [f64::from(st.doc.size.width), f64::from(st.doc.size.height)]);
+            app.drag = Some(Drag { clear, doc_size, ..Drag::new(tool, from.map_or([x, y], |p| [p[0], p[1]]), points, mods, erase) });
             app.trail = None;
             app.stylus.begin_stroke();
             if from.is_some() {
