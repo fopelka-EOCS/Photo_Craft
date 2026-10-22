@@ -1,11 +1,18 @@
-//! The command line, as clap types. Values stay strings: the handlers check them, with their own
-//! messages (#7071). A flag a subcommand doesn't take is a usage error, so a typo such as
-//! `--fromat` can't be silently ignored (#423), and so is a repeated one: `--quality 80 --quality
-//! 60` is more likely a mistake than a choice. A value starting with `-` is written
-//! `--out=-image.png` (or `./-image.png`), so a value flag never takes the next flag as its value;
-//! negative numbers are kept where they mean something.
+//! The command line, as clap types. Values are parsed into their types here, so a bad one is a
+//! usage error naming its flag (exit 2) and the handlers never see it (#7071). A flag a
+//! subcommand doesn't take is a usage error too, so a typo such as `--fromat` can't be silently
+//! ignored (#423), and so is a repeated one: `--quality 80 --quality 60` is more likely a mistake
+//! than a choice. A value starting with `-` is written `--out=-image.png` (or `./-image.png`), so a
+//! value flag never takes the next flag as its value; negative numbers are kept where they mean
+//! something.
 
-use clap::{ArgAction, ArgMatches, Args, CommandFactory, FromArgMatches, Parser, Subcommand};
+use std::ffi::OsString;
+use std::path::PathBuf;
+
+use clap::{ArgAction, ArgGroup, ArgMatches, Args, CommandFactory, FromArgMatches, Parser, Subcommand};
+use photocraft_codecs::{JpegFormat, TiffCompression};
+use photocraft_io::{DdsCompression, DpxBits, TgaBits};
+use serde_json::Value;
 
 /// photocraft-cli: headless PhotoCraft
 #[derive(Parser)]
@@ -35,33 +42,33 @@ pub(crate) struct ExportArgs {
     pub(crate) format: Option<String>,
     /// JPEG or WebP quality, 1-100. A WebP written with a quality is lossy, without one lossless
     // allow_negative_numbers makes `--quality -1` an out-of-range value rather than an unexpected argument.
-    #[arg(long, value_name = "1-100", allow_negative_numbers = true)]
-    pub(crate) quality: Option<String>,
+    #[arg(long, value_name = "1-100", value_parser = clap::value_parser!(u8).range(1..=100), allow_negative_numbers = true)]
+    pub(crate) quality: Option<u8>,
     /// Keep the layers in TIFF output (Photoshop layer data); TIFF output is flat without it
     #[arg(long)]
     pub(crate) tiff_layers: bool,
     /// Compress TIFF output: none (the default), lzw or zip
-    #[arg(long, value_name = "none|lzw|zip")]
-    pub(crate) tiff_compression: Option<String>,
+    #[arg(long, value_name = "none|lzw|zip", value_parser = tiff_compression)]
+    pub(crate) tiff_compression: Option<TiffCompression>,
     /// A TGA's bits per pixel: 32 writes the alpha channel (or else the transparency) as its
     /// alpha, 24 none. Without it: 32 with an alpha channel or transparency, else 24
-    #[arg(long, value_name = "24|32")]
-    pub(crate) tga_bits: Option<String>,
+    #[arg(long, value_name = "24|32", value_parser = tga_bits)]
+    pub(crate) tga_bits: Option<TgaBits>,
     /// A DPX's bits per sample. Without it: 8 for an 8-bit document, else 16
-    #[arg(long, value_name = "8|10|12|16")]
-    pub(crate) dpx_bits: Option<String>,
+    #[arg(long, value_name = "8|10|12|16", value_parser = dpx_bits)]
+    pub(crate) dpx_bits: Option<DpxBits>,
     /// A DDS texture's compression: none (uncompressed, the default), bc1 (DXT1: alpha on or
     /// off), bc2 (DXT3) or bc3 (DXT5)
-    #[arg(long, value_name = "none|bc1|bc2|bc3")]
-    pub(crate) dds_compression: Option<String>,
+    #[arg(long, value_name = "none|bc1|bc2|bc3", value_parser = dds_compression)]
+    pub(crate) dds_compression: Option<DdsCompression>,
     /// Also write a DDS texture's full mip chain
     #[arg(long)]
     pub(crate) dds_mipmaps: bool,
     /// A JPEG's scans, as JPEG Options picks them: baseline (the default), optimized (Huffman
     /// tables fitted to the image; RGB is written 4:2:0 and keeps the standard tables, so only Gray
     /// and CMYK shrink) or progressive
-    #[arg(long, value_name = "baseline|optimized|progressive")]
-    pub(crate) jpeg_format: Option<String>,
+    #[arg(long, value_name = "baseline|optimized|progressive", value_parser = jpeg_format)]
+    pub(crate) jpeg_format: Option<JpegFormat>,
 }
 
 /// Convert between formats (.pcraft, .psd, .png, .jpg, .tif, .webp, .exr, …)
@@ -72,10 +79,10 @@ pub(crate) struct ExportArgs {
 pub(crate) struct ConvertArgs {
     /// The file to read
     #[arg(value_name = "IN")]
-    pub(crate) input: String,
+    pub(crate) input: PathBuf,
     /// The file to write; its extension picks the format unless --format is given
     #[arg(value_name = "OUT")]
-    pub(crate) output: String,
+    pub(crate) output: PathBuf,
     /// Allow an <OUT> that is the <IN> file, replacing the original
     #[arg(long)]
     pub(crate) in_place: bool,
@@ -86,7 +93,7 @@ pub(crate) struct ConvertArgs {
 /// Print the document as JSON (size, mode, depth, layer tree)
 #[derive(Args)]
 pub(crate) struct InfoArgs {
-    pub(crate) file: String,
+    pub(crate) file: PathBuf,
     /// One line of JSON instead of pretty-printed
     #[arg(long)]
     pub(crate) compact: bool,
@@ -94,28 +101,37 @@ pub(crate) struct InfoArgs {
 
 /// Open a file (or start a new document), run engine commands in order, save the result
 ///
-/// Prints each command's JSON result. Give exactly one of <FILE> or --new.
+/// Prints each command's JSON result. Give exactly one of <FILE> or --new, and at least one --cmd
+/// or --out.
 #[derive(Args)]
+#[command(group(ArgGroup::new("source").args(["file", "new"]).required(true)))]
+#[command(group(ArgGroup::new("work").args(["cmd", "out"]).required(true).multiple(true)))]
 pub(crate) struct RunArgs {
     /// The document to open
-    pub(crate) file: Option<String>,
+    pub(crate) file: Option<PathBuf>,
     /// Start from a new document with these JSON parameters instead of opening a file
-    #[arg(long, value_name = "JSON")]
-    pub(crate) new: Option<String>,
+    #[arg(long, value_name = "JSON", value_parser = json)]
+    pub(crate) new: Option<Value>,
     /// An engine command to run; repeat for several, run in order
     #[arg(long, value_name = "ID", action = ArgAction::Append)]
     pub(crate) cmd: Vec<String>,
     /// JSON parameters for the --cmd before it (default {})
-    #[arg(long, value_name = "JSON", action = ArgAction::Append)]
-    pub(crate) params: Vec<String>,
+    #[arg(long, value_name = "JSON", action = ArgAction::Append, value_parser = json)]
+    pub(crate) params: Vec<Value>,
     /// Save the result to this file
     #[arg(long, value_name = "FILE")]
-    pub(crate) out: Option<String>,
+    pub(crate) out: Option<PathBuf>,
     #[command(flatten)]
     pub(crate) export: ExportArgs,
-    /// `--cmd` and `--params` values in command-line order (`true` for a `--cmd`), set by [`parse`].
+    /// `--cmd` and `--params` values in command-line order, set by [`parse`].
     #[arg(skip)]
-    pub(crate) steps: Vec<(bool, String)>,
+    pub(crate) steps: Vec<Step>,
+}
+
+/// One `--cmd` or `--params` of `run`, in command-line order.
+pub(crate) enum Step {
+    Cmd(String),
+    Params(Value),
 }
 
 /// Apply an action list to every image in a directory
@@ -130,16 +146,16 @@ pub(crate) struct RunArgs {
 pub(crate) struct BatchArgs {
     /// The action list: actions.json, a droplet, or a Photoshop Actions file (.atn)
     #[arg(long, value_name = "FILE")]
-    pub(crate) actions: Option<String>,
+    pub(crate) actions: PathBuf,
     /// Which action of an Actions set to play
     #[arg(long, value_name = "NAME")]
     pub(crate) action: Option<String>,
     /// The folder of images to process
     #[arg(long = "in", value_name = "DIR")]
-    pub(crate) in_dir: Option<String>,
+    pub(crate) in_dir: PathBuf,
     /// The folder to write the results to, as <stem>.<ext>
     #[arg(long, value_name = "DIR")]
-    pub(crate) out: Option<String>,
+    pub(crate) out: PathBuf,
     /// An --out folder that is the --in folder is refused, as the results would replace the
     /// originals; --in-place allows it
     #[arg(long)]
@@ -177,18 +193,18 @@ pub(crate) struct CommandsArgs {
 #[derive(Args)]
 pub(crate) struct ControlArgs {
     /// The control token (64 hex digits)
-    #[arg(long, value_name = "64-HEX")]
+    #[arg(long, value_name = "64-HEX", conflicts_with = "control_token_file")]
     pub(crate) control_token: Option<String>,
     /// A file holding the control token, used instead of --control-token (a server creates it
     /// when missing)
     #[arg(long, value_name = "PATH")]
-    pub(crate) control_token_file: Option<String>,
+    pub(crate) control_token_file: Option<PathBuf>,
     /// The folder automation may read from (none without it)
     #[arg(long, value_name = "DIR")]
-    pub(crate) automation_read_root: Option<String>,
+    pub(crate) automation_read_root: Option<PathBuf>,
     /// The folder automation may write to (none without it)
     #[arg(long, value_name = "DIR")]
-    pub(crate) automation_write_root: Option<String>,
+    pub(crate) automation_write_root: Option<PathBuf>,
 }
 
 /// Run the MCP server on stdio (headless engine, or bridge to a running `photocraft --control <port>`)
@@ -211,27 +227,75 @@ pub(crate) struct McpArgs {
 pub(crate) struct ServeArgs {
     /// Listen on 127.0.0.1:<PORT> instead of stdio
     #[arg(long, value_name = "PORT")]
-    pub(crate) port: Option<String>,
+    pub(crate) port: Option<u16>,
     #[command(flatten)]
     pub(crate) control: ControlArgs,
 }
 
-/// `--cmd` and `--params` values back in command-line order: clap keeps each flag's values apart,
-/// their indices say how they interleave.
-fn steps(m: &ArgMatches) -> Vec<(bool, String)> {
-    let mut steps: Vec<(usize, bool, String)> = Vec::new();
-    for (id, is_cmd) in [("cmd", true), ("params", false)] {
-        if let (Some(at), Some(values)) = (m.indices_of(id), m.try_get_many::<String>(id).ok().flatten()) {
-            steps.extend(at.zip(values).map(|(i, v)| (i, is_cmd, v.clone())));
-        }
-    }
-    steps.sort_by_key(|s| s.0);
-    steps.into_iter().map(|(_, is_cmd, v)| (is_cmd, v)).collect()
+/// Why a value was refused: clap prints it after the flag and its value (exit 2).
+#[derive(Debug, thiserror::Error)]
+enum ValueError {
+    #[error("expected 24 or 32")]
+    TgaBits,
+    #[error("expected 8, 10, 12 or 16")]
+    DpxBits,
+    #[error("expected none, bc1, bc2 or bc3")]
+    DdsCompression,
+    #[error("expected none, lzw or zip")]
+    TiffCompression,
+    #[error("expected baseline, optimized or progressive")]
+    JpegFormat,
 }
 
-/// Parse the arguments (without the binary name).
-pub(crate) fn parse(args: &[String]) -> Result<Cli, clap::Error> {
-    let matches = Cli::command().try_get_matches_from(std::iter::once("photocraft-cli").chain(args.iter().map(String::as_str)))?;
+fn tga_bits(s: &str) -> Result<TgaBits, ValueError> {
+    s.parse().ok().and_then(TgaBits::from_bits).ok_or(ValueError::TgaBits)
+}
+
+fn dpx_bits(s: &str) -> Result<DpxBits, ValueError> {
+    s.parse().ok().and_then(DpxBits::from_bits).ok_or(ValueError::DpxBits)
+}
+
+fn dds_compression(s: &str) -> Result<DdsCompression, ValueError> {
+    DdsCompression::from_name(s).ok_or(ValueError::DdsCompression)
+}
+
+fn tiff_compression(s: &str) -> Result<TiffCompression, ValueError> {
+    match s {
+        "none" => Ok(TiffCompression::None),
+        "lzw" => Ok(TiffCompression::Lzw),
+        "zip" => Ok(TiffCompression::Deflate),
+        _ => Err(ValueError::TiffCompression),
+    }
+}
+
+fn jpeg_format(s: &str) -> Result<JpegFormat, ValueError> {
+    JpegFormat::parse(s).ok_or(ValueError::JpegFormat)
+}
+
+/// `--new` and `--params`: bad JSON is a usage error, before any work. Whether the value is an
+/// object is the command's to say.
+fn json(s: &str) -> Result<Value, serde_json::Error> {
+    serde_json::from_str(s)
+}
+
+/// `--cmd` and `--params` values back in command-line order: clap keeps each flag's values apart,
+/// their indices say how they interleave.
+fn steps(m: &ArgMatches) -> Vec<Step> {
+    let mut steps: Vec<(usize, Step)> = Vec::new();
+    if let (Some(at), Ok(Some(ids))) = (m.indices_of("cmd"), m.try_get_many::<String>("cmd")) {
+        steps.extend(at.zip(ids).map(|(i, id)| (i, Step::Cmd(id.clone()))));
+    }
+    if let (Some(at), Ok(Some(params))) = (m.indices_of("params"), m.try_get_many::<Value>("params")) {
+        steps.extend(at.zip(params).map(|(i, p)| (i, Step::Params(p.clone()))));
+    }
+    steps.sort_by_key(|s| s.0);
+    steps.into_iter().map(|(_, s)| s).collect()
+}
+
+/// Parse the arguments (without the binary name). clap reads them as `OsString`s: a path need not
+/// be valid Unicode (#1108), text must.
+pub(crate) fn parse(args: &[OsString]) -> Result<Cli, clap::Error> {
+    let matches = Cli::command().try_get_matches_from(std::iter::once(OsString::from("photocraft-cli")).chain(args.iter().cloned()))?;
     let mut cli = Cli::from_arg_matches(&matches)?;
     if let (Command::Run(r), Some(m)) = (&mut cli.command, matches.subcommand_matches("run")) {
         r.steps = steps(m);
