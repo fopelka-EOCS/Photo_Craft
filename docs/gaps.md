@@ -100,8 +100,10 @@ what an agent can't finish alone.
 
 ### G11. Actions and scripting
 - **2026-10-22 evidence (#7246):** Save Actions keeps an explicit `layers` list: one Set per
-  layer, referenced by Photoshop's layer id, with strict-refusal for steps the format can't
-  carry exactly (an id beyond u32; a rename of several layers). [Round-trip coverage](../crates/engine/src/atn_cmds/layer_list_tests.rs);
+  layer, by Photoshop's layer id, and an imported id step re-exports by the same id. Strict
+  export rejects a step the format cannot carry exactly (an id beyond u32; a rename of several
+  layers); with `skipUnsupported` the same step is skipped whole.
+  [Round-trip coverage](../crates/engine/src/atn_cmds/layer_list_tests.rs);
   independent Photoshop replay of the export is pending.
 - **2026-10-21 evidence (#8304):** Save Actions expands compound layer-property edits into
   separate Photoshop Set events, with rename last so named layer references remain valid.

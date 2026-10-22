@@ -217,11 +217,16 @@ fn class_ref(cls: &str) -> D {
     D::Reference(vec![ReferenceItem::Class(class(cls))])
 }
 
-/// The `null` reference for a command's `layer` param: by name, else the target layer.
+/// The `null` reference for a command's `layer` param: by name, by id (a numeric `layer`
+/// is an imported `Idnt`: Photoshop's own layer-id reference), else the target layer.
 fn layer_ref(p: &Value) -> Option<D> {
     match p.get("layer") {
         None | Some(Value::Null) => Some(target_ref("Lyr ")),
         Some(Value::String(n)) => Some(name_ref("Lyr ", n)),
+        Some(Value::Number(n)) => match n.as_u64() {
+            Some(i) if i <= u32::MAX as u64 => Some(D::Reference(vec![ReferenceItem::Identifier { class: class("Lyr "), id: i as u32 }])),
+            _ => Some(target_ref("Lyr ")),
+        },
         _ => None,
     }
 }
@@ -1629,6 +1634,11 @@ fn set_to(id: &str, p: &Value) -> Option<Descriptor> {
             // channels or an explicit `layers` list would be dropped (#7196, #7246).
             const MAPPED: [&str; 7] = ["layer", "name", "opacity", "fill", "blend", "visible", "color"];
             if p.as_object().is_some_and(|m| m.iter().any(|(k, v)| !v.is_null() && !MAPPED.contains(&k.as_str()))) {
+                return None;
+            }
+            // A numeric `layer` is an imported `Idnt`; one beyond the u32 the reference holds
+            // exports as nothing, rather than drift to the target layer.
+            if p.get("layer").and_then(Value::as_u64).is_some_and(|i| i > u32::MAX as u64) {
                 return None;
             }
             let mut t = desc("Lyr ");

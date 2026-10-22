@@ -83,6 +83,17 @@ fn a_layer_id_reference_imports_as_the_layer_id() {
     let imported = import(&bytes).unwrap();
     assert_eq!(imported.unsupported, []);
     assert_eq!(imported.actions[0].steps, [("layer.setProps".to_string(), json!({"layer": 7, "opacity": 0.3}))]);
+
+    // Re-exporting the imported step keeps the id: the reference is the same `Idnt` again,
+    // not the implicit target layer (#7246, review).
+    let (out, skipped) = export("S", &[&imported.actions[0]], &[], false).unwrap();
+    assert_eq!(skipped, []);
+    let file = atn::parse(&out).unwrap();
+    assert_eq!(file.actions[0].items.len(), 1);
+    let id_ref = get_ref(file.actions[0].items[0].descriptor.as_ref().unwrap(), "null").unwrap();
+    let [ReferenceItem::Identifier { class, id }] = id_ref else { panic!("{id_ref:?}") };
+    assert!(class.class_id.is("Lyr "), "{class:?}");
+    assert_eq!(*id, 7);
 }
 
 /// A one-layer list exports as a single Set by its id, so the step roundtrips by the same
@@ -115,6 +126,15 @@ fn export_refuses_a_layer_id_beyond_the_idnt_range() {
 #[test]
 fn export_refuses_a_rename_carrying_a_layers_list() {
     let action = Action::new("Targets", vec![("layer.setProps".into(), json!({"layers": [1, 2], "name": "Both"}))]);
+    let e = export("S", &[&action], &[], false).unwrap_err();
+    assert!(e.contains("layer.setProps"), "{e}");
+}
+
+/// A numeric `layer` the reference can't hold refuses as well: exporting it silently would
+/// aim the step at the active layer instead (#7246, review).
+#[test]
+fn export_refuses_a_numeric_layer_beyond_the_idnt_range() {
+    let action = Action::new("Targets", vec![("layer.setProps".into(), json!({"layer": u32::MAX as u64 + 1, "opacity": 0.5}))]);
     let e = export("S", &[&action], &[], false).unwrap_err();
     assert!(e.contains("layer.setProps"), "{e}");
 }
