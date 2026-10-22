@@ -787,6 +787,40 @@ mod tests {
     }
 
     #[test]
+    fn doc_export_data_sets_judges_pixel_replacement_paths() {
+        // Exporting applies each data set, so an image outside the roots is refused as it is by
+        // `image.applyDataSet`, before any file is written (#8586).
+        let base = std::env::temp_dir().join(format!("pc-doc-data-sets-pixels-{}", std::process::id()));
+        let root = base.join("workspace");
+        std::fs::create_dir_all(&root).unwrap();
+        let img = photocraft_codecs::Image::from_u8(4, 4, photocraft_codecs::ChannelLayout::Rgb, vec![42; 4 * 4 * 3]).unwrap();
+        let outside = base.join("outside.png");
+        std::fs::write(&outside, photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &Default::default()).unwrap()).unwrap();
+        let mut h = Headless::with_workspace(crate::AuthorizedWorkspace::new(Some(&root), Some(&root)).unwrap());
+        h.handle("doc.new", json!({"width": 8, "height": 8, "background": "white", "name": "card"})).unwrap();
+        let layer = h.handle("doc.inspect", json!({})).unwrap()["layers"][0]["id"].as_u64().expect("the layer id");
+        h.handle(
+            "engine.execute",
+            json!({"command": "image.variables.define", "params": {"defs": [{"name": "photo", "layer": layer, "type": "pixelReplacement"}]}}),
+        )
+        .unwrap();
+        h.handle(
+            "engine.execute",
+            json!({"command": "image.variables.dataSets", "params": {"dataSets": [
+                {"name": "swap", "values": [{"variable": "photo", "kind": "pixels", "value": outside.to_string_lossy()}]},
+            ]}}),
+        )
+        .unwrap();
+
+        let sets = root.join("sets");
+        let refused = h.handle("doc.exportDataSets", json!({"dir": sets.to_string_lossy(), "format": "png"})).unwrap_err().to_string();
+        assert!(refused.contains("ambient filesystem paths"), "{refused}");
+        assert_eq!(std::fs::read_dir(&sets).map_or(0, Iterator::count), 0, "no file of the refused batch");
+        drop(h);
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
     fn indexed_place_and_data_set_methods_keep_the_active_document() {
         let base = std::env::temp_dir().join(format!("pc-doc-index-active-{}", std::process::id()));
         let root = base.join("workspace");
