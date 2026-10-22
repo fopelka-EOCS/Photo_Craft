@@ -1156,6 +1156,40 @@ const MASK_USING: &[(&str, &str)] = &[
     ("HdSl", "layer.layerMask.hideSelection"),
 ];
 
+/// Keep Make's surrounding layer properties on the same command as its adjustment (#8384).
+/// An unreadable property keeps the entire Photoshop step instead of silently changing it.
+fn adjustment_layer_steps(a: &Adjustment, t: Option<&Descriptor>, using: Option<&Descriptor>) -> Mapped {
+    let Mapped::Steps(mut steps) = adjustment_steps(a, "layer.newAdjustmentLayer.", t) else {
+        return Mapped::Unsupported { harmless: false };
+    };
+    let Some((_, Value::Object(p))) = steps.first_mut() else { return Mapped::Unsupported { harmless: false } };
+    if let Some(u) = using {
+        if u.get("Nm  ").is_some() {
+            let Some(n) = get_text(u, "Nm  ") else { return Mapped::Unsupported { harmless: false } };
+            p.insert("name".into(), n.into());
+        }
+        if let Some(opacity) = u.get("Opct") {
+            if matches!(opacity, D::UnitFloat { unit, .. } if *unit != PCT) {
+                return Mapped::Unsupported { harmless: false };
+            }
+            let Some(o) = get_num(u, "Opct").filter(|o| (0.0..=100.0).contains(o)) else { return Mapped::Unsupported { harmless: false } };
+            // Photoshop stores layer opacity on a 0..255 scale even in a 16-bit document.
+            p.insert("opacity".into(), ((o * 255.0 / 100.0).round() / 255.0).into());
+        }
+        if u.get("Md  ").is_some() {
+            let Some(m) = get_enum(u, "Md  ").and_then(|m| blend_label(&m)).filter(|m| *m != "Pass Through") else {
+                return Mapped::Unsupported { harmless: false };
+            };
+            p.insert("blend".into(), m.into());
+        }
+        if u.get("Grup").is_some() {
+            let Some(clipped) = get_bool(u, "Grup") else { return Mapped::Unsupported { harmless: false } };
+            p.insert("clipped".into(), clipped.into());
+        }
+    }
+    Mapped::Steps(steps)
+}
+
 fn make_from(d: &Descriptor) -> Mapped {
     // Duplicate layer/group into a new document: `Mk` with a document class, a layer
     // `Usng`, an optional `Nm` (the new document's name) and an optional `LyrN`
@@ -1253,7 +1287,7 @@ fn make_from(d: &Descriptor) -> Mapped {
             step("layer.new.layer", Value::Object(p))
         }
         Some("AdjL") => match type_desc.and_then(|t| adjustment_by_class(&trimmed(&t.class_id))) {
-            Some(a) => adjustment_steps(a, "layer.newAdjustmentLayer.", type_desc),
+            Some(a) => adjustment_layer_steps(a, type_desc, using),
             None => Mapped::Unsupported { harmless: false },
         },
         Some("contentLayer") => match type_desc {
@@ -1408,7 +1442,27 @@ fn make_to(id: &str, p: &Value) -> Option<Descriptor> {
             } else {
                 (a.to)(p)?
             };
-            desc("null").with("null", class_ref("AdjL")).with("Usng", D::Descriptor(desc("AdjL").with("Type", D::Descriptor(t))))
+            {
+                let mut u = desc("AdjL").with("Type", D::Descriptor(t));
+                if p.get("name").is_some() {
+                    u = u.with("Nm  ", text(jstr(p, "name")?));
+                }
+                if p.get("opacity").is_some() {
+                    let opacity = jnum(p, "opacity").filter(|o| o.is_finite() && (0.0..=1.0).contains(o))?;
+                    u = u.with("Opct", pct(opacity * 100.0));
+                }
+                if p.get("blend").is_some() {
+                    let mode = jstr(p, "blend")?;
+                    if crate::commands::blend_from_str(mode)? == photocraft_color::BlendMode::PassThrough {
+                        return None;
+                    }
+                    u = u.with("Md  ", enm("BlnM", blend_ps(mode)?));
+                }
+                if p.get("clipped").is_some() {
+                    u = u.with("Grup", D::Boolean(jbool(p, "clipped")?));
+                }
+                desc("null").with("null", class_ref("AdjL")).with("Usng", D::Descriptor(u))
+            }
         }
     })
 }
@@ -3352,7 +3406,7 @@ const EVENTS: &[Event] = &[
     adjustment_event!("Pstr", "Pstr", "posterize", "Posterize"),
     adjustment_event!("Invr", "Invr", "invert", "Invert"),
     adjustment_event!("ClrB", "ClrB", "colorBalance", "Color Balance"),
-    adjustment_event!("Vbrn", "Vbrn", "vibrance", "Vibrance"),
+    adjustment_event!("", "Vbrn", "vibrance", "Vibrance"),
     adjustment_event!("Exps", "Exps", "exposure", "Exposure"),
     // Photoshop runs Photo Filter by name only: `PhtF` is the class, not an event (#8301).
     adjustment_event!("", "PhtF", "photoFilter", "Photo Filter"),
@@ -3670,7 +3724,7 @@ const EVENTS: &[Event] = &[
 /// `flatness` property, not the flatten event. Import keeps accepting them so actions saved
 /// before still load; export never writes them.
 const LEGACY_CODES: &[(&str, &str)] =
-    &[("BoxB", "boxblur"), ("SrfB", "surfaceBlur"), ("Fltn", "flattenImage"), ("BlnW", "blackAndWhite"), ("PhtF", "photoFilter")];
+    &[("BoxB", "boxblur"), ("SrfB", "surfaceBlur"), ("Fltn", "flattenImage"), ("BlnW", "blackAndWhite"), ("PhtF", "photoFilter"), ("Vbrn", "vibrance")];
 
 fn event_for(item: &AtnEvent) -> Option<&'static Event> {
     let id = item.id();
