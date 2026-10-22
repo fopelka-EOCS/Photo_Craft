@@ -153,7 +153,7 @@ pub(crate) fn forbidden_line_start(c: char) -> bool {
     matches!(
         c,
         // Closing brackets and quotation marks.
-        '）' | '］' | '｝' | '〕' | '〉' | '》' | '」' | '』' | '】' | '〗' | '〙' | '〛' | '｣' | '｠'
+        '）' | '］' | '｝' | '〕' | '〉' | '》' | '」' | '』' | '】' | '〗' | '〙' | '〛' | '〟' | '｣' | '｠'
             | '”' | '’' | '\'' | '"'
             // Sentence punctuation.
             | '、' | '。' | '，' | '．' | '・' | '：' | '；' | '？' | '！' | '｡' | '､' | '･'

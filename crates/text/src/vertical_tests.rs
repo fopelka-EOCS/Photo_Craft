@@ -143,8 +143,8 @@ fn line_start_kinsoku_keeps_forbidden_characters_off_the_column_start() {
     // The character sets, without a font.
     for c in [
         'ぁ', 'ぃ', 'ぅ', 'ぇ', 'ぉ', 'っ', 'ゃ', 'ゅ', 'ょ', 'ゎ', 'ゕ', 'ゖ', 'ァ', 'ィ', 'ゥ', 'ェ', 'ォ', 'ッ', 'ャ', 'ュ', 'ョ', 'ヮ', 'ヵ', 'ヶ', 'ｧ',
-        'ｯ', 'ー', 'ｰ', '、', '。', '，', '．', '・', '：', '；', '？', '！', '｡', '､', '･', '」', '』', '）', '］', '｝', '】', '〉', '》', '々', 'ゝ', 'ヽ',
-        '゛', '゜', '”', '’',
+        'ｯ', 'ー', 'ｰ', '、', '。', '，', '．', '・', '：', '；', '？', '！', '｡', '､', '･', '」', '』', '）', '］', '｝', '】', '〉', '》', '〟', '々', 'ゝ',
+        'ヽ', '゛', '゜', '”', '’',
     ] {
         assert!(forbidden_line_start(c), "{c}");
     }
@@ -192,6 +192,21 @@ fn line_start_kinsoku_keeps_forbidden_characters_off_the_column_start() {
         "{fam}: {:?}",
         h.lines.iter().map(|l| &horizontal[l.range.clone()]).collect::<Vec<_>>()
     );
+}
+
+/// U+301F 〟 is a closing quotation mark (JLREQ cl-02) used in vertical composition. In a narrow
+/// one-character column an emergency BreakWord break would otherwise start a column with it:
+/// "あい〟うえ" would set 〟 at the start of the third column. 行頭禁則 keeps it on the previous
+/// column instead.
+#[test]
+fn narrow_box_keeps_u301f_quote_off_the_column_start() {
+    let Some((mut e, fam)) = cjk_engine() else { return };
+    let text = "あい〟うえ";
+    let layer = TextLayer { shape: TextShape::Box { x: 0.0, y: 0.0, width: 200.0, height: 30.0 }, ..vertical(text, &fam, 20.0) };
+    let l = e.layout(&layer, 72.0);
+    assert!(l.lines.len() >= 2, "{fam}: {text} needs columns");
+    let columns: Vec<&str> = l.lines.iter().map(|line| &text[line.range.clone()]).collect();
+    assert!(!columns.iter().any(|column| column.starts_with('〟')), "{fam}: {columns:?}");
 }
 
 #[test]
