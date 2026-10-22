@@ -432,19 +432,20 @@ fn subject_adapter(s: &Session, p: &SubjectParams) -> Result<Option<std::sync::A
             s.adapters
                 .list()
                 .iter()
-                .find(|descriptor| {
+                .find(|d| {
                     #[cfg(not(target_arch = "wasm32"))]
-                    if !s.adapter_packages.ready_for_automatic_run(&descriptor.id) {
+                    if !s.adapter_packages.ready_for_automatic_run(&d.id) {
                         return false;
                     }
-                    descriptor.operations.iter().any(|op| {
+                    let op_match = d.operations.iter().any(|op| {
                         op.id == SUBJECT_OPERATION
                             && op.output_kind == OutputKind::Mask
-                            && input_mode.is_some_and(|mode| op.color_modes.iter().any(|m| m == mode))
-                    })
-                        && p.device.as_ref().is_none_or(|id| {
-                            descriptor.devices.iter().any(|device| device.id == *id && device.operations.iter().any(|op| op == SUBJECT_OPERATION))
-                        })
+                            && input_mode.as_ref().is_some_and(|mode| op.color_modes.iter().any(|m| m == mode))
+                    });
+                    let device_match = p.device.as_ref().is_none_or(|id| {
+                        d.devices.iter().any(|dev| dev.id == *id && dev.operations.iter().any(|op| op == SUBJECT_OPERATION))
+                    });
+                    op_match && device_match
                 })
                 .and_then(|descriptor| s.adapters.get(&descriptor.id))
         }

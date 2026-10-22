@@ -239,7 +239,9 @@ impl PackageStore {
     /// Packages need an explicit successful check; embedded adapters own their availability.
     /// This v1 package/default-model cache is not per-resource or hardware attestation.
     pub(crate) fn ready_for_automatic_run(&self, id: &str) -> bool {
-        self.packages.get(id).is_none_or(|entry| entry.record.enabled && entry.status.get("state").and_then(Value::as_str) == Some("ready"))
+        self.packages.get(id).is_none_or(|entry| {
+            entry.record.enabled && entry.status.get("state").and_then(Value::as_str) == Some("ready")
+        })
     }
 
     fn directory(&self, id: &str) -> Result<PathBuf> {
