@@ -22,6 +22,84 @@ fn sections_with_boxes_have_flags() {
     assert!(b.texture.enabled);
 }
 
+#[test]
+fn texture_pattern_browser_dispatch_preserves_other_texture_settings() {
+    let mut app = app();
+    let Some(pattern) = app.session.patterns.items.first().map(|p| p.id.clone()) else {
+        panic!("the session starts with built-in patterns");
+    };
+    let global_selection = Some("global-pattern-selection".to_string());
+    app.session.presets.pattern = global_selection.clone();
+    let tx = &mut app.session.tools.brush.texture;
+    tx.enabled = true;
+    tx.invert = true;
+    tx.scale = 1.75;
+    tx.brightness = -0.25;
+    tx.contrast = 0.6;
+    tx.each_tip = true;
+    tx.mode = MaskMode::HardMix;
+    tx.depth = 0.73;
+    tx.depth_jitter = paint::Dynamic { jitter: 0.31, minimum: 0.12, control: Control::PenPressure, ..Default::default() };
+    app.run("brush.texturePattern", json!({ "pattern": pattern })).unwrap();
+
+    let tx = &app.session.tools.brush.texture;
+    assert!(matches!(tx.pattern, Pattern::Tile(_)), "library patterns are converted to the brush's greyscale tile representation");
+    assert!(tx.enabled);
+    assert!(tx.invert);
+    assert_eq!(tx.scale, 1.75);
+    assert_eq!(tx.brightness, -0.25);
+    assert_eq!(tx.contrast, 0.6);
+    assert!(tx.each_tip);
+    assert_eq!(tx.mode, MaskMode::HardMix);
+    assert_eq!(tx.depth, 0.73);
+    assert_eq!(tx.depth_jitter.jitter, 0.31);
+    assert_eq!(tx.depth_jitter.minimum, 0.12);
+    assert_eq!(tx.depth_jitter.control, Control::PenPressure);
+    assert_eq!(app.session.presets.pattern, global_selection, "brush texture selection must not change the global Patterns panel selection");
+}
+
+#[test]
+fn brush_settings_texture_uses_compact_patterns_browser_and_keeps_panel_selection_independent() {
+    use egui_kittest::kittest::Queryable;
+
+    let mut h = harness(0, 3);
+    let (pattern_id, pattern_name) = h
+        .state()
+        .session
+        .presets
+        .pattern_groups
+        .iter()
+        .find_map(|g| {
+            g.items.first().and_then(|id| h.state().session.patterns.items.iter().find(|p| &p.id == id).map(|p| (p.id.clone(), p.display_name().to_string())))
+        })
+        .expect("a built-in Patterns group");
+    h.state_mut().session.tools.brush.texture.enabled = true;
+    let global_selection = Some("another-panel-selection".to_string());
+    h.state_mut().session.presets.pattern = global_selection.clone();
+    h.run_steps(2);
+
+    h.get_by_label("Browse…").click();
+    h.run_steps(2);
+    h.get_by_label(&pattern_name).click();
+    h.run_steps(4);
+
+    assert!(matches!(h.state().session.tools.brush.texture.pattern, Pattern::Tile(_)));
+    assert_eq!(h.state().ui.presets_ui.selected.get("brush-texture-patterns"), Some(&pattern_id));
+    assert_eq!(h.state().session.presets.pattern, global_selection, "the compact texture picker must not change the main Patterns panel selection");
+    assert_eq!(last_journal(h.state()).unwrap().0, "brush.texturePattern");
+}
+
+#[test]
+fn selecting_a_brush_preset_clears_the_compact_texture_pattern_selection() {
+    let mut app = app();
+    let preset = app.session.tools.presets.first().expect("built-in brush preset").name.clone();
+    app.ui.presets_ui.selected.insert("brush-texture-patterns".into(), "stale-pattern-id".into());
+
+    crate::brushes_tab::apply(&mut app, vec![crate::brushes_tab::Action::Select(preset)]);
+
+    assert!(!app.ui.presets_ui.selected.contains_key("brush-texture-patterns"));
+}
+
 /// What each section's controls edit, set to non-default values.
 fn edit_section(i: usize, b: &mut BrushSettings) {
     let dynamic = |jitter: f32, control: Control, minimum: f32| paint::Dynamic { jitter, control, fade_steps: 40, minimum, ..Default::default() };

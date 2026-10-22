@@ -203,7 +203,11 @@ pub fn show_picker(app: &mut PhotocraftApp, ctx: &egui::Context) {
     // Remember it for the picker's next open, and — egui's memory being saved — the next run.
     ctx.data_mut(|d| d.insert_persisted(size_id, [content.x, content.y]));
     let style = ctx.global_style();
-    let size = content + style.spacing.menu_margin.sum() + egui::Vec2::splat(2.0 * style.visuals.window_stroke().width);
+    // The body's controls and scroll area can measure 8 pt taller than the requested minimum
+    // content height. Account for that measured overflow, the popup margin and its stroke when
+    // clamping the origin; otherwise a picker at the bottom edge can extend to y=802 in an 800 pt
+    // viewport after its layout settles.
+    let size = content + style.spacing.menu_margin.sum() + egui::Vec2::splat(2.0 * style.visuals.window_stroke().width + 8.0);
     let pos = egui::pos2(x.min(screen.right() - size.x).max(screen.left()), y.min(screen.bottom() - size.y).max(screen.top()));
     let area = egui::Area::new(id).order(egui::Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
         let before = app.session.tools.brush.clone();
@@ -361,7 +365,10 @@ mod tests {
         let shown = h.ctx.memory(|m| m.area_rect(egui::Id::new("canvas-brush-picker"))).expect("picker shown");
         let screen = h.ctx.content_rect();
         assert!((shown.min.x - c.x).abs() < 1.0 && shown.min.y <= c.y + 1.0, "{shown:?}");
-        assert!(screen.contains_rect(shown.shrink(0.5)) && shown.width() > 250.0 && shown.height() > 150.0, "{shown:?}");
+        assert!(
+            screen.contains_rect(shown.shrink(0.5)) && shown.width() > 250.0 && shown.height() > 150.0,
+            "picker rect {shown:?} must fit content rect {screen:?} and retain usable size"
+        );
         // It is the real preset library, not a fixed set of round tips (#258).
         let names: Vec<String> = h.state().session.tools.presets.iter().take(3).map(|p| p.name.clone()).collect();
         {
@@ -402,31 +409,52 @@ mod tests {
     fn picker_click_picks_a_preset_and_double_click_closes_it() {
         use egui_kittest::kittest::Queryable;
         let mut h = harness(None);
+        // Start without a selected preset so the first click must dispatch a pick, even if the
+        // library's first card happens to be the harness's default brush.
+        h.state_mut().session.tools.current_preset = None;
         let c = h.state().last_canvas_rect.center();
         h.event(egui::Event::PointerMoved(c));
         h.run_steps(1);
         press(&mut h, c, PointerButton::Secondary, true);
         press(&mut h, c, PointerButton::Secondary, false);
         h.run_steps(2);
-        let names: Vec<String> = h.state().session.tools.presets.iter().skip(1).take(2).map(|p| p.name.clone()).collect();
+        let names: Vec<String> = h.state().session.tools.presets.iter().take(2).map(|p| p.name.clone()).collect();
+        assert_eq!(names.len(), 2, "the preset library supplies two cards");
+        assert_ne!(names[0], names[1], "the two clicks must target distinct presets");
         let picks = |h: &Harness<'static, PhotocraftApp>, name: &str| {
             h.state().session.journal.iter().filter(|(id, p)| id == "tools.setBrush" && *p == json!({ "preset": name })).count()
         };
+        let ctx = h.ctx.clone();
+        let picker_rect = || ctx.memory(|m| m.area_rect(crate::brush_picker::picker_id())).expect("picker shown");
+
+        // Filter each target into the visible part of the scroll area. Library order and grouping
+        // don't imply visibility: folder headers and earlier rows can push a card below the clip.
+        h.state_mut().ui.brush_picker_list.filter = names[0].clone();
+        h.run_steps(3);
+        let first_rect = h.get_by_label(&names[0]).rect();
+        assert!(picker_rect().contains(first_rect.center()), "first card is outside the picker: {first_rect:?}");
+        let first_before = picks(&h, &names[0]);
         h.get_by_label(&names[0]).click();
         h.run_steps(3);
-        assert_eq!(picks(&h, &names[0]), 1);
+        assert_eq!(picks(&h, &names[0]), first_before + 1, "single-click selection for {:?}", names[0]);
         assert!(h.state().ui.brush_picker.is_some(), "a click keeps the picker open");
-        let at = h.get_by_label(&names[1]).rect().center();
-        h.event(egui::Event::PointerMoved(at));
-        h.run_steps(1);
-        // Two clicks 2 frames apart; well after the first click, so not a triple click.
+
+        h.state_mut().ui.brush_picker_list.filter = names[1].clone();
+        h.run_steps(3);
+        let second_before = picks(&h, &names[1]);
+        let second_rect = h.get_by_label(&names[1]).rect();
+        assert!(picker_rect().contains(second_rect.center()), "second card is outside the picker: {second_rect:?}");
+        // The first card and filtered second card occupy the same grid position. Let egui's
+        // double-click window expire before starting a fresh pair, then use kittest's click helper
+        // for both halves so hover, press and release follow the same path as other UI tests.
         h.run_steps(40);
-        for pressed in [true, false, true, false] {
-            h.event(egui::Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
-            h.step();
-        }
-        h.run_steps(2);
-        assert_eq!(picks(&h, &names[1]), 1, "picked once: the second click only closes");
+        h.get_by_label(&names[1]).click();
+        h.run_steps(3);
+        assert_eq!(picks(&h, &names[1]), second_before + 1, "first click of the double-click selects {:?}", names[1]);
+        assert!(h.state().ui.brush_picker.is_some(), "the first click of a double-click keeps the picker open");
+        h.get_by_label(&names[1]).click();
+        h.run_steps(3);
+        assert_eq!(picks(&h, &names[1]), second_before + 1, "picked once: the second click only closes");
         assert_eq!(h.state().ui.brush_picker, None, "a double-click closes the picker");
         assert!(strokes(&h).is_empty(), "nothing painted under the picker");
         // Enter applies the typed size, then closes the picker.

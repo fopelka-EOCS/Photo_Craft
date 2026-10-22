@@ -75,6 +75,7 @@ impl Pick {
     }
 }
 
+/// Stable egui identity shared by the picker surface and the canvas-popup dismissal logic.
 pub(crate) fn picker_id() -> egui::Id {
     egui::Id::new("canvas-brush-picker")
 }
@@ -218,24 +219,23 @@ pub fn body(
     size: egui::Vec2,
 ) -> Vec<Pick> {
     let t = Tokens::get(ui.ctx());
-    let mut picks = Vec::new();
+    let state = std::cell::RefCell::new(st);
+    let picks = std::cell::RefCell::new(Vec::new());
     // The picker is its dragged (or remembered) size: at least that tall even when every group
     // is closed, so reopening one has the room to show it.
     ui.set_width(size.x);
     ui.set_min_height(size.y);
     let top = ui.cursor().min.y;
-    // The Size and Hardness controls live in one block flush with the left edge, at most
-    // [`HEAD_MAX_W`] wide: a picker dragged wider leaves the space past the block empty instead of
-    // stretching the rows across it.
-    ui.scope(|ui| {
+    // These are brush-tool controls, not part of the shared picker shell. Keep them stacked above
+    // the shell so its menu/search/browser layout stays consistent with other pickers.
+    ui.vertical(|ui| {
         ui.set_max_width(ui.available_width().min(HEAD_MAX_W));
-        // Size: value field plus a logarithmic slider (small sizes get most of the travel).
         ui.horizontal(|ui| {
             ui.label(RichText::new(tl!("Size")).color(t.text_dim));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let mut size = b.size;
-                if widgets::value_field(ui, &mut size, 1.0..=MAX_BRUSH_SIZE, "px", 72.0).changed() {
-                    b.size = size.round().clamp(1.0, MAX_BRUSH_SIZE);
+                let mut value = b.size;
+                if widgets::value_field(ui, &mut value, 1.0..=MAX_BRUSH_SIZE, "px", 72.0).changed() {
+                    b.size = value.round().clamp(1.0, MAX_BRUSH_SIZE);
                 }
             });
         });
@@ -254,35 +254,57 @@ pub fn body(
             dismiss_popup(&hardness);
         }
     });
-    ui.add_space(6.0);
-    widgets::hairline(ui);
-    ui.add_space(6.0);
-    ui.horizontal(|ui| {
-        icons::paint(ui, egui::Rect::from_min_size(ui.cursor().min + vec2(0.0, 3.0), vec2(16.0, 16.0)), "search", 14.0, t.text_faint);
-        ui.add_space(20.0);
-        widgets::text_field(ui, ui.id().with("brush-picker-search"), &mut st.filter, tl!("Search Brushes"), (size.x - 118.0).max(60.0), false);
+    let controls_h = (ui.cursor().min.y - top).max(0.0);
+    let mut menu = |ui: &mut egui::Ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            gear_menu(ui, current, presets, st, &mut picks);
+            gear_menu(ui, current, presets, &mut state.borrow_mut(), &mut picks.borrow_mut());
             let new_tip = "Create new brush preset from the current settings";
             let settings_tip = "Brush Settings…  (F5): every option of this brush";
             if named(icons::button(ui, "square-plus", 24.0, false, tl!(new_tip)), "New Brush Preset").clicked() {
-                picks.push(Pick::NewPreset);
+                picks.borrow_mut().push(Pick::NewPreset);
             }
             if named(icons::button(ui, "sliders-horizontal", 24.0, false, tl!(settings_tip)), "Brush Settings…").clicked() {
-                picks.push(Pick::OpenSettings);
+                picks.borrow_mut().push(Pick::OpenSettings);
             }
         });
-    });
-    ui.add_space(4.0);
-    // The list takes the picker's height past the controls above it and the footer below.
-    let mut layout = LIST;
-    layout.max_height = (size.y - (ui.cursor().min.y - top) - FOOTER_H).max(80.0);
-    picks.extend(brushes_tab::preset_list(ui, presets, current, st, layout).into_iter().map(Pick::List));
-    // The footer lives in the picker's bottom band whatever the list left over, flush with the
-    // bottom and the slider clear of the resize grip's corner.
-    ui.add_space((size.y - (ui.cursor().min.y - top) - SLIDER_H).max(FOOTER_GAP));
-    scale_slider(ui, st);
-    picks
+    };
+    let mut search = |ui: &mut egui::Ui| {
+        ui.horizontal(|ui| {
+            icons::paint(ui, egui::Rect::from_min_size(ui.cursor().min + vec2(0.0, 3.0), vec2(16.0, 16.0)), "search", 14.0, t.text_faint);
+            ui.add_space(20.0);
+            widgets::text_field(
+                ui,
+                ui.id().with("brush-picker-search"),
+                &mut state.borrow_mut().filter,
+                tl!("Search Brushes"),
+                (size.x - 40.0).max(60.0),
+                false,
+            );
+        });
+    };
+    let mut footer = |ui: &mut egui::Ui| {
+        ui.add_space((size.y - (ui.cursor().min.y - top) - SLIDER_H).max(FOOTER_GAP));
+        scale_slider(ui, &mut state.borrow_mut());
+    };
+
+    let list_picks = crate::preset_panels::picker_shell_custom(
+        ui,
+        (size.y - controls_h).max(0.0),
+        crate::preset_panels::ShellOptions {
+            panel_menu: Some(&mut menu),
+            search: Some(&mut search),
+            custom_footer: Some((&mut footer, FOOTER_H)),
+            ..Default::default()
+        },
+        |ui, allocated_h| {
+            brushes_tab::preset_list(ui, presets, current, &mut state.borrow_mut(), ListLayout { max_height: (allocated_h - 4.0).max(80.0), ..LIST })
+                .into_iter()
+                .map(Pick::List)
+                .collect::<Vec<_>>()
+        },
+    );
+    picks.borrow_mut().extend(list_picks);
+    picks.into_inner()
 }
 
 /// The footer's card-scale slider: how big the preset cards are drawn (1 the standard, 2 the
@@ -330,15 +352,20 @@ pub fn clamp_size(size: [f32; 2], screen: egui::Vec2) -> egui::Vec2 {
 pub fn resize_grip(ui: &mut egui::Ui, frame: egui::Rect, content: egui::Vec2) -> Option<egui::Vec2> {
     let t = Tokens::get(ui.ctx());
     let grip = egui::Rect::from_min_size(frame.right_bottom() - vec2(16.0, 16.0), vec2(16.0, 16.0));
-    let resp = ui.interact(grip, ui.id().with("brush-picker-resize"), egui::Sense::drag());
+    // The gear menu can extend over the bottom-right corner. Give the grip its own top interaction
+    // layer so it remains draggable there and can dismiss that menu, rather than letting the popup
+    // intercept the press.
+    let layer = egui::LayerId::new(egui::Order::Tooltip, ui.id().with("brush-picker-resize-layer"));
+    let grip_ui = ui.new_child(egui::UiBuilder::new().layer_id(layer).max_rect(grip));
+    let resp = grip_ui.interact(grip, ui.id().with("brush-picker-resize"), egui::Sense::drag());
     dismiss_popup(&resp);
     let corner = grip.right_bottom() - vec2(3.0, 3.0);
     for i in 0..3 {
         let o = i as f32 * 4.0;
-        ui.painter().line_segment([corner - vec2(o, 0.0), corner - vec2(0.0, o)], Stroke::new(1.0, t.text_faint));
+        grip_ui.painter().line_segment([corner - vec2(o, 0.0), corner - vec2(0.0, o)], Stroke::new(1.0, t.text_faint));
     }
     if resp.hovered() || resp.dragged() {
-        ui.ctx().set_cursor_icon(CursorIcon::ResizeNwSe);
+        grip_ui.ctx().set_cursor_icon(CursorIcon::ResizeNwSe);
     }
     // The size this drag started from, kept while the button is held.
     let start_id = resp.id.with("start");
@@ -347,8 +374,8 @@ pub fn resize_grip(ui: &mut egui::Ui, frame: egui::Rect, content: egui::Vec2) ->
     }
     resp.dragged().then(|| {
         let min = egui::vec2(MIN_SIZE[0], MIN_SIZE[1]);
-        let max = (ui.ctx().content_rect().size() - vec2(40.0, 40.0)).max(min);
-        let start: egui::Vec2 = ui.ctx().data_mut(|d| d.get_temp(start_id)).unwrap_or(content);
+        let max = (grip_ui.ctx().content_rect().size() - vec2(40.0, 40.0)).max(min);
+        let start: egui::Vec2 = grip_ui.ctx().data_mut(|d| d.get_temp(start_id)).unwrap_or(content);
         (start + resp.total_drag_delta().unwrap_or_default()).clamp(min, max)
     })
 }

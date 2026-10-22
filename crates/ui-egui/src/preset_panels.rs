@@ -259,26 +259,75 @@ pub(crate) fn pattern_picker(app: &PhotocraftApp, ui: &mut egui::Ui, selected: &
     let name = current.map_or(String::new(), |p| p.display_name().to_string());
     let resp = resp.on_hover_text(&name);
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Patterns")));
-    let mut picked = None;
-    egui::Popup::menu(&resp).show(|ui| {
-        ui.set_max_width(6.0 * (SWATCH + 4.0));
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
-            for p in pats {
-                let (r, cell) = ui.allocate_exact_size(vec2(SWATCH, SWATCH), Sense::click());
-                ui.painter().image(pattern_texture(&ctx, p).id(), r, uv, Color32::WHITE);
-                let (w, c) = if p.id == selected { (2.0, t.accent) } else { (1.0, t.field_border) };
-                ui.painter().rect_stroke(r, 0.0, Stroke::new(w, c), egui::StrokeKind::Outside);
-                let cell = cell.on_hover_text(p.display_name());
-                cell.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, p.display_name()));
-                if cell.clicked() {
-                    picked = Some(p.id.clone());
-                    ui.close();
-                }
-            }
-        });
-    });
+    let groups = pattern_group_views(pats, &app.session.presets.pattern_groups);
+    let picked = egui::Popup::menu(&resp)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            // Preserve the former six-swatch-wide popup while sharing the grouped browser.
+            ui.set_width(6.0 * (SWATCH + 4.0));
+            compact_pattern_browser(ui, pats, &groups, selected, "compact-pattern-picker", 240.0)
+        })
+        .and_then(|r| r.inner);
     picked.filter(|id| id != selected)
+}
+
+/// The Patterns library rendered by the shared browser without the standard panel shell. Used by
+/// compact pickers (Brush Settings and fill dialogs) that need selection but no footer or menus.
+pub(crate) fn compact_pattern_browser(
+    ui: &mut egui::Ui,
+    pats: &[photocraft_doc::Pattern],
+    groups: &[GroupView],
+    selected: &str,
+    panel: &'static str,
+    max_h: f32,
+) -> Option<String> {
+    let ctx = ui.ctx().clone();
+    let t = Tokens::get(&ctx);
+    let uv = Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0));
+    // Popup contents are rebuilt every frame. Keep the browser's expansion state in egui's
+    // temporary data store, scoped to this popup instance and consumer.
+    let state_id = egui::Id::new(("compact-pattern-browser", panel));
+    let mut state = ui.data(|d| d.get_temp::<PresetUi>(state_id)).unwrap_or_else(|| {
+        let mut state = PresetUi::default();
+        // Compact pickers replace the old ungrouped swatch grid. Keep every group's items
+        // immediately reachable on first open, while allowing users to collapse groups afterward.
+        state.toggled.extend(groups.iter().skip(1).map(|g| format!("{panel}/{}", g.name)));
+        state
+    });
+    state.selected.insert(panel.into(), selected.to_string());
+    state.sizes.insert(panel.into(), 40.0);
+    let mut adapter = BrowserAdapter {
+        panel,
+        groups,
+        options: BrowserOptions { canvas: Rect::NOTHING, max_h, flush: false },
+        capabilities: BrowserCapabilities { item_drag: false, group_drag: false, selection: true, activation: true },
+        item_context_menu: None,
+        group_context_menu: None,
+        paint_group: None,
+        paint_item: &mut |ui, r, gi, ii| {
+            if let Some(p) = groups.get(gi).and_then(|g| g.items.get(ii)).and_then(|i| pats.iter().find(|p| p.id == i.key)) {
+                ui.painter().image(pattern_texture(&ctx, p).id(), r, uv, Color32::WHITE);
+                let on = p.id == selected;
+                ui.painter().rect_stroke(
+                    r,
+                    0.0,
+                    Stroke::new(if on { 2.0 } else { 1.0 }, if on { t.accent } else { t.field_border }),
+                    egui::StrokeKind::Outside,
+                );
+            }
+        },
+    };
+    let mut picked = None;
+    for event in browser(ui, &mut state, &mut adapter, max_h) {
+        if let Ev::Select(id) | Ev::Activate(id) = event {
+            if id != selected {
+                picked = Some(id);
+            }
+            ui.close();
+        }
+    }
+    ui.data_mut(|d| d.insert_temp(state_id, state));
+    picked
 }
 
 pub(crate) fn style_texture(app: &PhotocraftApp, ctx: &egui::Context, st: &photocraft_engine::presets::styles::StylePreset) -> TextureHandle {
@@ -301,29 +350,193 @@ fn shape_texture(ctx: &egui::Context, sh: &photocraft_engine::presets::shapes::S
 
 // ------------------------------------------------------------------ the browser
 
+/// Asset-neutral item identity and label consumed by the shared picker browser.
 pub(crate) struct ItemView {
+    /// Stable consumer-defined key used for selection and emitted events.
     pub(crate) key: String,
+    /// Display label shown in the item card or list row.
     pub(crate) name: String,
 }
 
+/// Asset-neutral group and its ordered items, ready for rendering by the shared browser.
 pub(crate) struct GroupView {
+    /// Group label and identity used for collapse state and group actions.
     pub(crate) name: String,
+    /// Items in the order they should appear within this group.
     pub(crate) items: Vec<ItemView>,
 }
 
+/// Build browser groups from the current library, including patterns not yet reconciled into the
+/// saved group projection. Newly defined/imported patterns and reconstructed library ids must be
+/// visible in compact pickers even if the main Patterns panel has not rendered first.
+pub(crate) fn pattern_group_views(patterns: &[photocraft_doc::Pattern], groups: &[photocraft_engine::presets::Group<String>]) -> Vec<GroupView> {
+    let mut assigned = BTreeSet::new();
+    let mut views: Vec<GroupView> = groups
+        .iter()
+        .map(|g| GroupView {
+            name: g.name.clone(),
+            items: g
+                .items
+                .iter()
+                .filter_map(|id| patterns.iter().find(|p| &p.id == id))
+                .filter(|p| assigned.insert(p.id.clone()))
+                .map(|p| ItemView { key: p.id.clone(), name: p.display_name().to_string() })
+                .collect(),
+        })
+        .collect();
+    let loose: Vec<ItemView> =
+        patterns.iter().filter(|p| !assigned.contains(&p.id)).map(|p| ItemView { key: p.id.clone(), name: p.display_name().to_string() }).collect();
+    if !loose.is_empty() {
+        if let Some(group) = views.iter_mut().find(|g| g.name == "Patterns") {
+            group.items.extend(loose);
+        } else {
+            views.push(GroupView { name: "Patterns".into(), items: loose });
+        }
+    }
+    views
+}
+
+/// Reusable hierarchy projection for consumers whose items carry nested folder paths. The tree
+/// preserves source order: a folder appears where its first descendant occurs and direct items keep
+/// their positions relative to folders. Consumers retain their own row/card rendering and actions.
+#[derive(Debug)]
+pub enum HierarchyNode<'a, T> {
+    /// An item that belongs directly at this level of the hierarchy.
+    Preset(&'a T),
+    /// A nested folder, kept in the position of its first descendant.
+    Folder(HierarchyFolder<'a, T>),
+}
+
+/// A folder node in the shared, order-preserving hierarchy projection.
+#[derive(Debug)]
+pub struct HierarchyFolder<'a, T> {
+    /// Full path from the item's group root to this folder.
+    pub path: Vec<String>,
+    /// Items and subfolders in their original library order.
+    pub children: Vec<HierarchyNode<'a, T>>,
+    /// Number of items in this folder subtree, including nested folders.
+    pub count: usize,
+}
+
+/// Project ordered items and their folder paths into a hierarchy, truncating paths at `max_depth`.
+///
+/// Paths deeper than `max_depth` are truncated before grouping, so the view cannot recurse beyond
+/// the consumer's supported nesting limit. Item references remain borrowed from the source library.
+pub(crate) fn hierarchy_tree<'a, T>(items: Vec<(&'a [String], &'a T)>, max_depth: usize) -> Vec<HierarchyNode<'a, T>> {
+    let bounded = items.into_iter().map(|(path, item)| (&path[..path.len().min(max_depth)], item)).collect();
+    hierarchy_level(bounded, &[])
+}
+
+/// Shared ordered traversal for nested hierarchy views. Consumers provide their item-run renderer,
+/// folder presentation/interaction, and collapse policy; the traversal itself owns the recursive
+/// folder/item sequencing so specialised views do not grow independent hierarchy walkers.
+///
+/// Adjacent presets are batched into one `draw_items` call and flushed before each folder header;
+/// children are traversed only when `is_open` returns true and `max_depth` has not been reached.
+type HierarchyOpen<'a, 'b, T> = dyn FnMut(&HierarchyFolder<'a, T>) -> bool + 'b;
+type HierarchyDrawFolder<'a, 'b, T> = dyn FnMut(&mut egui::Ui, &HierarchyFolder<'a, T>, bool, usize) + 'b;
+type HierarchyDrawItems<'a, 'b, T> = dyn FnMut(&mut egui::Ui, &[&'a T], usize) + 'b;
+
+pub(crate) fn draw_hierarchy<'a, 'b, T>(
+    ui: &mut egui::Ui,
+    nodes: &[HierarchyNode<'a, T>],
+    depth: usize,
+    max_depth: usize,
+    is_open: &mut HierarchyOpen<'a, 'b, T>,
+    draw_folder: &mut HierarchyDrawFolder<'a, 'b, T>,
+    draw_items: &mut HierarchyDrawItems<'a, 'b, T>,
+) {
+    let mut run: Vec<&'a T> = Vec::new();
+    let flush = |ui: &mut egui::Ui, run: &mut Vec<&'a T>, draw_items: &mut dyn FnMut(&mut egui::Ui, &[&'a T], usize)| {
+        if !run.is_empty() {
+            draw_items(ui, run, depth);
+            run.clear();
+        }
+    };
+    for node in nodes {
+        match node {
+            HierarchyNode::Preset(item) => run.push(*item),
+            HierarchyNode::Folder(folder) => {
+                flush(ui, &mut run, draw_items);
+                let open = is_open(folder);
+                draw_folder(ui, folder, open, depth);
+                if open && depth < max_depth {
+                    draw_hierarchy(ui, &folder.children, depth + 1, max_depth, is_open, draw_folder, draw_items);
+                }
+            }
+        }
+    }
+    flush(ui, &mut run, draw_items);
+}
+
+type HierarchyEntry<'a, T> = (&'a [String], &'a T);
+
+/// Build one level of the tree while retaining the first-seen order of items and folders.
+fn hierarchy_level<'a, T>(items: Vec<HierarchyEntry<'a, T>>, prefix: &[String]) -> Vec<HierarchyNode<'a, T>> {
+    enum Slot {
+        Item(usize),
+        Folder(usize),
+    }
+    let mut slots = Vec::new();
+    let mut folders: Vec<(&String, Vec<HierarchyEntry<'a, T>>)> = Vec::new();
+    for (i, (path, item)) in items.iter().enumerate() {
+        match path.split_first() {
+            None => slots.push(Slot::Item(i)),
+            Some((name, rest)) => match folders.iter_mut().position(|(n, _)| *n == name) {
+                Some(k) => {
+                    if let Some((_, v)) = folders.get_mut(k) {
+                        v.push((rest, *item));
+                    }
+                }
+                None => {
+                    slots.push(Slot::Folder(folders.len()));
+                    folders.push((name, vec![(rest, *item)]));
+                }
+            },
+        }
+    }
+    type NamedFolderEntries<'a, T> = (&'a String, Vec<HierarchyEntry<'a, T>>);
+    let mut folders: Vec<Option<NamedFolderEntries<'a, T>>> = folders.into_iter().map(Some).collect();
+    slots
+        .into_iter()
+        .filter_map(|slot| match slot {
+            Slot::Item(i) => items.get(i).map(|(_, item)| HierarchyNode::Preset(*item)),
+            Slot::Folder(i) => {
+                let (name, sub) = folders.get_mut(i)?.take()?;
+                let path: Vec<String> = prefix.iter().cloned().chain(std::iter::once(name.clone())).collect();
+                let count = sub.len();
+                let children = hierarchy_level(sub, &path);
+                Some(HierarchyNode::Folder(HierarchyFolder { path, children, count }))
+            }
+        })
+        .collect()
+}
+
+/// Generic browser interactions; each asset consumer translates these into its own commands.
 pub(crate) enum Ev {
+    /// Select an item without activating or dismissing its picker.
     Select(String),
+    /// Activate an item, typically on a double-click.
     Activate(String),
+    /// Drop an item onto a canvas position in screen coordinates.
     Drop(String, Pos2),
+    /// Rename an item from its stable key to a new display name.
     Rename(String, String),
+    /// Delete the item identified by its stable key.
     Delete(String),
+    /// Move an item into the named group.
     Move(String, String),
+    /// Rename a group from its current name to a new name.
     RenameGroup(String, String),
+    /// Delete a group and its contents.
     DeleteGroup(String),
+    /// Request creation of a new group.
     NewGroup,
+    /// Request creation of a new item.
     New,
 }
 
+/// Initial expansion policy for a browser group, with explicit user toggles overriding the default.
 fn group_open(st: &PresetUi, panel: &str, gi: usize, name: &str) -> bool {
     // Swatch groups are small and all start open (Photoshop); other panels open the first only.
     (gi == 0 || panel == crate::swatches_ui::PANEL) != st.toggled.contains(&format!("{panel}/{name}"))
@@ -332,36 +545,226 @@ fn group_open(st: &PresetUi, panel: &str, gi: usize, name: &str) -> bool {
 /// The footer's height (gap, size slider and buttons) before it has been measured.
 const FOOTER_GUESS: f32 = 32.0;
 
-/// Draws the folders and footer; `thumb` paints item `(group, item)` into a rect.
-/// Where a browser sits: the canvas (drop target), its height cap and the New button's tooltip.
+/// Browser-specific layout and presentation, supplied by each asset consumer.
 /// `flush` lays the grid out as Photoshop's Swatches panel: the cells touch, square-cornered and
 /// without a border of their own, so no screen is spent on gaps (#5103); gradients, patterns and
 /// the other preset grids keep their [`GRID_GAP`] and card borders.
-pub(crate) struct Place<'a> {
+#[derive(Clone, Copy)]
+pub(crate) struct BrowserOptions {
+    /// Canvas hit region used to distinguish drops onto the canvas from drops into the browser.
     pub(crate) canvas: Rect,
+    /// Consumer-specific cap; the shell reduces this after reserving its optional controls.
     pub(crate) max_h: f32,
-    pub(crate) new_tip: &'a str,
+    /// Use touching, square-cornered grid cells rather than spaced preset cards.
     pub(crate) flush: bool,
 }
+
+/// Features that can be enabled independently for a particular browser consumer.
+#[derive(Clone, Copy)]
+pub(crate) struct BrowserCapabilities {
+    /// Whether presets can be dragged to the canvas or other browser targets.
+    pub(crate) item_drag: bool,
+    /// Whether group headers can be reordered by dragging.
+    pub(crate) group_drag: bool,
+    /// Whether clicking an item emits a selection event.
+    pub(crate) selection: bool,
+    /// Whether activating an item (for example, double-clicking) emits an activation event.
+    pub(crate) activation: bool,
+}
+
+impl Default for BrowserCapabilities {
+    fn default() -> Self {
+        Self { item_drag: true, group_drag: true, selection: true, activation: true }
+    }
+}
+
+/// Optional consumer-provided painter for a group row: UI, row rectangle, group, open, hovered.
+pub(crate) type PaintGroup = dyn FnMut(&egui::Ui, Rect, &GroupView, bool, bool);
+
+/// Consumer adapter for the generic browser. Each asset library projects its own identity and
+/// labels into `GroupView`/`ItemView`, paints its own preview, and handles returned `Ev` values with
+/// its own commands. The browser never knows about gradient, pattern, swatch, style, or brush data.
+pub(crate) struct BrowserAdapter<'a> {
+    /// Stable key for this consumer's selection, sizing, and folder-collapse state.
+    pub(crate) panel: &'a str,
+    /// Consumer-projected groups and ordered items to display.
+    pub(crate) groups: &'a [GroupView],
+    /// Grid geometry and consumer-specific layout options.
+    pub(crate) options: BrowserOptions,
+    /// Toggleable interactions supported by this consumer.
+    pub(crate) capabilities: BrowserCapabilities,
+    /// Consumers may replace the standard item menu or omit it entirely. The browser only owns
+    /// the hit target; menu contents and emitted generic requests live behind this adapter seam.
+    pub(crate) item_context_menu: Option<ItemContextMenu>,
+    /// Consumer-specific group menu policy, attached to the shared group hit target.
+    pub(crate) group_context_menu: Option<GroupContextMenu>,
+    /// Optional override for group-row visuals; the default is a folder row with disclosure.
+    pub(crate) paint_group: Option<&'a mut PaintGroup>,
+    /// Consumer-specific item preview painter, given the UI, target rectangle, group index and item index.
+    pub(crate) paint_item: &'a mut dyn FnMut(&egui::Ui, Rect, usize, usize),
+}
+
+/// Consumer callback that appends generic events for actions offered on an item.
+pub(crate) type ItemContextMenu = fn(&mut egui::Ui, &mut PresetUi, &str, &ItemView, &GroupView, &[String], &mut Vec<Ev>);
+/// Consumer callback that appends generic events for actions offered on a group header.
+pub(crate) type GroupContextMenu = fn(&mut egui::Ui, &mut PresetUi, &str, &GroupView, &mut Vec<Ev>);
+
+/// Actions shared by picker item and group context menus. Consumers translate these into their
+/// own state updates or engine commands, while the menu labels and interaction stay consistent.
+pub(crate) enum ContextMenuAction {
+    /// Begin renaming the targeted item or group.
+    Rename,
+    /// Delete the targeted item or group.
+    Delete,
+    /// Move the targeted item into the named group.
+    MoveTo(String),
+}
+
+/// Draw a configurable item context menu and return the chosen generic action, if any.
+///
+/// `move_to` supplies the submenu label, available group names, and current group; the current
+/// group is omitted from the choices. Returns a generic action without mutating an asset library.
+pub(crate) fn draw_item_context_menu(
+    ui: &mut egui::Ui,
+    rename_label: &str,
+    delete_label: &str,
+    move_to: Option<(&str, &[String], &str)>,
+) -> Option<ContextMenuAction> {
+    if ui.button(rename_label).clicked() {
+        ui.close();
+        return Some(ContextMenuAction::Rename);
+    }
+    if ui.button(delete_label).clicked() {
+        ui.close();
+        return Some(ContextMenuAction::Delete);
+    }
+    if let Some((label, group_names, current_group)) = move_to {
+        let mut action = None;
+        ui.menu_button(label, |ui| {
+            for group in group_names.iter().filter(|name| name.as_str() != current_group) {
+                if ui.button(group).clicked() {
+                    action = Some(ContextMenuAction::MoveTo(group.clone()));
+                    ui.close();
+                }
+            }
+        });
+        return action;
+    }
+    None
+}
+
+/// Draw a group's rename/delete context menu and return the chosen action, if any.
+pub(crate) fn draw_group_context_menu(ui: &mut egui::Ui, rename_label: &str, delete_label: &str) -> Option<ContextMenuAction> {
+    if ui.button(rename_label).clicked() {
+        ui.close();
+        Some(ContextMenuAction::Rename)
+    } else if ui.button(delete_label).clicked() {
+        ui.close();
+        Some(ContextMenuAction::Delete)
+    } else {
+        None
+    }
+}
+
+/// Default menu policy for the standard preset panels. Keeping this separate from the browser
+/// lets specialised consumers supply their own operations without forking the shared hit targets.
+pub(crate) fn standard_item_context_menu(
+    ui: &mut egui::Ui,
+    st: &mut PresetUi,
+    panel: &str,
+    item: &ItemView,
+    group: &GroupView,
+    group_names: &[String],
+    ev: &mut Vec<Ev>,
+) {
+    match draw_item_context_menu(ui, tl!("Rename…"), tl!("Delete"), Some((tl!("Move to"), group_names, &group.name))) {
+        Some(ContextMenuAction::Rename) => st.renaming = Some((panel.to_string(), item.key.clone(), item.name.clone())),
+        Some(ContextMenuAction::Delete) => ev.push(Ev::Delete(item.key.clone())),
+        Some(ContextMenuAction::MoveTo(group)) => ev.push(Ev::Move(item.key.clone(), group)),
+        None => {}
+    }
+}
+
+/// Apply the shared rename/delete policy for a standard browser group context menu.
+pub(crate) fn standard_group_context_menu(ui: &mut egui::Ui, st: &mut PresetUi, panel: &str, group: &GroupView, ev: &mut Vec<Ev>) {
+    match draw_group_context_menu(ui, tl!("Rename Group…"), tl!("Delete Group")) {
+        Some(ContextMenuAction::Rename) => st.renaming = Some((panel.to_string(), format!("group:{}", group.name), group.name.clone())),
+        Some(ContextMenuAction::Delete) => ev.push(Ev::DeleteGroup(group.name.clone())),
+        _ => {}
+    }
+}
+
+/// Shared context-menu hit target for specialised consumers that keep their own row/card renderer.
+/// The caller provides the menu policy and generic action requests; this helper owns only egui's
+/// response wiring, matching the standard browser's item/group targets.
+pub(crate) fn context_menu_target(resp: egui::Response, menu: impl FnOnce(&mut egui::Ui)) {
+    let _ = resp.context_menu(menu);
+}
+
+/// Optional standard-picker footer controls. The shell owns their placement; the browser only
+/// emits the corresponding generic events, leaving each consumer to dispatch asset-specific work.
+pub(crate) struct FooterOptions<'a> {
+    pub(crate) new_tip: &'a str,
+    pub(crate) size_slider: bool,
+    pub(crate) new_group: bool,
+    pub(crate) new_item: bool,
+    pub(crate) delete: bool,
+}
+
+impl<'a> FooterOptions<'a> {
+    /// Enable the standard new-item, new-group, delete, and size controls for a picker footer.
+    pub(crate) fn standard(new_tip: &'a str) -> Self {
+        Self { new_tip, size_slider: true, new_group: true, new_item: true, delete: true }
+    }
+}
+
+/// Shell-level controls are optional so compact pickers can share the browser without inheriting
+/// the standard footer or panel chrome. Callbacks draw consumer-specific controls; they never
+/// dispatch browser item/group actions.
+#[derive(Default)]
+pub(crate) struct ShellOptions<'a> {
+    /// Optional consumer-owned header content above the shared picker controls.
+    pub(crate) header: Option<&'a mut dyn FnMut(&mut egui::Ui)>,
+    /// Optional consumer-owned menu button or settings controls.
+    pub(crate) panel_menu: Option<&'a mut dyn FnMut(&mut egui::Ui)>,
+    /// Optional search control; the consumer owns its query state and filtering.
+    pub(crate) search: Option<&'a mut dyn FnMut(&mut egui::Ui)>,
+    /// Optional recent-items strip rendered above the browser.
+    pub(crate) recents: Option<&'a mut dyn FnMut(&mut egui::Ui)>,
+    /// Standard shared footer controls, when the picker needs them.
+    pub(crate) footer: Option<FooterOptions<'a>>,
+    /// Consumer-owned footer renderer plus the height it reserves in the browser viewport.
+    pub(crate) custom_footer: Option<CustomFooter<'a>>,
+}
+
+type CustomFooter<'a> = (&'a mut dyn FnMut(&mut egui::Ui), f32);
 
 /// Space between the cells of a preset grid, and the grid's inset from the panel's left edge.
 const GRID_GAP: f32 = 4.0;
 const GRID_INSET: f32 = 8.0;
 
-pub(crate) fn browser(
-    ui: &mut egui::Ui,
-    st: &mut PresetUi,
-    panel: &str,
-    groups: &[GroupView],
-    place: Place,
-    thumb: &mut dyn FnMut(&egui::Ui, Rect, usize, usize),
-) -> Vec<Ev> {
+/// Draw only the reusable library region. It owns groups/items, selection, drag/drop and item/group
+/// context targets, but not the containing panel's optional controls or footer.
+///
+/// `allocated_height` is reserved by the caller or picker shell; the browser owns only the
+/// scrolling library region, not search, recents, panel menus, footer controls, or command dispatch.
+pub(crate) fn browser(ui: &mut egui::Ui, st: &mut PresetUi, adapter: &mut BrowserAdapter<'_>, allocated_height: f32) -> Vec<Ev> {
     let t = Tokens::get(ui.ctx());
-    let Place { canvas, max_h, new_tip, flush } = place;
+    let panel = adapter.panel;
+    let groups = adapter.groups;
+    let BrowserOptions { canvas, flush, .. } = adapter.options;
+    let capabilities = adapter.capabilities;
+    let item_context_menu = adapter.item_context_menu;
+    let group_context_menu = adapter.group_context_menu;
+    let paint_group = &mut adapter.paint_group;
+    let paint_item = &mut adapter.paint_item;
+    let max_h = allocated_height;
     let mut ev = Vec::new();
     let size = *st.sizes.get(panel).unwrap_or(&40.0);
     let list = size <= MIN_THUMB + 0.5;
     let selected = st.selected.get(panel).cloned();
+    let rename_row_top = ui.cursor().top();
+    let has_rename_row = st.renaming.as_ref().is_some_and(|r| r.0 == panel);
     // Rename field (Photoshop opens a small dialog; inline keeps the panel modeless).
     if let Some((p, key, mut text)) = st.renaming.clone().filter(|r| r.0 == panel) {
         let mut done = None;
@@ -386,6 +789,11 @@ pub(crate) fn browser(
             }
         }
     }
+    // The rename row is part of the browser's allocated height, not extra height above it. The
+    // scroll area's minimum must exclude the row (and its layout spacing), or a short dock can
+    // push the shell-owned footer below the panel.
+    let rename_row_height = if has_rename_row { (ui.cursor().top() - rename_row_top).max(0.0) } else { 0.0 };
+    let scroll_height = (max_h - rename_row_height).max(0.0);
     let mut headers: Vec<(usize, Rect, String)> = Vec::new();
     let mut dropped: Option<(String, Pos2)> = None;
     // Folder drag (#3658): the order the folders are drawn in, and what the pointer is doing this
@@ -394,50 +802,50 @@ pub(crate) fn browser(
     let mut released: Option<(usize, Pos2)> = None;
     let group_names: Vec<String> = groups.iter().map(|g| g.name.clone()).collect();
     let display = st.display_order(panel, &group_names);
-    // The footer stays in view: the list gets the height left after it (as measured last frame)
-    // and scrolls, rather than pushing the footer out of a short dock group (#4790).
-    let footer_id = egui::Id::new(("preset-footer", panel));
-    let footer_h = ui.data(|d| d.get_temp::<f32>(footer_id)).unwrap_or(FOOTER_GUESS);
-    let max_h = max_h.min((ui.available_height() - footer_h).max(0.0));
-    egui::ScrollArea::vertical().id_salt(("preset-scroll", panel)).max_height(max_h).min_scrolled_height(max_h.min(64.0)).auto_shrink([false, true]).show(
-        ui,
-        |ui| {
+    // The browser is the flexible middle region of a picker panel. Keep it at the allocated
+    // height even when the library is short; otherwise the footer floats up and each consumer's
+    // panel geometry depends on how many presets happen to be installed.
+    let scroll = egui::ScrollArea::vertical()
+        .id_salt(("preset-scroll", panel))
+        .max_height(scroll_height)
+        .min_scrolled_height(scroll_height)
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
             ui.spacing_mut().item_spacing = vec2(0.0, 2.0);
             for &gi in &display {
                 let Some(g) = groups.get(gi) else { continue };
                 let open = group_open(st, panel, gi, &g.name);
                 let (hr, hresp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click_and_drag());
-                if hresp.hovered() || hresp.dragged() {
-                    ui.painter().rect_filled(hr, 2.0, t.hover.gamma_multiply(0.5));
+                if let Some(paint) = paint_group.as_deref_mut() {
+                    paint(ui, hr, g, open, hresp.hovered() || hresp.dragged());
+                } else {
+                    if hresp.hovered() || hresp.dragged() {
+                        ui.painter().rect_filled(hr, 2.0, t.hover.gamma_multiply(0.5));
+                    }
+                    let tri = Rect::from_center_size(pos2(hr.left() + 9.0, hr.center().y), vec2(12.0, 12.0));
+                    crate::icons::paint(ui, tri, if open { "chevron-down" } else { "chevron-right" }, 10.0, t.text_dim);
+                    let fold = Rect::from_center_size(pos2(hr.left() + 25.0, hr.center().y), vec2(14.0, 14.0));
+                    crate::icons::paint(ui, fold, if open { "folder-open" } else { "folder" }, 12.0, t.icon);
+                    ui.painter().text(pos2(hr.left() + 37.0, hr.center().y), Align2::LEFT_CENTER, &g.name, FontId::proportional(11.5), t.text);
                 }
-                let tri = Rect::from_center_size(pos2(hr.left() + 9.0, hr.center().y), vec2(12.0, 12.0));
-                crate::icons::paint(ui, tri, if open { "chevron-down" } else { "chevron-right" }, 10.0, t.text_dim);
-                let fold = Rect::from_center_size(pos2(hr.left() + 25.0, hr.center().y), vec2(14.0, 14.0));
-                crate::icons::paint(ui, fold, if open { "folder-open" } else { "folder" }, 12.0, t.icon);
-                ui.painter().text(pos2(hr.left() + 37.0, hr.center().y), Align2::LEFT_CENTER, &g.name, FontId::proportional(11.5), t.text);
                 if hresp.clicked() {
                     let k = format!("{panel}/{}", g.name);
                     if !st.toggled.remove(&k) {
                         st.toggled.insert(k);
                     }
                 }
-                hresp.context_menu(|ui| {
-                    if ui.button(tl!("Rename Group…")).clicked() {
-                        st.renaming = Some((panel.to_string(), format!("group:{}", g.name), g.name.clone()));
-                        ui.close();
-                    }
-                    if ui.button(tl!("Delete Group")).clicked() {
-                        ev.push(Ev::DeleteGroup(g.name.clone()));
-                        ui.close();
-                    }
-                });
-                if hresp.dragged()
+                if let Some(menu) = group_context_menu {
+                    context_menu_target(hresp.clone(), |ui| menu(ui, st, panel, g, &mut ev));
+                }
+                if capabilities.group_drag
+                    && hresp.dragged()
                     && let Some(p) = ui.ctx().pointer_interact_pos()
                 {
                     drag = Some((gi, p));
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                 }
-                if hresp.drag_stopped()
+                if capabilities.group_drag
+                    && hresp.drag_stopped()
                     && let Some(p) = ui.ctx().pointer_interact_pos()
                 {
                     released = Some((gi, p));
@@ -470,10 +878,10 @@ pub(crate) fn browser(
                             ui.painter().rect_filled(r, 0.0, t.hover.gamma_multiply(0.5));
                         }
                         let tr = Rect::from_min_size(r.min + vec2(24.0, 2.0), vec2(20.0, 20.0));
-                        thumb(ui, tr, gi, ii);
+                        paint_item(ui, tr, gi, ii);
                         ui.painter().text(pos2(tr.right() + 8.0, r.center().y), Align2::LEFT_CENTER, &it.name, FontId::proportional(11.5), t.text);
                     } else {
-                        thumb(ui, r, gi, ii);
+                        paint_item(ui, r, gi, ii);
                         // Touching cells draw no border of their own: only the selected and the
                         // hovered one are outlined, over their neighbours, as in Photoshop.
                         let stroke = if is_sel {
@@ -490,12 +898,13 @@ pub(crate) fn browser(
                         }
                     }
                     let resp = if list { resp } else { resp.on_hover_text(&it.name) };
-                    if resp.double_clicked() {
+                    if capabilities.activation && resp.double_clicked() {
                         ev.push(Ev::Activate(it.key.clone()));
-                    } else if resp.clicked() {
+                    } else if capabilities.selection && resp.clicked() {
                         ev.push(Ev::Select(it.key.clone()));
                     }
-                    if resp.dragged()
+                    if capabilities.item_drag
+                        && resp.dragged()
                         && let Some(pp) = ui.ctx().pointer_interact_pos()
                     {
                         // A ghost of the swatch follows the pointer.
@@ -505,30 +914,16 @@ pub(crate) fn browser(
                         lp.rect_stroke(gr, 3.0, Stroke::new(1.0, t.accent), egui::StrokeKind::Outside);
                         lp.text(gr.center(), Align2::CENTER_CENTER, "+", FontId::proportional(16.0), t.accent);
                     }
-                    if resp.drag_stopped()
+                    if capabilities.item_drag
+                        && resp.drag_stopped()
                         && let Some(pp) = ui.ctx().pointer_interact_pos()
                         && !r.contains(pp)
                     {
                         dropped = Some((it.key.clone(), pp));
                     }
-                    resp.context_menu(|ui| {
-                        if ui.button(tl!("Rename…")).clicked() {
-                            st.renaming = Some((panel.to_string(), it.key.clone(), it.name.clone()));
-                            ui.close();
-                        }
-                        if ui.button(tl!("Delete")).clicked() {
-                            ev.push(Ev::Delete(it.key.clone()));
-                            ui.close();
-                        }
-                        ui.menu_button(tl!("Move to"), |ui| {
-                            for gname in group_names.iter().filter(|n| **n != g.name) {
-                                if ui.button(gname).clicked() {
-                                    ev.push(Ev::Move(it.key.clone(), gname.clone()));
-                                    ui.close();
-                                }
-                            }
-                        });
-                    });
+                    if let Some(menu) = item_context_menu {
+                        context_menu_target(resp.clone(), |ui| menu(ui, st, panel, it, g, &group_names, &mut ev));
+                    }
                 }
             }
             // Insertion line while a folder is dragged by its header.
@@ -543,8 +938,8 @@ pub(crate) fn browser(
                     ui.painter().line_segment([pos2(r.left(), y), pos2(r.right(), y)], Stroke::new(2.0, t.accent));
                 }
             }
-        },
-    );
+        });
+    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(("preset-browser-rect", panel)), scroll.inner_rect));
     // Apply the drop now every header rect is known; the next frame draws the new order.
     if let Some((from, p)) = released {
         let before = group_drop_before(&headers, from, p.y);
@@ -563,36 +958,97 @@ pub(crate) fn browser(
             ev.push(Ev::Drop(key, pos));
         }
     }
-    // Footer: thumbnail size | New Group, New, Delete.
-    let footer_top = ui.min_rect().bottom();
-    ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 2.0;
-        let mut s = size;
-        ui.add_sized(vec2(90.0, 18.0), egui::Slider::new(&mut s, MIN_THUMB..=96.0).show_value(false)).on_hover_text(tl!("Thumbnail size (smallest: list)"));
-        if (s - size).abs() > 0.01 {
-            st.sizes.insert(panel.to_string(), s);
-        }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if crate::icons::button(ui, "trash", 24.0, false, tl!("Delete")).clicked()
-                && let Some(k) = selected.clone()
-            {
-                ev.push(Ev::Delete(k));
-            }
-            if crate::icons::button(ui, "plus", 24.0, false, new_tip).clicked() {
-                ev.push(Ev::New);
-            }
-            if crate::icons::button(ui, "folder-plus", 24.0, false, tl!("Create new group")).clicked() {
-                ev.push(Ev::NewGroup);
-            }
-        });
-    });
-    let measured = ui.min_rect().bottom() - footer_top;
-    if measured.is_finite() && (measured - footer_h).abs() > 0.5 {
-        ui.data_mut(|d| d.insert_temp(footer_id, measured));
-        ui.ctx().request_repaint();
-    }
     ev
+}
+
+/// General picker-panel shell. It lays out optional panel menu, search and recents controls, gives
+/// the remaining vertical space to the browser, then places the optional footer. The browser's
+/// item/group actions remain generic `Ev` values for the consumer to handle.
+///
+/// The shell reserves vertical space for enabled controls before drawing the browser, keeping the
+/// library viewport stable when groups are collapsed or the library is empty. Asset commands remain
+/// the responsibility of the caller that consumes the returned events.
+pub(crate) fn picker_shell(ui: &mut egui::Ui, st: &mut PresetUi, adapter: &mut BrowserAdapter<'_>, mut shell: ShellOptions<'_>) -> Vec<Ev> {
+    let panel = adapter.panel.to_string();
+    shell_controls(ui, &mut shell);
+
+    let footer_id = egui::Id::new(("preset-footer", panel.as_str()));
+    let footer_h = if shell.footer.is_some() { ui.data(|d| d.get_temp::<f32>(footer_id)).unwrap_or(FOOTER_GUESS) } else { 0.0 };
+    let allocated_h = adapter.options.max_h.min((ui.available_height() - footer_h).max(0.0));
+    let mut events = browser(ui, st, adapter, allocated_h);
+
+    if let Some(footer) = shell.footer {
+        let footer_top = ui.min_rect().bottom();
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            if footer.size_slider {
+                let size = *st.sizes.get(&panel).unwrap_or(&40.0);
+                let mut next = size;
+                ui.add_sized(vec2(90.0, 18.0), egui::Slider::new(&mut next, MIN_THUMB..=96.0).show_value(false))
+                    .on_hover_text(tl!("Thumbnail size (smallest: list)"));
+                if (next - size).abs() > 0.01 {
+                    st.sizes.insert(panel.clone(), next);
+                }
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if footer.delete
+                    && crate::icons::button(ui, "trash", 24.0, false, tl!("Delete")).clicked()
+                    && let Some(k) = st.selected.get(&panel).cloned()
+                {
+                    events.push(Ev::Delete(k));
+                }
+                if footer.new_item && crate::icons::button(ui, "plus", 24.0, false, footer.new_tip).clicked() {
+                    events.push(Ev::New);
+                }
+                if footer.new_group && crate::icons::button(ui, "folder-plus", 24.0, false, tl!("Create new group")).clicked() {
+                    events.push(Ev::NewGroup);
+                }
+            });
+        });
+        let measured = ui.min_rect().bottom() - footer_top;
+        if measured.is_finite() && (measured - footer_h).abs() > 0.5 {
+            ui.data_mut(|d| d.insert_temp(footer_id, measured));
+            ui.ctx().request_repaint();
+        }
+    }
+    events
+}
+
+/// Shared shell layout for consumers with a specialised browser renderer. The shell owns the
+/// optional top controls and allocates the remaining height; the consumer keeps its own rendering
+/// and action model until it can be represented by `BrowserAdapter`.
+///
+/// Unlike [`picker_shell`], this variant does not require `BrowserAdapter`; it passes the height
+/// remaining after optional controls to `draw_browser`, allowing specialised views to retain their
+/// own cards, nested-folder interactions, and rendering rules.
+pub(crate) fn picker_shell_custom<R>(ui: &mut egui::Ui, max_h: f32, mut shell: ShellOptions<'_>, draw_browser: impl FnOnce(&mut egui::Ui, f32) -> R) -> R {
+    debug_assert!(shell.footer.is_none(), "custom browser renderers use the custom footer slot");
+    shell_controls(ui, &mut shell);
+    let footer_h = shell.custom_footer.as_ref().map_or(0.0, |(_, h)| *h + 4.0);
+    let allocated_h = max_h.min((ui.available_height() - footer_h).max(0.0));
+    let result = draw_browser(ui, allocated_h);
+    if let Some((footer, _)) = shell.custom_footer {
+        ui.add_space(4.0);
+        footer(ui);
+    }
+    result
+}
+
+/// Paint optional shell controls in their shared top-to-bottom order.
+fn shell_controls(ui: &mut egui::Ui, shell: &mut ShellOptions<'_>) {
+    if let Some(header) = shell.header.as_deref_mut() {
+        ui.horizontal(|ui| header(ui));
+    }
+    if let Some(menu) = shell.panel_menu.as_deref_mut() {
+        ui.horizontal(|ui| menu(ui));
+    }
+    if let Some(search) = shell.search.as_deref_mut() {
+        search(ui);
+    }
+    if let Some(recents) = shell.recents.as_deref_mut() {
+        recents(ui);
+    }
 }
 
 /// The folder (by library index) a header dragged to `y` lands before (`None` = last). `headers`
@@ -612,6 +1068,12 @@ fn group_drop_before(headers: &[(usize, Rect, String)], from: usize, y: f32) -> 
 /// Folder header rects drawn last frame (name → rect), in display order; for tests and automation.
 pub fn last_group_headers(ctx: &egui::Context, panel: &str) -> Vec<(String, Rect)> {
     ctx.data(|d| d.get_temp(egui::Id::new(("preset-group-headers", panel)))).unwrap_or_default()
+}
+
+/// The allocated viewport from the last frame; useful to verify the shared browser's layout.
+#[cfg(test)]
+pub(crate) fn last_browser_rect(ctx: &egui::Context, panel: &str) -> Option<Rect> {
+    ctx.data(|d| d.get_temp(egui::Id::new(("preset-browser-rect", panel))))
 }
 
 /// Shared handling of the generic events through `<prefix>.edit` / `.new`.
@@ -681,11 +1143,21 @@ pub fn gradients_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let canvas = canvas_drop_rect(app);
     let mut st = std::mem::take(&mut app.ui.presets_ui);
     let max_h = (ui.available_height() - 40.0).clamp(90.0, 260.0);
-    let events =
-        browser(ui, &mut st, "gradients", &groups, Place { canvas, max_h, new_tip: tl!("Create new gradient"), flush: false }, &mut |ui, r, gi, ii| {
+    let mut adapter = BrowserAdapter {
+        panel: "gradients",
+        groups: &groups,
+        options: BrowserOptions { canvas, max_h, flush: false },
+        capabilities: BrowserCapabilities::default(),
+        item_context_menu: Some(standard_item_context_menu),
+        group_context_menu: Some(standard_group_context_menu),
+        paint_group: None,
+        paint_item: &mut |ui, r, gi, ii| {
             let stops = groups_src[gi].items[ii].resolve(fg, bg);
             paint_gradient(ui, r, &stops);
-        });
+        },
+    };
+    let events =
+        picker_shell(ui, &mut st, &mut adapter, ShellOptions { footer: Some(FooterOptions::standard(tl!("Create new gradient"))), ..Default::default() });
     app.ui.presets_ui = st;
     for e in events {
         match &e {
@@ -709,37 +1181,31 @@ pub fn gradients_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 pub fn patterns_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     photocraft_engine::presets::patterns::sync(&mut app.session);
     let lib = app.session.patterns.items.clone();
-    let groups: Vec<GroupView> = app
-        .session
-        .presets
-        .pattern_groups
-        .iter()
-        .map(|g| GroupView {
-            name: g.name.clone(),
-            items: g
-                .items
-                .iter()
-                .filter_map(|id| lib.iter().find(|p| &p.id == id))
-                .map(|p| ItemView { key: p.id.clone(), name: p.display_name().to_string() })
-                .collect(),
-        })
-        .collect();
-    let pats: Vec<Vec<photocraft_doc::Pattern>> =
-        app.session.presets.pattern_groups.iter().map(|g| g.items.iter().filter_map(|id| lib.iter().find(|p| &p.id == id).cloned()).collect()).collect();
+    let groups = pattern_group_views(&lib, &app.session.presets.pattern_groups);
     let canvas = canvas_drop_rect(app);
     let mut st = std::mem::take(&mut app.ui.presets_ui);
     let max_h = (ui.available_height() - 40.0).clamp(90.0, 280.0);
     let ctx = ui.ctx().clone();
-    let events = browser(
+    let mut adapter = BrowserAdapter {
+        panel: "patterns",
+        groups: &groups,
+        options: BrowserOptions { canvas, max_h, flush: false },
+        capabilities: BrowserCapabilities::default(),
+        item_context_menu: Some(standard_item_context_menu),
+        group_context_menu: Some(standard_group_context_menu),
+        paint_group: None,
+        paint_item: &mut |ui, r, gi, ii| {
+            if let Some(pattern) = groups.get(gi).and_then(|g| g.items.get(ii)).and_then(|item| lib.iter().find(|p| p.id == item.key)) {
+                let tex = pattern_texture(&ctx, pattern);
+                ui.painter().image(tex.id(), r, Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), Color32::WHITE);
+            }
+        },
+    };
+    let events = picker_shell(
         ui,
         &mut st,
-        "patterns",
-        &groups,
-        Place { canvas, max_h, new_tip: tl!("Create new pattern from the selection"), flush: false },
-        &mut |ui, r, gi, ii| {
-            let tex = pattern_texture(&ctx, &pats[gi][ii]);
-            ui.painter().image(tex.id(), r, Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), Color32::WHITE);
-        },
+        &mut adapter,
+        ShellOptions { footer: Some(FooterOptions::standard(tl!("Create new pattern from the selection"))), ..Default::default() },
     );
     app.ui.presets_ui = st;
     for e in events {
@@ -836,16 +1302,24 @@ pub fn styles_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     for g in &src {
         texes.push(g.items.iter().map(|s| style_texture(app, &ctx, s)).collect());
     }
-    let events = browser(
-        ui,
-        &mut st,
-        "styles",
-        &groups,
-        Place { canvas, max_h: 300.0, new_tip: tl!("Create new style from the selected layer"), flush: false },
-        &mut |ui, r, gi, ii| {
+    let mut adapter = BrowserAdapter {
+        panel: "styles",
+        groups: &groups,
+        options: BrowserOptions { canvas, max_h: 300.0, flush: false },
+        capabilities: BrowserCapabilities::default(),
+        item_context_menu: Some(standard_item_context_menu),
+        group_context_menu: Some(standard_group_context_menu),
+        paint_group: None,
+        paint_item: &mut |ui, r, gi, ii| {
             ui.painter().rect_filled(r, 2.0, t.field);
             ui.painter().image(texes[gi][ii].id(), r, Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), Color32::WHITE);
         },
+    };
+    let events = picker_shell(
+        ui,
+        &mut st,
+        &mut adapter,
+        ShellOptions { footer: Some(FooterOptions::standard(tl!("Create new style from the selected layer"))), ..Default::default() },
     );
     app.ui.presets_ui = st;
     let shift = ui.input(|i| i.modifiers.shift);
@@ -880,16 +1354,24 @@ pub fn shapes_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let mut st = std::mem::take(&mut app.ui.presets_ui);
     let ctx = ui.ctx().clone();
     let t = Tokens::get(&ctx);
-    let events = browser(
-        ui,
-        &mut st,
-        "shapes",
-        &groups,
-        Place { canvas, max_h: 300.0, new_tip: tl!("Create new shape from the current path"), flush: false },
-        &mut |ui, r, gi, ii| {
+    let mut adapter = BrowserAdapter {
+        panel: "shapes",
+        groups: &groups,
+        options: BrowserOptions { canvas, max_h: 300.0, flush: false },
+        capabilities: BrowserCapabilities::default(),
+        item_context_menu: Some(standard_item_context_menu),
+        group_context_menu: Some(standard_group_context_menu),
+        paint_group: None,
+        paint_item: &mut |ui, r, gi, ii| {
             let tex = shape_texture(&ctx, &src[gi].items[ii]);
             ui.painter().image(tex.id(), r.shrink(2.0), Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), t.text);
         },
+    };
+    let events = picker_shell(
+        ui,
+        &mut st,
+        &mut adapter,
+        ShellOptions { footer: Some(FooterOptions::standard(tl!("Create new shape from the current path"))), ..Default::default() },
     );
     app.ui.presets_ui = st;
     let fill = shape_fill(app);
@@ -1427,6 +1909,317 @@ mod tests {
         let mut m = PresetUi::default();
         m.group_order.insert("swatches".into(), vec!["Dark".into(), "Grays".into()]);
         assert_eq!(m.display_order("swatches", &names), vec![3, 0, 1, 2]);
+    }
+
+    #[test]
+    fn short_preset_library_keeps_the_allocated_browser_height() {
+        use egui_kittest::Harness;
+
+        let mut st = PresetUi::default();
+        let groups = Vec::<GroupView>::new();
+        let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let mut adapter = BrowserAdapter {
+            panel: "short-library",
+            groups: &groups,
+            options: BrowserOptions { canvas: Rect::NOTHING, max_h: 180.0, flush: false },
+            capabilities: BrowserCapabilities::default(),
+            item_context_menu: Some(standard_item_context_menu),
+            group_context_menu: Some(standard_group_context_menu),
+            paint_group: None,
+            paint_item: &mut |_, _, _, _| {},
+        };
+        let mut h = Harness::builder().with_size(vec2(320.0, 300.0)).build_ui_state(
+            |ui, _app: &mut PhotocraftApp| {
+                picker_shell(ui, &mut st, &mut adapter, ShellOptions { footer: Some(FooterOptions::standard("Create preset")), ..Default::default() });
+            },
+            app,
+        );
+        h.run_steps(2);
+        let rect = last_browser_rect(&h.ctx, "short-library");
+        assert!(rect.is_some(), "browser viewport is recorded");
+        assert!(rect.unwrap().height() >= 175.0, "short libraries should retain their allocated height: {rect:?}");
+    }
+
+    #[test]
+    fn short_picker_keeps_the_footer_visible_while_renaming() {
+        use std::{cell::Cell, rc::Rc};
+
+        use egui_kittest::Harness;
+
+        let mut st = PresetUi { renaming: Some(("short-rename".into(), "preset-key".into(), "Preset name".into())), ..Default::default() };
+        let groups = Vec::<GroupView>::new();
+        let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let mut adapter = BrowserAdapter {
+            panel: "short-rename",
+            groups: &groups,
+            options: BrowserOptions { canvas: Rect::NOTHING, max_h: 180.0, flush: false },
+            capabilities: BrowserCapabilities::default(),
+            item_context_menu: Some(standard_item_context_menu),
+            group_context_menu: Some(standard_group_context_menu),
+            paint_group: None,
+            paint_item: &mut |_, _, _, _| {},
+        };
+        let content_bottom = Rc::new(Cell::new(0.0_f32));
+        let measured_bottom = Rc::clone(&content_bottom);
+        let mut h = Harness::builder().with_size(vec2(320.0, 180.0)).build_ui_state(
+            |ui, _app: &mut PhotocraftApp| {
+                picker_shell(ui, &mut st, &mut adapter, ShellOptions { footer: Some(FooterOptions::standard("Create preset")), ..Default::default() });
+                measured_bottom.set(ui.min_rect().bottom());
+            },
+            app,
+        );
+        h.run_steps(3);
+        assert!(content_bottom.get() <= 180.0, "footer should stay inside the short panel: content bottom {}", content_bottom.get());
+    }
+
+    #[test]
+    fn custom_picker_shell_renders_search_and_passes_remaining_height_to_renderer() {
+        use std::{cell::Cell, rc::Rc};
+
+        use egui_kittest::Harness;
+
+        let calls = Rc::new(Cell::new(0));
+        let observed_height = Rc::new(Cell::new(0.0_f32));
+        let call_count = Rc::clone(&calls);
+        let height = Rc::clone(&observed_height);
+        let mut search = move |ui: &mut egui::Ui| {
+            call_count.set(call_count.get() + 1);
+            ui.label("Brush search");
+        };
+        let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let mut h = Harness::builder().with_size(vec2(320.0, 300.0)).build_ui_state(
+            |ui, _app: &mut PhotocraftApp| {
+                picker_shell_custom(ui, 260.0, ShellOptions { search: Some(&mut search), ..Default::default() }, |ui, allocated_h| {
+                    height.set(allocated_h);
+                    ui.allocate_exact_size(vec2(ui.available_width(), allocated_h.min(50.0)), Sense::hover());
+                });
+            },
+            app,
+        );
+        h.run_steps(2);
+        assert!(calls.get() > 0, "the shared shell renders enabled search controls");
+        assert!(observed_height.get() > 100.0, "the custom renderer receives the space remaining after shell controls");
+        assert!(observed_height.get() <= 260.0, "the custom renderer respects its consumer height cap");
+    }
+
+    #[test]
+    fn picker_shell_controls_and_browser_capabilities_are_optional() {
+        use std::{
+            cell::{Cell, RefCell},
+            rc::Rc,
+        };
+
+        use egui_kittest::{Harness, kittest::Queryable};
+
+        let groups = vec![GroupView { name: "Only group".into(), items: vec![ItemView { key: "only".into(), name: "Only item".into() }] }];
+        let mut st = PresetUi::default();
+        let menu_calls = Rc::new(Cell::new(0));
+        let search_calls = Rc::new(Cell::new(0));
+        let recent_calls = Rc::new(Cell::new(0));
+        let menu_count = Rc::clone(&menu_calls);
+        let search_count = Rc::clone(&search_calls);
+        let recent_count = Rc::clone(&recent_calls);
+        let mut menu = move |ui: &mut egui::Ui| {
+            menu_count.set(menu_count.get() + 1);
+            ui.label("Panel menu");
+        };
+        let mut search = move |ui: &mut egui::Ui| {
+            search_count.set(search_count.get() + 1);
+            ui.label("Search");
+        };
+        let mut recents = move |ui: &mut egui::Ui| {
+            recent_count.set(recent_count.get() + 1);
+            ui.label("Recent");
+        };
+        let events = Rc::new(RefCell::new(Vec::<Ev>::new()));
+        let captured_events = Rc::clone(&events);
+        let mut adapter = BrowserAdapter {
+            panel: "compact-library",
+            groups: &groups,
+            options: BrowserOptions { canvas: Rect::NOTHING, max_h: 260.0, flush: false },
+            capabilities: BrowserCapabilities { item_drag: false, group_drag: false, selection: false, activation: false },
+            item_context_menu: None,
+            group_context_menu: None,
+            paint_group: None,
+            paint_item: &mut |_, _, _, _| {},
+        };
+        let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let mut h = Harness::builder().with_size(vec2(320.0, 300.0)).build_ui_state(
+            |ui, _app: &mut PhotocraftApp| {
+                let emitted = picker_shell(
+                    ui,
+                    &mut st,
+                    &mut adapter,
+                    ShellOptions { panel_menu: Some(&mut menu), search: Some(&mut search), recents: Some(&mut recents), footer: None, ..Default::default() },
+                );
+                captured_events.borrow_mut().extend(emitted);
+            },
+            app,
+        );
+        h.run_steps(3);
+        assert!(menu_calls.get() > 0 && search_calls.get() > 0 && recent_calls.get() > 0, "enabled shell slots are rendered");
+        let rect = last_browser_rect(&h.ctx, "compact-library").expect("browser viewport is recorded without a footer");
+        assert!(rect.height() > 100.0, "the browser receives the space left by optional controls: {rect:?}");
+        h.get_by_label("Only item").click();
+        h.run_steps(2);
+        assert!(events.borrow().is_empty(), "disabled browser capabilities do not emit consumer actions");
+    }
+
+    #[test]
+    fn shared_hierarchy_preserves_order_and_bounds_nested_paths() {
+        #[derive(Debug, PartialEq)]
+        struct Item(&'static str);
+        let a = Item("a");
+        let b = Item("b");
+        let c = Item("c");
+        let d = Item("d");
+        let path = |parts: &[&str]| parts.iter().map(|s| (*s).to_string()).collect::<Vec<_>>();
+        let folder_path = path(&["Folder"]);
+        let nested_path = path(&["Folder", "Nested"]);
+        let tree = hierarchy_tree(vec![(&folder_path, &a), (&[], &b), (&nested_path, &c), (&folder_path, &d)], 4);
+        assert!(matches!(tree.first(), Some(HierarchyNode::Folder(f)) if f.path == ["Folder"] && f.count == 3));
+        assert!(matches!(tree.get(1), Some(HierarchyNode::Preset(item)) if item.0 == "b"));
+        let Some(HierarchyNode::Folder(folder)) = tree.first() else { panic!("folder node") };
+        assert!(matches!(folder.children.first(), Some(HierarchyNode::Preset(item)) if item.0 == "a"));
+        assert!(matches!(folder.children.get(1), Some(HierarchyNode::Folder(nested)) if nested.path == ["Folder", "Nested"]));
+        assert!(matches!(folder.children.get(2), Some(HierarchyNode::Preset(item)) if item.0 == "d"));
+
+        let deep_path = path(&["Folder", "Deep", "TooDeep"]);
+        let bounded = hierarchy_tree(vec![(&nested_path, &c), (&deep_path, &d)], 1);
+        assert!(matches!(bounded.first(), Some(HierarchyNode::Folder(f)) if f.path == ["Folder"] && f.children.len() == 2));
+    }
+
+    #[test]
+    fn compact_patterns_browser_selects_a_library_identity() {
+        use egui_kittest::{Harness, kittest::Queryable};
+
+        let (app, _) = app();
+        let patterns = app.session.patterns.items.clone();
+        let groups = pattern_group_views(&patterns, &app.session.presets.pattern_groups);
+        let first = groups.iter().find_map(|g| g.items.first()).expect("built-in Patterns group has an item");
+        let (id, name) = (first.key.clone(), first.name.clone());
+        let mut h = Harness::builder().with_size(vec2(320.0, 240.0)).build_ui_state(
+            move |ui, picked: &mut Option<String>| {
+                if let Some(id) = compact_pattern_browser(ui, &patterns, &groups, "", "compact-test", 180.0) {
+                    *picked = Some(id);
+                }
+            },
+            None::<String>,
+        );
+        h.run_steps(3);
+        h.get_by_label(&name).click();
+        h.run_steps(2);
+        assert_eq!(h.state().as_deref(), Some(id.as_str()));
+        assert!(last_browser_rect(&h.ctx, "compact-test").is_some(), "compact consumer uses the shared browser viewport");
+    }
+
+    #[test]
+    fn compact_patterns_browser_preserves_folder_disclosure_between_frames() {
+        use egui_kittest::Harness;
+
+        let (app, _) = app();
+        let patterns = app.session.patterns.items.clone();
+        let groups = pattern_group_views(&patterns, &app.session.presets.pattern_groups);
+        assert!(groups.len() > 1, "the fixture needs a second group to toggle");
+        let folder = groups[1].name.clone();
+        let panel = "compact-disclosure-test";
+        let state_id = egui::Id::new(("compact-pattern-browser", panel));
+        let mut h = Harness::builder().with_size(vec2(320.0, 240.0)).build_ui_state(
+            move |ui, _picked: &mut Option<String>| {
+                let _ = compact_pattern_browser(ui, &patterns, &groups, "", panel, 180.0);
+            },
+            None::<String>,
+        );
+
+        h.run_steps(3);
+        assert!(
+            h.ctx.data(|d| d.get_temp::<PresetUi>(state_id).is_some_and(|s| s.toggled.contains(&format!("{panel}/{folder}")))),
+            "later folders start collapsed"
+        );
+
+        let header =
+            last_group_headers(&h.ctx, panel).iter().find(|(name, _)| name == &folder).map(|(_, rect)| rect.center()).expect("second group header is visible");
+        h.event(egui::Event::PointerMoved(header));
+        h.run_steps(1);
+        h.event(egui::Event::PointerButton { pos: header, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+        h.event(egui::Event::PointerButton { pos: header, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+        h.run_steps(2);
+
+        let key = format!("{panel}/{folder}");
+        assert!(!h.ctx.data(|d| d.get_temp::<PresetUi>(state_id).is_some_and(|s| s.toggled.contains(&key))), "clicking the folder expands it");
+        h.run_steps(2);
+        assert!(!h.ctx.data(|d| d.get_temp::<PresetUi>(state_id).is_some_and(|s| s.toggled.contains(&key))), "the next frame must retain the expanded state");
+    }
+
+    #[test]
+    fn patterns_panel_dispatches_selection_to_the_patterns_command() {
+        use egui_kittest::{Harness, kittest::Queryable};
+
+        let (app, _) = app();
+        let first = pattern_group_views(&app.session.patterns.items, &app.session.presets.pattern_groups)
+            .iter()
+            .find_map(|g| g.items.first().map(|p| (p.key.clone(), p.name.clone())))
+            .expect("a built-in Patterns group");
+        let (id, name) = first;
+        let mut h = Harness::builder().with_size(vec2(340.0, 360.0)).build_ui_state(|ui, app: &mut PhotocraftApp| patterns_panel(app, ui), app);
+        PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ProMedium);
+        h.run_steps(4);
+        h.get_by_label(&name).click();
+        h.run_steps(3);
+        assert_eq!(h.state().session.presets.pattern.as_deref(), Some(id.as_str()));
+        assert_eq!(h.state().session.journal.last().map(|(id, _)| id.as_str()), Some("pattern.presets.select"));
+    }
+
+    fn consumer_item_menu(ui: &mut egui::Ui, _st: &mut PresetUi, _panel: &str, item: &ItemView, _group: &GroupView, _names: &[String], ev: &mut Vec<Ev>) {
+        if ui.button("Consumer item operation").clicked() {
+            ev.push(Ev::Delete(item.key.clone()));
+            ui.close();
+        }
+    }
+
+    fn consumer_group_menu(ui: &mut egui::Ui, _st: &mut PresetUi, _panel: &str, group: &GroupView, ev: &mut Vec<Ev>) {
+        if ui.button("Consumer group operation").clicked() {
+            ev.push(Ev::DeleteGroup(group.name.clone()));
+            ui.close();
+        }
+    }
+
+    #[test]
+    fn browser_keeps_context_hit_targets_but_delegates_menu_actions() {
+        use egui_kittest::{Harness, kittest::Queryable};
+
+        let groups = vec![GroupView { name: "Only group".into(), items: vec![ItemView { key: "only".into(), name: "Only item".into() }] }];
+        let mut st = PresetUi::default();
+        let mut adapter = BrowserAdapter {
+            panel: "consumer-actions",
+            groups: &groups,
+            options: BrowserOptions { canvas: Rect::NOTHING, max_h: 180.0, flush: false },
+            capabilities: BrowserCapabilities::default(),
+            item_context_menu: Some(consumer_item_menu),
+            group_context_menu: Some(consumer_group_menu),
+            paint_group: None,
+            paint_item: &mut |_, _, _, _| {},
+        };
+        let mut h = Harness::builder()
+            .with_size(vec2(320.0, 240.0))
+            .build_ui_state(|ui, events: &mut Vec<Ev>| events.extend(browser(ui, &mut st, &mut adapter, 180.0)), Vec::<Ev>::new());
+        h.run_steps(3);
+        h.get_by_label("Only item").click_secondary();
+        h.run_steps(2);
+        h.get_by_label("Consumer item operation").click();
+        h.run_steps(2);
+        assert!(matches!(h.state().last(), Some(Ev::Delete(key)) if key == "only"));
+
+        let header = last_group_headers(&h.ctx, "consumer-actions").first().map(|(_, r)| r.center()).expect("group hit target recorded");
+        h.event(egui::Event::PointerMoved(header));
+        h.run_steps(1);
+        h.event(egui::Event::PointerButton { pos: header, button: egui::PointerButton::Secondary, pressed: true, modifiers: egui::Modifiers::NONE });
+        h.run_steps(1);
+        h.event(egui::Event::PointerButton { pos: header, button: egui::PointerButton::Secondary, pressed: false, modifiers: egui::Modifiers::NONE });
+        h.run_steps(2);
+        h.get_by_label("Consumer group operation").click();
+        h.run_steps(2);
+        assert!(matches!(h.state().last(), Some(Ev::DeleteGroup(group)) if group == "Only group"));
     }
 
     /// #3658: the folder order persists with the UI state and reads leniently (an old state has no

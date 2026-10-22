@@ -19,17 +19,22 @@ use serde_json::json;
 
 use crate::brush_panel::{BrushesPanelState, BrushesView, Renaming, UNGROUPED, commit_gesture, full_uv, grouped_presets, run_or_status};
 use crate::brush_preview;
+use crate::preset_panels::{ShellOptions, picker_shell_custom};
 use crate::theme::{self, Tokens};
 use crate::{PhotocraftApp, icons, widgets};
 
 /// What a drag in the Brushes tab carries.
 #[derive(Clone, Debug, PartialEq)]
 pub enum BrushDrag {
+    /// A brush preset identified by its name.
     Preset(String),
+    /// A top-level brush group identified by its key.
     Group(String),
-    /// A nested folder of a group.
+    /// A nested folder, identified by its owning group and path.
     Folder {
+        /// Key of the top-level group containing the folder.
         group: String,
+        /// Folder path relative to that group; an empty path denotes the group itself.
         folder: Vec<String>,
     },
 }
@@ -85,9 +90,11 @@ pub enum Action {
 pub struct ListLayout {
     /// The scroll area's id and its height limit.
     pub id: &'static str,
+    /// Maximum height available to the scrolling list.
     pub max_height: f32,
     /// Width of a grid cell (its height is 6 points more) and the grid's left indent.
     pub cell: f32,
+    /// Horizontal inset applied to the grid and nested-folder contents.
     pub indent: f32,
     /// The Brush Preset picker's cards: a tip cell and a stroke cell on top and the name across
     /// the bottom (or, with only the tip and the name on, in the stroke's cell). Replaces the
@@ -119,70 +126,13 @@ pub fn folder_view_key(label: &str, folder: &[String]) -> String {
 }
 
 /// A group's content in panel order: its presets and nested folders.
-#[derive(Debug)]
-pub enum Node<'a> {
-    Preset(&'a BrushPreset),
-    Folder(FolderNode<'a>),
-}
-
-/// A nested folder and what it holds.
-#[derive(Debug)]
-pub struct FolderNode<'a> {
-    /// The folder's path in its group.
-    pub path: Vec<String>,
-    pub children: Vec<Node<'a>>,
-    /// Presets in it and below it.
-    pub count: usize,
-}
+pub type Node<'a> = crate::preset_panels::HierarchyNode<'a, BrushPreset>;
+pub type FolderNode<'a> = crate::preset_panels::HierarchyFolder<'a, BrushPreset>;
 
 /// The tree of a group's presets (`items`, in library order): each folder appears where its first
 /// preset is, presets keep their order. Paths deeper than [`MAX_VIEW_DEPTH`] are cut there.
 pub fn folder_tree<'a>(items: &[&'a BrushPreset]) -> Vec<Node<'a>> {
-    level(items.iter().map(|p| (p.folder.get(..p.folder.len().min(MAX_VIEW_DEPTH)).unwrap_or_default(), *p)).collect(), &[])
-}
-
-/// A preset with its folder path below the level being built.
-type Entry<'a> = (&'a [String], &'a BrushPreset);
-
-/// One level of [`folder_tree`]: `items` pairs each preset with its path below `prefix`. The
-/// recursion is as deep as the longest path (at most [`MAX_VIEW_DEPTH`]).
-fn level<'a>(items: Vec<Entry<'a>>, prefix: &[String]) -> Vec<Node<'a>> {
-    enum Slot {
-        Preset(usize),
-        Folder(usize),
-    }
-    let mut slots = Vec::new();
-    let mut folders: Vec<(&String, Vec<Entry<'a>>)> = Vec::new();
-    for (i, (path, p)) in items.iter().enumerate() {
-        match path.split_first() {
-            None => slots.push(Slot::Preset(i)),
-            Some((name, rest)) => match folders.iter_mut().position(|(n, _)| *n == name) {
-                Some(k) => {
-                    if let Some((_, v)) = folders.get_mut(k) {
-                        v.push((rest, *p));
-                    }
-                }
-                None => {
-                    slots.push(Slot::Folder(folders.len()));
-                    folders.push((name, vec![(rest, *p)]));
-                }
-            },
-        }
-    }
-    let mut folders: Vec<Option<(&String, Vec<Entry<'a>>)>> = folders.into_iter().map(Some).collect();
-    slots
-        .into_iter()
-        .filter_map(|s| match s {
-            Slot::Preset(i) => items.get(i).map(|(_, p)| Node::Preset(p)),
-            Slot::Folder(k) => {
-                let (name, sub) = folders.get_mut(k)?.take()?;
-                let path: Vec<String> = prefix.iter().cloned().chain(std::iter::once(name.clone())).collect();
-                let count = sub.len();
-                let children = level(sub, &path);
-                Some(Node::Folder(FolderNode { path, children, count }))
-            }
-        })
-        .collect()
+    crate::preset_panels::hierarchy_tree(items.iter().map(|p| (p.folder.as_slice(), *p)).collect(), MAX_VIEW_DEPTH)
 }
 
 /// Where a preset dropped onto `target` lands: (group, folder, index in that group after the
@@ -226,11 +176,17 @@ fn view_actions(st: &mut BrushesPanelState, acts: Vec<Action>) -> Vec<Action> {
 pub fn apply(app: &mut PhotocraftApp, acts: Vec<Action>) {
     for a in acts {
         match a {
-            Action::Select(name) => run_or_status(app, "tools.setBrush", json!({ "preset": name })),
+            Action::Select(name) => match app.run("tools.setBrush", json!({ "preset": name })) {
+                Ok(_) => crate::brush_panel::clear_texture_pattern_selection(app),
+                Err(e) => app.ui.status = e,
+            },
             Action::Choose(name) => {
                 // The double-click's first click already picked it.
                 if app.session.tools.current_preset.as_deref() != Some(name.as_str()) {
-                    run_or_status(app, "tools.setBrush", json!({ "preset": name }));
+                    match app.run("tools.setBrush", json!({ "preset": name })) {
+                        Ok(_) => crate::brush_panel::clear_texture_pattern_selection(app),
+                        Err(e) => app.ui.status = e,
+                    }
                 }
             }
             Action::ToggleGroup(_) | Action::BeginRename(_) => {}
@@ -318,14 +274,13 @@ fn preset_interactions(ui: &egui::Ui, resp: &egui::Response, r: egui::Rect, p: &
     } else if resp.clicked() {
         acts.push(Action::Select(p.name.clone()));
     }
-    resp.context_menu(|ui| {
-        if ui.button(tl!("Rename Brush…")).clicked() {
-            acts.push(Action::BeginRename(Renaming { group: false, name: p.name.clone(), folder: Vec::new(), text: String::new() }));
-            ui.close();
-        }
-        if ui.button(tl!("Delete Brush")).clicked() {
-            acts.push(Action::Delete(p.name.clone()));
-            ui.close();
+    crate::preset_panels::context_menu_target(resp.clone(), |ui| {
+        match crate::preset_panels::draw_item_context_menu(ui, tl!("Rename Brush…"), tl!("Delete Brush"), None) {
+            Some(crate::preset_panels::ContextMenuAction::Rename) => {
+                acts.push(Action::BeginRename(Renaming { group: false, name: p.name.clone(), folder: Vec::new(), text: String::new() }));
+            }
+            Some(crate::preset_panels::ContextMenuAction::Delete) => acts.push(Action::Delete(p.name.clone())),
+            Some(crate::preset_panels::ContextMenuAction::MoveTo(_)) | None => {}
         }
     });
 }
@@ -712,14 +667,13 @@ fn group_header(ui: &mut egui::Ui, label: &str, key: &str, folder: &[String], op
     if resp.clicked() {
         acts.push(Action::ToggleGroup(folder_view_key(label, folder)));
     }
-    resp.context_menu(|ui| {
-        if ui.button(tl!("Rename Group…")).clicked() {
-            acts.push(Action::BeginRename(Renaming { group: true, name: key.to_string(), folder: folder.to_vec(), text: String::new() }));
-            ui.close();
-        }
-        if ui.button(tl!("Delete Group")).clicked() {
-            acts.push(Action::DeleteGroup { group: key.to_string(), folder: folder.to_vec() });
-            ui.close();
+    crate::preset_panels::context_menu_target(resp.clone(), |ui| {
+        match crate::preset_panels::draw_group_context_menu(ui, tl!("Rename Group…"), tl!("Delete Group")) {
+            Some(crate::preset_panels::ContextMenuAction::Rename) => {
+                acts.push(Action::BeginRename(Renaming { group: true, name: key.to_string(), folder: folder.to_vec(), text: String::new() }));
+            }
+            Some(crate::preset_panels::ContextMenuAction::Delete) => acts.push(Action::DeleteGroup { group: key.to_string(), folder: folder.to_vec() }),
+            Some(crate::preset_panels::ContextMenuAction::MoveTo(_)) | None => {}
         }
     });
 }
@@ -901,6 +855,7 @@ pub fn preset_list(ui: &mut egui::Ui, presets: &[BrushPreset], current: Option<&
                 continue;
             }
             let key = group_key(presets, &label);
+            // Search expands top-level groups so matching presets remain discoverable.
             let open = !filter.is_empty() || !collapsed.contains(&label);
             group_header(ui, &label, &key, &[], open, items.len(), &mut acts);
             if !open {
@@ -986,25 +941,38 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     });
     commit_gesture(app, ui.ctx(), &before, &b);
     ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        icons::paint(ui, egui::Rect::from_min_size(ui.cursor().min + vec2(0.0, 3.0), vec2(16.0, 16.0)), "search", 14.0, t.text_faint);
-        ui.add_space(20.0);
-        let search_w = (inner_w - 112.0).clamp(90.0, inner_w - 40.0);
-        widgets::text_field(ui, ui.id().with("brush-search"), &mut app.ui.brushes_panel.filter, tl!("Search Brushes"), search_w, false);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let view = &mut app.ui.brushes_panel.view;
-            let grid_tip = "Grid view";
-            let list_tip = "List view";
-            if icons::button(ui, "grid-2x2", 24.0, *view == BrushesView::Grid, tl!(grid_tip)).clicked() {
-                *view = BrushesView::Grid;
-            }
-            if icons::button(ui, "align-justify", 24.0, *view == BrushesView::List, tl!(list_tip)).clicked() {
-                *view = BrushesView::List;
-            }
+    let layout = responsive_list_layout(ui);
+    let filter = std::cell::RefCell::new(app.ui.brushes_panel.filter.clone());
+    let view = std::cell::Cell::new(app.ui.brushes_panel.view);
+    let mut search = |ui: &mut egui::Ui| {
+        ui.horizontal(|ui| {
+            icons::paint(ui, egui::Rect::from_min_size(ui.cursor().min + vec2(0.0, 3.0), vec2(16.0, 16.0)), "search", 14.0, t.text_faint);
+            ui.add_space(20.0);
+            let search_w = (inner_w - 112.0).clamp(90.0, inner_w - 40.0);
+            widgets::text_field(ui, ui.id().with("brush-search"), &mut filter.borrow_mut(), tl!("Search Brushes"), search_w, false);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let grid_tip = "Grid view";
+                let list_tip = "List view";
+                if icons::button(ui, "grid-2x2", 24.0, view.get() == BrushesView::Grid, tl!(grid_tip)).clicked() {
+                    view.set(BrushesView::Grid);
+                }
+                if icons::button(ui, "align-justify", 24.0, view.get() == BrushesView::List, tl!(list_tip)).clicked() {
+                    view.set(BrushesView::List);
+                }
+            });
         });
+    };
+    let acts = picker_shell_custom(ui, layout.max_height, ShellOptions { search: Some(&mut search), ..Default::default() }, |ui, allocated_h| {
+        app.ui.brushes_panel.filter = filter.borrow().clone();
+        app.ui.brushes_panel.view = view.get();
+        preset_list(
+            ui,
+            &app.session.tools.presets,
+            app.session.tools.current_preset.as_deref(),
+            &mut app.ui.brushes_panel,
+            ListLayout { max_height: allocated_h, ..layout },
+        )
     });
-    ui.add_space(6.0);
-    let acts = preset_list(ui, &app.session.tools.presets, app.session.tools.current_preset.as_deref(), &mut app.ui.brushes_panel, responsive_list_layout(ui));
     apply(app, acts);
     ui.add_space(4.0);
     widgets::hairline(ui);

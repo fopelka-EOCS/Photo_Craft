@@ -15,7 +15,10 @@ use egui::{Color32, CornerRadius, Rect};
 use serde_json::{Value, json};
 
 use crate::PhotocraftApp;
-use crate::preset_panels::{Ev, GroupView, ItemView, Place, browser, run};
+use crate::preset_panels::{
+    BrowserAdapter, BrowserCapabilities, BrowserOptions, Ev, FooterOptions, GroupView, ItemView, ShellOptions, picker_shell, run, standard_group_context_menu,
+    standard_item_context_menu,
+};
 
 /// The browser's panel key (selection, folder state and thumbnail size live under it).
 pub const PANEL: &str = "swatches";
@@ -69,10 +72,21 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     st.sizes.entry(PANEL.to_string()).or_insert(DEFAULT_SIZE);
     let max_h = (ui.available_height() - 30.0).max(60.0);
     // Flat, touching squares, as in Photoshop's Swatches panel (#5103).
-    let events = browser(ui, &mut st, PANEL, &groups, Place { canvas, max_h, new_tip: tl!("Create new swatch"), flush: true }, &mut |ui, r: Rect, gi, ii| {
-        let c = table.get(gi).and_then(|g| g.get(ii)).copied().unwrap_or(Color32::GRAY);
-        ui.painter().rect_filled(r, CornerRadius::ZERO, c);
-    });
+    let mut adapter = BrowserAdapter {
+        panel: PANEL,
+        groups: &groups,
+        options: BrowserOptions { canvas, max_h, flush: true },
+        capabilities: BrowserCapabilities::default(),
+        item_context_menu: Some(standard_item_context_menu),
+        group_context_menu: Some(standard_group_context_menu),
+        paint_group: None,
+        paint_item: &mut |ui, r: Rect, gi, ii| {
+            let c = table.get(gi).and_then(|g| g.get(ii)).copied().unwrap_or(Color32::GRAY);
+            ui.painter().rect_filled(r, CornerRadius::ZERO, c);
+        },
+    };
+    let events =
+        picker_shell(ui, &mut st, &mut adapter, ShellOptions { footer: Some(FooterOptions::standard(tl!("Create new swatch"))), ..Default::default() });
     app.ui.presets_ui = st;
     let mods = ui.input(|i| i.modifiers);
     for e in events {

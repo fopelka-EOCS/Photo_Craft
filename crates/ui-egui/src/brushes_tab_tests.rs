@@ -280,6 +280,9 @@ fn brush_picker_menu_closes_when_a_slider_or_the_grip_is_grabbed() {
     click_gear(&h);
     h.run_steps(2);
     assert!(egui::Popup::is_any_open(&h.ctx), "the gear opens its menu again");
+    // Read the frame after the menu has opened: egui can expand the containing area while the
+    // popup is laid out, so the grip must be targeted from the current frame, not its old rect.
+    let picker = h.ctx.memory(|m| m.area_rect(egui::Id::new("canvas-brush-picker"))).expect("the picker is shown");
     // The grip is the frame's bottom-right 16 × 16, so its middle is 8 pt off the picker's corner.
     let grip = picker.right_bottom() - vec2(8.0, 8.0);
     h.drag_at(grip);

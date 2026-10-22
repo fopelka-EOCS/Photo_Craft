@@ -5,7 +5,7 @@
 
 use egui::{Color32, RichText, Sense, Stroke, pos2, vec2};
 use photocraft_engine::BrushSettings;
-use photocraft_engine::paint::{self, BrushPreset, Control, Dynamic, MAX_BRUSH_SIZE, MaskMode, Pattern, PatternStyle, TipShape};
+use photocraft_engine::paint::{self, BrushPreset, Control, Dynamic, MAX_BRUSH_SIZE, MaskMode, Pattern, TipShape};
 
 use crate::brush_preview;
 use crate::theme::{self, Tokens};
@@ -34,9 +34,6 @@ pub const MASK_MODES: [(MaskMode, &str); 10] = [
     (MaskMode::LinearHeight, "Linear Height"),
     (MaskMode::Height, "Height"),
 ];
-
-const PATTERNS: [(PatternStyle, &str); 4] =
-    [(PatternStyle::Paper, "Paper"), (PatternStyle::Canvas, "Canvas"), (PatternStyle::Noise, "Noise"), (PatternStyle::Dots, "Dots")];
 
 /// Percent slider over a 0..`max` fraction.
 fn pct(ui: &mut egui::Ui, label: &str, v: &mut f32, max: f32) -> bool {
@@ -439,28 +436,31 @@ fn pattern_swatch(ui: &mut egui::Ui, tx: &paint::Texture) {
     ui.painter().rect_stroke(rect, 0.0, Stroke::new(1.0, t.field_border), egui::StrokeKind::Inside);
 }
 
-fn texture(ui: &mut egui::Ui, b: &mut BrushSettings) {
+/// Draw Texture controls and report a picked library pattern without dispatching the command here.
+/// The caller commits the edited brush settings first, then applies the returned pattern selection.
+fn texture(
+    ui: &mut egui::Ui,
+    b: &mut BrushSettings,
+    patterns: &[photocraft_doc::Pattern],
+    groups: &[crate::preset_panels::GroupView],
+    selected_pattern: &str,
+    picked_pattern: &mut Option<String>,
+) {
     let tx = &mut b.texture;
     ui.horizontal(|ui| {
         pattern_swatch(ui, tx);
         ui.add_space(8.0);
         ui.vertical(|ui| {
-            let mut style = match &tx.pattern {
-                Pattern::Procedural { style, .. } => Some(*style),
-                Pattern::Tile(_) | Pattern::Stored(_) => None,
-            };
-            let mut opts: Vec<(Option<PatternStyle>, &str)> = PATTERNS.iter().map(|(s, l)| (Some(*s), *l)).collect();
-            if style.is_none() {
-                opts.push((None, tl!("Custom")));
-            }
-            if widgets::dropdown(ui, "brush-pattern", &mut style, &opts, 110.0)
-                && let Some(s) = style
+            let button = ui.button(tl!("Browse…"));
+            if let Some(id) = egui::Popup::menu(&button)
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                .show(|ui| {
+                    ui.set_width(232.0);
+                    crate::preset_panels::compact_pattern_browser(ui, patterns, groups, selected_pattern, "brush-texture-patterns", 140.0)
+                })
+                .and_then(|r| r.inner)
             {
-                let size = match &tx.pattern {
-                    Pattern::Procedural { size, .. } => *size,
-                    Pattern::Tile(_) | Pattern::Stored(_) => 128,
-                };
-                tx.pattern = Pattern::Procedural { style: s, size, seed: 1 };
+                *picked_pattern = Some(id);
             }
             ui.add_space(4.0);
             widgets::checkbox(ui, &mut tx.invert, tl!("Invert"));
@@ -603,6 +603,36 @@ fn smoothing(ui: &mut egui::Ui, b: &mut BrushSettings) {
 /// Returns the name of a preset whose tip was picked in the Brush Tip Shape grid, for
 /// `brush.presets.setCurrent`.
 pub fn section_body(ui: &mut egui::Ui, b: &mut BrushSettings, i: usize, presets: &[BrushPreset], current: Option<&str>) -> Option<String> {
+    let mut picked_pattern = None;
+    section_body_with_patterns(
+        ui,
+        b,
+        i,
+        presets,
+        current,
+        PatternSectionPatterns { patterns: &[], groups: &[], selected_pattern: "", picked_pattern: &mut picked_pattern },
+    )
+}
+
+/// Pattern-library inputs used only by the Texture section.
+pub(crate) struct PatternSectionPatterns<'a> {
+    pub(crate) patterns: &'a [photocraft_doc::Pattern],
+    pub(crate) groups: &'a [crate::preset_panels::GroupView],
+    pub(crate) selected_pattern: &'a str,
+    pub(crate) picked_pattern: &'a mut Option<String>,
+}
+
+/// Brush Settings variant that exposes the shared Patterns browser for Texture while returning a
+/// pattern id to the panel. The panel dispatches `brush.texturePattern` after committing edits, so
+/// this view never mutates the engine session or changes the global Patterns selection.
+pub(crate) fn section_body_with_patterns(
+    ui: &mut egui::Ui,
+    b: &mut BrushSettings,
+    i: usize,
+    presets: &[BrushPreset],
+    current: Option<&str>,
+    pattern_section: PatternSectionPatterns<'_>,
+) -> Option<String> {
     let t = Tokens::get(ui.ctx());
     let note = |ui: &mut egui::Ui, s: &str| {
         ui.label(RichText::new(s).color(t.text_faint).font(theme::medium(11.5)));
@@ -613,7 +643,7 @@ pub fn section_body(ui: &mut egui::Ui, b: &mut BrushSettings, i: usize, presets:
     match i {
         1 => shape_dynamics(ui, b),
         2 => scattering(ui, b),
-        3 => texture(ui, b),
+        3 => texture(ui, b, pattern_section.patterns, pattern_section.groups, pattern_section.selected_pattern, pattern_section.picked_pattern),
         4 => dual_brush(ui, b, presets),
         5 => color_dynamics(ui, b),
         6 => {
