@@ -15,7 +15,7 @@
 
 use photocraft_color::PixelFormat;
 use photocraft_geom::{Rect, TileCoord};
-use photocraft_raster::{Surface, Tile};
+use photocraft_raster::{Interrupt, Surface, Tile};
 use std::sync::Arc;
 
 use crate::transform::{Interp, bicubic};
@@ -56,7 +56,7 @@ pub fn place_source_clipped(
             let (u, v) = w.map(x, y);
             (a * u + c * v + e, b * u + d * v + f)
         };
-        return Ok(warp_mesh_inner(src, src_rect, &map, Interp::Bicubic, true, clip));
+        return Ok(mesh(src, src_rect, &map, Interp::Bicubic, true, clip, &Interrupt::NONE));
     }
     let near = |x: f64, y: f64| (x - y).abs() < 1e-9;
     if near(a, 1.0) && near(b, 0.0) && near(c, 0.0) && near(d, 1.0) && near(e, e.round()) && near(f, f.round()) {
@@ -89,7 +89,7 @@ pub fn place_source_projective_clipped(
             let (u, v) = w.map(x, y);
             h.apply(u, v)
         };
-        return Ok(warp_mesh_inner(src, src_rect, &map, Interp::Bicubic, true, clip));
+        return Ok(mesh(src, src_rect, &map, Interp::Bicubic, true, clip, &Interrupt::NONE));
     }
     crate::transform::warp_surface(src, src_rect, h, Interp::Bicubic)
 }
@@ -98,23 +98,37 @@ pub fn place_source_projective_clipped(
 /// coordinates → destination document coordinates). Output has `src`'s format with alpha
 /// added; pixels outside the warped area are transparent.
 pub fn warp_mesh_surface(src: &Surface, src_rect: Rect, f: &(dyn Fn(f64, f64) -> (f64, f64) + Sync), interp: Interp) -> Surface {
-    warp_mesh_surface_with(src, src_rect, f, interp, true)
+    warp_mesh_surface_mips(src, src_rect, f, interp, true)
+}
+
+/// [`warp_mesh_surface`] reporting progress per destination tile; `None` once `ctl` is cancelled.
+pub fn warp_mesh_surface_with(src: &Surface, src_rect: Rect, f: &(dyn Fn(f64, f64) -> (f64, f64) + Sync), interp: Interp, ctl: &Interrupt) -> Option<Surface> {
+    let out = mesh(src, src_rect, f, interp, true, None, ctl);
+    (!ctl.cancelled()).then_some(out)
 }
 
 /// [`warp_mesh_surface`], with the reduced-level sampling of strong shrinks switched by `mips`
 /// (off: every shrink averages subsamples of the full-resolution source, the exact reference).
-pub(crate) fn warp_mesh_surface_with(src: &Surface, src_rect: Rect, f: &(dyn Fn(f64, f64) -> (f64, f64) + Sync), interp: Interp, mips: bool) -> Surface {
-    warp_mesh_inner(src, src_rect, f, interp, mips, None)
+pub(crate) fn warp_mesh_surface_mips(src: &Surface, src_rect: Rect, f: &(dyn Fn(f64, f64) -> (f64, f64) + Sync), interp: Interp, mips: bool) -> Surface {
+    mesh(src, src_rect, f, interp, mips, None, &Interrupt::NONE)
 }
 
 /// [`warp_mesh_surface`] restricted to `clip` (destination pixels): the same pixels inside it,
 /// nothing outside. For callers that only need what lands on the canvas (a flattened export),
 /// so a placement much larger than the canvas costs only its visible part.
 pub fn warp_mesh_surface_clipped(src: &Surface, src_rect: Rect, f: &(dyn Fn(f64, f64) -> (f64, f64) + Sync), interp: Interp, clip: Rect) -> Surface {
-    warp_mesh_inner(src, src_rect, f, interp, true, Some(clip))
+    mesh(src, src_rect, f, interp, true, Some(clip), &Interrupt::NONE)
 }
 
-fn warp_mesh_inner(src: &Surface, src_rect: Rect, f: &(dyn Fn(f64, f64) -> (f64, f64) + Sync), interp: Interp, mips: bool, clip: Option<Rect>) -> Surface {
+fn mesh(
+    src: &Surface,
+    src_rect: Rect,
+    f: &(dyn Fn(f64, f64) -> (f64, f64) + Sync),
+    interp: Interp,
+    mips: bool,
+    clip: Option<Rect>,
+    ctl: &Interrupt,
+) -> Surface {
     if src_rect.is_empty() {
         let fmt = src.format();
         return Surface::new(PixelFormat::new(fmt.mode, fmt.sample, true));
@@ -144,7 +158,7 @@ fn warp_mesh_inner(src: &Surface, src_rect: Rect, f: &(dyn Fn(f64, f64) -> (f64,
             tris.push([a, a + w1 + 1, a + w1]);
         }
     }
-    warp_triangles_with(src, src_rect, &verts, &tris, interp, mips, clip)
+    triangles(src, src_rect, &verts, &tris, interp, mips, clip, ctl)
 }
 
 /// Probe lines per axis [`mapped_lengths`] follows through the map.
@@ -189,10 +203,14 @@ fn mapped_lengths(src_rect: Rect, f: &(dyn Fn(f64, f64) -> (f64, f64) + Sync)) -
 /// interpolation of its source positions. Later triangles in `tris` draw over earlier ones (the
 /// order is the depth order). Output has `src`'s format with alpha added.
 pub fn warp_triangles(src: &Surface, src_rect: Rect, verts: &[([f64; 2], [f64; 2])], tris: &[[usize; 3]], interp: Interp) -> Surface {
-    warp_triangles_with(src, src_rect, verts, tris, interp, true, None)
+    triangles(src, src_rect, verts, tris, interp, true, None, &Interrupt::NONE)
 }
 
-fn warp_triangles_with(
+/// [`warp_triangles`], with reduced-level sampling switched by `mips`, rendered only inside `clip`
+/// when given, and reporting progress per destination tile to `ctl`. A cancelled `ctl` skips the
+/// remaining tiles; the caller discards the result.
+#[allow(clippy::too_many_arguments)]
+fn triangles(
     src: &Surface,
     src_rect: Rect,
     verts: &[([f64; 2], [f64; 2])],
@@ -200,6 +218,7 @@ fn warp_triangles_with(
     interp: Interp,
     mips: bool,
     clip: Option<Rect>,
+    ctl: &Interrupt,
 ) -> Surface {
     let mut fmt = src.format();
     let converted;
@@ -289,7 +308,16 @@ fn warp_triangles_with(
         }
         one.take_tiles(t).pop()
     };
+    // Tiles finished so far, for progress reported per tile (from any worker thread).
+    let finished = std::sync::atomic::AtomicUsize::new(0);
+    let total = tiles.len().max(1);
     let work = |((t, tris), &lvl): ((&Rect, &Vec<[usize; 3]>), &usize)| -> Option<(TileCoord, Arc<Tile>)> {
+        if ctl.cancelled() {
+            return None;
+        }
+        let k = finished.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        // The last few percent are putting the tiles in place.
+        ctl.progress(0.98 * k as f32 / total as f32);
         if tris.is_empty() {
             return None;
         }
@@ -506,6 +534,9 @@ fn warp_triangles_with(
     };
     #[cfg(target_arch = "wasm32")]
     let done: Vec<(TileCoord, Arc<Tile>)> = tiles.iter().zip(bins.iter()).zip(tile_level.iter()).filter_map(work).collect();
+    if ctl.cancelled() {
+        return out;
+    }
     out.put_tiles(done);
     out
 }
@@ -820,6 +851,28 @@ mod tests {
     }
 
     #[test]
+    fn the_interruptible_mesh_warp_reports_progress_and_stops_when_cancelled() {
+        let mut s = Surface::new(PixelFormat::RGBA8);
+        s.fill_rect(Rect::new(0, 0, 600, 400), &[0.2, 0.4, 0.6, 1.0]);
+        let r = s.content_bounds();
+        let w = Warp::preset(WarpStyle::Arc, 30.0, [0.0, 0.0, 600.0, 400.0]);
+        let map = |x: f64, y: f64| w.map(x, y);
+        let reported = std::sync::Mutex::new(0.0f32);
+        let progress = |p: f32| {
+            let mut m = reported.lock().unwrap();
+            *m = m.max(p);
+        };
+        let never = || false;
+        let out = warp_mesh_surface_with(&s, r, &map, Interp::Bicubic, &Interrupt::new(&never, &progress)).expect("not cancelled");
+        let want = warp_mesh_surface(&s, r, &map, Interp::Bicubic);
+        assert_eq!(out.content_bounds(), want.content_bounds());
+        assert_eq!(out.read_region(want.content_bounds()), want.read_region(want.content_bounds()));
+        assert!(*reported.lock().unwrap() > 0.9);
+        let always = || true;
+        assert!(warp_mesh_surface_with(&s, r, &map, Interp::Bicubic, &Interrupt::cancel_only(&always)).is_none());
+    }
+
+    #[test]
     fn a_mesh_warp_far_off_canvas_writes_only_the_two_regions() {
         // #995: the old and warped regions were cleared as one dense `src ∪ warped` buffer, about
         // 37 GiB of floats for a 48 px selection moved 100000 px. Same fix as `warp_gray` (b70fbd4).
@@ -948,7 +1001,7 @@ mod tests {
             for k in [1.0, 0.8, 1.5, 2.0, 3.8] {
                 let f = move |x: f64, y: f64| (x / k + 0.25 * y / k, y / k);
                 let mipped = warp_mesh_surface(&src, r, &f, Interp::Bicubic);
-                let exact = warp_mesh_surface_with(&src, r, &f, Interp::Bicubic, false);
+                let exact = warp_mesh_surface_mips(&src, r, &f, Interp::Bicubic, false);
                 assert_eq!(mipped.content_bounds(), exact.content_bounds(), "{depth:?}, k = {k}");
                 assert_eq!(mipped.read_region(mipped.content_bounds()), exact.read_region(exact.content_bounds()), "{depth:?}, k = {k}");
             }
@@ -963,7 +1016,7 @@ mod tests {
             // A shear and a bend too, so triangles differ in scale across a tile.
             let f = move |x: f64, y: f64| (x / kx + 0.002 * y, y / ky + 6.0 * (x / 2048.0 * std::f64::consts::PI).sin());
             let mipped = warp_mesh_surface(&src, r, &f, Interp::Bicubic);
-            let exact = warp_mesh_surface_with(&src, r, &f, Interp::Bicubic, false);
+            let exact = warp_mesh_surface_mips(&src, r, &f, Interp::Bicubic, false);
             let d = mean_abs_diff(&mipped, &exact) * 255.0;
             assert!(d < 1.0, "{kx}x{ky}: mean diff {d:.3}/255");
         }
@@ -990,7 +1043,7 @@ mod tests {
         let clip = Rect::new(0, 0, 700, 450);
         for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
             let src = textured(600, 400, 5).convert(PixelFormat::new(ColorMode::Rgb, depth, true));
-            let full = warp_mesh_surface_with(&src, r, &f, Interp::Bicubic, true);
+            let full = warp_mesh_surface_mips(&src, r, &f, Interp::Bicubic, true);
             let clipped = warp_mesh_surface_clipped(&src, r, &f, Interp::Bicubic, clip);
             assert!(clip.contains_rect(&clipped.content_bounds()), "{depth:?}: {:?}", clipped.content_bounds());
             assert!(!full.content_bounds().intersect(&clip).is_empty() && !clip.contains_rect(&full.content_bounds()), "{depth:?}");
@@ -1007,7 +1060,7 @@ mod tests {
         let r = Rect::new(0, 0, 2048, 512);
         let f = |x: f64, y: f64| (x / 16.0, y);
         let mipped = warp_mesh_surface(&src, r, &f, Interp::Bicubic);
-        let exact = warp_mesh_surface_with(&src, r, &f, Interp::Bicubic, false);
+        let exact = warp_mesh_surface_mips(&src, r, &f, Interp::Bicubic, false);
         let d = mean_abs_diff(&mipped, &exact) * 255.0;
         assert!(d < 1.0, "mean diff {d:.3}/255");
     }
@@ -1021,7 +1074,7 @@ mod tests {
         let f = |x: f64, y: f64| (x / 8.0 + 0.01 * y, y / 8.0);
         for (name, mips) in [("exact", false), ("mipped", true)] {
             let t = std::time::Instant::now();
-            let out = warp_mesh_surface_with(&src, r, &f, Interp::Bicubic, mips);
+            let out = warp_mesh_surface_mips(&src, r, &f, Interp::Bicubic, mips);
             println!("{name}: {:.0} ms ({:?})", t.elapsed().as_secs_f64() * 1000.0, out.content_bounds());
         }
     }
