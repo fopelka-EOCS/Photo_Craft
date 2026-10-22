@@ -17,6 +17,33 @@ fn active(s: &Session) -> &Layer {
     st.doc.layer(st.active_layer.unwrap()).unwrap()
 }
 
+/// #8230: the Fade dialog's preview is the document Fade would leave, at every depth and in a
+/// blend mode, with no history step and nothing changed until OK; with nothing to fade or a bad
+/// mode it is an error, not a panic.
+#[test]
+fn fade_preview_matches_fade_without_a_step() {
+    for depth in [8, 16, 32] {
+        assert!(fade_preview(&session(depth), &json!({"opacity": 50})).is_err(), "nothing to fade yet");
+        for p in [json!({"opacity": 25}), json!({"opacity": 60, "mode": "difference"}), json!({})] {
+            let mut s = session(depth);
+            s.execute("edit.fill", json!({"color": "#000000"})).unwrap();
+            let (steps, revision) = (s.active().unwrap().history.past_len(), s.active().unwrap().revision);
+            let preview = fade_preview(&s, &p).unwrap();
+            assert_eq!((s.active().unwrap().history.past_len(), s.active().unwrap().revision), (steps, revision), "depth {depth} {p}: no step");
+            assert_eq!(px(&s, 5, 5)[0], 0.0, "depth {depth} {p}: the layer is untouched");
+            let id = s.active().unwrap().active_layer.unwrap();
+            let shown = preview.layer(id).unwrap().surface().unwrap().pixel(5, 5);
+            s.execute("edit.fade", p.clone()).unwrap();
+            assert_eq!(shown, px(&s, 5, 5), "depth {depth} {p}: the preview is what OK applies");
+        }
+        let mut s = session(depth);
+        s.execute("edit.fill", json!({"color": "#000000"})).unwrap();
+        assert!(fade_preview(&s, &json!({"mode": "nonsense"})).is_err());
+        s.execute("layer.new.layer", json!({})).unwrap();
+        assert!(fade_preview(&s, &json!({})).is_err(), "not right after the step");
+    }
+}
+
 #[test]
 fn fade_blends_last_step_at_all_depths() {
     for depth in [8, 16, 32] {

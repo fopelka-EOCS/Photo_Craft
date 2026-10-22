@@ -1864,7 +1864,8 @@ pub(crate) fn ensure_filter_preview(app: &mut PhotocraftApp, idx: usize, ctx: &e
         params = crate::select_mask_view::request_params(&d.fields, params);
     }
     let st = app.session.documents().get(idx)?;
-    let k = filter_preview_factor(app, &st.doc, &cmd, &params);
+    let fade = cmd == "edit.fade";
+    let k = if fade { 1 } else { filter_preview_factor(app, &st.doc, &cmd, &params) };
     let request = crate::filter_dialog::FilterPreviewKey {
         doc: st.doc.id,
         revision: st.revision,
@@ -1876,6 +1877,21 @@ pub(crate) fn ensure_filter_preview(app: &mut PhotocraftApp, idx: usize, ctx: &e
         k,
     };
     let key = request.doc.0 ^ (1u64 << 61);
+    // Fade blends the layer back towards its pixels before the last step, which only the
+    // session's history holds: one blend over the changed area at full size, computed here (#8230).
+    if fade {
+        if app.filter_preview.as_ref().is_none_or(|p| p.key != request) {
+            let t0 = crate::gpu_canvas::now_ms();
+            let computed = photocraft_engine::edit_menu_cmds::fade_preview(&app.session, &request.params).ok().map(|doc| {
+                let buffer = photocraft_compose::flatten(&doc);
+                (std::sync::Arc::new(doc), buffer)
+            });
+            publish_filter_preview(app, idx, request, computed, crate::gpu_canvas::now_ms() - t0);
+        }
+        let preview = app.filter_preview.as_ref()?;
+        let result = preview.result.as_ref()?;
+        return Some((preview.key.k, key, [result.size.width, result.size.height]));
+    }
     // Every filter's preview computes off the UI thread in the desktop app: Gaussian Blur at
     // 1000 px takes long enough to freeze the window. Once the slider settles, a preview still
     // running for an older value is cancelled.
@@ -6391,6 +6407,32 @@ mod tests {
         // Unchanged request: nothing is recomputed or recorded again.
         ensure_filter_preview(&mut app, 0, &egui::Context::default()).expect("the same preview");
         assert_eq!(app.perf.frame_refresh_ms, app.perf.composite_ms + app.perf.upload_ms);
+    }
+
+    /// #8230: Edit › Fade opens with a Preview checkbox, as in Photoshop, and the canvas shows the
+    /// layer faded with the dialog's opacity, at full size, on the desktop and the inline path
+    /// alike. The document and its history stay as they were until OK.
+    #[test]
+    fn fade_dialog_previews_the_faded_layer() {
+        for background in [false, true] {
+            let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+            app.background_jobs = background;
+            app.run("file.new", json!({"width": 40, "height": 30, "background": "white"})).unwrap();
+            app.run("edit.fill", json!({"color": "#000000"})).unwrap();
+            let id = crate::filter_dialog::open(&mut app, "edit.fade").expect("Fade has a dialog");
+            let d = app.ui.dialogs.iter_mut().find(|d| d.id == id).expect("the dialog");
+            assert_eq!(d.fields.get("__preview"), Some(&json!(true)), "a Preview checkbox, on");
+            d.fields.insert("opacity".into(), json!(25));
+            let steps = app.session.active().unwrap().history.past_len();
+            let (k, _, size) = ensure_filter_preview(&mut app, 0, &egui::Context::default()).expect("a preview");
+            assert_eq!((k, size), (1, [40, 30]), "background jobs {background}");
+            let st = app.session.active().unwrap();
+            let layer = st.active_layer.unwrap();
+            let shown = app.filter_preview.as_ref().and_then(|p| p.result.as_ref()).expect("a result").layer(layer).unwrap().surface().unwrap().pixel(3, 3);
+            assert!((shown[0] - 0.75).abs() < 0.01, "background jobs {background}: {shown:?}");
+            assert_eq!(st.doc.layer(layer).unwrap().surface().unwrap().pixel(3, 3)[0], 0.0, "the layer itself is untouched");
+            assert_eq!(st.history.past_len(), steps, "no history step");
+        }
     }
 
     /// #6326: a filter's live preview is never coarser than the screen. On a document big enough
