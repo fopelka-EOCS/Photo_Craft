@@ -550,6 +550,11 @@ pub struct View {
     /// Recompute fill-screen on next frame. Unlike fit, this may crop an edge of the document.
     #[serde(default)]
     pub fill_pending: bool,
+    /// The pending fit was asked for by View › Fit on Screen (or a Fit Screen button): it also
+    /// enlarges a small document, as Photoshop does. Opening or resizing a document fits without
+    /// going past 100% (#7895).
+    #[serde(default)]
+    pub fit_magnify: bool,
     /// Document size this view last showed; a change (Image/Canvas Size, crop) re-centres it.
     #[serde(default)]
     pub doc_size: [u32; 2],
@@ -558,9 +563,18 @@ pub struct View {
     pub rotation: f32,
 }
 
+impl View {
+    /// Fit the whole document in the window on the next frame, enlarging it when it is small.
+    pub fn request_fit_to_screen(&mut self) {
+        self.fit_pending = true;
+        self.fit_magnify = true;
+        self.fill_pending = false;
+    }
+}
+
 impl Default for View {
     fn default() -> Self {
-        Self { zoom: 1.0, center: [0.0, 0.0], fit_pending: true, fill_pending: false, doc_size: [0, 0], rotation: 0.0 }
+        Self { zoom: 1.0, center: [0.0, 0.0], fit_pending: true, fill_pending: false, fit_magnify: false, doc_size: [0, 0], rotation: 0.0 }
     }
 }
 

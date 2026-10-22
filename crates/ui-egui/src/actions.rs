@@ -171,7 +171,7 @@ pub(crate) fn run_view(app: &mut PhotocraftApp, id: &str, params: Value) -> Resu
     let v = app.ui.views.get_mut(i).ok_or("no document view")?;
     v.fill_pending = false;
     match id {
-        "view.fitOnScreen" => v.fit_pending = true,
+        "view.fitOnScreen" => v.request_fit_to_screen(),
         "view.zoomIn" => {
             v.fit_pending = false;
             v.zoom = crate::zoom_levels::step(v.zoom, 1, v.doc_size);

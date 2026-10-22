@@ -789,8 +789,7 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                         app.ui.views[i].fill_pending = false;
                     }
                     if fit {
-                        app.ui.views[i].fit_pending = true;
-                        app.ui.views[i].fill_pending = false;
+                        app.ui.views[i].request_fit_to_screen();
                     }
                     if let Some(r) = rotation {
                         app.ui.views[i].rotation = crate::rotate_view::wrap_deg(r as f32);

@@ -1529,7 +1529,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         if widgets::secondary_button(ui, tl!("Fit Screen"), 0.0).clicked()
                             && let Some(i) = app.session.active_index()
                         {
-                            app.ui.views[i].fit_pending = true;
+                            app.ui.views[i].request_fit_to_screen();
                         }
                         if widgets::secondary_button(ui, "100%", 0.0).clicked()
                             && let Some(i) = app.session.active_index()
@@ -1566,8 +1566,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         if widgets::secondary_button(ui, tl!("Fit Screen"), 0.0).clicked()
                             && let Some(i) = app.session.active_index()
                         {
-                            app.ui.views[i].fit_pending = true;
-                            app.ui.views[i].fill_pending = false;
+                            app.ui.views[i].request_fit_to_screen();
                         }
                         if widgets::secondary_button(ui, tl!("Fill Screen"), 0.0).clicked()
                             && let Some(i) = app.session.active_index()
@@ -1793,7 +1792,7 @@ pub fn status_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         && widgets::compact_button(ui, tl!("Fit"), control_h).clicked()
                         && let Some(i) = app.session.active_index()
                     {
-                        app.ui.views[i].fit_pending = true;
+                        app.ui.views[i].request_fit_to_screen();
                     }
                     if app.session.has_jobs() {
                         ui.add_space(6.0);

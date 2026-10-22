@@ -67,7 +67,14 @@ fn ctrl_plus_zooms_the_canvas_not_the_interface() {
     assert_eq!(zoom(&h), 1.0);
     h.key_press_modifiers(Modifiers::COMMAND, Key::Num0);
     h.run_steps(3);
-    assert!((zoom(&h) - z0).abs() < 1e-3, "⌘0 fits on screen: {} vs {z0}", zoom(&h));
+    // Fit on Screen enlarges a small document to the window (#7895); opening it only fitted down.
+    let fitted = zoom(&h);
+    assert!(fitted > z0, "⌘0 fits on screen: {fitted} vs {z0}");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Num1);
+    h.run_steps(2);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Num0);
+    h.run_steps(3);
+    assert!((zoom(&h) - fitted).abs() < 1e-3, "⌘0 is repeatable");
     assert_eq!(h.ctx.zoom_factor(), 1.0, "the interface must never scale");
 }
 

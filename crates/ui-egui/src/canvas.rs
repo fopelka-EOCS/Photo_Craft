@@ -1036,15 +1036,23 @@ pub fn doc_point_at(app: &PhotocraftApp, pos: Pos2) -> Option<[f64; 2]> {
 /// point; `View::zoom` is stored in physical pixels per document pixel. `aspect` is the
 /// displayed pixel aspect ratio ([`ViewXform::aspect`]): the image is that much wider on screen.
 pub fn fit_view(view: &mut View, doc: &Document, area: Vec2, ppp: f32, aspect: f32) {
+    fit_view_to(view, doc, area, ppp, aspect, false);
+}
+
+/// [`fit_view`], which with `magnify` also enlarges a document smaller than the area (View ›
+/// Fit on Screen); without it, fitting never goes past 100%.
+pub fn fit_view_to(view: &mut View, doc: &Document, area: Vec2, ppp: f32, aspect: f32, magnify: bool) {
     let (w, h) = (doc.size.width as f32, doc.size.height as f32);
     let shown_w = w * if aspect.is_finite() && aspect > 0.0 { aspect } else { 1.0 };
-    // Fit never magnifies past 100%: one image pixel per *physical* pixel, so the cap applies
-    // after the points → device pixels conversion (a 150% display would otherwise open at 150%).
+    // Opening a document never magnifies past 100%: one image pixel per *physical* pixel, so the
+    // cap applies after the points → device pixels conversion (a 150% display would otherwise
+    // open at 150%). View › Fit on Screen does enlarge small documents (#7895).
     let fit = ((area.x - 40.0) / shown_w).min((area.y - 40.0) / h) * ppp;
-    let zoom = crate::zoom_levels::clamp(fit.min(1.0), [doc.size.width, doc.size.height]);
+    let zoom = crate::zoom_levels::clamp(if magnify { fit } else { fit.min(1.0) }, [doc.size.width, doc.size.height]);
     view.zoom = zoom;
     view.center = [w / 2.0, h / 2.0];
     view.fit_pending = false;
+    view.fit_magnify = false;
     view.fill_pending = false;
 }
 
@@ -1058,6 +1066,7 @@ pub fn fill_view(view: &mut View, doc: &Document, area: Vec2, ppp: f32, aspect: 
     view.zoom = zoom;
     view.center = [w / 2.0, h / 2.0];
     view.fit_pending = false;
+    view.fit_magnify = false;
     view.fill_pending = false;
 }
 
@@ -3136,7 +3145,11 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     // View › Pixel Aspect Ratio Correction: document pixels are shown this much wider.
     let aspect = app.ui.view.display_aspect();
     if view.fit_pending && rect.width() > 50.0 {
-        fit_view(&mut view, &doc, rect.size(), ppp, aspect);
+        let magnify = view.fit_magnify;
+        fit_view_to(&mut view, &doc, rect.size(), ppp, aspect, magnify);
+    }
+    if !view.fit_pending {
+        view.fit_magnify = false;
     }
     if view.fill_pending && rect.width() > 50.0 {
         fill_view(&mut view, &doc, rect.size(), ppp, aspect);
@@ -8485,6 +8498,32 @@ mod tests {
         let mut view = View { fit_pending: true, ..View::default() };
         fit_view(&mut view, &big, vec2(480.0, 480.0), 1.5, 1.0);
         assert!((view.zoom - 0.66).abs() < 1e-5, "{}", view.zoom);
+    }
+
+    /// #7895: View › Fit on Screen enlarges a document smaller than the window (the 499 × 500
+    /// canvas that stayed at 100%); opening or resizing one still fits without going past 100%.
+    #[test]
+    fn fit_on_screen_command_enlarges_small_documents() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 400, "height": 200})).unwrap();
+        app.sync_views();
+        let doc = app.session.active().unwrap().doc.clone();
+        let mut view = View::default();
+        fit_view(&mut view, &doc, vec2(600.0, 600.0), 1.0, 1.0);
+        assert_eq!(view.zoom, 1.0, "opening still caps at 100%");
+
+        app.run("view.fitOnScreen", json!({})).unwrap();
+        let v = &mut app.ui.views[0];
+        assert!(v.fit_pending && v.fit_magnify);
+        let magnify = v.fit_magnify;
+        fit_view_to(v, &doc, vec2(600.0, 600.0), 1.0, 1.0, magnify);
+        assert!((v.zoom - 1.4).abs() < 1e-5, "(600 - 40) / 400 = 1.4, got {}", v.zoom);
+        assert!(!v.fit_pending && !v.fit_magnify);
+
+        // The scale of a high-DPI display is part of the physical zoom, as for the 100% cap.
+        let mut view = View::default();
+        fit_view_to(&mut view, &doc, vec2(600.0, 600.0), 2.0, 1.0, true);
+        assert!((view.zoom - 2.8).abs() < 1e-5, "{}", view.zoom);
     }
 
     #[test]
