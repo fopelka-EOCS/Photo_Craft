@@ -2810,6 +2810,7 @@ impl PhotocraftApp {
                         let sx = ((x as f32 + 0.5) * dw / w as f32) as i32;
                         let sy = ((y as f32 + 0.5) * dh / h as f32) as i32;
                         let v = ch.surface.sample_channel(sx, sy, 0);
+                        let v = if ch.spot.is_some() { 1.0 - v } else { v };
                         px[(y + oy) * side + x + ox] = egui::Color32::from_gray((v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8);
                     }
                 }

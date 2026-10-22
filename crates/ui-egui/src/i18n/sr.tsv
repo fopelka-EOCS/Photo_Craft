@@ -4232,6 +4232,7 @@ shape	Appearance	Izgled
 # Channel Options and New Spot Channel (#3761)
 	Channel Color	Boja kanala
 	Color Indicates:	Boja označava:
+	Spot Channel Options…	Опције канала спот боје…
 	Ink Characteristics	Karakteristike mastila
 	Solidity:	Punoća:
 	Redrawing	Ponovno iscrtavanje

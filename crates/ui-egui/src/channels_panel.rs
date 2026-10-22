@@ -46,6 +46,7 @@ pub fn load_operation(m: egui::Modifiers) -> &'static str {
     }
 }
 
+/// Renders channel rows and dispatches targeting, spot dialogs, and footer actions.
 pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     let Some(st) = app.session.active() else {
@@ -224,7 +225,7 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 actions.push(("ui.channelOptions".into(), json!("quickMask")));
             }
             if let Row::Alpha(i) = row {
-                if resp.double_clicked() && on_thumb {
+                if resp.double_clicked() && (on_thumb || doc.channels.get(i).is_some_and(|ch| ch.spot.is_some())) {
                     actions.push(("ui.channelOptions".into(), json!(i)));
                 } else if resp.double_clicked() {
                     ctx.data_mut(|d| d.insert_temp(rename_id, name.clone()));
@@ -322,7 +323,11 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         actions.extend(drop(ui, &trash, Footer::Delete));
         let new = icons::button(ui, "plus", 26.0, false, tl!("Create new channel"));
         if new.clicked() {
-            actions.push(("channel.new".into(), json!({})));
+            if doc.selection.is_some() {
+                actions.push(("ui.newSpotChannel".into(), json!({})));
+            } else {
+                actions.push(("channel.new".into(), json!({ "fill": "black" })));
+            }
         }
         actions.extend(drop(ui, &new, Footer::New));
         if icons::button(ui, "square-dashed", 26.0, false, tl!("Save selection as channel")).clicked() {
@@ -470,6 +475,7 @@ mod tests {
         assert_eq!(load_operation(m(true, true)), "intersect");
     }
 
+    /// Checks that channel renaming interrupts IME composition only when the field gains focus.
     #[test]
     fn rename_field_interrupts_the_ime_only_when_it_takes_focus() {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
@@ -490,6 +496,25 @@ mod tests {
             })
             .collect();
         assert_eq!(interrupts, [None, Some(false), Some(false), Some(false)]);
+    }
+
+    /// Checks spot thumbnail polarity while preserving the alpha-mask thumbnail convention.
+    #[test]
+    fn spot_thumbnail_shows_dark_ink_on_white_without_inverting_alpha_masks() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 16, "height": 16, "background": "transparent"})).unwrap();
+        app.run("select.rect", json!({"x": 4, "y": 4, "width": 8, "height": 8})).unwrap();
+        app.run("channel.newSpot", json!({"color": "#00ff00", "solidity": 100})).unwrap();
+        app.run("channel.new", json!({"fill": "selection"})).unwrap();
+        let ctx = egui::Context::default();
+        ctx.begin_pass(Default::default());
+        let ids = app.channel_thumbs(&ctx);
+        let output = ctx.end_pass();
+        let egui::ImageData::Color(spot) = &output.textures_delta.set.get(&ids[4]).unwrap()[0].image;
+        let egui::ImageData::Color(alpha) = &output.textures_delta.set.get(&ids[5]).unwrap()[0].image;
+        let center = (spot.size[1] / 2) * spot.size[0] + spot.size[0] / 2;
+        assert_eq!((spot.pixels[0], spot.pixels[center]), (Color32::WHITE, Color32::BLACK));
+        assert_eq!((alpha.pixels[0], alpha.pixels[center]), (Color32::BLACK, Color32::WHITE));
     }
 
     #[test]
@@ -536,12 +561,17 @@ mod tests {
     /// The Channels tab (the Layers card's second tab) of a 64×48 white document with a layer
     /// mask on "Masked" and one alpha channel.
     fn channels_harness() -> (egui_kittest::Harness<'static, PhotocraftApp>, u64) {
+        channels_harness_at_depth(8)
+    }
+
+    /// Builds a Channels panel fixture with a layer mask and alpha channel at the requested depth.
+    fn channels_harness_at_depth(depth: u32) -> (egui_kittest::Harness<'static, PhotocraftApp>, u64) {
         let mut s = photocraft_engine::Session::new();
-        s.execute("file.new", json!({"width": 64, "height": 48})).unwrap();
+        s.execute("file.new", json!({"width": 64, "height": 48, "depth": depth})).unwrap();
         let masked = s.execute("layer.new.layer", json!({"name": "Masked"})).unwrap()["layer"].as_u64().unwrap();
         s.execute("layer.layerMask.revealAll", json!({"layer": masked})).unwrap();
         s.execute("channel.new", json!({})).unwrap();
-        let mut h = egui_kittest::Harness::builder().with_size(vec2(1440.0, 1000.0)).with_max_steps(64).build_eframe(move |cc| {
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(1440.0, 1000.0)).with_step_dt(1.0 / 60.0).with_max_steps(64).build_eframe(move |cc| {
             PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
             PhotocraftApp::new(s, crate::Services::default())
         });
@@ -587,8 +617,106 @@ mod tests {
         drag(h, from, to);
     }
 
+    /// Returns custom channel names in document order for panel-action assertions.
     fn alphas(h: &egui_kittest::Harness<'_, PhotocraftApp>) -> Vec<String> {
         h.state().session.active().unwrap().doc.channels.iter().map(|c| c.name.clone()).collect()
+    }
+
+    /// Checks that double-clicking either part of a spot row opens its ink options.
+    #[test]
+    fn double_clicking_a_spot_row_opens_ink_options_on_its_name_and_thumbnail() {
+        for on_thumbnail in [false, true] {
+            let (mut h, _) = channels_harness();
+            h.state_mut().run("channel.options", json!({"channel": 0, "indicates": "spot", "color": "#00ff00", "solidity": 100})).unwrap();
+            h.run_steps(2);
+            let position = if on_thumbnail { recorded(&h.ctx).into_iter().find(|(name, _)| name == "Alpha 1").unwrap().1.center() } else { at(&h, "Alpha 1") };
+            h.hover_at(position);
+            h.run_steps(1);
+            for _ in 0..2 {
+                for pressed in [true, false] {
+                    h.event(egui::Event::PointerButton { pos: position, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+                    h.run_steps(1);
+                }
+            }
+            let dialog = h.state().ui.dialogs.last().unwrap_or_else(|| panic!("double click opens channel options (thumbnail={on_thumbnail})"));
+            assert_eq!(dialog.fields["__label"], "Spot Channel Options…");
+            assert_eq!(dialog.fields["indicates"], "spot");
+            assert_eq!(dialog.fields["color"], "#00ff00");
+            assert_eq!(dialog.fields["opacity"].as_f64(), Some(100.0));
+        }
+    }
+
+    /// Checks selection-to-spot and empty-alpha footer workflows at 8, 16, and 32 bits.
+    #[test]
+    fn new_channel_button_opens_spot_from_selection_or_creates_an_empty_channel() {
+        for depth in [8, 16, 32] {
+            check_new_channel_button(depth);
+        }
+    }
+
+    /// Exercises real footer clicks, dialog cancellation, spot coverage, and undo/redo at one depth.
+    fn check_new_channel_button(depth: u32) {
+        let (mut h, _) = channels_harness_at_depth(depth);
+        let click_new = |h: &mut egui_kittest::Harness<'_, PhotocraftApp>| {
+            use egui::{Modifiers, PointerButton};
+            let p = at(h, "Create new channel");
+            h.hover_at(p);
+            h.run_steps(1);
+            h.event(egui::Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+            h.run_steps(1);
+            h.event(egui::Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+            h.run_steps(2);
+        };
+
+        // No selection must not turn the implicit select-all mask into a white channel.
+        click_new(&mut h);
+        assert_eq!(alphas(&h), ["Alpha 1", "Alpha 2"]);
+        assert_eq!(h.state().session.active().unwrap().doc.channels[1].surface.sample_channel(8, 8, 0), 0.0);
+        h.state_mut().run("edit.undo", json!({})).unwrap();
+
+        h.state_mut().run("select.rect", json!({"x": 8, "y": 8, "width": 24, "height": 24})).unwrap();
+        h.state_mut().run("select.modify.feather", json!({"radius": 2})).unwrap();
+        let selection = h.state().session.active().unwrap().doc.selection.clone().unwrap();
+        assert!(selection.sample_channel(8, 16, 0) > 0.0 && selection.sample_channel(8, 16, 0) < 1.0);
+        let steps = h.state().session.active().unwrap().history.past_len();
+        h.run_steps(2);
+        click_new(&mut h);
+        assert_eq!(alphas(&h), ["Alpha 1"], "opening the dialog creates no intermediate alpha");
+        assert_eq!(h.state().session.active().unwrap().history.past_len(), steps);
+        let dialog = h.state().ui.dialogs.last().unwrap();
+        assert!(crate::channel_options_ui::owns_new_spot(&dialog.fields));
+        let id = dialog.id;
+        crate::dialogs::cancel(h.state_mut(), id).unwrap();
+        assert_eq!(alphas(&h), ["Alpha 1"]);
+        assert_eq!(h.state().session.active().unwrap().history.past_len(), steps);
+        h.run_steps(30);
+        click_new(&mut h);
+        let dialog = h.state_mut().ui.dialogs.last_mut().unwrap();
+        dialog.fields.insert("name".into(), json!("Spot 1"));
+        dialog.fields.insert("color".into(), json!("#00b000"));
+        dialog.fields.insert("solidity".into(), json!(100));
+        let id = dialog.id;
+        crate::dialogs::confirm(h.state_mut(), id).unwrap();
+        let st = h.state().session.active().unwrap();
+        assert_eq!(st.history.past_len(), steps + 1);
+        assert_eq!(st.channel_view.target, ChannelTarget::Alpha(1));
+        let channel = st.doc.channels[1].surface.clone();
+        assert!(st.doc.channels[1].spot.is_some(), "the result is spot ink, not a grayscale alpha mask");
+        assert!(st.channel_view.color_hidden.iter().all(|hidden| !hidden));
+        assert!(channel.sample_channel(16, 16, 0) > 0.99);
+        assert_eq!(channel.sample_channel(60, 40, 0), 0.0, "no ink outside the selection");
+        for y in 0..48 {
+            for x in 0..64 {
+                let expected = selection.sample_channel(x, y, 0);
+                assert!((channel.sample_channel(x, y, 0) - expected).abs() < 0.005, "spot ink coverage at {x},{y}");
+                assert_eq!(st.doc.selection.as_ref().unwrap().sample_channel(x, y, 0), expected, "the selection stays intact");
+            }
+        }
+        h.state_mut().run("edit.undo", json!({})).unwrap();
+        assert_eq!(alphas(&h), ["Alpha 1"]);
+        h.state_mut().run("edit.redo", json!({})).unwrap();
+        assert_eq!(alphas(&h), ["Alpha 1", "Spot 1"]);
+        assert_eq!(h.state().session.active().unwrap().doc.channels[1].surface.sample_channel(8, 16, 0), channel.sample_channel(8, 16, 0));
     }
 
     /// #4689: as in Photoshop, a channel dropped on New is duplicated, on Delete deleted, and on

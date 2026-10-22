@@ -3907,6 +3907,7 @@ cameraData	Lens	Lens
 # Channel Options and New Spot Channel (#3761)
 	Channel Color	Kanal Rengi
 	Color Indicates:	Rengin Gösterdiği:
+	Spot Channel Options…	Spot Kanalı Seçenekleri…
 	Ink Characteristics	Mürekkep Özellikleri
 	Solidity:	Doluluk:
 	Redrawing	Yeniden çiziliyor

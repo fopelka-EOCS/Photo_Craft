@@ -4096,6 +4096,7 @@ cameraRaw	Yellow	Sárga
 # Channel Options and New Spot Channel (#3761)
 	Channel Color	Csatorna színe
 	Color Indicates:	A szín jelzése:
+	Spot Channel Options…	Direktszíncsatorna beállításai…
 	Ink Characteristics	Festék jellemzői
 	Solidity:	Fedőképesség:
 	Redrawing	Újrarajzolás

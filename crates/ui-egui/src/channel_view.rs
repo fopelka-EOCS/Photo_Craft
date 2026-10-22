@@ -396,6 +396,7 @@ mod tests {
         }
     }
 
+    /// Checks that channel visibility reuses the composite until its source pixels change.
     #[test]
     fn channel_eyes_reuse_composite_until_pixels_change() {
         let mut app = PhotocraftApp::new(Session::new(), crate::Services::default());
@@ -443,6 +444,47 @@ mod tests {
         .unwrap();
         assert_eq!(actual, expected, "reused pixels must preserve channel colours");
         assert!(unused.is_none(), "reuse must not create a second composite");
+    }
+
+    /// Checks converted spot coverage, transparent surroundings, editing, and history at every depth.
+    #[test]
+    fn converted_spot_keeps_ink_inside_the_selection_and_transparency_outside() {
+        for depth in [8, 16, 32] {
+            let mut s = Session::new();
+            s.execute("file.new", json!({"width": 16, "height": 16, "depth": depth, "background": "transparent"})).unwrap();
+            s.execute("select.rect", json!({"x": 4, "y": 4, "width": 8, "height": 8})).unwrap();
+            s.execute("select.modify.feather", json!({"radius": 1})).unwrap();
+            let selection = s.active().unwrap().doc.selection.clone().unwrap();
+            s.execute("channel.new", json!({"fill": "inverseSelection"})).unwrap();
+            let steps = s.active().unwrap().history.past_len();
+            s.execute("channel.options", json!({"channel": 0, "indicates": "spot", "color": "#00ff00", "solidity": 100})).unwrap();
+            let st = s.active().unwrap();
+            assert_eq!(st.history.past_len(), steps + 1);
+            assert_eq!(st.channel_view.visible_colors(3), 3, "preview the ink over the transparent image");
+            let pixels = render(&st.doc, &st.channel_view, st.doc.bounds(), 1, false, st.active_layer).unwrap();
+            assert_eq!(pixels[0], Color32::TRANSPARENT, "no spot ink outside the selected footprint");
+            assert_eq!(pixels[8 * 16 + 8], Color32::GREEN);
+            for y in 0..16 {
+                for x in 0..16 {
+                    let expected = selection.sample_channel(x, y, 0);
+                    let pixel = pixels[(y * 16 + x) as usize];
+                    assert!((f32::from(pixel.a()) / 255.0 - expected).abs() < 0.01, "coverage at {x},{y}, depth {depth}");
+                    assert_eq!(st.doc.selection.as_ref().unwrap().sample_channel(x, y, 0), expected);
+                }
+            }
+            assert!(s.undo());
+            assert!(s.active().unwrap().doc.channels[0].spot.is_none());
+            assert_eq!(s.active().unwrap().doc.channels[0].surface.sample_channel(0, 0, 0), 1.0);
+            assert!(s.redo());
+            s.execute("channel.options", json!({"channel": 0, "indicates": "spot", "name": "Spot 1", "color": "#0000ff", "solidity": 100})).unwrap();
+            let st = s.active().unwrap();
+            let pixels = render(&st.doc, &st.channel_view, st.doc.bounds(), 1, false, st.active_layer).unwrap();
+            assert_eq!((pixels[0], pixels[8 * 16 + 8]), (Color32::TRANSPARENT, Color32::BLUE), "editing spot options must not invert twice");
+            s.execute("channel.target", json!({"channel": 0})).unwrap();
+            assert_eq!(s.active().unwrap().channel_view.visible_colors(3), 3, "clicking the spot keeps the transparent image preview");
+            s.execute("channel.options", json!({"channel": 0, "indicates": "masked"})).unwrap();
+            assert_eq!(s.active().unwrap().doc.channels[0].surface.sample_channel(0, 0, 0), 1.0, "converting back restores the alpha polarity");
+        }
     }
 
     #[test]

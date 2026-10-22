@@ -1349,3 +1349,14 @@ mod tests {
 
 #[cfg(test)]
 mod live_tests;
+
+#[cfg(test)]
+mod spot_title_tests {
+    /// Every shipped language must translate the spot-specific channel dialog title.
+    #[test]
+    fn spot_channel_options_title_is_translated_in_every_catalog() {
+        for language in super::Lang::all().filter(|language| *language != super::Lang::EN) {
+            assert!(language.catalog().plain("Spot Channel Options…").is_some(), "{}", language.code());
+        }
+    }
+}
