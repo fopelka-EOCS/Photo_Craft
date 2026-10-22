@@ -988,7 +988,17 @@ fn print_paper_size(value: Option<&Value>) -> (f64, f64) {
 /// unrotated print points; the engine applies orientation and validates the final size.
 fn print_paper_controls(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     let previous = f.get("paper").cloned();
-    let mut selected = if previous.as_ref().is_some_and(Value::is_array) { "custom".to_string() } else { s(f, "paper", "letter") };
+    let mut selected = if previous.as_ref().is_some_and(Value::is_array) {
+        "custom".to_string()
+    } else {
+        let name = s(f, "paper", "letter");
+        // `file.print` remembers the name as typed, aliases included; the menu is keyed by the
+        // canonical `PAPERS` names, so show the key an alias names, and keep unknown names.
+        match photocraft_engine::print_cmds::paper_size(&name) {
+            Some(size) => photocraft_engine::print_cmds::PAPERS.iter().find(|p| (p.1, p.2) == size).map_or(name, |p| p.0.to_string()),
+            None => name,
+        }
+    };
     ui.horizontal(|ui| {
         let mut papers: Vec<_> = photocraft_engine::print_cmds::PAPERS.iter().map(|p| (p.0.to_string(), print_paper_label(p.0))).collect();
         papers.push(("custom".to_string(), tl!("Custom")));

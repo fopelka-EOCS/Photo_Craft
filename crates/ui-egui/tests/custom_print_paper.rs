@@ -243,6 +243,18 @@ fn remembered_custom_paper_is_shown_without_becoming_a_preset() {
     assert_eq!(fields(&h, id)["paper"], json!([432.0, 576.0]));
 }
 
+/// #8307: `file.print` remembers the paper name as typed, aliases included. Reopening the dialog
+/// must select the canonical preset an alias names instead of leaving the Paper control unmatched.
+#[test]
+fn remembered_paper_alias_selects_the_canonical_preset() {
+    let (mut app, id) = app();
+    app.ui.dialog_mut(id).unwrap().fields.insert("paper".into(), json!("はがき"));
+    let h = harness(app);
+    assert!(shown(&h, "はがき (100 × 148 mm)"), "a remembered alias must show the paper it names");
+    let layout = photocraft_engine::print_cmds::layout(&h.state().session.active().unwrap().doc, &Value::Object(fields(&h, id)), "file.print").unwrap();
+    assert_eq!(layout.paper, (283.46, 419.53), "the remembered alias must still print as はがき");
+}
+
 #[test]
 fn invalid_custom_paper_is_rejected_without_printing_or_changing_the_document() {
     let (mut app, id) = app();

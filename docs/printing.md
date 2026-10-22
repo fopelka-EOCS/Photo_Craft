@@ -7,8 +7,9 @@ batch commands and automation (`file.print`, `file.printOneCopy`); this page is 
 
 ## Paper sizes
 
-The Print dialog's Paper list, `file.print`'s `paper` (a name, or `[width, height]` in points) and
-the PDF page all use the paper table in `print_cmds.rs` (portrait sizes in points):
+The Print dialog's named Paper entries and `file.print`'s named `paper` values use the paper table
+in `print_cmds.rs` (portrait sizes in points). `file.print` also accepts a custom `[width, height]`
+in points. Both produce a portrait PDF page:
 
 | Name | Size |
 |---|---|
