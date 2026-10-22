@@ -151,7 +151,15 @@ jobs:
 
       - name: Format
         if: runner.os == 'Linux'
-        run: cargo fmt --all -- --check
+        run: |
+          cargo fmt --all
+          if ! git diff --exit-code; then
+            echo "### rustfmt diff" >> "$GITHUB_STEP_SUMMARY"
+            echo '```diff' >> "$GITHUB_STEP_SUMMARY"
+            git diff >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
 
       # Keep formatting, strict Clippy, layering and scorecard checks ahead of tests.
       - name: Clippy
