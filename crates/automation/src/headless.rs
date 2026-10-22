@@ -150,6 +150,36 @@ impl Headless {
         })
     }
 
+    /// Replace the contents of smart object `layer` (all its instances) from a file: the
+    /// capability-scoped counterpart of `layer.smartObjects.replaceContents`, which reads an
+    /// ambient path. `path` resolves beneath the read root as in [`Headless::place`]; `fit`
+    /// (`"keep"`, `"stretch"` or `"contain"`) is the command's own option. One undo step.
+    pub fn replace_contents(&mut self, index: Option<usize>, path: &str, params: &Value) -> Result<Value, AutomationError> {
+        let layer =
+            params.get("layer").and_then(Value::as_u64).ok_or_else(|| AutomationError::BadRequest("doc.replaceContents needs a numeric `layer`".into()))?;
+        let fit = photocraft_engine::smart_cmds::Fit::from_param(params.get("fit"))
+            .ok_or_else(|| AutomationError::BadRequest(format!("`fit` must be \"keep\", \"stretch\" or \"contain\", not {}", params["fit"])))?;
+        let i = self.doc_index(index)?;
+        if self.session.active_index() != Some(i) && !self.session.set_active(i) {
+            return Err(AutomationError::BadRequest(format!("no document at index {i}")));
+        }
+        if matches!(&self.filesystem, Filesystem::TrustedLocal) {
+            let mut opts = params.as_object().cloned().unwrap_or_default();
+            opts.remove("index");
+            opts.insert("path".into(), json!(path));
+            return self.command_run("layer.smartObjects.replaceContents", Value::Object(opts));
+        }
+        let bytes = match &self.filesystem {
+            Filesystem::Workspace(workspace) => workspace.read(path)?,
+            _ => {
+                return Err(AutomationError::BadRequest("automation filesystem access is not granted: read authority is absent".into()));
+            }
+        };
+        let name = Path::new(path).file_name().and_then(|name| name.to_str()).unwrap_or(path);
+        self.sync_jobs();
+        Ok(photocraft_engine::smart_cmds::replace_contents_fit(&mut self.session, photocraft_doc::LayerId(layer), name, bytes, fit)?)
+    }
+
     /// Export each exported layer of a document as its own file beneath the write root: the
     /// capability-scoped `file.export.layersToFiles`, which takes an ambient `dir` and is
     /// therefore refused in automation (#3216). The bytes come from the command's own core, so
