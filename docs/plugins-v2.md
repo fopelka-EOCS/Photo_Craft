@@ -403,10 +403,12 @@ other, and only the operations the host had not carried out yet are dropped. Wha
 is reach *past* the document: `doc.capture`, `doc.commit` and `http.request` are refused in this build
 (see below), so it can neither see pixels nor add them, nor reach the network.
 
-Ordering is what bounds a failing reply, and why the host stops a panel rather than carry on: the
-commands a reply asks for are run only once that whole reply has been applied, so an operation that
-fails partway through one ends that reply — the operations before it stand, what follows it is
-dropped, and the commands it had asked for are not carried out with it.
+Ordering is what bounds a failing reply, and why the host stops a panel rather than carry on. The
+commands a reply asks for are queued as that reply is applied and run only once all of it has been
+applied, so a reply that fails partway through ends its own batch: the operations before the failure
+stand, what follows it is dropped, and **the commands it had queued are dropped with the panel**. A
+stopped panel runs nothing, however its commands reached it — `plugin.panel.close` on a stopped panel's
+window closes the window and changes nothing.
 
 **Panels are process-wide.** There is one instance per plug-in id for the whole process, shared by
 every session (the installed plug-ins and the failure windows are process-wide too, as in v1). The

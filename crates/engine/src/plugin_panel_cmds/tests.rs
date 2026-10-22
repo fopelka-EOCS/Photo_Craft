@@ -635,6 +635,45 @@ fn a_panel_that_answers_every_answer_forever_is_stopped() {
     cleanup(&mut s, id);
 }
 
+/// A command a panel asked for before it stopped must never run — not with the reply that asked for
+/// it, and not later.
+///
+/// The reply below asks the host to run `type.create` and then fails while being carried out: 513
+/// input values against a 512-key cap. The command is queued rather than run as the reply is read
+/// (see `apply`), and the failure stops the panel, so it never runs. What made that worth a test is
+/// the second half: the queued command stayed in the dropped panel's place until something ran it,
+/// and `plugin.panel.close` did — the command the UI sends when the user closes a panel's window,
+/// which is the way out of a stopped panel — putting a layer on the document on behalf of a panel
+/// that had already failed. Closing a stopped panel now closes it and nothing else.
+#[test]
+fn a_command_a_panel_asked_for_before_it_stopped_is_dropped() {
+    let id = "test.panel.staleask";
+    let mut values = Map::new();
+    for i in 0..=MAX_VALUE_KEYS {
+        values.insert(format!("k{i}"), json!(i));
+    }
+    let reply = json!([
+        {"op": "doc.command", "id": "made", "command": "type.create",
+         "params": {"x": 4, "y": 8, "text": "Never made", "size": 12}},
+        {"op": "ui.set", "values": values}
+    ])
+    .to_string();
+    let mut s = app(id, &panel(id, &[VIEW, reply.as_str()]));
+    open(&mut s, id);
+    let error = click(&mut s, id, "go").expect_err("the 513th input value is past the cap");
+    assert!(error.to_string().contains("input values"), "{error}");
+    assert_eq!(inspect(&mut s, id)["state"], "stopped");
+    let layers = |s: &mut Session| s.execute("document.inspect", json!({})).unwrap()["layers"].as_array().map(Vec::len);
+    assert_eq!(layers(&mut s), Some(1), "the command the failed reply asked for did not run");
+    // The one way left out of a stopped panel: closing its window. It closes the panel, and it is
+    // not the moment the dropped command runs.
+    let closed = s.execute("plugin.panel.close", json!({"id": id})).unwrap();
+    assert_eq!(closed["visible"], false);
+    assert_eq!(inspect(&mut s, id)["state"], "stopped", "and the panel is still the panel it was");
+    assert_eq!(layers(&mut s), Some(1), "nor does closing the panel run it");
+    cleanup(&mut s, id);
+}
+
 #[test]
 fn a_filter_is_not_a_panel_and_a_panel_is_not_a_filter() {
     let id = "test.panel.kinds";

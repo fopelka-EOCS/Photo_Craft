@@ -468,6 +468,18 @@ fn note_failure(id: &str, now: u64) -> bool {
     all.entry(id.to_string()).or_default().record(now)
 }
 
+/// Stops `panel` for good, dropping what it had asked the host to run and counting the failure.
+///
+/// A stopped panel runs nothing: the commands in [`Panel::asked`] were queued by a reply that the
+/// host had not finished carrying out (see [`drain`]), and running them afterwards would let a
+/// panel that has failed — or been stopped by its own runaway queue — still change the document.
+/// [`run_asked`] refuses them too, so a panel that stops between the two cannot slip through.
+fn stop_panel(panel: &mut Panel, error: PluginError, now: u64) {
+    panel.asked.clear();
+    panel.instance.stop(error);
+    note_failure(panel.instance.plugin().id(), now);
+}
+
 /// The wall-clock budget of one host call that drives a panel, shared by every event that call pumps.
 ///
 /// Each `pc_event` has its own deadline (`Limits::panel_wall_time_ms`), and a panel that answers each
@@ -535,20 +547,20 @@ fn drain(panel: &mut Panel, ctx: &HostCtx, budget: &Budget) -> Result<()> {
         pumped += 1;
         if pumped > MAX_PUMP_STEPS {
             let error = PluginError::Failed(format!("the panel queued more than {MAX_PUMP_STEPS} events without settling"));
-            panel.instance.stop(error.clone());
-            note_failure(panel.instance.plugin().id(), ctx.now);
+            stop_panel(panel, error.clone(), ctx.now);
             return Err(err(error));
         }
         if budget.expired() {
             let error = PluginError::Limit("time budget".into());
-            panel.instance.stop(error.clone());
-            note_failure(panel.instance.plugin().id(), ctx.now);
+            stop_panel(panel, error.clone(), ctx.now);
             return Err(err(error));
         }
         let ops = match panel.instance.send(&event) {
             Ok(ops) => ops,
+            // `send` has already stopped the instance with this error; the commands it had queued for
+            // the host go with it.
             Err(error) => {
-                note_failure(panel.instance.plugin().id(), ctx.now);
+                stop_panel(panel, error.clone(), ctx.now);
                 return Err(err(error));
             }
         };
@@ -557,8 +569,7 @@ fn drain(panel: &mut Panel, ctx: &HostCtx, budget: &Budget) -> Result<()> {
             // error alone would leave the operations before it applied, the ones after it dropped,
             // and the panel still running with a state it never asked for.
             if let Err(error) = apply(panel, ctx, op) {
-                panel.instance.stop(PluginError::Ops(error.to_string()));
-                note_failure(panel.instance.plugin().id(), ctx.now);
+                stop_panel(panel, PluginError::Ops(error.to_string()), ctx.now);
                 return Err(error);
             }
         }
@@ -572,12 +583,21 @@ fn drain(panel: &mut Panel, ctx: &HostCtx, budget: &Budget) -> Result<()> {
 /// Called with the panel lock **not** held. A granted command is ordinary engine code: it may be
 /// slow, it may ask the panel something in turn, and it must never run underneath the panel lock —
 /// a command that touched a panel would otherwise wait for itself.
+///
+/// A stopped panel runs nothing. The stop paths drop what it had queued (see [`stop_panel`]), and
+/// this check is the belt to that brace: callers reach here after the panel may have stopped — a
+/// `plugin.panel.close` of a stopped panel's window among them — and a command must not run for a
+/// panel that is no longer there to hear its result.
 fn run_asked(s: &mut Session, id: &str, ctx: &HostCtx, budget: &Budget) -> Result<()> {
     for _ in 0..MAX_PUMP_STEPS {
         let asked = {
             let mut all = panels();
             match all.get_mut(id) {
-                Some(panel) => std::mem::take(&mut panel.asked),
+                Some(panel) if panel.stopped().is_none() => std::mem::take(&mut panel.asked),
+                Some(panel) => {
+                    panel.asked.clear();
+                    return Ok(());
+                }
                 // Gone: the plug-in was removed while its own command ran.
                 None => return Ok(()),
             }
@@ -601,10 +621,12 @@ fn run_asked(s: &mut Session, id: &str, ctx: &HostCtx, budget: &Budget) -> Resul
         drain(panel, ctx, budget)?;
     }
     // Asking for a command on every answer never settles: stop the panel, as a runaway event loop is
-    // stopped, rather than run engine commands for it forever.
+    // stopped, rather than run engine commands for it forever. Its last reply may have asked for more,
+    // and those go with it, as everywhere a panel stops.
     let error = PluginError::Failed(format!("the panel asked for more than {MAX_PUMP_STEPS} commands without settling"));
     let mut all = panels();
     if let Some(panel) = all.get_mut(id) {
+        panel.asked.clear();
         panel.instance.stop(error.clone());
     }
     Err(err(error))
