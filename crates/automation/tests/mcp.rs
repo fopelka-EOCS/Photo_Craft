@@ -182,6 +182,303 @@ async fn command_list_filters() {
     client.cancel().await.unwrap();
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn command_allowlist_enforcement() {
+    let allowlist_text = "
+        # Allowed commands
+        file.new
+        layer.*
+    ";
+    let allowlist = photocraft_automation::CommandAllowlist::parse(allowlist_text).unwrap();
+    let client = connect(PhotocraftMcp::headless().with_allowlist(allowlist)).await;
+
+    // 1. List narrowed: only allowed commands appear
+    let all = json_of(&call(&client, "command_list", json!({})).await);
+    let items = all.as_array().unwrap();
+    assert!(!items.is_empty());
+    for item in items {
+        let id = item["id"].as_str().unwrap();
+        assert!(id == "file.new" || id.starts_with("layer."), "unexpected command {id}");
+    }
+    assert!(items.iter().any(|c| c["id"] == "file.new"));
+    assert!(items.iter().any(|c| c["id"] == "layer.new.layer"));
+    assert!(!items.iter().any(|c| c["id"] == "edit.undo"));
+    assert!(!items.iter().any(|c| c["id"] == "filter.blur.gaussianBlur"));
+
+    // 2. Resource narrowed: photocraft://commands matches command_list
+    let r = client.read_resource(rmcp::model::ReadResourceRequestParams::new("photocraft://commands")).await.unwrap();
+    let v = serde_json::to_value(r).unwrap();
+    let resource_commands: Value = serde_json::from_str(v["contents"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(&resource_commands, &all);
+
+    // 3. Run refused with named error
+    let res = call(&client, "command_run", json!({"id": "edit.undo", "params": {}})).await;
+    assert_eq!(res.is_error, Some(true));
+    let err_msg = text(&res);
+    assert!(err_msg.contains("edit.undo") && err_msg.contains("--commands"), "{err_msg}");
+
+    // Allowed command runs
+    json_of(&call(&client, "doc_new", json!({"width": 32, "height": 32})).await);
+    let run_ok = call(&client, "command_run", json!({"id": "layer.new.layer", "params": {"name": "TestLayer"}})).await;
+    assert_ne!(run_ok.is_error, Some(true));
+
+    // 4. Batch refused at step: earlier results kept, offending step refused, later skipped
+    let batch_res = json_of(
+        &call(
+            &client,
+            "command_batch",
+            json!({"steps": [
+                {"id": "layer.new.layer", "params": {"name": "BatchOne"}},
+                {"id": "edit.undo", "params": {}},
+                {"id": "layer.new.layer", "params": {"name": "BatchThree"}}
+            ]}),
+        )
+        .await,
+    );
+    assert_eq!(batch_res["completed"], 1, "{batch_res}");
+    assert_eq!(batch_res["failed"], 1, "{batch_res}");
+    assert_eq!(batch_res["results"].as_array().unwrap().len(), 2);
+    assert_eq!(batch_res["results"][0]["ok"], true);
+    assert_eq!(batch_res["results"][1]["ok"], false);
+    let step_err = batch_res["results"][1]["error"].as_str().unwrap();
+    assert!(step_err.contains("edit.undo") && step_err.contains("--commands"), "{step_err}");
+
+    // Verify document kept BatchOne and did NOT run BatchThree
+    let doc = json_of(&call(&client, "doc_inspect", json!({})).await).to_string();
+    assert!(doc.contains("\"BatchOne\"") && !doc.contains("\"BatchThree\""));
+
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn command_allowlist_leaves_typed_tools_and_jobs_alone() {
+    let unfiltered = {
+        let client = connect(PhotocraftMcp::headless()).await;
+        let v = json_of(&call(&client, "command_list", json!({})).await);
+        client.cancel().await.unwrap();
+        v
+    };
+    let allowlist = photocraft_automation::CommandAllowlist::parse("layer.*").unwrap();
+    let client = connect(PhotocraftMcp::headless().with_allowlist(allowlist)).await;
+
+    // Typed tools are not gated, even though `file.new` is not allowlisted.
+    let r = call(&client, "doc_new", json!({"width": 16, "height": 16})).await;
+    assert_ne!(r.is_error, Some(true), "{}", text(&r));
+    let r = call(&client, "command_run", json!({"id": "file.new", "params": {}})).await;
+    assert_eq!(r.is_error, Some(true));
+    // Job control tools are always available.
+    assert_ne!(call(&client, "jobs_list", json!({})).await.is_error, Some(true));
+
+    // stop_on_error: false continues past a denied step.
+    let b = json_of(
+        &call(
+            &client,
+            "command_batch",
+            json!({"stop_on_error": false, "steps": [
+                {"id": "edit.undo"},
+                {"id": "layer.new.layer", "params": {"name": "After"}}
+            ]}),
+        )
+        .await,
+    );
+    assert_eq!((b["completed"].as_u64(), b["failed"].as_u64()), (Some(1), Some(1)), "{b}");
+    assert_eq!(b["results"].as_array().map(Vec::len), Some(2), "{b}");
+    assert_eq!(b["results"][1]["ok"], true);
+    client.cancel().await.unwrap();
+
+    // No allowlist: the full catalog, identical to a second unfiltered server.
+    let client = connect(PhotocraftMcp::headless()).await;
+    assert_eq!(json_of(&call(&client, "command_list", json!({})).await), unfiltered);
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn bridge_command_allowlist_enforcement() {
+    let (addr, app) = fake_app().await;
+    let allowlist = photocraft_automation::CommandAllowlist::parse("layer.*\nfile.new").unwrap();
+    let client = connect(PhotocraftMcp::bridge(&addr, CONTROL_TOKEN).unwrap().with_allowlist(allowlist)).await;
+
+    // Run refused with named error
+    let res = call(&client, "command_run", json!({"id": "edit.undo", "params": {}})).await;
+    assert_eq!(res.is_error, Some(true));
+    let err_msg = text(&res);
+    assert!(err_msg.contains("edit.undo") && err_msg.contains("--commands"), "{err_msg}");
+
+    // Batch refused at step
+    let batch_res = json_of(
+        &call(
+            &client,
+            "command_batch",
+            json!({"steps": [
+                {"id": "layer.new.layer"},
+                {"id": "edit.undo"},
+                {"id": "layer.duplicate"}
+            ]}),
+        )
+        .await,
+    );
+    assert_eq!(batch_res["completed"], 1, "{batch_res}");
+    assert_eq!(batch_res["failed"], 1, "{batch_res}");
+    assert_eq!(batch_res["results"][0]["ok"], true);
+    assert_eq!(batch_res["results"][1]["ok"], false);
+    let step_err = batch_res["results"][1]["error"].as_str().unwrap();
+    assert!(step_err.contains("edit.undo") && step_err.contains("--commands"), "{step_err}");
+
+    client.cancel().await.unwrap();
+    app.abort();
+}
+
+/// Requests the fake bridge saw, minus the `auth` handshake, once the client has disconnected.
+async fn bridge_requests_seen(client: RunningService<RoleClient, Client>, app: tokio::task::JoinHandle<Vec<Value>>) -> Vec<Value> {
+    client.cancel().await.unwrap();
+    let seen = tokio::time::timeout(std::time::Duration::from_secs(5), app).await.unwrap().unwrap();
+    seen.into_iter().filter(|request| request["method"] != "auth").collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn bridge_control_call_engine_execute_respects_allowlist() {
+    let (addr, app) = fake_app().await;
+    let allowlist = photocraft_automation::CommandAllowlist::parse("layer.*\nfile.new").unwrap();
+    let client = connect(PhotocraftMcp::bridge(&addr, CONTROL_TOKEN).unwrap().with_allowlist(allowlist)).await;
+
+    // An excluded id is refused with the shared refusal text, by `command` or by the `id` fallback.
+    for params in [json!({"command": "edit.undo"}), json!({"id": "edit.undo"}), json!({"command": 7, "id": "edit.undo"})] {
+        let res = call(&client, "control_call", json!({"method": "engine.execute", "params": params})).await;
+        assert_eq!(res.is_error, Some(true), "{params}");
+        let msg = text(&res);
+        assert_eq!(msg, photocraft_automation::allowlist::refusal("edit.undo"), "{params}");
+    }
+
+    // An allowed id passes through.
+    let res = json_of(&call(&client, "control_call", json!({"method": "engine.execute", "params": {"command": "layer.new.layer"}})).await);
+    assert_eq!(res["ran"], "layer.new.layer");
+
+    let seen = bridge_requests_seen(client, app).await;
+    assert_eq!(seen.len(), 1, "refused calls must not reach the bridge: {seen:?}");
+    assert_eq!(seen[0]["params"]["command"], "layer.new.layer");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn bridge_control_call_engine_commands_is_narrowed() {
+    let (addr, app) = fake_app().await;
+    let allowlist = photocraft_automation::CommandAllowlist::parse("layer.*\nfile.new").unwrap();
+    let client = connect(PhotocraftMcp::bridge(&addr, CONTROL_TOKEN).unwrap().with_allowlist(allowlist)).await;
+
+    let catalogue = json_of(&call(&client, "control_call", json!({"method": "engine.commands"})).await);
+    let ids: Vec<&str> = catalogue.as_array().expect("bare array shape is kept").iter().map(|c| c["id"].as_str().unwrap()).collect();
+    assert_eq!(ids, ["file.new", "layer.new.layer"], "{catalogue}");
+    // Same entries as `command_list`.
+    assert_eq!(catalogue, json_of(&call(&client, "command_list", json!({})).await));
+
+    bridge_requests_seen(client, app).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn bridge_control_call_other_command_methods_respect_allowlist() {
+    let (addr, app) = fake_app().await;
+    let allowlist = photocraft_automation::CommandAllowlist::parse("layer.*\nfile.new").unwrap();
+    let client = connect(PhotocraftMcp::bridge(&addr, CONTROL_TOKEN).unwrap().with_allowlist(allowlist)).await;
+    let refusal = photocraft_automation::allowlist::refusal("edit.undo");
+
+    let refused = [
+        ("ui.menu.invoke", json!({"id": "edit.undo"})),
+        ("ui.dialog.open", json!({"kind": "command", "command": "edit.undo"})),
+        ("ui.dialog.open", json!({"kind": "Command", "command": "edit.undo"})),
+        ("batch", json!({"steps": [{"command": "layer.new.layer"}, {"command": "edit.undo"}]})),
+        ("batch", json!({"steps": [{"method": "engine.execute", "params": {"command": "edit.undo"}}]})),
+        ("batch", json!({"steps": [{"method": "batch", "params": {"steps": [{"command": "edit.undo"}]}}]})),
+    ];
+    for (method, params) in refused {
+        let res = call(&client, "control_call", json!({"method": method, "params": params})).await;
+        assert_eq!(res.is_error, Some(true), "{method} {params}");
+        assert_eq!(text(&res), refusal, "{method} {params}");
+    }
+
+    // Allowed ids, non-command dialogs and unrelated methods still pass through.
+    let allowed = [
+        ("ui.menu.invoke", json!({"id": "layer.new.layer"})),
+        ("ui.dialog.open", json!({"kind": "command", "command": "file.new"})),
+        ("ui.dialog.open", json!({"kind": "about"})),
+        ("batch", json!({"steps": [{"command": "layer.new.layer"}, {"method": "ui.inspect"}]})),
+    ];
+    for (method, params) in allowed {
+        let res = call(&client, "control_call", json!({"method": method, "params": params})).await;
+        assert_ne!(res.is_error, Some(true), "{method} {params}: {}", text(&res));
+    }
+
+    let seen = bridge_requests_seen(client, app).await;
+    let methods: Vec<&str> = seen.iter().map(|request| request["method"].as_str().unwrap()).collect();
+    assert_eq!(methods, ["ui.menu.invoke", "ui.dialog.open", "ui.dialog.open", "batch"], "refused calls must not reach the bridge");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn bridge_ui_menu_invoke_respects_allowlist() {
+    let (addr, app) = fake_app().await;
+    let allowlist = photocraft_automation::CommandAllowlist::parse("layer.*\nfile.new").unwrap();
+    let client = connect(PhotocraftMcp::bridge(&addr, CONTROL_TOKEN).unwrap().with_allowlist(allowlist)).await;
+
+    let res = call(&client, "ui_menu_invoke", json!({"id": "edit.undo"})).await;
+    assert_eq!(res.is_error, Some(true));
+    assert_eq!(text(&res), photocraft_automation::allowlist::refusal("edit.undo"));
+
+    let res = json_of(&call(&client, "ui_menu_invoke", json!({"id": "layer.new.layer"})).await);
+    assert_eq!(res["invoked"], "layer.new.layer");
+
+    let seen = bridge_requests_seen(client, app).await;
+    assert_eq!(seen.len(), 1, "the refused call must not reach the bridge: {seen:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn bridge_control_call_is_unchanged_without_allowlist() {
+    let (addr, app) = fake_app().await;
+    let client = connect(PhotocraftMcp::bridge(&addr, CONTROL_TOKEN).unwrap()).await;
+
+    let res = json_of(&call(&client, "control_call", json!({"method": "engine.execute", "params": {"command": "edit.undo"}})).await);
+    assert_eq!(res["ran"], "edit.undo");
+    let res = json_of(&call(&client, "ui_menu_invoke", json!({"id": "edit.undo"})).await);
+    assert_eq!(res["invoked"], "edit.undo");
+    let catalogue = json_of(&call(&client, "control_call", json!({"method": "engine.commands"})).await);
+    assert_eq!(catalogue.as_array().map(Vec::len), Some(3), "{catalogue}");
+
+    let seen = bridge_requests_seen(client, app).await;
+    assert_eq!(seen.len(), 3, "{seen:?}");
+}
+
+#[test]
+fn command_allowlist_glob_and_file_parsing() {
+    // Glob semantics: layer.* matches layer.new, not layers.x
+    let al = photocraft_automation::CommandAllowlist::parse("layer.*").unwrap();
+    assert!(al.allows("layer.new"));
+    assert!(al.allows("layer.new.layer"));
+    assert!(!al.allows("layers.x"));
+    assert!(!al.allows("layer"));
+
+    // Comments and blank lines
+    let text = "
+        # comment
+        
+           # indented comment
+        edit.cut   
+        
+        filter.*
+    ";
+    let al = photocraft_automation::CommandAllowlist::parse(text).unwrap();
+    assert!(al.allows("edit.cut"));
+    assert!(al.allows("filter.blur.gaussianBlur"));
+    assert!(!al.allows("edit.copy"));
+
+    // Malformed file errors naming the line
+    for bad in ["*foo", "layer.*.blur", "foo*bar", "**", "layer.*.*"] {
+        let err = photocraft_automation::CommandAllowlist::parse(bad).unwrap_err();
+        assert!(err.contains(bad), "expected error to name {bad}, got: {err}");
+        assert!(err.contains("only a trailing `*` glob is supported"), "{err}");
+    }
+
+    // Empty file error
+    let err = photocraft_automation::CommandAllowlist::parse("   \n# only comments\n   ").unwrap_err();
+    assert!(err.contains("empty"), "{err}");
+}
+
 /// Constructs strict tool-schema validators reject: a `$ref` / `$defs`, or a boolean in a schema
 /// position (`items: true`), anywhere in `schema`.
 fn strict_schema_problems(path: &str, schema: &Value, out: &mut Vec<String>) {
@@ -867,8 +1164,14 @@ async fn fake_app_with_screenshot(screenshot_png: Option<Vec<u8>>) -> (String, t
                 }
                 "app.save" => json!({"id": id, "ok": true, "result": {"saved": req["params"]}}),
                 "engine.commands" => {
-                    json!({"id": id, "ok": true, "result": [{"id": "file.new", "label": "New…", "enabled": true}]})
+                    json!({"id": id, "ok": true, "result": [
+                        {"id": "file.new", "label": "New…", "enabled": true},
+                        {"id": "edit.undo", "label": "Undo", "enabled": true},
+                        {"id": "layer.new.layer", "label": "New Layer", "enabled": true}
+                    ]})
                 }
+                "ui.menu.invoke" => json!({"id": id, "ok": true, "result": {"invoked": req["params"]["id"]}}),
+                "ui.dialog.open" | "batch" => json!({"id": id, "ok": true, "result": {"method": method, "params": req["params"]}}),
                 "ui.pointer" => json!({"id": id, "ok": true, "result": req["params"]}),
                 "ui.screenshot" => {
                     let bytes = screenshot_png.clone().unwrap_or_else(|| {

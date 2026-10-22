@@ -670,6 +670,42 @@ fn mcp_stdio_handshake_and_tool_call() {
     let _ = child.wait();
 }
 
+/// `mcp --commands <file>` reaches the server: `command_run` refuses ids outside the list.
+#[test]
+fn mcp_commands_flag_narrows_the_served_catalog() {
+    let d = tmp("mcp-allowlist-serve");
+    let list = d.join("list.txt");
+    std::fs::write(&list, "layer.*\n").unwrap();
+    let mut child = bin().arg("mcp").arg("--commands").arg(&list).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut send = |v: Value| {
+        writeln!(stdin, "{v}").unwrap();
+        stdin.flush().unwrap();
+    };
+    let mut recv = |id: u64| -> Value {
+        loop {
+            let mut line = String::new();
+            assert!(stdout.read_line(&mut line).unwrap() > 0, "server closed");
+            let v: Value = serde_json::from_str(&line).unwrap();
+            if v["id"] == id {
+                return v;
+            }
+        }
+    };
+    send(json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+        "protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}));
+    recv(1);
+    send(json!({"jsonrpc":"2.0","method":"notifications/initialized"}));
+    send(json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"command_run","arguments":{"id":"edit.undo"}}}));
+    let r = recv(2);
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    assert!(r["result"]["content"][0]["text"].as_str().unwrap_or_default().contains("--commands"), "{r}");
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 /// `--format` mapping two inputs to one name fails the second instead of overwriting the first (#420).
 #[test]
 fn batch_fails_inputs_that_share_an_output_name() {
@@ -795,4 +831,41 @@ fn batch_plays_a_photoshop_actions_file() {
     let err = String::from_utf8_lossy(&o.stderr);
     assert!(err.contains("Generative Fill"), "{err}");
     assert!(!o.status.success());
+}
+
+#[test]
+fn mcp_commands_allowlist_cli_validations() {
+    let d = tmp("mcp-allowlist");
+
+    // Missing file
+    let missing = d.join("does_not_exist.txt");
+    let o = bin().args(["mcp", "--commands"]).arg(&missing).output().unwrap();
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert_eq!(o.status.code(), Some(1), "{err}");
+    assert!(err.contains("does_not_exist.txt"), "{err}");
+    assert!(!err.contains("panicked"), "{err}");
+
+    // Empty file
+    let empty = d.join("empty.txt");
+    std::fs::write(&empty, "# only comments\n   \n").unwrap();
+    let o = bin().args(["mcp", "--commands"]).arg(&empty).output().unwrap();
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert_eq!(o.status.code(), Some(1), "{err}");
+    assert!(err.contains("empty"), "{err}");
+    assert!(!err.contains("panicked"), "{err}");
+
+    // Malformed glob file
+    let malformed = d.join("bad.txt");
+    std::fs::write(&malformed, "layer.*.blur\n").unwrap();
+    let o = bin().args(["mcp", "--commands"]).arg(&malformed).output().unwrap();
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert_eq!(o.status.code(), Some(1), "{err}");
+    assert!(err.contains("layer.*.blur") && err.contains("only a trailing `*` glob is supported"), "{err}");
+    assert!(!err.contains("panicked"), "{err}");
+
+    // Usage help names --commands
+    let (out, _) = ok(bin().args(["mcp", "--help"]));
+    assert!(out.contains("--commands <file>"), "{out}");
+
+    let _ = std::fs::remove_dir_all(&d);
 }

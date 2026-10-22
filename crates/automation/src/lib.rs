@@ -16,6 +16,7 @@
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+pub mod allowlist;
 pub mod bridge;
 pub mod budgets;
 pub mod files;
@@ -25,6 +26,7 @@ pub mod security;
 pub mod server;
 pub mod workspace;
 
+pub use allowlist::CommandAllowlist;
 pub use bridge::BridgeClient;
 pub use headless::Headless;
 pub use server::{Backend, PhotocraftMcp};

@@ -183,7 +183,8 @@ editing session; non-type layers return an error without changing the tool or do
 
 `engine.commands` (control channel and `serve`), the engine command `command.list` and the MCP
 tool `command_list` all reply with a bare JSON array, not an object: there is no
-`{"commands": [...]}` wrapper. On the control channel and `serve` the array is the reply's
+`{"commands": [...]}` wrapper. (Note that the MCP list may be narrowed by `--commands <file>`; see
+[docs/mcp.md](mcp.md).) On the control channel and `serve` the array is the reply's
 `result` (`{"id":1,"ok":true,"result":[…]}`); the MCP tool returns it as its JSON text.
 Each element describes one command, in registry order:
 

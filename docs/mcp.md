@@ -57,12 +57,43 @@ Paths are relative to the corresponding root, or absolute paths beneath it; with
 filesystem authority is absent. Bridge mode uses `--bridge` and `--control-token-file` as
 described in [development.md](development.md). UI tools require a running desktop app.
 
+The engine command catalog can be restricted with `--commands <file>`:
+
+```sh
+photocraft-cli mcp --commands /path/to/commands.allowlist
+```
+
+The allowlist file specifies one command id (e.g. `file.new`) or prefix glob with a trailing `*`
+(e.g. `layer.*`) per line. Blank lines and `#` comments are ignored, and surrounding whitespace is
+trimmed. Only trailing `*` globs are supported (e.g. `layer.*` matches `layer.new`, not `layers.x`);
+any other use of `*` is an error naming the offending line. An unreadable, empty or malformed file
+causes the CLI to exit with an error before serving. When active, only allowed commands appear in
+`command_list` and the `photocraft://commands` resource. Invoking an excluded command via
+`command_run` returns a tool error naming the id and `--commands`; in `command_batch`, execution
+refuses at the offending step with the same error, preserving earlier successful steps per existing
+batch semantics.
+
+The allowlist is a **discovery and run filter for the command tools, not a security boundary**:
+
+- It gates `command_list`, `command_run`, `command_batch` and the `photocraft://commands` resource.
+- Typed tools (`doc_new`, `doc_place`, `doc_export_layers`, the data-set tools, ...) and the job
+  tools `jobs_list` / `jobs_cancel` are not gated, so `doc_new` works without `file.new` listed.
+- In bridge mode it also gates the command-carrying parts of `control_call` and `ui_menu_invoke`:
+  `engine.execute`, `ui.menu.invoke`, a `command` dialog from `ui.dialog.open` and the steps of
+  a `batch` are refused for an excluded id (the app is not called), and `engine.commands` is
+  narrowed like `command_list`. Raw UI input (`ui.key`, `ui.pointer`, `ui.click`, answering
+  dialogs) is not mapped to command ids and is not gated.
+- Allowed commands that run other commands are not inspected: allowing `actions.*` lets
+  `actions.play` replay any recorded command, and allowing `command.list` returns the full catalog.
+- A bare `*` is rejected (omit the flag to allow everything), `#` is a comment only at the start of
+  a line, and the file is limited to 1 MiB.
+
 ## Tools and resources
 
 - `command_list`: discover engine ids, parameter docs and current enabled state; accepts
   `filter` and `enabled_only`. Returns a bare JSON array of
   `{id, label, menu, shortcut, params, enabled, disabledReason, needsDocument}` objects (see
-  [Command list replies](control-protocol.md#command-list-replies)).
+  [Command list replies](control-protocol.md#command-list-replies); narrowed by `--commands` when configured).
 - `command_run`: `id`, optional `params` and `wait`. Command parameters remain engine-defined.
 - `command_batch`: ordered `steps`, optional `stop_on_error` (default true); stops at the first
   error unless false. Not an atomic transaction: earlier successful steps stay applied, with

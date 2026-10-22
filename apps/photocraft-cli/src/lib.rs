@@ -6,7 +6,7 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use photocraft_automation::{AuthorizedWorkspace, Headless, PhotocraftMcp, files, security};
+use photocraft_automation::{AuthorizedWorkspace, CommandAllowlist, Headless, PhotocraftMcp, files, security};
 use photocraft_engine::actions_cmds::Action;
 use photocraft_io::ExportOptions;
 use serde_json::{Value, json};
@@ -43,8 +43,9 @@ USAGE:
   photocraft-cli commands [--json] [--filter <text>]
       List the engine command registry.
   photocraft-cli mcp [--bridge <127.0.0.1:port>] [--control-token <64-hex> | --control-token-file <path>]
-      [--automation-read-root <dir>] [--automation-write-root <dir>]
+      [--automation-read-root <dir>] [--automation-write-root <dir>] [--commands <file>]
       Run the MCP server on stdio (headless engine, or bridge to a running `photocraft --control <port>`).
+      --commands narrows exposed engine commands to the ids and prefix globs listed in <file>.
   photocraft-cli serve [--port <port>] [--control-token <64-hex> | --control-token-file <path>]
       [--automation-read-root <dir>] [--automation-write-root <dir>]
       Keep one headless session open and answer JSON lines ({\"id\",\"method\",\"params\"}) on stdio,
@@ -94,7 +95,7 @@ const SUBCOMMANDS: &[Subcommand] = &[
     Subcommand { name: "commands", values: &["--filter"], bare: &["--json"], run: |a, out, _| commands(a, out) },
     Subcommand {
         name: "mcp",
-        values: &["--bridge", "--control-token", "--control-token-file", "--automation-read-root", "--automation-write-root"],
+        values: &["--bridge", "--control-token", "--control-token-file", "--automation-read-root", "--automation-write-root", "--commands"],
         bare: &[],
         run: |a, _, _| mcp(a),
     },
@@ -613,7 +614,11 @@ fn serve(a: &Args, err: &mut dyn Write) -> R {
 }
 
 fn mcp(a: &Args) -> R {
-    let server = match a.get("--bridge") {
+    let allowlist = match a.get("--commands") {
+        Some(path) => Some(CommandAllowlist::load(Path::new(path))?),
+        None => None,
+    };
+    let mut server = match a.get("--bridge") {
         Some(addr) => {
             let (supplied, token_file) = security::token_inputs(a.get("--control-token").map(str::to_owned), a.get("--control-token-file").map(PathBuf::from));
             let token = security::client_token(supplied.as_deref(), token_file.as_deref()).map_err(|e| e.to_string())?;
@@ -621,6 +626,9 @@ fn mcp(a: &Args) -> R {
         }
         None => PhotocraftMcp::headless_with_workspace(automation_workspace(a)?),
     };
+    if let Some(allowlist) = allowlist {
+        server = server.with_allowlist(allowlist);
+    }
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().map_err(|e| e.to_string())?;
     rt.block_on(server.serve_stdio()).map_err(|e| e.to_string())
 }

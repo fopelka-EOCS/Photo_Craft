@@ -187,7 +187,13 @@ impl Headless {
 
     /// [`Headless::batch`] with a caller's reply budget (MCP charges escaped sizes, see
     /// [`BatchReplyBudget::escaped`]). Steps stop once the budget runs out.
-    pub fn batch_with_budget(&mut self, p: &Value, mut reply_budget: BatchReplyBudget) -> Result<Value, AutomationError> {
+    pub fn batch_with_budget(&mut self, p: &Value, reply_budget: BatchReplyBudget) -> Result<Value, AutomationError> {
+        self.batch_filtered(p, reply_budget, &|_| true)
+    }
+
+    /// [`Headless::batch_with_budget`] where a `command` step whose id `allow` rejects is not run:
+    /// it fails like any other step error (so `stopOnError`, the counters and the budget apply).
+    pub fn batch_filtered(&mut self, p: &Value, mut reply_budget: BatchReplyBudget, allow: &dyn Fn(&str) -> bool) -> Result<Value, AutomationError> {
         let steps = p.get("steps").and_then(Value::as_array).ok_or_else(|| bad("batch needs `steps`"))?;
         if steps.len() > MAX_BATCH_STEPS {
             return Err(bad(format!("batch contains {} steps; maximum is {MAX_BATCH_STEPS}", steps.len())));
@@ -200,7 +206,7 @@ impl Headless {
             let r = if let Some(c) = str_of(s, "command") {
                 // Like `engine.execute`: `wait: false` starts a long command as a background job.
                 let wait = s.get("wait").and_then(Value::as_bool).unwrap_or(true);
-                self.command_start(c, params, wait)
+                if allow(c) { self.command_start(c, params, wait) } else { Err(bad(crate::allowlist::refusal(c))) }
             } else if let Some(m) = str_of(s, "method") {
                 if m == "batch" { Err(bad("nested batch")) } else { self.handle(m, params) }
             } else {
