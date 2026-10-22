@@ -148,7 +148,8 @@ fn pick(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let Some(target) = auto_select_target(&doc, x, y, group, drilled) else {
         // A click that hit no layer ends the drill: the next click starts at the group again.
-        if select && let Some(st) = s.active_mut() {
+        // The probe the Move tool makes before a press counts too: the press is the click.
+        if let Some(st) = s.active_mut() {
             st.last_pick = None;
         }
         return Ok(json!({ "layer": null }));
@@ -397,6 +398,17 @@ mod tests {
         assert_eq!(pick(&mut s, 500), Value::Null);
         assert_eq!(pick(&mut s, 5), outer.0, "the group, not the layer inside it");
         assert_eq!(pick(&mut s, 5), inner.0, "and the drill works again from there");
+    }
+
+    #[test]
+    fn the_move_tools_probe_ends_the_drill_too() {
+        // The Move tool probes the point before a press (`select: false`); the press is the
+        // click, so a probe that hits nothing ends the drill as well.
+        let (mut s, _, outer, _) = nested_groups();
+        let pick = |s: &mut Session| s.execute("layer.pickAt", json!({"x": 5, "y": 5, "target": "group"})).unwrap()["layer"].clone();
+        assert_eq!(pick(&mut s), outer.0);
+        assert_eq!(s.execute("layer.pickAt", json!({"x": 500, "y": 5, "target": "group", "select": false})).unwrap()["layer"], Value::Null);
+        assert_eq!(pick(&mut s), outer.0, "the group, not the layer inside it");
     }
 
     #[test]
