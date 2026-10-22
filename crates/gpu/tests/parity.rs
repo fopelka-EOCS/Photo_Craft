@@ -3024,3 +3024,25 @@ fn no_composite_cache_budget_caches_nothing_above_the_edit() {
     }
     assert_eq!(comp.composite_cache_bytes(), 0);
 }
+
+/// A composite-cache allowance too small for what the stack-above cache holds drops it, so
+/// `composite_cache_bytes` never stays above the allowance it was given.
+#[test]
+fn a_smaller_composite_cache_budget_drops_the_cached_stack_above() {
+    let Some(g) = gpu() else { return };
+    let mut comp = Compositor::new(&g.device);
+    let mut doc = affine_stack(SampleType::U8, 12);
+    for opacity in [0.5, 0.8, 0.3] {
+        doc.layers[4].opacity = opacity;
+        photocraft_gpu::render_to_vec(&mut comp, &g.device, &g.queue, &doc, doc.bounds()).unwrap();
+    }
+    let held = comp.composite_cache_bytes();
+    assert!(held > 0);
+    comp.set_composite_cache_budget(held);
+    assert_eq!(comp.composite_cache_bytes(), held, "an allowance that still holds both keeps both");
+    comp.set_composite_cache_budget(held - 1);
+    assert!(comp.composite_cache_bytes() < held, "{} of {}", comp.composite_cache_bytes(), held - 1);
+    doc.layers[4].opacity = 0.9;
+    let (_, s) = photocraft_gpu::render_to_vec_stats(&mut comp, &g.device, &g.queue, &doc, doc.bounds()).unwrap();
+    assert_eq!(s.suffix_hits, 0, "nothing cached above is left to apply: {s:?}");
+}

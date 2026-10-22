@@ -842,6 +842,7 @@ impl Compositor {
         self.lent = 0;
         self.exact_resident = false;
         self.lend();
+        self.fit_composite_caches();
     }
 
     /// Record that a render needs `needed` bytes of layer pages and return the resident budget
@@ -887,6 +888,15 @@ impl Compositor {
         let caches = self.fx_budget.saturating_add(self.prefix.budget());
         self.prefix.set_budget(bytes.min(caches));
         self.fx_budget = caches.saturating_sub(self.prefix.budget());
+        self.fit_composite_caches();
+    }
+
+    /// The stack-above cache shares the lower-stack allowance: when a smaller allowance no longer
+    /// holds both, drop it, as the lower-stack cache drops itself (`Prefix::set_budget`).
+    fn fit_composite_caches(&mut self) {
+        if self.prefix.bytes().saturating_add(self.suffix.bytes()) > self.prefix.budget() {
+            self.suffix.clear();
+        }
     }
 
     /// Bytes of the layer pages a render of `region` needs resident (each layer and mask
