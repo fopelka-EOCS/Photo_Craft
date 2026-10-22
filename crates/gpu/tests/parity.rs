@@ -3034,8 +3034,10 @@ fn affine_stack(depth: SampleType, n: u32) -> Document {
 fn stack_above_a_repeated_edit_is_cached_and_matches_the_cpu() {
     let _gamma = TEXT_GAMMA.lock().unwrap_or_else(|e| e.into_inner());
     let Some(mut g) = gpu() else { return };
-    for depth in [SampleType::U8, SampleType::U16] {
+    // A translucent background too: there the formula's `x.a` term (F1 − F0) carries weight.
+    for (depth, bg_alpha) in [(SampleType::U8, 1.0), (SampleType::U16, 1.0), (SampleType::U8, 0.3)] {
         let mut doc = affine_stack(depth, 12);
+        doc.layers[0] = noise_layer("bg", doc.pixel_format(), doc.bounds(), 1, bg_alpha);
         let mid = 4;
         check(&mut g, &doc, "first render");
         // The first edit draws everything; the second in a row builds the cache and applies it.
