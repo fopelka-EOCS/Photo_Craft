@@ -25,6 +25,22 @@ are aliases: `はがき`/`ハガキ`/`葉書`/`ポストカード`, `往復は�
 `L判`/`Lサイズ`/`L-size`, `2L判`, `KG判`, `六切`/`6切`, `四切`/`4切`. A size not in the table can be
 given as points (`[width, height]`), which is what the dialog's Custom row does.
 
+## Positioning the preview
+
+Drag the visible image on the paper to change Top and Left. Starting a drag switches Center
+off using the currently resolved layout, including Scale to Fit Media, so the image stays at
+the grab point. Top/Left stay visible but disabled while Center is on, keeping the dialog and
+paper stationary when a drag enables them. Position fields accept negative values in inches, centimetres or millimetres;
+the stored command parameters are inches from the sheet's top-left. Manual positions are
+bounded to ±10000 inches. Height, width and paper dimensions retain their positive fields.
+
+The preview converts egui point displacement to PDF points using its paper display scale.
+No extra Retina pixel factor is needed: painting and pointer input both use egui points.
+Emulsion Down reverses the horizontal position change to match the mirrored output. The image
+is clipped to the paper; any visible portion remains a drag target. A completely off-page image
+can be recovered with Top/Left or Center. These controls affect print parameters only, and
+the preview and generated PDF continue to share `print_cmds::layout`.
+
 ## Routes to the printer
 
 | Route | When | What the user sees |
