@@ -1338,6 +1338,9 @@ fn cmyk_of(fmt: &PixelFormat) -> bool {
 /// `ctl` gets the fraction of rows done after each band; once it is cancelled the rest of the
 /// image is left blank (the caller discards it).
 fn merged_planes(doc: &Document, fmt: &PixelFormat, cmyk: bool, matte: bool, ctl: &Interrupt) -> (Vec<u8>, bool, bool) {
+    if cmyk && let Some(merged) = merged_planes_cmyk(doc, fmt, matte, ctl) {
+        return merged;
+    }
     let sample = fmt.sample;
     let cc = fmt.mode.color_channels();
     let bps = sample.bytes();
@@ -1393,6 +1396,59 @@ fn merged_planes(doc: &Document, fmt: &PixelFormat, cmyk: bool, matte: bool, ctl
         Ok(())
     });
     (planes, has_alpha, translucent)
+}
+
+/// [`merged_planes`] of a CMYK document composited in its ink values
+/// ([`photocraft_compose::native::flatten_cmyk`]), so the merged image keeps the layers' inks
+/// instead of re-separating them through RGB (#7697); `None` when the stack needs the full
+/// compositor.
+fn merged_planes_cmyk(doc: &Document, fmt: &PixelFormat, matte: bool, ctl: &Interrupt) -> Option<(Vec<u8>, bool, bool)> {
+    let sample = fmt.sample;
+    let inks = fmt.mode.color_channels();
+    let bps = sample.bytes();
+    let canvas = doc.bounds();
+    let w = canvas.width() as usize;
+    let plane = doc.size.area() as usize * bps;
+    let ink_fmt = PixelFormat::new(ColorMode::Cmyk, sample, true);
+    let n = ink_fmt.channels();
+    let rows = photocraft_compose::band_rows_for(canvas.width(), 0);
+    let total = canvas.height().max(1) as f32;
+    let mut planes = vec![0u8; plane * (inks + 1)];
+    let (mut has_alpha, mut translucent) = (false, false);
+    let mut y = canvas.y0;
+    while y < canvas.y1 {
+        if ctl.cancelled() {
+            break;
+        }
+        let band = photocraft_geom::Rect::new(canvas.x0, y, canvas.x1, y.saturating_add(rows).min(canvas.y1));
+        let px = photocraft_compose::native::flatten_cmyk(doc, band, ink_fmt, false)?.read_region(band);
+        let mut out: Vec<Vec<u8>> = vec![Vec::with_capacity(px.len() / n * bps); inks + 1];
+        for p in px.chunks_exact(n) {
+            let a = p.get(inks).copied().unwrap_or(1.0);
+            has_alpha |= match sample {
+                SampleType::U8 => q255(a) < 255,
+                SampleType::U16 => (a.clamp(0.0, 1.0) * 65535.0 + 0.5) as u16 != u16::MAX,
+                SampleType::F32 => a != 1.0,
+            };
+            translucent |= a < 1.0;
+            for (c, o) in out.iter_mut().enumerate() {
+                // Matte against white paper (no ink) like Photoshop (see `pixels::matte`).
+                let v = p.get(c).copied().unwrap_or(0.0);
+                let x = if c < inks { 1.0 - if matte { crate::pixels::matte(v, a, 0.0) } else { v } } else { v };
+                encode_be(x, sample, o);
+            }
+        }
+        let start = (band.y0 - canvas.y0) as usize * w * bps;
+        for (c, src) in out.iter().enumerate() {
+            let o = c * plane + start;
+            if let Some(dst) = planes.get_mut(o..o + src.len()) {
+                dst.copy_from_slice(src);
+            }
+        }
+        ctl.progress((band.y1 - canvas.y0) as f32 / total);
+        y = band.y1;
+    }
+    Some((planes, has_alpha, translucent))
 }
 
 /// The merged image of a file saved without Maximize Compatibility: Photoshop's white placeholder

@@ -223,6 +223,8 @@ fn composite_uses_distinctive_document_profile_on_every_worker() {
     let mut doc = document(SampleType::F32, 0.5);
     doc.size = Size::new(64, 64);
     doc.icc_profile = Some(profile.to_bytes());
+    // A blend mode the inks can't carry, so the composite goes through RGB and separates back.
+    doc.layers[0].blend = photocraft_color::BlendMode::Multiply;
     let rgb = photocraft_compose::flatten(&doc);
     let transform = Transform::new(Builtin::Srgb.profile(), &profile, Intent::RelativeColorimetric, true).unwrap();
     let fallback = Transform::new(Builtin::Srgb.profile(), Builtin::CoatedCmyk.profile(), Intent::RelativeColorimetric, true).unwrap();
@@ -355,4 +357,30 @@ fn merged_composite_of_a_tagged_cmyk_file_reads_through_its_profile() {
     let apart = |a: &[[f32; 3]]| merged.iter().zip(a).flat_map(|(m, s)| (0..3).map(move |c| (m[c] - s[c]).abs())).fold(0.0f32, f32::max);
     assert!(apart(&shown) < 1e-4, "merged image read through its profile: {}", apart(&shown));
     assert!(apart(&builtin) > 0.01, "the built-in profile would show it differently");
+}
+
+/// A CMYK document whose composite is one plain layer writes that layer's inks into the merged
+/// image unchanged, like Flatten (#7697): no round trip through RGB re-separates them.
+#[test]
+fn psd_merged_image_keeps_the_inks_of_a_single_cmyk_layer() {
+    for depth in [SampleType::U8, SampleType::U16] {
+        for ink in [[1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.5], [0.66, 0.59, 0.58, 0.40]] {
+            let mut doc = Document::new("inks", Size::new(16, 16), ColorMode::Cmyk, depth);
+            let mut surface = Surface::new(doc.pixel_format());
+            surface.fill_rect(doc.bounds(), &[ink[0], ink[1], ink[2], ink[3], 1.0]);
+            doc.layers.push(Layer::new("Background", LayerContent::Raster(surface)));
+
+            let psd = export(&doc, "psd", &ExportOptions::default()).unwrap();
+
+            let file = photocraft_psd::PsdFile::from_bytes(&psd.bytes).unwrap();
+            let merged = file.decode_merged().unwrap();
+            let layer = &file.layers()[0];
+            let plane = 16 * 16 * depth.bytes();
+            for c in 0..4 {
+                let channel = layer.decode_channel(c as i16, file.header.depth, file.header.version).unwrap();
+                assert_eq!(channel.len(), plane, "{depth:?} {ink:?}");
+                assert_eq!(&merged[c * plane..(c + 1) * plane], channel.as_slice(), "{depth:?} {ink:?}: channel {c}");
+            }
+        }
+    }
 }

@@ -386,30 +386,15 @@ fn document_to_image_for(doc: &Document, warnings: &mut Vec<String>, cmyk_target
     let single = single_layer(doc);
     let native = single.filter(|_| fmt.mode != ColorMode::Lab || lab_target);
     let mut icc = doc.icc_profile.as_ref().map(|i| i.to_vec());
+    let meta = codecs::Metadata {
+        exif: doc.metadata.exif.as_ref().map(|e| e.to_vec()),
+        xmp: doc.metadata.xmp.clone(),
+        text: doc.metadata.text.clone(),
+        dpi: Some((doc.resolution_dpi, doc.resolution_dpi)),
+        ..Default::default()
+    };
     let img = if let Some(s) = native {
-        // Native path: keep model and depth. The surface's encoded samples are the codec's raw
-        // native-endian samples, copied a band of rows at a time (alpha dropped when opaque).
-        let ch = fmt.channels();
-        let opaque = opaque_surface(s, canvas);
-        let layout = layout_for(fmt.mode, !opaque);
-        let bps = fmt.sample.bytes();
-        let keep = if opaque { (ch - 1) * bps } else { ch * bps };
-        let mut data = try_buffer(n, keep)?;
-        let rows = (BAND_BYTES / (w as usize * ch * bps).max(1)).max(1) as i32;
-        let mut y = 0;
-        while y < h as i32 {
-            let y1 = y.saturating_add(rows).min(h as i32);
-            let band = s.to_interleaved(Rect::new(0, y, w as i32, y1));
-            if opaque {
-                for px in band.chunks_exact(ch * bps) {
-                    data.extend_from_slice(&px[..keep]);
-                }
-            } else {
-                data.extend_from_slice(&band);
-            }
-            y = y1;
-        }
-        Image::from_raw(w, h, layout, csample(fmt.sample), data)?
+        surface_image(s, canvas, fmt)?
     } else {
         if single.is_none() {
             let count = doc.layer_count();
@@ -437,6 +422,12 @@ fn document_to_image_for(doc: &Document, warnings: &mut Vec<String>, cmyk_target
         } else {
             None
         };
+        // A CMYK stack the inks carry exactly is composited in them, so the inks aren't
+        // re-separated through RGB (#7697), as Flatten and the PSD merged image do.
+        let ink_fmt = PixelFormat::new(ColorMode::Cmyk, fmt.sample, true);
+        if cmyk && let Some(s) = photocraft_compose::native::flatten_cmyk(doc, canvas, ink_fmt, false) {
+            return Ok(surface_image(&s, canvas, ink_fmt)?.with_icc(icc).with_meta(meta));
+        }
         let gray = fmt.mode == ColorMode::Grayscale;
         if (fmt.mode == ColorMode::Cmyk && !cmyk) || fmt.mode == ColorMode::Lab {
             // RGB-only targets use the sRGB composite directly, without reseparating CMYK.
@@ -508,14 +499,36 @@ fn document_to_image_for(doc: &Document, warnings: &mut Vec<String>, cmyk_target
         );
         Image::from_raw(w, h, layout, cs, data)?
     };
-    let meta = codecs::Metadata {
-        exif: doc.metadata.exif.as_ref().map(|e| e.to_vec()),
-        xmp: doc.metadata.xmp.clone(),
-        text: doc.metadata.text.clone(),
-        dpi: Some((doc.resolution_dpi, doc.resolution_dpi)),
-        ..Default::default()
-    };
     Ok(img.with_icc(icc).with_meta(meta))
+}
+
+/// A surface holding the whole composite in `fmt` as an image, keeping model and depth.
+fn surface_image(s: &Surface, canvas: Rect, fmt: PixelFormat) -> Result<Image, IoError> {
+    let (w, h) = (canvas.width(), canvas.height());
+    let n = (w as usize) * (h as usize);
+    // Native path: keep model and depth. The surface's encoded samples are the codec's raw
+    // native-endian samples, copied a band of rows at a time (alpha dropped when opaque).
+    let ch = fmt.channels();
+    let opaque = opaque_surface(s, canvas);
+    let layout = layout_for(fmt.mode, !opaque);
+    let bps = fmt.sample.bytes();
+    let keep = if opaque { (ch - 1) * bps } else { ch * bps };
+    let mut data = try_buffer(n, keep)?;
+    let rows = (BAND_BYTES / (w as usize * ch * bps).max(1)).max(1) as i32;
+    let mut y = 0;
+    while y < h as i32 {
+        let y1 = y.saturating_add(rows).min(h as i32);
+        let band = s.to_interleaved(Rect::new(0, y, w as i32, y1));
+        if opaque {
+            for px in band.chunks_exact(ch * bps) {
+                data.extend_from_slice(&px[..keep]);
+            }
+        } else {
+            data.extend_from_slice(&band);
+        }
+        y = y1;
+    }
+    Ok(Image::from_raw(w, h, layout, csample(fmt.sample), data)?)
 }
 
 /// An empty buffer with room for `pixels × bytes_per_pixel` bytes, or an error (not an abort)
