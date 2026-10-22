@@ -130,6 +130,17 @@ fn export_refuses_a_rename_carrying_a_layers_list() {
     assert!(e.contains("layer.setProps"), "{e}");
 }
 
+/// A present `layers` that isn't an array ("7,8" etc.) can't be exact either: exporting it as
+/// one item would aim the step at the active layer instead (#7246, review).
+#[test]
+fn export_refuses_a_non_array_layers_value() {
+    let action = Action::new("Targets", vec![("layer.setProps".into(), json!({"layers": "7,8", "opacity": 0.5}))]);
+    let e = export("S", &[&action], &[], false).unwrap_err();
+    assert!(e.contains("layer.setProps"), "{e}");
+    let (_, skipped) = export("S", &[&action], &[], true).unwrap();
+    assert_eq!(skipped, [Skipped { action: "Targets".into(), step: 0, id: "layer.setProps".into() }]);
+}
+
 /// A numeric `layer` the reference can't hold refuses as well: exporting it silently would
 /// aim the step at the active layer instead (#7246, review).
 #[test]
