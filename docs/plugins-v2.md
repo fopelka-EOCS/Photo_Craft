@@ -489,15 +489,15 @@ runs a timer while its Watch button is on — re-arming the one-shot timer from 
 fired it. Nothing in the ABI prefers its approach: a real plug-in in a language with an allocator
 and a JSON parser would use those.
 
-The other end of that range is the workflow this ABI was designed for: TyperTools 1.4.9, the manga
-and comic lettering panel for Photoshop, as a native panel — a clean-room Rust port of some 6,500
-lines with its own script parser, its own style library and that library's JSON format, lettering a
-page through those five commands and nothing else. It is not part of this repository: it is kept
-beside the original it reimplements, in a fork of it, and installs here as one `.wasm` module like any
-other panel. What it did shape is everything above — the allow-list was cut down to what it emits, the
-widget set to what it draws, and the ABI's rough edges are the ones it hit: a panel follows the
-document rather than being told about its own edits, and an action it cannot take is refused on screen
-rather than attempted.
+The other end of that range is the workflow this ABI was designed for: TyperTools/TypeR 1.4.9, the
+manga and comic lettering panel for Photoshop, as a native panel — a Rust port of some 6,500 lines,
+carrying the original's MIT licence (© 2017 Swirt), with its own script parser, its own style library
+and that library's JSON format, lettering a page through those five commands and nothing else. It is
+not part of this repository: it is kept in its own repository, with attribution to the original
+authors, and installs here as one `.wasm` module like any other panel. What it did shape is everything
+above — the allow-list was cut down to what it emits, the widget set to what it draws, and the ABI's
+rough edges are the ones it hit: a panel follows the document rather than being told about its own
+edits, and an action it cannot take is refused on screen rather than attempted.
 
 ## Not in v2 (yet)
 

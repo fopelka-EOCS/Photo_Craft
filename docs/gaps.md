@@ -159,13 +159,13 @@ what an agent can't finish alone.
   `addLayers`); the list is five type commands, and nothing that reaches the file system, the
   settings, the plug-in registry or a recorded action (AUTO-219-6 partial).
 - **Proof it is enough (2026-10-16):** the ABI has been taken to the far end of what it was designed
-  for — a clean-room port of TyperTools 1.4.9's manga and comic lettering workflow, about 6,500 lines
-  with its own script parser and style library, which letters a page through five allow-listed
-  commands and nothing else (installed as one `.wasm` from a repository of its own: it is kept beside
-  the original it reimplements, not here). Install, open, paste a script, press Create, and the
-  document has a styled Type layer in the marquee, at the style's own size, in one undo step, with a
-  size step that grows the type without moving the layer. What it needed is why the list was cut down
-  to those five, and the widget set to what its pages draw.
+  for — a Rust port of TyperTools/TypeR 1.4.9's manga and comic lettering workflow, about 6,500 lines
+  under the original's MIT licence (© 2017 Swirt), with its own script parser and style library, which
+  letters a page through five allow-listed commands and nothing else (installed as one `.wasm` from
+  its own repository, with attribution to the original authors — not from this one). Install, open,
+  paste a script, press Create, and the document has a styled Type layer in the marquee, at the
+  style's own size, in one undo step, with a size step that grows the type without moving the layer.
+  What it needed is why the list was cut down to those five, and the widget set to what its pages draw.
 - **Still missing in v2:** document images (`doc.capture` / `doc.commit` answer "not supported yet"),
   storage on disk rather than in memory, layers other than the active document, command and shortcut
   contribution (so a panel's actions cannot become menu items or hotkeys — the lettering port's three
