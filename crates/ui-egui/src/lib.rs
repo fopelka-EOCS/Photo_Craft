@@ -59,6 +59,8 @@ pub mod channels_panel;
 pub mod chrome_ui;
 pub mod cjk_fonts;
 pub mod clip_line_ui;
+pub mod cloud;
+pub mod cloud_dialog;
 pub mod color_picker_ui;
 pub mod color_range_ui;
 pub mod color_table_ui;
@@ -981,6 +983,33 @@ pub struct PhotocraftApp {
     pub(crate) jpeg_options: Option<jpeg_options_ui::Prompt>,
     /// A save to a DDS texture parked behind the DDS Options prompt (see `dds_options_ui`).
     pub(crate) dds_options: Option<dds_options_ui::Prompt>,
+    /// Open and Save against cloud storage ([`cloud`]). Nothing cloud-shaped is offered until the
+    /// host connects a backend, so a build with no service configured is the app as it was.
+    pub cloud: cloud::CloudFiles,
+    /// The revision of each document a cloud save in flight encoded, so a save that lands marks
+    /// exactly that revision saved and an edit made meanwhile stays unsaved.
+    pub(crate) cloud_sent: cloud::Sent,
+    /// Document uid a share-dialog save was started for, so completion is not tied to whichever
+    /// document is active when the worker answers.
+    pub(crate) sharing_save_uid: Option<u64>,
+    /// Share dialog generation when a share save started, so a result is not applied after close.
+    pub(crate) sharing_save_epoch: Option<u64>,
+    /// Document that was active when Share opened, for saves while another tab is selected.
+    pub(crate) sharing_doc_uid: Option<u64>,
+    /// Bumps each time Share opens; pairs with [`Self::sharing_save_epoch`].
+    pub(crate) share_open_epoch: u64,
+    /// Previous frame's [`craft_ui::share::ShareDialog::is_open`], for open/close edges.
+    pub(crate) share_was_open: bool,
+    /// URLs the cloud controls asked for while the frame was being drawn. Those calls hold a
+    /// shared borrow of the window and opening one wants a mutable one, so they wait here until
+    /// [`Self::open_queued_urls`] runs.
+    cloud_urls: std::cell::RefCell<Vec<String>>,
+    /// Share, the same dialog every Craft app offers. It opens no socket; the host connects the
+    /// half that reaches the service.
+    pub share: craft_ui::share::ShareDialog,
+    /// Who else is in the open document, drawn beside the account badge. Nothing is drawn while a
+    /// person works alone.
+    pub presence: craft_ui::presence::PresenceBar,
     /// Files read but not opened yet: the first waits on its profile prompt, the rest behind it
     /// (see `open_prompt`).
     pub(crate) held_opens: std::collections::VecDeque<open_prompt::Held>,
@@ -1147,6 +1176,18 @@ impl PhotocraftApp {
             targa_options: None,
             jpeg_options: None,
             dds_options: None,
+            cloud: cloud::CloudFiles::new(),
+            cloud_sent: cloud::Sent::new(),
+            sharing_save_uid: None,
+            sharing_save_epoch: None,
+            sharing_doc_uid: None,
+            share_open_epoch: 0,
+            share_was_open: false,
+            cloud_urls: std::cell::RefCell::new(Vec::new()),
+            share: craft_ui::share::ShareDialog::new(),
+            // Initials alone: the title bar has room for a row of them beside the account, and a
+            // name each would crowd out the controls next to it.
+            presence: craft_ui::presence::PresenceBar::new().badges_only(),
             held_opens: Default::default(),
             allow_close: false,
             stylus: Default::default(),
@@ -2269,6 +2310,9 @@ impl eframe::App for PhotocraftApp {
             self.checker = None;
         }
         self.drain_control(ctx);
+        // Answers from the cloud worker, and anything still in flight.
+        cloud::pump(self, ctx);
+        self.open_queued_urls(ctx);
         native_menu::run(self, ctx);
         // Switching tools commits, also between the Type and Type Mask tools.
         if self.ui.text_edit.as_ref().is_some_and(|ed| !self.ui.tool.is_type() || ed.mask != self.ui.tool.is_type_mask()) {
@@ -2452,6 +2496,13 @@ impl eframe::App for PhotocraftApp {
         timeline_ui::windows(self, &ctx);
         workspace_ui::windows(self, &ctx);
         palette::show(self, &ctx);
+        self.share.show(&ctx);
+        // A share of a document that has never been saved. The dialog asked; only this side can
+        // encode one, so it answers.
+        cloud::share_save(self);
+        // Above the dialogs: a refused save has to be answered, and the answer decides what
+        // happens to the user's edits.
+        cloud::conflict_modal(self, &ctx);
         dialogs::show(self, &ctx);
         layers_panel_ui::show_dialog(self, &ctx);
         rasterize_prompt::run_pending(self, &ctx);

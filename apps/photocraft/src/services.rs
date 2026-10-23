@@ -622,7 +622,7 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) ->
             photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &EncodeOptions::default()).map_err(|e| e.to_string())
         })),
         inbox: None,
-        open_url: Some(Box::new(|url: &str| open::that(url).map_err(|e| e.to_string()))),
+        open_url: Some(Box::new(|url: &str| crate::cloud::open_browser(url).map_err(|e| e.to_string()))),
         beep: Some(platform_beep),
         clipboard_set_image: Some({
             let clip = clip.clone();
@@ -722,6 +722,16 @@ mod tests {
     use photocraft_format::list_recovery;
     use photocraft_ui_egui::{PhotocraftApp, prefs_ui};
     use serde_json::{Value, json};
+
+    /// A cloud file list offers a file only when File › Open would turn it into a document, so the
+    /// cloud table is held to a subset of this one. A format added to one and forgotten in the
+    /// other would offer a file the app then cannot open, or hide one it can.
+    #[test]
+    fn cloud_open_extensions_are_a_subset_of_file_open() {
+        for extension in photocraft_ui_egui::cloud::DOCUMENT.extensions {
+            assert!(OPEN_EXTS.contains(extension) || SVG_EXTS.contains(extension), ".{extension} is offered from the cloud but File › Open does not open it");
+        }
+    }
 
     /// #6601: a chosen path whose name isn't valid Unicode is reported, never handed on lossily
     /// (Open would fail with "No such file", Save would write a second, renamed file).
