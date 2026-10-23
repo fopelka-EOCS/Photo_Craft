@@ -937,6 +937,7 @@ const PLACE_AFTER: &[(&str, &str)] = &[
     ("filter.render.relight", "filter.render.lightingEffects"),
     ("view.resetView", "view.flipHorizontal"),
     ("filter.other.colorToAlpha", "filter.other.offset"),
+    ("image.pixelArtUpscale", "image.imageSize"),
 ];
 
 pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {
@@ -1745,6 +1746,21 @@ mod tests {
         assert!(items[c2a].enabled, "the Background becomes a layer when the filter runs");
         let others: Vec<_> = items.iter().filter(|i| i.path.first().is_some_and(|p| p == "Filter") && i.path.len() == 2).map(|i| &i.path[1]).collect();
         assert!(!others.iter().any(|p| p.as_str() == "Other"), "no duplicate Other submenu: {others:?}");
+    }
+
+    /// Pixel Art Upscale has no Photoshop counterpart: it sits in Image right after Image Size.
+    #[test]
+    fn pixel_art_upscale_sits_in_image_after_image_size() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 32, "height": 32})).unwrap();
+        let items = menu_items(&app);
+        let at = |id: &str| items.iter().position(|i| i.id == id).unwrap_or_else(|| panic!("{id} missing"));
+        let (size, up) = (at("image.imageSize"), at("image.pixelArtUpscale"));
+        assert_eq!(up, size + 1);
+        assert_eq!(items[up].path, items[size].path);
+        assert_eq!(items[up].label, "Pixel Art Upscale…");
+        assert!(items[up].enabled);
+        assert!(crate::filter_dialog::has_dialog("image.pixelArtUpscale"));
     }
 
     #[test]
