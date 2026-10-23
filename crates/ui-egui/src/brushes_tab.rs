@@ -821,9 +821,11 @@ fn draw_nodes(ui: &mut egui::Ui, d: &Draw, nodes: &[Node], depth: usize, acts: &
             // Rows of whole columns, each with the same margin: a wrapped row indented only
             // its first line and left the spare width on the right.
             let base = if d.show.0 || d.show.1 { CARD_TIP_NAME_W } else { d.layout.cell };
-            let cell = grid_cell_width(base, d.scale);
+            let grid_indent = d.layout.indent + indent;
+            let available = (ui.available_width() - grid_indent).max(1.0);
+            let cell = grid_cell_width(base, d.scale).min(available);
             let scale = list_row_height(d.scale) / 44.0;
-            let (left, cols) = grid_columns(ui.available_width(), cell, d.layout.indent + indent, GRID_GAP);
+            let (left, cols) = grid_columns(ui.available_width(), cell, grid_indent, GRID_GAP);
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing = vec2(GRID_GAP, GRID_GAP);
                 for row in run.chunks(cols) {

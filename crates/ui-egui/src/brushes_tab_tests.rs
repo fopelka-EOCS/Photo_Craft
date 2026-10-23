@@ -397,6 +397,7 @@ fn brush_picker_upper_controls_stop_at_their_max_width() {
     assert_eq!(h.state().session.tools.brush.size, inside, "just past the block the click lands on nothing");
 }
 
+/// Grid rows stay centred, and large previews fit even in a narrow panel with nested folders.
 #[test]
 fn the_brushes_tab_grid_is_centred_past_its_indent() {
     let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
@@ -416,6 +417,36 @@ fn the_brushes_tab_grid_is_centred_past_its_indent() {
     PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ALL[0]);
     h.run_steps(6);
     rows_are_centred(&h, PANEL_LIST.indent, 2);
+    for nested in [false, true] {
+        for show in [(true, true, true), (true, false, true), (false, true, false), (false, false, true)] {
+            let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+            if nested {
+                for preset in &mut app.session.tools.presets {
+                    preset.folder = vec!["Outer".into(), "Inner".into()];
+                }
+            }
+            let st = &mut app.ui.brushes_panel;
+            st.view = BrushesView::Grid;
+            st.scale = 2.0;
+            st.collapsed.clear();
+            (st.show_name, st.show_stroke, st.show_tip) = show;
+            let name = app.session.tools.presets[0].name.clone();
+            let mut h = Harness::builder().with_size(vec2(180.0, 600.0)).build_ui_state(
+                |ui, app: &mut PhotocraftApp| {
+                    if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                        preset_list(ui, &app.session.tools.presets, None, &mut app.ui.brushes_panel, PANEL_LIST);
+                    }
+                },
+                app,
+            );
+            PhotocraftApp::setup_context(&h.ctx, Default::default());
+            h.run_steps(4);
+            let cell = h.get_by_role_and_label(Role::Button, &name).rect();
+            let panel = h.ctx.content_rect();
+            assert!(cell.left() >= panel.left() && cell.right() <= panel.right(), "grid cell {cell:?} exceeds {panel:?}: nested={nested}, parts={show:?}");
+            assert_eq!(h.state().ui.brushes_panel.scale, 2.0, "fitting the preview leaves the chosen scale unchanged");
+        }
+    }
 }
 
 /// #4454: a card's size number sat under the tip thumbnail of any medium or large brush (the
