@@ -54,6 +54,8 @@ mod canvas_popup;
 pub mod canvas_tool_menu;
 pub mod cas_transform;
 pub mod channel_options_ui;
+mod channel_transform_gpu;
+mod channel_transform_preview;
 pub mod channel_view;
 pub mod channels_panel;
 pub mod chrome_ui;
@@ -727,6 +729,8 @@ pub struct PhotocraftApp {
     pub(crate) menu_cache: Option<menus::ItemCache>,
     /// Move tool drag shown live (`move_ui`).
     pub(crate) move_preview: Option<move_ui::MovePreview>,
+    /// Cached native samples for an isolated colour-channel Move drag.
+    pub(crate) move_gpu_preview: Option<move_ui::MoveGpuPreview>,
     /// Move tool › Show Highlight on Rollover: the last hover answer (`move_hover`).
     pub(crate) move_hover: Option<move_hover::Hover>,
     /// Smart Guides distances shown with ⌘ held over the canvas: the last answer (`move_distance`).
@@ -1030,6 +1034,7 @@ impl PhotocraftApp {
             remove_trail: None,
             menu_cache: None,
             move_preview: None,
+            move_gpu_preview: None,
             move_hover: None,
             move_distance: None,
             object_finder: None,
@@ -1196,6 +1201,7 @@ impl PhotocraftApp {
             }
         };
         self.perf.gpu_info.canvas = "gpu".into();
+        self.move_gpu_preview = None;
         self.window_device = Some((rs.device.clone(), gpu.health().clone()));
         self.gpu = Some(gpu);
         self.prefs_rt.gpu_style = None;
@@ -1475,6 +1481,7 @@ impl PhotocraftApp {
     }
 
     pub fn sync_views(&mut self) {
+        move_ui::cancel_stale_gpu(self);
         type_transform::cancel_stale(self);
         crate::cam_transform::cancel_stale(self);
         crate::lasso_ui::cancel_stale(self);
@@ -2569,7 +2576,11 @@ impl PhotocraftApp {
     /// ⌘I then inverts the mask, as in Photoshop (#780). A targeted alpha channel or Quick Mask
     /// mode wins, as the engine routes those itself.
     pub fn with_mask_target(&self, id: &str, params: Value) -> Value {
-        if !photocraft_engine::channel_cmds::follows_target(id) || params.get("target").is_some() || !self.layer_mask_targeted() {
+        if (id.starts_with("edit.transform") && params.get("layer").is_some())
+            || !photocraft_engine::channel_cmds::follows_target(id)
+            || params.get("target").is_some()
+            || !self.layer_mask_targeted()
+        {
             return params;
         }
         match params {
@@ -2604,6 +2615,12 @@ impl PhotocraftApp {
     /// active layer (a shape layer's path is its content, not a mask). Targeting a mask or the
     /// pixels brings back that target's foreground/background pair, as in Photoshop (#2166).
     pub(crate) fn sync_mask_targets(&mut self) {
+        if let Some(guard) = self.session.active().and_then(|st| st.channel_transform.as_ref()) {
+            self.ui.mask_target = guard.target == "mask";
+            self.ui.vector_mask_target = false;
+            self.session.tools.target_mask(self.ui.mask_target || guard.target == "quickMask" || guard.target.get("channel").is_some());
+            return;
+        }
         if let Some(st) = self.session.active_mut() {
             if photocraft_engine::mask_view_cmds::current(st).is_some() || st.channel_view.target == photocraft_engine::channel_cmds::ChannelTarget::LayerMask {
                 self.ui.mask_target = true;
