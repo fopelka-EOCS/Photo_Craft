@@ -1,6 +1,6 @@
 # Brush and painting parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-16 · **Change:** minor (named, stateful Brush Settings locks and visible keyboard focus; independent Brush Pose tilt-axis overrides; Transfer Wetness/Mix tool applicability; dragged preset tip preview; Hue Jitter amount track; Brush Settings minimum fields follow their Control; checkbox-only rows and non-destructive Smoothing switch; shaped-tip cursor follows the view; Color Replacement is a live toolbar tool; no brush-feel estimate changed; 2026-10-11: Pattern Stamp and Background Eraser draw live, TOOL-213-7) · **Target:** Adobe Photoshop 2026
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-22 · **Change:** minor (Spacing checkbox and percentage share one header; named, stateful Brush Settings locks and visible keyboard focus; independent Brush Pose tilt-axis overrides; Transfer Wetness/Mix tool applicability; dragged preset tip preview; Hue Jitter amount track; Brush Settings minimum fields follow their Control; checkbox-only rows and non-destructive Smoothing switch; shaped-tip cursor follows the view; Color Replacement is a live toolbar tool; no brush-feel estimate changed; 2026-10-11: Pattern Stamp and Background Eraser draw live, TOOL-213-7) · **Target:** Adobe Photoshop 2026
 
 Painting is where Photoshop users notice differences first, so it gets its own checklist: the
 brush engine (`crates/paint/src/brush.rs`), the Brush Settings UI
@@ -19,6 +19,7 @@ tablets against Photoshop side by side.
 | Section | Status | Evidence |
 |---|---|---|
 | Brush Tip Shape: size, angle, roundness, hardness, spacing, flip X/Y | done | `brush.rs` |
+| Brush Tip Shape Spacing checkbox and percentage share one header without a duplicated label | done | #3825 (Spacing header only); UI regressions cover all 14 themes, enabled/disabled editing, percentage limits, fractional-value retention and `tools.setBrush` routing. |
 | Shape Dynamics (size/angle/roundness jitter, pen pressure/tilt/rotation/wheel controls, minimums, flip jitter, brush projection) | done | #174 |
 | Scattering (both axes, count, count jitter) | done | |
 | Texture (pattern, scale, brightness, contrast, mode, depth, each tip) | done | |
@@ -127,6 +128,7 @@ tablets against Photoshop side by side.
 | 2026-10-12 | minor | A shaped tip's cursor outline turns and flips with a rotated or flipped view, and follows pixel aspect correction |
 | 2026-10-13 | minor | Shape Dynamics and Transfer minimum inputs follow their Control and retain their values while disabled (#3825, partial). No brush-feel estimate changed. |
 | 2026-10-13 | minor | Hue Jitter uses the same themed amount slider as other jitter controls (#3825, partial). No brush-feel estimate changed. |
+| 2026-10-13 | minor | Brush Tip Shape combines the Spacing checkbox and percentage into one header (#3825, partial), retaining the value while disabled. No brush-feel estimate changed. |
 | 2026-10-13 | minor | Transfer Wetness/Mix controls follow the active tool and retain their settings while disabled (#3825, partial). No brush-feel estimate changed. |
 | 2026-10-14 | minor | The 12 existing Brush Settings section locks expose translated names and locked state to AccessKit and show themed keyboard focus (#3477 workflow); icons, hit targets and command behavior retained. No brush-feel estimate changed. |
 | 2026-10-13 | minor | Dragging a brush preset shows its cached tip thumbnail and name in the Brushes panel and preset picker (#4225, partial). No brush-feel estimate changed. |
