@@ -1382,8 +1382,14 @@ fn merged_planes(doc: &Document, fmt: &PixelFormat, cmyk: bool, matte: bool, ctl
                 for p in &band.px[range.clone()] {
                     photocraft_raster::from_rgba_into(fmt, *p, &mut v);
                     for c in 0..=cc {
-                        // Matte against white like Photoshop (see `pixels::matte`).
-                        let m = if c < cc && matte { crate::pixels::matte(v[c], v[cc], white[c]) } else { v[c] };
+                        // Matte against white like Photoshop (see `pixels::matte`). A pixel
+                        // that is completely clear has no colour of its own either: the RGBA
+                        // composite is black there, and converting that black into CMYK puts a
+                        // dark brown in the colour samples of a TIFF that keeps its
+                        // transparency. Photoshop stores paper, as the CMYK flat path does, so
+                        // encode paper for clear pixels too (#8777).
+                        let clear = c < cc && cmyk && !matte && v[cc] == 0.0;
+                        let m = if c < cc && (matte || clear) { crate::pixels::matte(v[c], v[cc], white[c]) } else { v[c] };
                         let x = if cmyk && c < cc { 1.0 - m } else { m };
                         // 16-bit Lab a*/b* use Photoshop's 0..65280 scale (`pixels::lab16_chroma`).
                         let x = if lab16 && (c == 1 || c == 2) { x * (crate::pixels::LAB16_CHROMA_MAX / 65535.0) } else { x };
