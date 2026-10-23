@@ -52,6 +52,23 @@ fn stroke_accepts_full_points_brush_and_preset() {
 }
 
 #[test]
+fn stroke_spacing_is_a_diameter_fraction() {
+    // The documented contract: `spacing` multiplies the diameter (Photoshop's percent), so
+    // a size-50 spacing-5 stroke stamps dabs 250px apart — two bands on a 320px path.
+    let mut s = session(400, 400);
+    s.execute("paint.stroke", json!({"points": [[200, 40], [200, 360]], "size": 50, "spacing": 5, "color": "#ff0000"})).unwrap();
+    let painted: Vec<i32> = (0..400).filter(|&y| rgba(&s, 200, y)[3] > 0.0).collect();
+    let mut bands: Vec<(i32, i32)> = Vec::new();
+    for y in painted {
+        match bands.last_mut() {
+            Some(b) if y == b.1 + 1 => b.1 = y,
+            _ => bands.push((y, y)),
+        }
+    }
+    assert_eq!(bands, vec![(15, 64), (265, 314)], "pitch = size × spacing = 250px");
+}
+
+#[test]
 fn paint_commands_bound_hostile_time_and_reject_oversized_brushes() {
     let mut s = session(32, 32);
     let timed = s.execute(
