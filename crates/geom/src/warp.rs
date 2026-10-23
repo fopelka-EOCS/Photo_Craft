@@ -489,7 +489,7 @@ impl BezierMesh {
         let knots_ok = |k: &[f64]| k.len() >= 2 && k[0] == 0.0 && k[k.len() - 1] == 1.0 && k.windows(2).all(|w| w[1] > w[0]);
         knots_ok(&self.us)
             && knots_ok(&self.vs)
-            && self.points.len() == self.nx() * self.ny()
+            && self.nx().checked_mul(self.ny()) == Some(self.points.len())
             && self.points.iter().all(|p| p[0].is_finite() && p[1].is_finite())
     }
 
@@ -523,8 +523,12 @@ impl BezierMesh {
     }
 
     /// Splits the patch column containing `s` at `s` (a vertical split line). Exact: the surface
-    /// is unchanged. Returns false when `s` is on or too close to an existing boundary.
+    /// is unchanged. Returns false for a malformed mesh or when `s` is on or too close to an
+    /// existing boundary.
     pub fn split_u(&mut self, s: f64) -> bool {
+        if !self.is_valid() {
+            return false;
+        }
         let (pi, a) = Self::locate(&self.us, s);
         if !(0.01..=0.99).contains(&a) {
             return false;
@@ -544,7 +548,11 @@ impl BezierMesh {
     }
 
     /// Splits the patch row containing `t` at `t` (a horizontal split line). Exact.
+    /// Returns false for a malformed mesh or a split too close to an existing boundary.
     pub fn split_v(&mut self, t: f64) -> bool {
+        if !self.is_valid() {
+            return false;
+        }
         self.transpose();
         let ok = self.split_u(t);
         self.transpose();
@@ -553,9 +561,10 @@ impl BezierMesh {
 
     /// Removes interior vertical boundary `k` (1..us.len()-1), merging its two patch columns.
     /// Exact when the patches came from an unedited split; otherwise the outer control points are
-    /// kept and the inner handles extrapolated.
+    /// kept and the inner handles extrapolated. Returns false for a malformed mesh or a boundary
+    /// outside the interior range.
     pub fn remove_split_u(&mut self, k: usize) -> bool {
-        if k == 0 || k >= self.us.len().saturating_sub(1) {
+        if !self.is_valid() || k == 0 || k >= self.us.len().saturating_sub(1) {
             return false;
         }
         let a = (self.us[k] - self.us[k - 1]) / (self.us[k + 1] - self.us[k - 1]);
@@ -577,8 +586,12 @@ impl BezierMesh {
         true
     }
 
-    /// Removes interior horizontal boundary `k`.
+    /// Removes interior horizontal boundary `k`. Returns false for a malformed mesh or a boundary
+    /// outside the interior range.
     pub fn remove_split_v(&mut self, k: usize) -> bool {
+        if !self.is_valid() {
+            return false;
+        }
         self.transpose();
         let ok = self.remove_split_u(k);
         self.transpose();
@@ -1273,6 +1286,60 @@ mod tests {
             let e = f(s, t);
             assert!((p[0] - e[0]).abs() < 1e-9 && (p[1] - e[1]).abs() < 1e-9);
         }
+    }
+
+    fn assert_malformed_mesh_edit_rejected(edit: impl Fn(&mut BezierMesh) -> bool) {
+        let valid = BezierMesh::identity(B, 2, 3);
+        let mut malformed = vec![
+            BezierMesh { us: vec![], vs: vec![], points: vec![] },
+            BezierMesh { us: vec![0.0], vs: valid.vs.clone(), points: valid.points.clone() },
+            BezierMesh { us: valid.us.clone(), vs: vec![], points: valid.points.clone() },
+        ];
+        let mut truncated = valid.clone();
+        truncated.points.pop();
+        malformed.push(truncated);
+        let mut unordered = valid.clone();
+        unordered.us.swap(0, 1);
+        malformed.push(unordered);
+        let mut nonfinite = valid.clone();
+        nonfinite.points[0][0] = f64::INFINITY;
+        malformed.push(nonfinite);
+
+        for original in malformed {
+            assert!(!original.is_valid());
+            let mut mesh = original.clone();
+            assert!(!edit(&mut mesh), "accepted a malformed mesh");
+            assert_eq!(mesh, original, "changed a malformed mesh");
+        }
+    }
+
+    #[test]
+    fn mesh_validation_rejects_point_count_overflow_on_wasm32() {
+        // 21,845 patches give 65,536 control points per axis: their product overflows usize
+        // on wasm32 even though each knot vector is small enough to come from a file.
+        let knots: Vec<_> = (0..=21_845).map(|i| i as f64 / 21_845.0).collect();
+        let mesh = BezierMesh { us: knots.clone(), vs: knots, points: vec![] };
+        assert!(!mesh.is_valid());
+    }
+
+    #[test]
+    fn split_u_rejects_malformed_meshes() {
+        assert_malformed_mesh_edit_rejected(|mesh| mesh.split_u(0.25));
+    }
+
+    #[test]
+    fn split_v_rejects_malformed_meshes() {
+        assert_malformed_mesh_edit_rejected(|mesh| mesh.split_v(0.25));
+    }
+
+    #[test]
+    fn remove_split_u_rejects_malformed_meshes() {
+        assert_malformed_mesh_edit_rejected(|mesh| mesh.remove_split_u(1));
+    }
+
+    #[test]
+    fn remove_split_v_rejects_malformed_meshes() {
+        assert_malformed_mesh_edit_rejected(|mesh| mesh.remove_split_v(1));
     }
 
     #[test]
