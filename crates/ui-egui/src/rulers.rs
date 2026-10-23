@@ -123,16 +123,26 @@ impl GuideDrag {
         (self.pos - self.press).abs() * f64::from(app.point_zoom().max(0.01)) < 0.5
     }
 
-    /// An existing guide follows the pointer at document point `p`. With Shift it lands on the
-    /// nearest ruler tick, as a guide dragged out of a ruler does (#3770) and as in Photoshop; not
-    /// while it is still held in place, so a Shift-click selects the guide without moving it.
-    pub fn follow_pointer(&mut self, app: &PhotocraftApp, p: [f64; 2], shift: bool) {
-        self.pos = if self.vertical { p[0] } else { p[1] };
-        if shift
-            && !self.held_in_place(app)
+    /// An existing guide follows the pointer: `p` is the document point View › Snap made of the
+    /// pointer's `raw` one. With Shift the guide lands on the ruler tick nearest the pointer
+    /// instead, as a guide dragged out of a ruler does (#3770) and as in Photoshop: Snap To targets
+    /// (layer edges, the grid, the document's centre) neither pull it first nor hold it on a target
+    /// it sits on. Not while the pointer is still where it went down, so a Shift-click selects the
+    /// guide without moving it.
+    pub fn follow_pointer(&mut self, app: &mut PhotocraftApp, raw: [f64; 2], p: [f64; 2], shift: bool) {
+        let vertical = self.vertical;
+        let along = |q: [f64; 2]| if vertical { q[0] } else { q[1] };
+        if !shift {
+            self.pos = along(p);
+            return;
+        }
+        // The snap lines View › Snap drew for this move don't apply.
+        app.prefs_rt.snap_lines.clear();
+        self.pos = along(raw);
+        if !self.held_in_place(app)
             && let Some(xf) = ViewXform::active(app)
         {
-            self.pos = snap_to_tick(app, &xf, self.vertical, self.pos);
+            self.pos = snap_to_tick(app, &xf, vertical, self.pos);
         }
     }
 }
@@ -1495,5 +1505,43 @@ mod tests {
         let (y, selected) = move_guide(103.4, 103.4, egui::Modifiers::SHIFT);
         assert!((y - 103.4).abs() < 0.01, "a Shift-click doesn't move the guide: {y}");
         assert_eq!(selected, Some((false, 0)), "it selects it");
+    }
+
+    /// With Shift a moved guide goes to the ruler tick nearest the pointer, as one dragged out of a
+    /// ruler does: View › Snap's targets neither pull it first nor hold it on a target it sits on.
+    #[test]
+    fn shift_moving_a_guide_ignores_snap_targets() {
+        let move_guide = |from: f64, to: f32, modifiers: egui::Modifiers| {
+            let mut h = canvas_harness(false);
+            let app = h.state_mut();
+            app.ui.extras.snap = true;
+            // A grid every 100 px in thirds: its lines sit at fractions of a pixel (133.33…).
+            let grid = json!({"guidesGridAndSlices.gridlineEvery": 100, "guidesGridAndSlices.gridUnit": "pixels", "guidesGridAndSlices.subdivisions": 3});
+            app.run("prefs.set", json!({ "values": grid })).unwrap();
+            (app.ui.extras.grid, app.ui.view.snap_to.grid) = (true, true);
+            app.run("view.moveGuide", json!({"orientation": "horizontal", "index": 0, "position": from})).unwrap();
+            h.run_steps(2);
+            let press = canvas_at(&h, 200.0, from as f32);
+            h.event_modifiers(egui::Event::PointerMoved(press), modifiers);
+            h.run_steps(1);
+            h.event_modifiers(egui::Event::PointerButton { pos: press, button: egui::PointerButton::Primary, pressed: true, modifiers }, modifiers);
+            h.run_steps(1);
+            let up = canvas_at(&h, 210.0, to);
+            for p in [canvas_at(&h, 205.0, (from as f32 + to) / 2.0), up] {
+                h.event_modifiers(egui::Event::PointerMoved(p), modifiers);
+                h.run_steps(2);
+            }
+            h.event_modifiers(egui::Event::PointerButton { pos: up, button: egui::PointerButton::Primary, pressed: false, modifiers }, modifiers);
+            h.run_steps(2);
+            h.state().session.active().unwrap().doc.guides.horizontal[0]
+        };
+        let third = 400.0 / 3.0;
+        let y = move_guide(103.0, 136.5, egui::Modifiers::NONE);
+        assert!((y - third).abs() < 0.01, "without Shift the guide snaps to the grid line by the pointer: {y}");
+        // Pixels at 100%: ticks every 10 px. A guide on a grid line, Shift-moved within the line's
+        // reach, still goes to the tick by the pointer.
+        assert_eq!(move_guide(third, 136.5, egui::Modifiers::SHIFT), 140.0);
+        // The document's centre (y = 150) doesn't pull it off the tick by the pointer either.
+        assert_eq!(move_guide(103.0, 144.0, egui::Modifiers::SHIFT), 140.0);
     }
 }
