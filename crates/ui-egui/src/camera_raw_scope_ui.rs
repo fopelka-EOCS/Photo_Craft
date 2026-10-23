@@ -134,7 +134,11 @@ fn valid_floating_rect(r: [f32; 4]) -> bool {
 
 impl CameraRawDialog {
     fn pixels(&self) -> &[[f32; 4]] {
-        if self.show_before { &self.proxy } else { &self.processed }
+        match self.show_before {
+            true if !self.before_processed.is_empty() => &self.before_processed,
+            true => &self.proxy,
+            false => &self.processed,
+        }
     }
     fn pixel(&self, p: [f32; 2]) -> Option<[f32; 4]> {
         if !p.iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v)) || self.pw == 0 || self.ph == 0 {
@@ -382,8 +386,10 @@ fn graph(ui: &mut egui::Ui, d: &mut CameraRawDialog, view: &mut CameraRawScopeSt
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width().max(1.0), height), Sense::click_and_drag());
     d.scope.rect = Some(rect);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, ui.is_enabled(), tl!("Tone Histogram")));
-    ui.painter().rect_filled(rect, t.radius_sm, t.histogram_background());
-    let plot = rect.shrink(4.0);
+    // Camera Raw's histogram fills its block edge to edge on the rule colour.
+    ui.painter().rect_filled(rect, 0.0, crate::camera_raw_style::Acr::get(ui.ctx()).rule);
+    // Edge to edge and down to the bottom, as Camera Raw draws it.
+    let plot = Rect::from_min_max(rect.min + vec2(1.0, 6.0), rect.max - vec2(1.0, 0.0));
     // Camera Raw's scale: the typical columns set it and a shadow or highlight spike runs off the top.
     crate::rgb_histogram::paint_with(ui.painter(), plot, d.histogram(), &t, crate::rgb_histogram::Spikes::Clip);
     let corner = 18.0;
@@ -436,7 +442,6 @@ fn graph(ui: &mut egui::Ui, d: &mut CameraRawDialog, view: &mut CameraRawScopeSt
         d.scope.tone_drag = None;
     }
     context_menu(&response, d.selection.is_some(), view);
-    ui.painter().rect_stroke(rect, t.radius_sm, Stroke::new(1.0, t.field_border), egui::StrokeKind::Inside);
 }
 
 /// The cloud and pixel target use exactly the same orientation and saturation radius.
@@ -495,7 +500,9 @@ fn vectorscope(ui: &mut egui::Ui, d: &mut CameraRawDialog, view: &mut CameraRawS
     }
 }
 
-pub(crate) fn header(ui: &mut egui::Ui, d: &mut CameraRawDialog, view: &mut CameraRawScopeState) {
+/// The histogram block at the top of the panels (`height` pt, Camera Raw's 122), with the
+/// vectorscope below it when shown.
+pub(crate) fn header(ui: &mut egui::Ui, d: &mut CameraRawDialog, view: &mut CameraRawScopeState, height: f32) {
     view.samplers.truncate(MAX_SAMPLERS);
     view.samplers.retain(|p| p.iter().all(|x| x.is_finite() && (0.0..=1.0).contains(x)));
     if view.floating_rect.is_some_and(|r| !valid_floating_rect(r)) {
@@ -505,13 +512,11 @@ pub(crate) fn header(ui: &mut egui::Ui, d: &mut CameraRawDialog, view: &mut Came
         let (_, response) = ui.allocate_exact_size(vec2(ui.available_width(), 48.0), Sense::click());
         context_menu(&response, d.selection.is_some(), view);
     } else {
-        let height = (ui.available_height() * 0.18).clamp(48.0, 110.0);
         graph(ui, d, view, height);
         if view.vectorscope {
-            vectorscope(ui, d, view, (ui.available_height() * 0.3).clamp(100.0, 220.0));
+            vectorscope(ui, d, view, 200.0);
         }
     }
-    ui.add_space(8.0);
 }
 
 pub(crate) fn floating(ctx: &egui::Context, d: &mut CameraRawDialog, view: &mut CameraRawScopeState, dock: Rect) {
