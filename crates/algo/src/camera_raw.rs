@@ -421,16 +421,17 @@ fn lut_eval(lut: &[f32], v: f32) -> f32 {
     lut[i] + (lut[i + 1] - lut[i]) * t
 }
 
-/// Parametric tone curve as a LUT (regions split at `splits`, each slider ±100 moves its region
-/// by up to a quarter of the range, smoothly).
-fn parametric_lut(p: &CameraRaw, n: usize) -> Vec<f32> {
+/// Parametric tone curve as an `n`-entry LUT over 0..=1 (regions split at `curve_splits`, each
+/// slider ±100 moves its region by up to a quarter of the range, smoothly; `n` ≥ 2).
+pub fn parametric_lut(p: &CameraRaw, n: usize) -> Vec<f32> {
     let s = p.curve_splits.map(|v| v.clamp(5.0, 95.0) / 100.0);
     let centres = [s[0] / 2.0, (s[0] + s[1]) / 2.0, (s[1] + s[2]) / 2.0, (s[2] + 1.0) / 2.0];
     let amounts = [p.curve_shadows, p.curve_darks, p.curve_lights, p.curve_highlights];
     let widths = [s[0].max(0.1), (s[1] - s[0]).max(0.1), (s[2] - s[1]).max(0.1), (1.0 - s[2]).max(0.1)];
+    let last = n.saturating_sub(1).max(1) as f32;
     let mut lut: Vec<f32> = (0..n)
         .map(|i| {
-            let x = i as f32 / (n - 1) as f32;
+            let x = i as f32 / last;
             let mut y = x;
             for k in 0..4 {
                 let d = (x - centres[k]) / (widths[k] * 1.2);
@@ -574,6 +575,74 @@ pub fn white_balance_gains(temperature: f32, tint: f32) -> [f32; 3] {
 /// Runs the Camera Raw pipeline on straight RGBA pixels (`w × h`, display-encoded RGB).
 /// `float` keeps values above 1 (32-bit documents).
 pub fn develop(px: &mut [[f32; 4]], w: usize, h: usize, p: &CameraRaw, float: bool) {
+    develop_tonal(px, w, h, p);
+    develop_colour(px, w, h, p, float);
+}
+
+/// `p` without the settings of [`develop_colour`]'s stages (the per-pixel colour stages, Detail
+/// and Effects): what [`develop_tonal`]'s result depends on, so a preview can keep that result
+/// while only those settings change.
+pub fn tonal_part(p: &CameraRaw) -> CameraRaw {
+    let d = CameraRaw::default();
+    CameraRaw {
+        vibrance: d.vibrance,
+        saturation: d.saturation,
+        curve_highlights: d.curve_highlights,
+        curve_lights: d.curve_lights,
+        curve_darks: d.curve_darks,
+        curve_shadows: d.curve_shadows,
+        curve_splits: d.curve_splits,
+        point_curve: d.point_curve.clone(),
+        point_curve_red: d.point_curve_red.clone(),
+        point_curve_green: d.point_curve_green.clone(),
+        point_curve_blue: d.point_curve_blue.clone(),
+        hsl_hue: d.hsl_hue,
+        hsl_sat: d.hsl_sat,
+        hsl_lum: d.hsl_lum,
+        grade_shadows: d.grade_shadows,
+        grade_midtones: d.grade_midtones,
+        grade_highlights: d.grade_highlights,
+        grade_global: d.grade_global,
+        grade_blending: d.grade_blending,
+        grade_balance: d.grade_balance,
+        sharpen_amount: d.sharpen_amount,
+        sharpen_radius: d.sharpen_radius,
+        sharpen_detail: d.sharpen_detail,
+        sharpen_masking: d.sharpen_masking,
+        noise_luminance: d.noise_luminance,
+        noise_luminance_detail: d.noise_luminance_detail,
+        noise_color: d.noise_color,
+        noise_color_detail: d.noise_color_detail,
+        grain_amount: d.grain_amount,
+        grain_size: d.grain_size,
+        grain_roughness: d.grain_roughness,
+        vignette_amount: d.vignette_amount,
+        vignette_midpoint: d.vignette_midpoint,
+        vignette_roundness: d.vignette_roundness,
+        vignette_feather: d.vignette_feather,
+        vignette_highlights: d.vignette_highlights,
+        vignette_style: d.vignette_style.clone(),
+        seed: d.seed,
+        ..p.clone()
+    }
+}
+
+/// The first half of [`develop`]: White Balance and Exposure, Dehaze and the tone stages up to
+/// Whites and Blacks (no clamping).
+pub fn develop_tonal(px: &mut [[f32; 4]], w: usize, h: usize, p: &CameraRaw) {
+    develop_tonal_with(px, w, h, p, &mut DevelopCache::default());
+}
+
+/// What [`develop_tonal_with`] keeps between calls for a preview: Shadows and Highlights' filter
+/// split into parts that any slider value combines, for the pixels it last saw (see
+/// `local_tone`).
+#[derive(Default)]
+pub struct DevelopCache {
+    local_tone: local_tone::Kept,
+}
+
+/// [`develop_tonal`], reusing `cache` when a stage sees exactly the pixels it saw last time.
+pub fn develop_tonal_with(px: &mut [[f32; 4]], w: usize, h: usize, p: &CameraRaw, cache: &mut DevelopCache) {
     if px.is_empty() || p.is_identity() {
         return;
     }
@@ -598,7 +667,7 @@ pub fn develop(px: &mut [[f32; 4]], w: usize, h: usize, p: &CameraRaw, float: bo
     }
     // 3. Tone. Highlights and Shadows: a local Laplacian filter (see `local_tone`).
     if p.highlights != 0.0 || p.shadows != 0.0 {
-        local_tone::apply(px, w, h, p.shadows, p.highlights, Encoding::of(p.encoding_gamma));
+        local_tone::apply_with(px, w, h, p.shadows, p.highlights, Encoding::of(p.encoding_gamma), &mut cache.local_tone);
     }
     if !p.local_tone_neutral() && [p.contrast, p.texture, p.clarity].iter().any(|v| *v != 0.0) {
         let l: Vec<f32> = px.iter().map(|q| luma([q[0], q[1], q[2]]).max(0.0)).collect();
@@ -638,6 +707,61 @@ pub fn develop(px: &mut [[f32; 4]], w: usize, h: usize, p: &CameraRaw, float: bo
         let (xw, xb) = whites_blacks::amounts(p.whites.clamp(-100.0, 100.0), p.blacks.clamp(-100.0, 100.0), bp, wp);
         whites_blacks::apply(px, w, xw, xb, enc);
     }
+}
+
+/// The second half of [`develop`], after [`develop_tonal`]: the per-pixel colour stages, Detail
+/// and Effects, then the clamp to 0…1 unless `float`.
+pub fn develop_colour(px: &mut [[f32; 4]], w: usize, h: usize, p: &CameraRaw, float: bool) {
+    develop_colour_in(px, w, h, p, float, Frame::whole(w, h));
+}
+
+/// Where a `w × h` part of an image lies in it: the part's top-left corner and the image's size.
+/// The post-crop vignette and the grain depend on it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Frame {
+    pub x: usize,
+    pub y: usize,
+    pub width: usize,
+    pub height: usize,
+}
+
+impl Frame {
+    /// The whole `w × h` image.
+    pub fn whole(w: usize, h: usize) -> Self {
+        Frame { x: 0, y: 0, width: w, height: h }
+    }
+}
+
+/// How many pixels around a pixel [`develop_colour`] reads at these settings (Detail's filters,
+/// one after the other). A part of the image grown by this much on every side where the image
+/// goes on develops its inside as the whole image does ([`develop_colour_in`]).
+pub fn colour_reach(p: &CameraRaw) -> usize {
+    let ps = p.pixel_scale.clamp(0.01, 1.0);
+    let gauss_reach = |sigma: f32| if sigma < 0.3 { 0 } else { crate::fxutil::gauss_box_radii(sigma).iter().sum::<usize>() };
+    let mut luma = 0;
+    if p.noise_luminance > 0.0 {
+        let n = p.noise_luminance / 100.0;
+        let r = ((1.0 + 3.0 * n) * ps).round().max(1.0) as usize;
+        // The guided filter's two box means.
+        luma += 2 * r;
+    }
+    if p.sharpen_amount > 0.0 {
+        let blur = gauss_reach((p.sharpen_radius.clamp(0.5, 3.0) * ps).max(0.3));
+        // Masking's gradient reads one pixel past its smoothing.
+        let mask = if p.sharpen_masking > 0.0 { gauss_reach(1.0 * ps.max(0.5)) + 1 } else { 0 };
+        luma += blur.max(mask);
+    }
+    let chroma = if p.noise_color > 0.0 { gauss_reach((p.noise_color / 100.0 * 6.0 * ps).max(0.3)) } else { 0 };
+    luma.max(chroma)
+}
+
+/// [`develop_colour`] for the part of an image that `frame` places. Grown by [`colour_reach`]
+/// where the image goes on, the part's inside comes out as in a develop of the whole image.
+pub fn develop_colour_in(px: &mut [[f32; 4]], w: usize, h: usize, p: &CameraRaw, float: bool, frame: Frame) {
+    if px.is_empty() || px.len() != w.saturating_mul(h) || p.is_identity() {
+        return;
+    }
+    let ps = p.pixel_scale.clamp(0.01, 1.0);
     // 4–7: per-pixel colour stages.
     let need_color = p.vibrance != 0.0 || p.saturation != 0.0 || !p.curves_neutral() || !p.hsl_neutral() || !p.grade_neutral();
     if need_color {
@@ -729,7 +853,7 @@ pub fn develop(px: &mut [[f32; 4]], w: usize, h: usize, p: &CameraRaw, float: bo
     }
     // 9. Effects.
     if p.vignette_amount != 0.0 {
-        vignette(px, w, h, p);
+        vignette(px, w, p, frame);
     }
     if p.grain_amount > 0.0 {
         let cell = 1.0 + p.grain_size / 25.0;
@@ -738,9 +862,10 @@ pub fn develop(px: &mut [[f32; 4]], w: usize, h: usize, p: &CameraRaw, float: bo
         let seed = p.seed as u64;
         let pscale = 1.0 / ps;
         par_rows(px, w, 1, |y, row| {
+            let y = frame.y + y;
             for (x, q) in row.iter_mut().enumerate() {
                 // Sample in full-resolution coordinates so previews match the result.
-                let (fx, fy) = (x as f32 * pscale / cell, y as f32 * pscale / cell);
+                let (fx, fy) = ((frame.x + x) as f32 * pscale / cell, y as f32 * pscale / cell);
                 let n = value_noise(fx, fy, seed) * (1.0 - rough) + (value_noise(fx * 2.3, fy * 2.3, seed + 7) - 0.0) * rough;
                 let l = luma([q[0], q[1], q[2]]).clamp(0.0, 1.0);
                 let g = (n - 0.5) * 2.0 * amt * (0.4 + 2.4 * l * (1.0 - l));
@@ -922,14 +1047,15 @@ fn detail(px: &mut [[f32; 4]], w: usize, h: usize, p: &CameraRaw, ps: f32) {
     }
 }
 
-fn vignette(px: &mut [[f32; 4]], w: usize, h: usize, p: &CameraRaw) {
+/// Post-crop vignetting of the `w`-wide part `frame` places.
+fn vignette(px: &mut [[f32; 4]], w: usize, p: &CameraRaw, frame: Frame) {
     let amt = p.vignette_amount / 100.0;
     let mid = p.vignette_midpoint.clamp(0.0, 100.0) / 100.0;
     let feather = p.vignette_feather.clamp(0.0, 100.0) / 100.0;
     let round = p.vignette_roundness.clamp(-100.0, 100.0) / 100.0;
     let hl = p.vignette_highlights.clamp(0.0, 100.0) / 100.0;
     let style = p.vignette_style.as_str();
-    let (cx, cy) = (w as f32 / 2.0, h as f32 / 2.0);
+    let (cx, cy) = (frame.width as f32 / 2.0, frame.height as f32 / 2.0);
     // Roundness: 0 follows the frame's aspect, +1 a circle, −1 a rounded rectangle.
     let (ax, ay) = if round >= 0.0 {
         let r = cx.min(cy) + (cx.max(cy) - cx.min(cy)) * (1.0 - round);
@@ -942,7 +1068,9 @@ fn vignette(px: &mut [[f32; 4]], w: usize, h: usize, p: &CameraRaw) {
     let edge0 = inner - feather * 0.5 * inner;
     let edge1 = inner + feather * 0.5 * (1.4 - inner) + 0.02;
     par_rows(px, w, 1, |y, row| {
+        let y = frame.y + y;
         for (x, q) in row.iter_mut().enumerate() {
+            let x = frame.x + x;
             let (dx, dy) = (((x as f32 + 0.5 - cx) / ax).abs(), ((y as f32 + 0.5 - cy) / ay).abs());
             let r = (dx.powf(pw) + dy.powf(pw)).powf(1.0 / pw);
             let m = smoothstep(edge0, edge1, r);
@@ -984,6 +1112,62 @@ fn vignette(px: &mut [[f32; 4]], w: usize, h: usize, p: &CameraRaw) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A part of the image, grown by `colour_reach`, develops its inside as the whole image does:
+    /// Detail's filters, the vignette and the grain included.
+    #[test]
+    fn a_part_grown_by_the_reach_develops_as_the_whole() {
+        let (w, h) = (203usize, 151usize);
+        let whole: Vec<[f32; 4]> = (0..w * h)
+            .map(|i| {
+                let (x, y) = ((i % w) as f32, (i / w) as f32);
+                let t = (x * 0.37 + y * 0.11).sin() * 0.5 + 0.5;
+                [0.2 + 0.6 * t, ((x * 0.05).cos() * 0.4 + 0.5) * (y / h as f32), ((x + y) % 17.0) / 17.0, 1.0]
+            })
+            .collect();
+        let mut hsl = [0.0; 8];
+        hsl[1] = 30.0;
+        let params = [
+            CameraRaw { vibrance: 20.0, hsl_sat: hsl, sharpen_amount: 60.0, sharpen_masking: 30.0, ..Default::default() },
+            CameraRaw { noise_luminance: 40.0, noise_color: 70.0, ..Default::default() },
+            CameraRaw { vignette_amount: -40.0, vignette_highlights: 50.0, grain_amount: 40.0, grain_size: 30.0, saturation: 10.0, ..Default::default() },
+            CameraRaw { vignette_amount: 30.0, vignette_roundness: -60.0, vignette_style: "colorPriority".into(), sharpen_amount: 30.0, ..Default::default() },
+            CameraRaw { sharpen_amount: 50.0, noise_luminance: 20.0, pixel_scale: 0.5, grain_amount: 25.0, ..Default::default() },
+        ];
+        let part = (37usize, 41usize, 121usize, 97usize); // x0, y0, x1, y1
+        for p in &params {
+            for float in [false, true] {
+                let mut full = whole.clone();
+                develop_colour(&mut full, w, h, p, float);
+                let reach = colour_reach(p);
+                let (gx0, gy0) = (part.0.saturating_sub(reach), part.1.saturating_sub(reach));
+                let (gx1, gy1) = ((part.2 + reach).min(w), (part.3 + reach).min(h));
+                let gw = gx1 - gx0;
+                let mut px: Vec<[f32; 4]> = (gy0..gy1).flat_map(|y| whole[y * w + gx0..y * w + gx1].to_vec()).collect();
+                develop_colour_in(&mut px, gw, gy1 - gy0, p, float, Frame { x: gx0, y: gy0, width: w, height: h });
+                let mut worst = 0.0f32;
+                for y in part.1..part.3 {
+                    for x in part.0..part.2 {
+                        let (a, b) = (full[y * w + x], px[(y - gy0) * gw + (x - gx0)]);
+                        for c in 0..4 {
+                            worst = worst.max((a[c] - b[c]).abs());
+                        }
+                    }
+                }
+                assert!(worst < 1e-6, "{p:?} float {float}: {worst} (reach {reach})");
+            }
+        }
+    }
+
+    /// The reach covers Detail's filters and nothing else needs it.
+    #[test]
+    fn the_reach_follows_detail() {
+        assert_eq!(colour_reach(&CameraRaw { vibrance: 50.0, vignette_amount: -30.0, grain_amount: 20.0, ..Default::default() }), 0);
+        let sharpen = colour_reach(&CameraRaw { sharpen_amount: 40.0, ..Default::default() });
+        assert!(sharpen > 0);
+        assert!(colour_reach(&CameraRaw { sharpen_amount: 40.0, noise_luminance: 30.0, ..Default::default() }) > sharpen);
+        assert!(colour_reach(&CameraRaw { noise_color: 100.0, ..Default::default() }) >= 15);
+    }
 
     #[test]
     fn new_curves_are_validated_but_saved_curves_still_load_and_render() {
@@ -1149,5 +1333,49 @@ mod tests {
         let mut a = vec![[2.0f32, 1.5, 0.5, 1.0]; 16];
         develop(&mut a, 4, 4, &CameraRaw { exposure: 0.5, ..Default::default() }, true);
         assert!(a[0][0] > 2.0);
+    }
+
+    /// The tonal half from [`tonal_part`] and the colour half give exactly [`develop`]'s
+    /// result, for every stage on at once (a preview keeps the tonal half while colours change).
+    #[test]
+    fn tonal_then_colour_is_develop() {
+        let (w, h) = (40, 30);
+        let mut src = img(w, h);
+        for (i, q) in src.iter_mut().enumerate() {
+            q[0] *= 1.0 + 0.4 * ((i * 7919) % 13) as f32 / 13.0;
+        }
+        let wheel = |hue, sat, lum| Wheel { hue, sat, lum };
+        let p = CameraRaw {
+            temperature: 12.0,
+            tint: -4.0,
+            exposure: 0.4,
+            contrast: 15.0,
+            highlights: -30.0,
+            shadows: 35.0,
+            whites: 10.0,
+            blacks: -12.0,
+            texture: 20.0,
+            clarity: 25.0,
+            dehaze: 10.0,
+            vibrance: 25.0,
+            saturation: 10.0,
+            curve_lights: 15.0,
+            point_curve: vec![[0.0, 0.0], [64.0, 50.0], [192.0, 205.0], [255.0, 255.0]],
+            hsl_sat: [0.0, 20.0, 0.0, 0.0, 0.0, -15.0, 0.0, 0.0],
+            grade_shadows: wheel(220.0, 20.0, 5.0),
+            sharpen_amount: 40.0,
+            noise_luminance: 20.0,
+            grain_amount: 20.0,
+            vignette_amount: -20.0,
+            pixel_scale: 0.5,
+            ..Default::default()
+        };
+        let mut whole = src.clone();
+        develop(&mut whole, w, h, &p, false);
+        let mut halves = src.clone();
+        develop_tonal(&mut halves, w, h, &tonal_part(&p));
+        develop_colour(&mut halves, w, h, &p, false);
+        assert_eq!(whole, halves);
+        assert_ne!(whole, src);
     }
 }
