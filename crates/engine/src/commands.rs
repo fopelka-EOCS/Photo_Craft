@@ -1437,7 +1437,7 @@ fn build() -> Vec<CommandSpec> {
             menu: &["Image", "Adjustments"],
             shortcut: match kind {
                 "levels" => Some("Cmd+L"),
-                "curves" => Some("Cmd+M"),
+                "curves" => Some(crate::shell_commands::CURVES_SHORTCUT),
                 "hueSaturation" => Some("Cmd+U"),
                 "colorBalance" => Some("Cmd+B"),
                 "invert" => Some("Cmd+I"),
