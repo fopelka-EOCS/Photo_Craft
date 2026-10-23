@@ -375,6 +375,156 @@ pub fn wand_region(img: &[[u8; 4]], area: Rect, seed: (i32, i32), tolerance: f32
     Some(Region { bbox, mask })
 }
 
+/// The widest gap (px) [`wand_region_gap`] can close.
+pub const MAX_BUCKET_GAP: u32 = 64;
+
+/// Dilates `src` (`w` × `h`) by `r` pixels in a square window, in linear time whatever `r` is.
+fn dilate(src: &[bool], w: usize, h: usize, r: usize) -> Vec<bool> {
+    let mut rows = vec![false; src.len()];
+    let mut prefix = vec![0u32; w + 1];
+    for y in 0..h {
+        let row = &src[y * w..(y + 1) * w];
+        for (x, v) in row.iter().enumerate() {
+            prefix[x + 1] = prefix[x] + u32::from(*v);
+        }
+        for x in 0..w {
+            rows[y * w + x] = prefix[(x + r + 1).min(w)] > prefix[x.saturating_sub(r)];
+        }
+    }
+    let mut out = vec![false; src.len()];
+    let mut count = vec![0u32; w];
+    let add = |count: &mut [u32], y: usize, sign: i32| {
+        for (c, v) in count.iter_mut().zip(&rows[y * w..(y + 1) * w]) {
+            if *v {
+                *c = c.wrapping_add_signed(sign);
+            }
+        }
+    };
+    for y in 0..r.min(h) {
+        add(&mut count, y, 1);
+    }
+    for y in 0..h {
+        if y + r < h {
+            add(&mut count, y + r, 1);
+        }
+        if y > r {
+            add(&mut count, y - r - 1, -1);
+        }
+        for (o, c) in out[y * w..(y + 1) * w].iter_mut().zip(&count) {
+            *o = *c > 0;
+        }
+    }
+    out
+}
+
+/// The Paint Bucket's gap detection: [`wand_region`] (contiguous) that does not leak through gaps
+/// of up to `gap` pixels in the outline around the seed (line art with small breaks). Pixels
+/// that don't match the seed are barriers, widened by half the gap so a break closes; the fill
+/// floods from the seed between the widened barriers and then grows back to the real ones.
+/// `gap` 0, or a seed that sits closer to a barrier than half the gap (a region too narrow to
+/// tell from a gap), gives the plain region. Gaps are capped at [`MAX_BUCKET_GAP`].
+pub fn wand_region_gap(img: &[[u8; 4]], area: Rect, seed: (i32, i32), tolerance: f32, anti_alias: bool, gap: u32) -> Option<Region> {
+    let r = gap.min(MAX_BUCKET_GAP).div_ceil(2) as usize;
+    if r == 0 {
+        return wand_region(img, area, seed, tolerance, true, anti_alias);
+    }
+    if !area.contains(seed.0, seed.1) {
+        return None;
+    }
+    let (w, h) = (area.width() as usize, area.height() as usize);
+    if w.checked_mul(h).is_none_or(|n| n > img.len()) {
+        return None;
+    }
+    let si = (seed.1 - area.y0) as usize * w + (seed.0 - area.x0) as usize;
+    let target = *img.get(si)?;
+    let tol = (tolerance + 1e-3).floor().max(0.0) as i32;
+    let similar = |p: [u8; 4]| (target[3] == 0 && p[3] == 0) || (0..4).all(|c| (p[c] as i32 - target[c] as i32).abs() <= tol);
+    let sim: Vec<bool> = img.iter().take(w * h).map(|p| similar(*p)).collect();
+    let barrier: Vec<bool> = sim.iter().map(|v| !v).collect();
+    let blocked = dilate(&barrier, w, h, r);
+    drop(barrier);
+    if blocked.get(si).copied().unwrap_or(true) {
+        return wand_region(img, area, seed, tolerance, true, anti_alias);
+    }
+    // Flood from the seed between the widened barriers.
+    let mut core = vec![false; w * h];
+    core[si] = true;
+    let mut stack = vec![si];
+    while let Some(i) = stack.pop() {
+        let (x, y) = (i % w, i / w);
+        let mut visit = |j: usize| {
+            if !core[j] && !blocked[j] {
+                core[j] = true;
+                stack.push(j);
+            }
+        };
+        if x > 0 {
+            visit(i - 1);
+        }
+        if x + 1 < w {
+            visit(i + 1);
+        }
+        if y > 0 {
+            visit(i - w);
+        }
+        if y + 1 < h {
+            visit(i + w);
+        }
+    }
+    drop(blocked);
+    // Grow back to the real barriers (one further than the widening, so the fill reaches them).
+    let grown = dilate(&core, w, h, r + 1);
+    let marks: Vec<u8> = grown.iter().zip(&sim).map(|(g, s)| if *g && *s { 255 } else { 0 }).collect();
+    region_from_marks(&marks, area, anti_alias)
+}
+
+/// A [`Region`] from per-pixel 0/255 `marks` over `area`, with the anti-aliased fringe if asked.
+fn region_from_marks(marks: &[u8], area: Rect, anti_alias: bool) -> Option<Region> {
+    let (w, h) = (area.width() as usize, area.height() as usize);
+    let (mut bx0, mut by0, mut bx1, mut by1) = (usize::MAX, usize::MAX, 0usize, 0usize);
+    for (y, row) in marks.chunks_exact(w.max(1)).enumerate().take(h) {
+        let (Some(a), Some(b)) = (row.iter().position(|v| *v != 0), row.iter().rposition(|v| *v != 0)) else { continue };
+        (bx0, bx1, by0, by1) = (bx0.min(a), bx1.max(b), by0.min(y), by1.max(y));
+    }
+    if bx0 == usize::MAX {
+        return None;
+    }
+    let pad = anti_alias as usize;
+    let (x0, y0) = (bx0.saturating_sub(pad), by0.saturating_sub(pad));
+    let (x1, y1) = ((bx1 + 1 + pad).min(w), (by1 + 1 + pad).min(h));
+    let bw = x1 - x0;
+    let mut mask = vec![0u8; bw * (y1 - y0)];
+    for (yy, out) in mask.chunks_exact_mut(bw).enumerate() {
+        let y = y0 + yy;
+        for (xx, o) in out.iter_mut().enumerate() {
+            let x = x0 + xx;
+            let at = |x: usize, y: usize| marks[y * w + x];
+            let v = at(x, y);
+            *o = v;
+            if !anti_alias {
+                continue;
+            }
+            let mut sum = 0u32;
+            let mut edge = false;
+            for dy in -1i32..=1 {
+                for dx in -1i32..=1 {
+                    let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                    let n = if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 { v } else { at(nx as usize, ny as usize) };
+                    edge |= n != v;
+                    sum += n as u32;
+                }
+            }
+            if edge {
+                let avg = sum as f32 / (9.0 * 255.0);
+                let f = if v > 127 { 0.5 + 0.5 * avg } else { 0.5 * avg };
+                *o = (f * 255.0).round() as u8;
+            }
+        }
+    }
+    let bbox = Rect::new(area.x0 + x0 as i32, area.y0 + y0 as i32, area.x0 + x1 as i32, area.y0 + y1 as i32);
+    Some(Region { bbox, mask })
+}
+
 /// Combines a [`Region`] with the current selection, touching only the region's box (outside it
 /// the new mask is zero). Returns `None` when nothing remains selected.
 pub fn combine_region(old: Option<&Surface>, new: Option<&Region>, mode: SelectionMode) -> Option<Surface> {
@@ -1372,6 +1522,82 @@ mod tests {
                     assert_eq!(new.len(), old.len());
                     let diff = new.iter().zip(&old).position(|(a, b)| a.to_bits() != b.to_bits());
                     assert!(diff.is_none(), "{pts:?} {area:?} aa={aa}: first difference at {diff:?}");
+                }
+            }
+        }
+    }
+
+    /// A 40 x 30 white page with a black 1 px box outline (x 10..30, y 5..25) that has a
+    /// `gap` px break in its top edge, starting at x = 18.
+    fn boxed(gap: i32) -> (Vec<[u8; 4]>, Rect) {
+        let area = Rect::new(0, 0, 40, 30);
+        let mut img = vec![[255u8, 255, 255, 255]; 40 * 30];
+        for t in 10..30 {
+            for (x, y) in [(t, 5), (t, 24), (10, t - 5), (29, t - 5)] {
+                if (0..30).contains(&y) {
+                    img[(y * 40 + x) as usize] = [0, 0, 0, 255];
+                }
+            }
+        }
+        for x in 18..18 + gap {
+            img[5 * 40 + x as usize] = [255, 255, 255, 255];
+        }
+        (img, area)
+    }
+
+    fn filled(r: &Region, x: i32, y: i32) -> bool {
+        r.at(x, y) > 0.5
+    }
+
+    /// #7756: with gap detection the fill stays inside an outline that has a small break, and
+    /// without it (or with a gap larger than the setting) it leaks out.
+    #[test]
+    fn bucket_gap_does_not_leak_through_a_small_break() {
+        let (img, area) = boxed(3);
+        let plain = wand_region(&img, area, (20, 15), 0.0, true, false).unwrap();
+        assert!(filled(&plain, 2, 2), "the plain fill leaks through the break");
+        assert_eq!(wand_region_gap(&img, area, (20, 15), 0.0, false, 0).unwrap(), plain, "gap 0 is the plain region");
+        for gap in [3, 4, 8] {
+            let r = wand_region_gap(&img, area, (20, 15), 0.0, false, gap).unwrap();
+            assert!(!filled(&r, 2, 2), "gap {gap}: leaked outside");
+            assert!(!filled(&r, 20, 2), "gap {gap}: leaked above the box");
+            assert!(filled(&r, 20, 15) && filled(&r, 11, 6) && filled(&r, 28, 23), "gap {gap}: the inside is filled up to its outline");
+            assert!(!filled(&r, 10, 15) && !filled(&r, 29, 15), "gap {gap}: the outline itself is not filled");
+        }
+        // A box narrower than the gap can't tell its walls from a break: the plain fill.
+        assert_eq!(wand_region_gap(&img, area, (20, 15), 0.0, false, 30), Some(plain));
+        // A break wider than the setting still leaks.
+        let (wide, area) = boxed(8);
+        assert!(filled(&wand_region_gap(&wide, area, (20, 15), 0.0, false, 4).unwrap(), 2, 2));
+        assert!(!filled(&wand_region_gap(&wide, area, (20, 15), 0.0, false, 8).unwrap(), 2, 2));
+    }
+
+    #[test]
+    fn bucket_gap_edge_cases_never_panic() {
+        let (img, area) = boxed(3);
+        assert!(wand_region_gap(&img, area, (-1, 0), 0.0, true, 4).is_none(), "seed outside the area");
+        assert!(wand_region_gap(&img, area, (20, 15), 0.0, true, u32::MAX).is_some(), "huge gap is capped");
+        assert!(wand_region_gap(&img[..10], area, (20, 15), 0.0, true, 4).is_none(), "short image");
+        // The seed on the outline itself, or beside it: too close to tell a gap from a region.
+        assert!(wand_region_gap(&img, area, (10, 15), 0.0, true, 4).is_some());
+        assert!(wand_region_gap(&img, area, (11, 15), 0.0, true, 4).is_some());
+        let tiny = [[0u8; 4]; 1];
+        assert!(wand_region_gap(&tiny, Rect::new(0, 0, 1, 1), (0, 0), 0.0, true, 6).is_some());
+        // Anti-aliased edges stay inside the area.
+        let r = wand_region_gap(&img, area, (20, 15), 0.0, true, 4).unwrap();
+        assert!(area.contains_rect(&r.bbox));
+    }
+
+    #[test]
+    fn dilate_matches_a_brute_force_window() {
+        let (w, h) = (13usize, 9usize);
+        let src: Vec<bool> = (0..w * h).map(|i| (i * 7 + i / 5) % 23 == 0).collect();
+        for r in [0usize, 1, 2, 5, 20] {
+            let out = dilate(&src, w, h, r);
+            for y in 0..h {
+                for x in 0..w {
+                    let want = (0..h).any(|yy| (0..w).any(|xx| src[yy * w + xx] && xx.abs_diff(x) <= r && yy.abs_diff(y) <= r));
+                    assert_eq!(out[y * w + x], want, "r {r} at ({x}, {y})");
                 }
             }
         }

@@ -650,6 +650,9 @@ pub struct ToolOptions {
     pub fill_opacity: f32,
     /// Paint Bucket fill source: false = Foreground colour, true = Pattern (Patterns panel selection).
     pub bucket_fill_pattern: bool,
+    /// Paint Bucket gap detection: breaks in an outline up to this many px wide don't let a
+    /// contiguous fill leak (0 = off, #7756).
+    pub bucket_gap: f32,
     /// Type tool: family, style name, size (pt), anti-aliasing and paragraph alignment.
     pub type_font: String,
     pub type_style: String,
@@ -959,6 +962,7 @@ impl Default for ToolOptions {
             gradient_blend_mode: photocraft_color::BlendMode::Normal,
             fill_opacity: 100.0,
             bucket_fill_pattern: false,
+            bucket_gap: 0.0,
             type_font: "Inter".into(),
             type_style: "Regular".into(),
             type_size: 48.0,

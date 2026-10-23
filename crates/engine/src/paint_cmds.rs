@@ -47,11 +47,18 @@ fn bucket(s: &mut Session, p: &Value) -> Result<Value> {
     let (x, y) = (f(p, "x", 0.0).floor() as i32, f(p, "y", 0.0).floor() as i32);
     let (tol, contiguous, aa) = (f(p, "tolerance", 32.0), b(p, "contiguous", true), b(p, "antiAlias", true));
     let opacity = opacity(p, "paint.bucket")?;
+    // Gap detection (#7756): a contiguous fill does not leak through breaks of up to this many px.
+    let gap = crate::eraser_cmds::number(p, "paint.bucket", "gapClose", 0.0, 0.0..=f64::from(photocraft_algo::selection::MAX_BUCKET_GAP))?.round() as u32;
+    let gap = if contiguous { gap } else { 0 };
     let all = b(p, "sampleAllLayers", false) && crate::channel_cmds::target_of(p) == crate::channel_cmds::Target::Pixels;
     // Other visible layers can define the region, but the fill still writes only to the target.
     let region = if all {
         let (area, img) = crate::selection_cmds::sample_rgba8(s, true)?;
-        let region = photocraft_algo::selection::wand_region(&img, area, (x, y), tol, contiguous, aa);
+        let region = if gap > 0 {
+            photocraft_algo::selection::wand_region_gap(&img, area, (x, y), tol, aa, gap)
+        } else {
+            photocraft_algo::selection::wand_region(&img, area, (x, y), tol, contiguous, aa)
+        };
         drop(img);
         region
     } else {
@@ -74,7 +81,11 @@ fn bucket(s: &mut Session, p: &Value) -> Result<Value> {
         let area = doc.bounds();
         let sel = doc.selection.clone();
         let (surf, lock) = crate::channel_cmds::target_surface(doc, *active, p)?;
-        let ok = if all && region.is_none() {
+        // With gap detection the region is found here, on the target's own pixels.
+        let own_region = (gap > 0 && !all && area.contains(x, y))
+            .then(|| photocraft_algo::selection::wand_region_gap(&photocraft_algo::selection::rgba8_image(surf, area), area, (x, y), tol, aa, gap));
+        let region = own_region.as_ref().unwrap_or(&region);
+        let ok = if (all || own_region.is_some()) && region.is_none() {
             false
         } else if let Some((tile, scale, angle, phase)) = &pattern {
             // Render the pattern over the canvas once, then sample it at each filled pixel.
@@ -162,7 +173,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Paint Bucket",
             menu: &[],
             shortcut: None,
-            params: r##"{"x":px,"y":px,"tolerance":0..255=32,"contiguous":bool=true,"antiAlias":bool=true,"sampleAllLayers":bool=false,"contents":"foreground|pattern"="foreground","color":"#rrggbb"=foreground,"pattern":id|name (contents=pattern),"scale":%=100,"angle":deg,"opacity":1..100=100,"target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target}"##,
+            params: r##"{"x":px,"y":px,"tolerance":0..255=32,"contiguous":bool=true,"antiAlias":bool=true,"sampleAllLayers":bool=false,"contents":"foreground|pattern"="foreground","color":"#rrggbb"=foreground,"pattern":id|name (contents=pattern),"scale":%=100,"angle":deg,"opacity":1..100=100,"gapClose":0..64=0 (px: a contiguous fill does not leak through breaks in an outline up to this wide),"target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target}"##,
             enabled: crate::commands::has_paintable,
             run: bucket,
             journal: true,
@@ -208,6 +219,55 @@ mod tests {
         .unwrap();
         s.execute("layer.new.layer", json!({})).unwrap();
         (s, bottom)
+    }
+
+    /// A white page with a black outline box (x 10..30, y 5..25) broken by 3 px at the top.
+    fn boxed_layer(depth: u32) -> Session {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 40, "height": 30, "depth": depth, "background": "white"})).unwrap();
+        s.edit("box", |doc, active| {
+            let surf = doc.layer_mut(active.unwrap()).unwrap().surface_mut().unwrap();
+            let black = photocraft_raster::from_rgba(&surf.format(), [0.0, 0.0, 0.0, 1.0]);
+            let white = photocraft_raster::from_rgba(&surf.format(), [1.0, 1.0, 1.0, 1.0]);
+            for r in [Rect::new(10, 5, 30, 6), Rect::new(10, 24, 30, 25), Rect::new(10, 5, 11, 25), Rect::new(29, 5, 30, 25)] {
+                surf.fill_rect(r, &black);
+            }
+            surf.fill_rect(Rect::new(18, 5, 21, 6), &white);
+            Ok(())
+        })
+        .unwrap();
+        s
+    }
+
+    /// #7756: `gapClose` keeps a contiguous fill inside an outline with a small break, at every depth.
+    #[test]
+    fn bucket_gap_close_stops_the_fill_leaking_through_a_break() {
+        for depth in [8, 16, 32] {
+            let p = |gap: Option<f64>| {
+                let mut p = json!({"x": 20, "y": 15, "color": "#ff0000", "antiAlias": false, "tolerance": 0});
+                if let Some(g) = gap {
+                    p["gapClose"] = json!(g);
+                }
+                p
+            };
+            let mut leaky = boxed_layer(depth);
+            leaky.execute("paint.bucket", p(None)).unwrap();
+            assert_eq!(px(&leaky, 2, 2), vec![1.0, 0.0, 0.0, 1.0], "depth {depth}: without gap detection the fill leaks");
+            let mut closed = boxed_layer(depth);
+            assert_eq!(closed.execute("paint.bucket", p(Some(4.0))).unwrap()["filled"], true);
+            assert_eq!(px(&closed, 2, 2), vec![1.0, 1.0, 1.0, 1.0], "depth {depth}: outside stays white");
+            assert_eq!(px(&closed, 20, 15), vec![1.0, 0.0, 0.0, 1.0], "depth {depth}: inside is filled");
+            assert_eq!(px(&closed, 10, 15), vec![0.0, 0.0, 0.0, 1.0], "depth {depth}: the outline is untouched");
+            // Non-contiguous fills ignore the setting; bad values are errors, not panics.
+            let mut all = boxed_layer(depth);
+            let mut q = p(Some(4.0));
+            q["contiguous"] = json!(false);
+            all.execute("paint.bucket", q).unwrap();
+            assert_eq!(px(&all, 2, 2), vec![1.0, 0.0, 0.0, 1.0], "depth {depth}");
+            assert!(boxed_layer(depth).execute("paint.bucket", json!({"x": 20, "y": 15, "gapClose": "wide"})).is_err());
+            assert!(boxed_layer(depth).execute("paint.bucket", json!({"x": 20, "y": 15, "gapClose": f64::NAN})).is_ok());
+            boxed_layer(depth).execute("paint.bucket", json!({"x": -5, "y": 99, "gapClose": 1e9})).unwrap();
+        }
     }
 
     #[test]

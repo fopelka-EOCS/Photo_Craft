@@ -1296,6 +1296,8 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         widgets::value_field(ui, &mut app.ui.tool_options.tolerance, 0.0..=255.0, "", 58.0);
                         widgets::checkbox(ui, &mut app.ui.tool_options.anti_alias, tl!("Anti-alias"));
                         widgets::checkbox(ui, &mut app.ui.tool_options.contiguous, tl!("Contiguous"));
+                        opt_label(ui, tl!("Gap"));
+                        widgets::value_field(ui, &mut app.ui.tool_options.bucket_gap, 0.0..=photocraft_algo::selection::MAX_BUCKET_GAP as f32, " px", 62.0);
                         widgets::checkbox(ui, &mut app.ui.tool_options.sample_all.paint_bucket, tl!("All Layers"));
                     }
                     Tool::Gradient => {
