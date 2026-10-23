@@ -278,5 +278,7 @@ fn placeholder_manifest() -> Manifest {
         params: Vec::new(),
         overlap: 0,
         area: crate::Area::Content,
+        guide: None,
+        groups: Vec::new(),
     }
 }
