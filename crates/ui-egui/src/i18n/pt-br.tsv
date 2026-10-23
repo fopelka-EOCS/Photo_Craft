@@ -4320,3 +4320,9 @@ layerLabel	No Color	Sem cor
 
 # Print preview image (#8236)
 	Print preview image	Print preview image
+
+# Preset file import status (File > Open of .abr, .pat, .grd)
+@plural	Imported {n} brush from {file}|Imported {n} brushes from {file}	{n} pincel importado de {file}|{n} pincéis importados de {file}
+@plural	Imported {n} pattern from {file}|Imported {n} patterns from {file}	{n} padrão importado de {file}|{n} padrões importados de {file}
+@plural	Imported {n} gradient from {file}|Imported {n} gradients from {file}	{n} degradê importado de {file}|{n} degradês importados de {file}
+	patterns	padrões
