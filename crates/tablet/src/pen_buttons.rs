@@ -149,7 +149,8 @@ mod tests {
         t.contact(true, false);
         assert!(t.take().tipless, "still the same contact");
         t.contact(false, false);
-        assert!(!t.take().tipless, "ended before this take");
+        assert!(t.take().tipless, "the take after it ends still sees it");
+        assert!(!t.take().tipless, "over");
     }
 
     #[test]
