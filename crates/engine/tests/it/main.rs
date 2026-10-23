@@ -46,6 +46,7 @@ mod layer_range_panel_order;
 mod live_line_transform;
 mod merge_transparent_bounds;
 mod missing_layer_error;
+mod new_document_profile;
 mod nonfinite_style;
 mod open_identity;
 mod path_blur_speed_clamp;
