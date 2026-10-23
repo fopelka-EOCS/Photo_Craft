@@ -633,8 +633,8 @@ fn panel_tab_context_menu_closes_one_tab_or_its_group() {
     for (theme, g, window) in [(ThemeKind::ProMedium, Group::Properties, "window.panel.properties"), (ThemeKind::Studio, Group::Layers, "window.panel.layers")]
     {
         let pro = is_pro(theme);
-        let names = g.tabs(pro);
         let (app, _, _) = app_with_layers();
+        let names: Vec<_> = visible_tabs(&app, g, pro).into_iter().map(|(_, name)| name).collect();
         let mut h = harness(app, vec2(1300.0, 850.0), theme);
         // Close the first tab: the group stays, showing (and selecting) the next one.
         right_click_tab(&mut h, g, 0);
@@ -643,7 +643,7 @@ fn panel_tab_context_menu_closes_one_tab_or_its_group() {
         assert!(g.shown(&h.state().ui.panels), "{theme:?}: closing one tab keeps the group");
         assert_eq!(*g.tab_mut(&mut h.state_mut().ui.dock_tabs), 1);
         let rest: Vec<(usize, &str)> = names.iter().copied().enumerate().skip(1).collect();
-        assert_eq!(h.state().ui.dock.visible_tabs(g, pro), rest);
+        assert_eq!(visible_tabs(h.state(), g, pro), rest);
         let strip: Vec<usize> = last_strips(&h.ctx).iter().find(|s| s.group == g).unwrap().tabs.iter().map(|(i, _)| *i).collect();
         assert_eq!(strip, rest.iter().map(|(i, _)| *i).collect::<Vec<_>>());
 
@@ -661,14 +661,14 @@ fn panel_tab_context_menu_closes_one_tab_or_its_group() {
         crate::menus::invoke(h.state_mut(), &ctx, window, json!({})).unwrap();
         h.run_steps(3);
         assert!(g.shown(&h.state().ui.panels) && !h.state().ui.dock.is_collapsed(g));
-        assert_eq!(h.state().ui.dock.visible_tabs(g, pro), vec![(0, names[0])]);
+        assert_eq!(visible_tabs(h.state(), g, pro), vec![(0, names[0])]);
 
         // A tab's Close Tab Group closes the entire group without hiding its one tab.
         right_click_tab(&mut h, g, 0);
         h.get_by_label("Close Tab Group").click();
         h.run_steps(3);
         assert!(!g.shown(&h.state().ui.panels));
-        assert_eq!(h.state().ui.dock.visible_tabs(g, pro), vec![(0, names[0])]);
+        assert_eq!(visible_tabs(h.state(), g, pro), vec![(0, names[0])]);
     }
 }
 

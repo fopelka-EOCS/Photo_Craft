@@ -251,7 +251,7 @@ fn damage_json(s: &mut Session, dmg: Rect) -> Value {
 
 /// The target layer (`None` for a channel), brush and zoom of a stroke. On a mask or channel the
 /// eraser paints the background colour (Photoshop).
-fn stroke_target(s: &Session, p: &Value, brush: BrushSettings) -> Result<(Option<photocraft_doc::LayerId>, BrushSettings, f32)> {
+pub(crate) fn stroke_target(s: &Session, p: &Value, brush: BrushSettings) -> Result<(Option<photocraft_doc::LayerId>, BrushSettings, f32)> {
     let gray = is_mask_target(p) || crate::channel_cmds::is_channel_target(p);
     let id = if crate::channel_cmds::is_channel_target(p) { None } else { Some(layer_id(s, p)?) };
     let brush = if gray && brush.erase { BrushSettings { erase: false, color: s.tools.background, ..brush } } else { brush };
@@ -260,7 +260,7 @@ fn stroke_target(s: &Session, p: &Value, brush: BrushSettings) -> Result<(Option
 
 /// Erasing a layer with locked transparency (e.g. the Background) can't remove opacity, so it
 /// paints the background colour instead (Photoshop).
-fn erase_locked(brush: &mut BrushSettings, lock: bool, bg: [f32; 4]) {
+pub(crate) fn erase_locked(brush: &mut BrushSettings, lock: bool, bg: [f32; 4]) {
     if brush.erase && lock {
         brush.erase = false;
         brush.color = bg;
@@ -284,6 +284,14 @@ fn stroke_with(s: &mut Session, cmd: &str, p: &Value, label: &str, brush: BrushS
     // The live stroke the canvas already rendered for exactly these params: take its pixels
     // instead of rendering the whole stroke again (the hitch at pen-up).
     let live = s.live_commit.take().filter(|l| l.matches(s, cmd, p, &pts));
+    if let Some(live) = &live {
+        let st = s.active().ok_or(EngineError::NoDocument)?;
+        if crate::channel_cmds::read_target_surface(&st.doc, id, p)? == &live.surface {
+            let mut result = damage_json(s, Rect::EMPTY);
+            result["fromLive"] = json!(true);
+            return Ok(result);
+        }
+    }
     let from_live = live.is_some();
     let dmg = photocraft_color::convert::with_cmyk_space(cmyk.as_ref(), || {
         s.edit(label, |doc, _| {
@@ -345,7 +353,7 @@ fn apply_auto_erase(brush: &mut BrushSettings, surf: &Surface, start: Option<&St
 
 /// The Pencil's brush: the session brush made aliased (every pixel fully painted or untouched,
 /// dabs on the pixel grid), hard and at full flow, with the options-bar mode.
-fn pencil_brush(s: &Session, p: &Value) -> Result<BrushSettings> {
+pub(crate) fn pencil_brush(s: &Session, p: &Value) -> Result<BrushSettings> {
     let mut brush = with_blend_mode(resolve_brush(s, p, "paint.pencil")?, p);
     if flag(p, "block", false) {
         return block_brush(brush, p);
@@ -407,7 +415,7 @@ fn clear_mode(p: &Value) -> bool {
 /// Applies the options-bar blend `mode` to a brush. `"mode"` accepts any blend-mode name
 /// (normal|multiply|screen|…), or `clear` to erase with the brush. The Eraser has no blend mode in
 /// Photoshop, so it is forced to Normal.
-fn with_blend_mode(mut b: BrushSettings, p: &Value) -> BrushSettings {
+pub(crate) fn with_blend_mode(mut b: BrushSettings, p: &Value) -> BrushSettings {
     b.erase |= clear_mode(p);
     if b.erase {
         b.mode = photocraft_color::BlendMode::Normal;

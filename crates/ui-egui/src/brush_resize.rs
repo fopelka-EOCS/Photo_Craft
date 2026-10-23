@@ -36,6 +36,8 @@ pub struct Resize {
     key: u64,
     /// Begun by an Alt+right-drag (#297): it ends when the right button is up.
     pub secondary: bool,
+    pub screen: bool,
+    size_only: bool,
 }
 
 /// Tools the gesture resizes: every painting tool, and Quick Selection (it has a brush too).
@@ -51,7 +53,9 @@ pub fn is_gesture(mods: egui::Modifiers) -> bool {
 /// Alt (Option) with the right button: Photoshop's Windows gesture (#297). The left button with
 /// Alt alone stays the painting tools' eyedropper.
 pub fn is_right_gesture(mods: egui::Modifiers) -> bool {
-    mods.alt
+    // A native macOS Control-click is normalized to a right-click with ctrl but no command.
+    // Preserve its context menu; Windows/Linux Ctrl also sets egui's command modifier.
+    mods.alt || (cfg!(feature = "uv-workbench") && mods.ctrl && mods.command && !mods.mac_cmd)
 }
 
 /// The diameter and hardness a drag from `start` by (`dx`, `dy`) document pixels gives at `zoom`.
@@ -69,6 +73,13 @@ pub fn resized(start: (f32, f32), dx: f64, dy: f64, zoom: f32) -> (f32, f32) {
 /// or an Alt+right-drag `armed` for this press, or already in progress), so the tool never sees
 /// it.
 pub fn pointer(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers, armed: bool) -> bool {
+    pointer_in_space(app, ev, mods, armed, false)
+}
+#[cfg(feature = "uv-workbench")]
+pub(crate) fn pointer_screen(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers, armed: bool) -> bool {
+    pointer_in_space(app, ev, mods, armed, true)
+}
+fn pointer_in_space(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers, armed: bool, screen: bool) -> bool {
     static KEY: AtomicU64 = AtomicU64::new(0);
     match ev {
         ToolEvent::Down { x, y, .. } => {
@@ -82,7 +93,14 @@ pub fn pointer(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers, ar
                 let b = &app.session.tools.brush;
                 (b.size, if vary { b.hardness } else { b.opacity })
             };
-            app.brush_resize = Some(Resize { anchor: [x, y], start: (size, v), key: KEY.fetch_add(1, Ordering::Relaxed), secondary: armed });
+            app.brush_resize = Some(Resize {
+                anchor: [x, y],
+                start: (size, v),
+                key: KEY.fetch_add(1, Ordering::Relaxed),
+                secondary: armed,
+                screen,
+                size_only: armed && mods.ctrl && !mods.alt,
+            });
             true
         }
         ToolEvent::Move { x, y, .. } => match app.brush_resize {
@@ -113,23 +131,33 @@ pub fn release_stale(app: &mut PhotocraftApp, secondary_down: bool) {
 fn update(app: &mut PhotocraftApp, r: Resize, x: f64, y: f64) {
     // Screen-relative, as in Photoshop (#4228): right is bigger and down harder on screen, however
     // the view is rotated or flipped. The screen delta over the zoom is in document pixels at 0°.
-    let (dx, dy, zoom) = match ViewXform::active(app) {
-        Some(xf) if xf.zoom.is_finite() && xf.zoom > 0.0 => {
-            let d = xf.to_screen(x as f32, y as f32) - xf.to_screen(r.anchor[0] as f32, r.anchor[1] as f32);
-            (f64::from(d.x / xf.zoom), f64::from(d.y / xf.zoom), xf.zoom)
+    let (dx, dy, zoom) = if r.screen {
+        (x - r.anchor[0], y - r.anchor[1], 1.0)
+    } else {
+        match ViewXform::active(app) {
+            Some(xf) if xf.zoom.is_finite() && xf.zoom > 0.0 => {
+                let d = xf.to_screen(x as f32, y as f32) - xf.to_screen(r.anchor[0] as f32, r.anchor[1] as f32);
+                (f64::from(d.x / xf.zoom), f64::from(d.y / xf.zoom), xf.zoom)
+            }
+            // No view: document axes, mirrored by View › Flip Horizontal.
+            _ => ((x - r.anchor[0]) * if app.ui.view.flip_horizontal { -1.0 } else { 1.0 }, y - r.anchor[1], app.point_zoom()),
         }
-        // No view: document axes, mirrored by View › Flip Horizontal.
-        _ => ((x - r.anchor[0]) * if app.ui.view.flip_horizontal { -1.0 } else { 1.0 }, y - r.anchor[1], app.point_zoom()),
     };
-    let (size, v) = resized(r.start, dx, dy, zoom);
+    let (size, v) = resized(r.start, dx, if r.size_only { 0.0 } else { dy }, zoom);
     // "Vary Round Brush Hardness on HUD" (Preferences ▸ Tools, on by default): off, the vertical
     // movement takes the opacity instead of the hardness, as in Photoshop.
     let vary = app.session.prefs().tools.vary_round_brush_hardness_on_hud;
     let b = &app.session.tools.brush;
-    if b.size == size && if vary { b.hardness == v } else { b.opacity == v } {
+    if b.size == size && (r.size_only || if vary { b.hardness == v } else { b.opacity == v }) {
         return;
     }
-    let brush = if vary { json!({ "size": size, "hardness": v }) } else { json!({ "size": size, "opacity": v }) };
+    let brush = if r.size_only {
+        json!({"size":size})
+    } else if vary {
+        json!({ "size": size, "hardness": v })
+    } else {
+        json!({ "size": size, "opacity": v })
+    };
     let p = json!({ "brush": brush, "coalesce": format!("brush-resize:{}", r.key) });
     if let Err(e) = app.run("tools.setBrush", p) {
         app.ui.status = e;
@@ -141,6 +169,9 @@ fn update(app: &mut PhotocraftApp, r: Resize, x: f64, y: f64) {
 /// Returns true while a resize is in progress (the canvas then hides its cursor).
 pub fn draw(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform) -> bool {
     let Some(r) = app.brush_resize else { return false };
+    if r.screen {
+        return false;
+    }
     let b = &app.session.tools.brush;
     let c = xf.to_screen(r.anchor[0] as f32, r.anchor[1] as f32);
     let radius = (b.size / 2.0 * xf.zoom).max(1.0);
@@ -150,6 +181,10 @@ pub fn draw(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform) -> boo
     // Photoshop hides the pointer while the circle stays put.
     painter.ctx().set_cursor_icon(egui::CursorIcon::None);
     let at = painter.ctx().pointer_latest_pos().unwrap_or(c);
+    if r.size_only {
+        crate::canvas::draw_readout(painter.ctx(), "brush-resize-readout", at, [tl!("Diameter:")], [format!("{} px", b.size.round() as i64)]);
+        return true;
+    }
     let (label, value) = if app.session.prefs().tools.vary_round_brush_hardness_on_hud {
         (tl!("Hardness:"), format!("{}%", (b.hardness * 100.0).round() as i64))
     } else {

@@ -88,24 +88,29 @@ pub(crate) struct ClonePreviewCache {
 }
 
 /// A transient source image beneath the brush outline; never part of the document render.
-fn draw_clone_preview(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewXform, at: [f64; 2], output: Option<u32>) {
+pub(crate) fn clone_preview_texture(
+    app: &mut PhotocraftApp,
+    painter: &egui::Painter,
+    at: [f64; 2],
+    output: Option<u32>,
+) -> Option<(egui::TextureId, DRect, Color32)> {
     use photocraft_engine::presets::clone_source::{Mapping, overlay_blend, transform_matrix};
     let overlay = app.session.presets.clone.overlay.clone();
     if app.ui.tool != Tool::CloneStamp || !overlay.show || (overlay.auto_hide && app.drag.is_some()) {
-        return;
+        return None;
     }
     let slot = app.session.presets.clone.active().clone();
-    let Some(source) = slot.source else { return };
+    let source = slot.source?;
     let radius = f64::from(app.session.tools.brush.size) / 2.0;
     if !radius.is_finite() || radius <= 0.0 || radius > 500.0 || !at.iter().all(|v| v.is_finite() && v.abs() < 1_000_000.0) {
-        return;
+        return None;
     }
     let stroke_start = app.drag.as_ref().map(|d| d.start);
     let anchor = if app.ui.tool_options.clone_aligned { slot.anchor.or(stroke_start) } else { stroke_start }.unwrap_or(at);
     let map =
         Mapping { source: (source[0], source[1]), anchor: (anchor[0], anchor[1]), m: transform_matrix(slot.scale, slot.rotation, slot.flip_h, slot.flip_v) };
     let rect = DRect::new((at[0] - radius).floor() as i32, (at[1] - radius).floor() as i32, (at[0] + radius).ceil() as i32, (at[1] + radius).ceil() as i32);
-    let Some(st) = app.session.active() else { return };
+    let st = app.session.active()?;
     let (display, display_key) = canvas_display(app, &st.doc, output);
     // A shaped tip (sampled bitmap, or a rotated / flattened round one) clips the overlay to its
     // outline instead of a circle, as Photoshop does with Clipped on.
@@ -117,14 +122,23 @@ fn draw_clone_preview(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &Vie
         (h.finish(), radius.to_bits(), at.map(f64::to_bits))
     });
     let key = format!(
-        "{:?}:{}:{:?}:{rect:?}:{map:?}:{}:{}:{}:{}:{}:{tip_key:?}",
-        st.doc.id, st.revision, st.active_layer, app.ui.tool_options.clone_sample, display_key, overlay.invert, overlay.blend, app.ui.view.pattern_preview
+        "{:?}:{}:{:?}:{rect:?}:{map:?}:{}:{}:{}:{}:{}:{tip_key:?}:{:?}:{:?}",
+        st.doc.id,
+        st.revision,
+        st.active_layer,
+        app.ui.tool_options.clone_sample,
+        display_key,
+        overlay.invert,
+        overlay.blend,
+        app.ui.view.pattern_preview,
+        overlay.clipped,
+        if overlay.clipped && tip_rings.is_none() { Some(at.map(f64::to_bits)) } else { None }
     );
     if app.clone_preview.as_ref().is_none_or(|c| c.key != key) {
         let Ok(mut buf) =
             photocraft_engine::retouch_cmds::clone_preview_periodic(&app.session, rect, &map, &app.ui.tool_options.clone_sample, app.ui.view.pattern_preview)
         else {
-            return;
+            return None;
         };
         if overlay.invert {
             for px in &mut buf.px {
@@ -138,7 +152,7 @@ fn draw_clone_preview(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &Vie
         if overlay.blend != "normal" {
             let here = Mapping { source: (0.0, 0.0), anchor: (0.0, 0.0), m: [1.0, 0.0, 0.0, 1.0] };
             let Ok(under) = photocraft_engine::retouch_cmds::clone_preview_periodic(&app.session, rect, &here, "all", app.ui.view.pattern_preview) else {
-                return;
+                return None;
             };
             for (px, d) in buf.px.iter_mut().zip(&under.px) {
                 *px = overlay_blend(&overlay.blend, *px, *d);
@@ -152,6 +166,15 @@ fn draw_clone_preview(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &Vie
                 }
             }
         }
+        if overlay.clipped && tip_rings.is_none() {
+            for (i, p) in buf.px.iter_mut().enumerate() {
+                let x = f64::from(rect.x0) + (i % rect.width() as usize) as f64 + 0.5;
+                let y = f64::from(rect.y0) + (i / rect.width() as usize) as f64 + 0.5;
+                if (x - at[0]).hypot(y - at[1]) > radius {
+                    *p = [0.0; 4];
+                }
+            }
+        }
         let image = display_image(display.as_deref(), &buf);
         match app.clone_preview.as_mut() {
             Some(cache) => {
@@ -161,10 +184,17 @@ fn draw_clone_preview(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &Vie
             None => app.clone_preview = Some(ClonePreviewCache { key, texture: painter.ctx().load_texture("clone-preview", image, canvas_texture_options(1)) }),
         }
     }
-    let Some(cache) = &app.clone_preview else { return };
+    let cache = app.clone_preview.as_ref()?;
     let tint = Color32::from_white_alpha((overlay.opacity.clamp(0.0, 100.0) * 2.55).round() as u8);
+    Some((cache.texture.id(), rect, tint))
+}
+fn draw_clone_preview(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewXform, at: [f64; 2], output: Option<u32>) {
+    let Some((texture, rect, tint)) = clone_preview_texture(app, painter, at, output) else { return };
+    let overlay = app.session.presets.clone.overlay.clone();
+    let radius = f64::from(app.session.tools.brush.size) / 2.0;
+    let tip_rings = if overlay.clipped { crate::brush_cursor::rings(painter.ctx(), &app.session.tools.brush, true) } else { None };
     // A textured triangle fan provides a circular clip, including mirrored canvas views.
-    let mut mesh = egui::Mesh::with_texture(cache.texture.id());
+    let mut mesh = egui::Mesh::with_texture(texture);
     let vertex = |x: f64, y: f64| egui::epaint::Vertex {
         pos: xf.to_screen(x as f32, y as f32),
         uv: pos2((x - f64::from(rect.x0)) as f32 / rect.width() as f32, (y - f64::from(rect.y0)) as f32 / rect.height() as f32),
@@ -869,7 +899,7 @@ fn begin_live_stroke(app: &PhotocraftApp) -> Option<LiveStroke> {
 
 /// Render the drag points the live stroke hasn't seen yet, with the pen pressure, tilt and
 /// rotation the commit's `paint.stroke` gets for them.
-fn feed_live_stroke(app: &mut PhotocraftApp) {
+pub(crate) fn feed_live_stroke(app: &mut PhotocraftApp) {
     // A batched move replays several samples in one frame and calls this once at the end, so the
     // per-sample calls from `tool_event` are skipped (see `canvas_view`).
     if app.defer_live_stroke {
@@ -2459,7 +2489,15 @@ pub(crate) fn retain_gpu_documents(app: &mut PhotocraftApp) {
 /// another document (`layer_transfer`).
 pub fn document_area(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     crate::distort_ui::drop_foreign(app);
-    documents(app, ui);
+    #[cfg(feature = "uv-workbench")]
+    let handled = crate::uv_ui::workspace(app, ui);
+    #[cfg(not(feature = "uv-workbench"))]
+    let handled = false;
+    if !handled {
+        documents(app, ui);
+    }
+    #[cfg(feature = "uv-workbench")]
+    crate::uv_workspace::floating(app, ui.ctx());
     crate::layer_transfer::finish(app, ui.ctx());
     // Once a frame, not per document view: the right-click or options-bar Brush Preset picker.
     crate::paint_mouse::show_picker(app, ui.ctx());
@@ -2479,7 +2517,16 @@ pub(crate) fn arranged_cells(app: &PhotocraftApp, rect: Rect) -> Option<Vec<(usi
     Some((start..n).zip(cells).collect())
 }
 
-fn documents(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+pub(crate) fn documents(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    documents_with_tabs(app, ui, true);
+}
+
+#[cfg(feature = "uv-workbench")]
+pub(crate) fn uv_documents(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    documents_with_tabs(app, ui, false);
+}
+
+fn documents_with_tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui, show_tabs: bool) {
     app.drop_canvas_rect = None;
     app.tab_strip = None;
     retain_gpu_documents(app);
@@ -2500,7 +2547,7 @@ fn documents(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         open_on_double_click(app, ui, area);
         return;
     }
-    if !app.ui.view.hides_tabs() || opening {
+    if show_tabs && (!app.ui.view.hides_tabs() || opening) {
         // Flat Spectrum tabs sit directly against the canvas. The parent's default vertical
         // item spacing would otherwise leave a visible gap below the tab strip (#2188).
         let spacing = ui.spacing().item_spacing.y;
@@ -3479,7 +3526,9 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     let xf = ViewXform { zoom: display_view.zoom / ppp, center: display_view.center, ..target_xf };
     let pixel_grid = app.ui.view.shows(app.ui.view.show.pixel_grid);
     let response = ui.allocate_rect(rect, Sense::click_and_drag());
-    let stroke_dismissal = primary && crate::shape_stroke_ui::dismiss_from_canvas(app, &response);
+    let stroke_dismissal = (primary && crate::shape_stroke_ui::dismiss_from_canvas(app, &response)) || app.brush_resize.is_some_and(|r| r.screen);
+    #[cfg(feature = "uv-workbench")]
+    let stroke_dismissal = stroke_dismissal || app.uv_paint_key.is_some();
     let painter = ui.painter_at(rect);
 
     match crate::prefs_ui::pasteboard_color(app) {
@@ -3760,6 +3809,8 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     };
     let painted = if crop_camera { None } else { Some(paint_canvas(app, ui, &display_view, xf)) };
     let img_rect = xf.doc_rect(doc.bounds());
+    #[cfg(feature = "uv-workbench")]
+    let uv_toolbar = crate::uv_ui::canvas_overlay(app, ui, &xf, idx, primary);
 
     // Under an open dialog the canvas widget is inert, but the image still pans and zooms.
     let under_dialog = !app.ui.dialogs.is_empty();
@@ -3853,6 +3904,14 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         drawing = true;
     }
     let temporary = crate::hold_keys::for_frame(app, &ctx, drawing || crate::type_transform::active(app));
+    // Ctrl+RMB resize wins over Ctrl's temporary Move tool for brush tools.
+    let resizing = crate::brush_resize::applies(app.ui.tool)
+        && (app.brush_resize.is_some_and(|r| r.secondary)
+            || ui.input(|i| {
+                crate::brush_resize::is_right_gesture(crate::workspace_ui::sticky_mods(app, i.modifiers))
+                    && (i.pointer.secondary_down() || i.pointer.secondary_released())
+            }));
+    let temporary = temporary.filter(|t| !resizing || *t != crate::hold_keys::Temporary::Move);
     let space_pan = temporary == Some(crate::hold_keys::Temporary::Hand);
     let middle = ui.input(|i| i.pointer.middle_down());
     let tool = match temporary {
@@ -4033,6 +4092,17 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             let d = xf.to_doc(p);
             crate::layer_picker::sample_at(app, d[0], d[1]);
         }
+    } else if primary && !stroke_dismissal && temporary.is_none() && !middle && {
+        #[cfg(feature = "uv-workbench")]
+        {
+            crate::uv_ui::canvas_input(app, ui, &xf, &response, idx, uv_toolbar)
+        }
+        #[cfg(not(feature = "uv-workbench"))]
+        {
+            false
+        }
+    } {
+        // UV shell selection owns this gesture; the active paint tool resumes in Paint mode.
     } else if primary && !stroke_dismissal {
         let mods = ui.input(|i| i.modifiers);
         // An ⌥-click the window manager took never arrives; say so (alt_grab.rs).
@@ -4742,6 +4812,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     // A tool drag held past the canvas edge scrolls the view toward the pointer (#4183); the
     // drag's next move then extends into what scrolled in.
     if primary
+        && !stroke_dismissal
         && app.drag.is_some()
         && tool != Tool::Hand
         && !middle

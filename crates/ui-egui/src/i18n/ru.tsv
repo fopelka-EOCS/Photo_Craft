@@ -2465,7 +2465,7 @@
 	Snap vector tools and transforms to pixel grid	Выравнивать векторные инструменты и трансформации по пиксельной сетке
 	Srgb	sRGB
 	Standard	Стандартный
-	Studio	Studio
+	Studio	Студия
 	Studio light	Светлая Studio
 	Adwaita	Adwaita
 	Adwaita dark	Тёмная Adwaita
@@ -4586,3 +4586,124 @@ shape	Appearance	Оформление
 
 # Print preview image (#8236)
 	Print preview image	Print preview image
+	3D / UV Workbench	Рабочая среда 3D / UV
+	3D Import	3D импорт
+	Import Model…	Импорт модели…
+	Import Settings…	Настройки импорта…
+	Open 3D Project…	Открыть 3D-проект…
+	Save 3D Project…	Сохранить 3D-проект…
+	Images	Изображения
+	Close 3D Project	Закрыть 3D-проект
+
+# 3D / UV workspace
+	Environment map exceeds 256 MiB	Карта окружения превышает 256 MiB
+	Unknown environment map format	Неизвестный формат окружения
+	Choose a linear HDR or EXR panorama	Выберите линейную панораму HDR или EXR
+	Environment preparation was interrupted	Подготовка окружения прервана
+	Environment loading is available in the desktop build	Загрузка окружения доступна в настольной сборке
+	Environment / PBR	Окружение / PBR
+	Studio environment	Студийное окружение
+	Preparing lighting…	Подготовка освещения…
+	Show environment background	Окружение на фоне
+	Background brightness	Яркость фона
+	Emissive intensity	Сила Emissive
+	Material defaults	Без карты материала
+	Choose a local HDR / EXR map	Выберите локальную HDR / EXR карту
+	No file selected	Файл не выбран
+	Project images are available in the 3D workspace	Изображения проекта доступны в рабочей среде 3D
+	Import a 3D model first	Сначала импортируйте 3D-модель
+	Drop images here, then drag them into Layers	Перетащите изображения сюда, затем — в слои
+	Add images…	Добавить изображения…
+	A local file is required	Нужен локальный файл
+	Add to Layers	Добавить в слои
+	Remove from library	Удалить из библиотеки
+	Assign a texture to this material before painting	Для рисования назначьте текстуру этому материалу
+	UV shell selection	Выделение UV-шеллов
+	3D / 2D views	Виды 3D / 2D
+	3D only                      F2	Только 3D                    F2
+	2D only                      F3	Только 2D                    F3
+	Swap 3D / 2D                 F4	Поменять 3D / 2D          F4
+	Open 3D in a window	Открыть 3D в окне
+	Open 2D in a window	Открыть 2D в окне
+	Show UV shells	Показывать UV-шеллы
+	Camera projection	Проекция камеры
+	Perspective view             F5	Перспектива                     F5
+	Orthographic view            F6	Ортографический вид          F6
+	3D display	Отображение 3D
+	MSAA antialiasing	Сглаживание MSAA
+	Smooth navigation	Плавная навигация
+	Up to 1600 px while navigating; source maps stay full size and full viewport resolution returns when you release the mouse.	До 1600 px во время жеста; исходные карты и полное разрешение после отпускания мыши.
+	Cull backfaces	Скрывать обратные стороны
+	Flip faces	Инвертировать стороны
+	Normal strength	Сила Normal
+	Camera navigation	Навигация камеры
+	Orbit pivot	Центр вращения
+	Reset camera	Сбросить камеру
+	Alt+LMB — orbit · Alt+MMB — pan	Alt+ЛКМ — вращать · Alt+СКМ — сдвиг
+	Alt+RMB — dolly · F / A — frame	Alt+ПКМ — приблизить · F / A — фокус
+	Display channel	Канал просмотра
+	Material shows the shaded material. Map channels show unlit texture colors.	Material — материал с освещением. Карты — цвет без освещения.
+	2D map	Карта 2D
+	The 2D map can be selected independently of the 3D display	Карта в 2D — независимо от просмотра 3D
+	3D import settings	Настройки 3D импорта
+	UV set:	UV-набор:
+	Materials, color textures and normal maps are loaded automatically.	Материалы, цветовые карты и normal map загружаются автоматически.
+	Choose model…	Выбрать модель…
+	3D · Model	3D · Модель
+	2D · Texture	2D · Текстура
+	Wait for the environment map to finish preparing, then save the project again	Дождитесь завершения подготовки карты окружения и сохраните проект ещё раз
+	Save changes to the 3D project?	Сохранить изменения 3D-проекта?
+	The .pcuv container saves layered textures, library images, the model and scene settings. Export Textures is not required.	Контейнер .pcuv сохраняет текстуры со слоями, изображения, модель и настройки сцены. Export Textures для этого не требуется.
+	Save project	Сохранить проект
+	Don't save	Не сохранять
+	View center → surface	Центр вида → поверхность
+	Under cursor	Под курсором
+	Mesh reimported. UVs changed: check existing seam protection masks.	Меш обновлён. UV изменилась: проверьте существующие маски защиты швов.
+	Mesh reimported; textures and layers preserved.	Меш обновлён; текстуры и слои сохранены.
+	The source model is unavailable. The current mesh is retained.	Исходная модель недоступна. Текущий меш сохранён.
+	The source model changed — click ReImport	Исходная модель изменена — нажмите ReImport
+	Source maps require more than 4 GiB of CPU cache. Remove unused material bindings; maps are not downscaled automatically.	Исходные карты требуют более 4 GiB CPU-кэша. Освободите ненужные привязки материалов; карты не уменьшаются автоматически.
+	Marquee:	Рамка:
+	Intersecting	Затронутые
+	Fully enclosed	Полностью внутри
+	General margin, px	Общий отступ, px
+	Horizontal margin, px	По горизонтали, px
+	Vertical margin, px	По вертикали, px
+	Inward feather, px	Растушёвка внутрь, px
+	Drop one file onto the texture slot	Перетащите один файл в карточку текстуры
+	Assigning a texture requires a local file	Для назначения текстуры нужен локальный файл
+	Choose a file or drop an image here	Выбрать файл или перетащить изображение сюда
+	Edit in 2D	Редактировать в 2D
+	Paint on this map	Рисовать по этой карте
+	Use active document	Из активного документа
+	New layer	Новый слой
+	New 1K texture	Новая текстура 1K
+	Open the 3D workspace	Открыть рабочую среду 3D
+	Materials / visibility	Материалы / видимость
+	Show mesh parts using this material	Показать часть модели с этим материалом
+	Material textures	Текстуры материала
+	Import a UV-mapped FBX or OBJ. Materials and available textures are loaded automatically.	Импортируйте FBX или OBJ с UV. Материалы и найденные текстуры загрузятся автоматически.
+	Image: {name}	Изображение: {name}
+	Could not save scene: {error}	Не удалось сохранить сцену: {error}
+	Triangles: {triangles} · UV shells: {shells}	Треуг.: {triangles} · UV-шеллы: {shells}
+	Source thumbnail	Исходная миниатюра
+	Click to replace or drop a file	Нажмите для замены или перетащите файл
+	Export Textures: exported {saved}, missing path {unsaved}, errors {errors}	Export Textures: экспортировано {saved}, без пути {unsaved}, ошибок {errors}
+	Source map {width} × {height} exceeds the GPU limit of {limit}. Maps are not downscaled automatically.	Исходная карта {width} × {height} превышает лимит GPU {limit}. Уменьшение автоматически не применяется.
+
+# Optional 3D / UV extension: English fallback; full extension translations are available in English and Russian.
+	Export Textures	Экспорт текстур
+
+# Optional 3D / UV extension: English fallback; full extension translations are available in English and Russian.
+	Import model…	Импорт модели…
+	ReImport	ReImport
+
+	Brush tip in UV space	Отпечаток в пространстве UV
+	Wraps neighboring faces and UV seams. Brush, Pencil and Eraser; retouching uses Paint UV.	Кисть огибает соседние грани и UV-швы. Кисть, карандаш и ластик; ретушь использует Paint UV.
+	Click to select · Shift to add · Alt in 2D / Ctrl in 3D to subtract	Щелчок — выбрать · Shift — добавить · Alt в 2D / Ctrl в 3D — вычесть
+
+	Paint UV	Рисование UV
+	Paint Wrap	Рисование с обёртыванием
+	PBR · Roughness / Metallic	PBR · Шероховатость / Металличность
+	HDR / EXR…	HDR / EXR…
+	Reimport	Повторный импорт

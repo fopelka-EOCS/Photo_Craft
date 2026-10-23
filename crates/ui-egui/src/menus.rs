@@ -13,7 +13,17 @@ pub(crate) fn modal_allows(app: &PhotocraftApp, id: &str) -> bool {
     if app.camera_raw.is_some() || crate::crop_ui::blocks(app, id) {
         return false;
     }
-    (app.ui.dialogs.is_empty() && app.ui.layers_panel_dialog.is_none() && app.discard.is_none()) || crate::shortcuts::NAV_COMMANDS.contains(&id)
+    let blocked = {
+        #[cfg(feature = "uv-workbench")]
+        {
+            crate::uv_project::prompt_open(app)
+        }
+        #[cfg(not(feature = "uv-workbench"))]
+        {
+            false
+        }
+    };
+    (app.ui.dialogs.is_empty() && app.ui.layers_panel_dialog.is_none() && app.discard.is_none() && !blocked) || crate::shortcuts::NAV_COMMANDS.contains(&id)
 }
 
 /// Top-level menus in Photoshop order.
@@ -62,16 +72,26 @@ fn workspace_name(id: &str) -> Option<&'static str> {
         "graphicAndWeb" => "Graphic and Web",
         "pixelArt" => "Pixel Art",
         "motion" => "Motion",
+        #[cfg(feature = "uv-workbench")]
+        "threeD" => "3D",
         _ => return None,
     })
 }
 
 /// Run a command id from any source (menu, shortcut, palette, automation).
 pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: Value) -> Result<Value, String> {
+    #[cfg(feature = "uv-workbench")]
+    if id != "file.exit" {
+        crate::uv_project::cancel_exit(app);
+    }
     if app.automation_input
         && let Some(authorize) = app.services.automation_command.as_ref()
     {
         authorize(id, &params)?;
+    }
+    #[cfg(feature = "uv-workbench")]
+    if crate::uv_project::intercept(app, id, &params) {
+        return Ok(Value::Null);
     }
     if crate::discard_ui::intercept(app, id, &params) {
         return Ok(Value::Null);
@@ -86,6 +106,21 @@ pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: Va
 
 /// [`invoke`] without the unsaved-changes prompt, for once the user has already answered it.
 pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: Value) -> Result<Value, String> {
+    #[cfg(feature = "uv-workbench")]
+    if let Some(result) = crate::uv_workspace::menu(app, id) {
+        return result;
+    }
+    #[cfg(feature = "uv-workbench")]
+    if id == "window.uvWorkbench" {
+        app.ui.uv_workbench.open = !app.ui.uv_workbench.open;
+        if app.ui.uv_workbench.open {
+            crate::uv_ui::reveal(app)?;
+        } else {
+            app.ui.dock_tabs.properties = 0;
+        }
+
+        return Ok(json!({"open": app.ui.uv_workbench.open}));
+    }
     if let Some(tool) = crate::tool_shortcuts::tool(id) {
         crate::tool_memory::select(app, tool);
         return Ok(json!({"tool": tool}));
@@ -679,11 +714,19 @@ fn open_path(app: &mut PhotocraftApp, path: &str) -> Result<Value, String> {
 }
 
 pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
+    #[cfg(feature = "uv-workbench")]
+    if let Some(enabled) = crate::uv_workspace::is_enabled(app, id) {
+        return enabled;
+    }
     if crate::tool_shortcuts::tool(id).is_some() {
         return true;
     }
     if id == "ui.symmetryTransform" {
         return crate::symmetry_ui::can_transform(app);
+    }
+    #[cfg(feature = "uv-workbench")]
+    if id == "edit.undo" && crate::uv_ui::pending_paint(app) {
+        return true;
     }
     // Draft Pen points can be undone even when the document has no History entries.
     if id == "edit.undo" && app.ui.pen.as_ref().is_some_and(|pen| !pen.knots.is_empty()) {
@@ -723,6 +766,8 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
         return e;
     }
     match id {
+        #[cfg(feature = "uv-workbench")]
+        "window.uvWorkbench" => true,
         "window.panel.activate" | "window.panel.layout" => true,
         "window.panel.group" | "window.panel.move" | "window.panel.float" | "window.panel.dock" | "window.panel.close" => !app.session.prefs().workspace_locked,
         "file.open" | "file.exit" | "file.clearRecent" | "file.removeRecent" | "help.about" | "help.systemInfo" | "edit.search" => true,
@@ -993,6 +1038,23 @@ pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {
             let at = after.or_else(|| items.iter().rposition(|i| i.path.first() == top.as_ref())).map_or(items.len(), |p| p + 1);
             items.insert(at, e);
         }
+    }
+    #[cfg(feature = "uv-workbench")]
+    {
+        let mut imports = Vec::new();
+        let mut i = 0;
+        while i < items.len() {
+            if items.get(i).is_some_and(|item| item.id.starts_with("file.uv.")) {
+                imports.push(items.remove(i));
+            } else {
+                i += 1;
+            }
+        }
+        let at = items
+            .iter()
+            .position(|item| item.id == "file.fileInfo")
+            .unwrap_or_else(|| items.iter().position(|item| item.id == "file.print").unwrap_or(items.len()));
+        items.splice(at..at, imports);
     }
     crate::plugin_ui::insert_menu_items(app, &mut items);
     if let Some(mask) = app.session.active().and_then(|s| s.active_layer.and_then(|id| s.doc.layer(id))).and_then(|l| l.mask.as_ref())
@@ -1594,6 +1656,26 @@ fn submenu_enabled(children: &[&MenuItem]) -> bool {
     children.iter().any(|c| c.enabled && c.label != "---")
 }
 
+#[cfg(all(test, feature = "uv-workbench"))]
+#[test]
+fn uv_workbench_menu_opens_without_a_document_and_after_import() {
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    let ctx = egui::Context::default();
+    for imported in [false, true] {
+        if imported {
+            let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../uv/tests/fixtures/two-shells.fbx");
+            app.run("uv.model.import", json!({"path":source.to_string_lossy()})).unwrap();
+        }
+        let item = menu_items(&app).into_iter().find(|m| m.id == "window.uvWorkbench").unwrap();
+        assert!(item.enabled, "UV import window must be reachable, imported={imported}");
+        assert!(modal_allows(&app, &item.id));
+        invoke(&mut app, &ctx, &item.id, json!({})).unwrap();
+        assert!(app.ui.uv_workbench.open);
+        invoke(&mut app, &ctx, &item.id, json!({})).unwrap();
+        assert!(!app.ui.uv_workbench.open);
+    }
+}
+
 /// The command a menu click runs: ⌥ + Merge Down / Merge Layers / Merge Visible keep the
 /// originals, running Stamp Down / Stamp Visible instead (#217).
 pub fn alt_click(id: String, alt: bool) -> String {
@@ -1605,6 +1687,8 @@ pub fn alt_click(id: String, alt: bool) -> String {
 
 /// Workspace presets (Window → Workspace): which panels are visible.
 pub fn apply_workspace(app: &mut PhotocraftApp) {
+    #[cfg(feature = "uv-workbench")]
+    crate::uv_workspace::sync_workspace(app);
     // Saved workspaces (Window › Workspace › New Workspace…) restore their own layout.
     if crate::workspace_ui::apply_custom(app) {
         return;
@@ -1626,6 +1710,8 @@ pub fn apply_workspace(app: &mut PhotocraftApp) {
         // Color includes Swatches; Navigator keeps the pixel canvas easy to inspect.
         "Pixel Art" => (true, true, true, false, false),
         "Motion" => (false, false, true, false, true),
+        #[cfg(feature = "uv-workbench")]
+        "3D" => (false, false, true, false, true),
         _ => (false, true, true, false, true),
     };
     p.navigator = nav;
@@ -1633,6 +1719,15 @@ pub fn apply_workspace(app: &mut PhotocraftApp) {
     p.layers = layers;
     p.history = history;
     p.properties = props;
+    #[cfg(feature = "uv-workbench")]
+    if app.ui.workspace == "3D" {
+        app.ui.uv_workbench.open = true;
+        if app.uv_cache.project.parked_view.is_none() {
+            app.ui.uv_workbench.view_3d = true;
+        }
+        app.ui.dock_tabs.properties = 2;
+        app.ui.dock.heights.insert(crate::dock::Group::Properties, 500.0);
+    }
     p.character = app.ui.workspace == "Graphic and Web";
     // Timeline is a floating panel, not a dock group. Showing it does not create or edit
     // a document timeline; changing away from Motion closes it just like its Close button.

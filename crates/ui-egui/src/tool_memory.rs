@@ -23,6 +23,11 @@ pub(crate) type ToolBrushes = (Tool, Vec<(Tool, BrushSettings)>);
 
 /// Explicit choices override temporary pen and held-key tools, even when selecting the same tool.
 pub(crate) fn select(app: &mut PhotocraftApp, tool: Tool) {
+    #[cfg(feature = "uv-workbench")]
+    {
+        app.ui.uv_workbench.select_shells = false;
+        app.uv_cache.shell_tool_owner = None;
+    }
     app.stylus.tool_before_eraser = None;
     app.ui.spring = None;
     app.ui.tool = tool;

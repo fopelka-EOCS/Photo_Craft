@@ -1271,6 +1271,9 @@ pub struct ColorPanelState {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UiState {
+    #[cfg(feature = "uv-workbench")]
+    #[serde(default)]
+    pub uv_workbench: crate::uv_ui::State,
     pub tool: Tool,
     /// The last tool used in each shortcut group (the tools sharing a key, [`Tool::key`]), at most
     /// one per group: the group's key brings it back, as in Photoshop (#2608).
@@ -1532,6 +1535,8 @@ impl Default for UiState {
     fn default() -> Self {
         Self {
             tool: Tool::Brush,
+            #[cfg(feature = "uv-workbench")]
+            uv_workbench: Default::default(),
             group_tools: Vec::new(),
             spring: None,
             recent_files: Vec::new(),

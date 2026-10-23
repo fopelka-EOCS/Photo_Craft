@@ -168,6 +168,8 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                                     let key = egui::Id::new(("tool-slot", *slot_index));
                                     let tool = slot_tool(ui, app.ui.tool, slot, key);
                                     let sel = slot.contains(&app.ui.tool);
+                                    #[cfg(feature = "uv-workbench")]
+                                    let sel = sel && !app.ui.uv_workbench.select_shells;
                                     let tip = match crate::tool_shortcuts::shortcut(app, tool) {
                                         Some(sc) => format!("{}  ({})", tl!(tool.label()), crate::shortcuts::pretty(&sc)),
                                         None => tl!(tool.label()).to_string(),
@@ -306,6 +308,10 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                                     }
                                 }
                             });
+                            #[cfg(feature = "uv-workbench")]
+                            if row.iter().any(|(_, slot)| slot.contains(&Tool::RectMarquee)) {
+                                crate::uv_workspace::shell_tool(app, ui, bx);
+                            }
                         }
                     }
                     if icons::button(ui, "ellipsis", bx, false, tl!("Edit Toolbar…")).clicked() {
@@ -967,6 +973,21 @@ fn options_bar_height(pro: bool, narrow: bool) -> f32 {
 }
 
 pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    #[cfg(feature = "uv-workbench")]
+    if app.ui.workspace == "3D" && app.ui.uv_workbench.select_shells && app.session.uv.scene.is_some() {
+        egui::Panel::top("options_bar").exact_size(36.0).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.menu_button(tl!("UV shell selection"), |ui| {
+                    ui.set_max_width(360.0);
+                    crate::uv_ui::shell_settings(app, ui);
+                });
+                ui.separator();
+                ui.weak(tl!("Click to select · Shift to add · Alt in 2D / Ctrl in 3D to subtract"));
+            });
+        });
+        return;
+    }
+
     let t = Tokens::get(ui.ctx());
     let narrow = app.session.prefs().workspace.narrow_options_bar();
     egui::Panel::top("options_bar")
@@ -1865,10 +1886,14 @@ pub fn request_dock_width(ctx: &egui::Context, w: f32) {
 
 fn dock_panels(app: &mut PhotocraftApp, ui: &mut egui::Ui, p: &crate::state::Panels, t: &Tokens) {
     use crate::dock::Group;
-    // Floating in Studio, Properties docks only in Pro (Photoshop).
+    // The UV controls stay docked in Studio too; ordinary Properties retain its layout.
+    #[cfg(feature = "uv-workbench")]
+    let uv_docked = app.ui.workspace == "3D" && matches!(app.ui.dock_tabs.properties, 2 | 3);
+    #[cfg(not(feature = "uv-workbench"))]
+    let uv_docked = false;
     let shown: Vec<Group> = [
         (Group::Color, p.color),
-        (Group::Properties, t.pro && p.properties),
+        (Group::Properties, (t.pro || uv_docked) && p.properties),
         (Group::Character, p.character),
         (Group::Navigator, p.navigator),
         (Group::History, p.history),
@@ -1913,6 +1938,10 @@ pub(crate) fn dock_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, group: crate
         (Group::Color, _) if pro => crate::swatches_ui::panel(app, ui),
         (Group::Color, 0) => crate::swatches_ui::panel(app, ui),
         (Group::Color, _) => color_picker(app, ui),
+        #[cfg(feature = "uv-workbench")]
+        (Group::Properties, 2) => crate::uv_ui::panel(app, ui),
+        #[cfg(feature = "uv-workbench")]
+        (Group::Properties, 3) => crate::uv_library::panel(app, ui),
         (Group::Properties, 0) => properties_body(app, ui),
         (Group::Properties, _) => adjustments_grid(app, ui),
         (Group::Character, tab) => crate::type_tool::character_panel(app, ui, tab == 1),
@@ -2649,6 +2678,10 @@ fn opacity_row_layout(available: f32, label_width: f32, gap: f32) -> (f32, bool)
 }
 
 fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    #[cfg(feature = "uv-workbench")]
+    if crate::uv_library::layers_drop(app, ui) {
+        ui.disable();
+    }
     // A new active layer opens its parent groups and is scrolled into view (#152).
     let reveal = crate::layer_reveal::track(app, ui.ctx());
     let Some(st) = app.session.active() else {
@@ -3932,6 +3965,10 @@ fn snapshot_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, selected: Option<u6
 /// tabs: Properties (`properties_body`: document, layer, adjustment and mask properties) and
 /// Adjustments (`adjustments_grid`).
 pub fn properties_window(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    #[cfg(feature = "uv-workbench")]
+    if app.ui.workspace == "3D" && matches!(app.ui.dock_tabs.properties, 2 | 3) {
+        return;
+    }
     if app.ui.docking.is_some() {
         return;
     }
@@ -3962,7 +3999,7 @@ pub fn properties_window(app: &mut PhotocraftApp, ctx: &egui::Context) {
             ui.set_width(width - 28.0);
             // Properties | Adjustments, as on the docked group (#7265).
             let group = crate::dock::Group::Properties;
-            let visible = app.ui.dock.visible_tabs(group, false);
+            let visible = crate::dock::visible_tabs(app, group, false);
             let indices: Vec<usize> = visible.iter().map(|(i, _)| *i).collect();
             let tabs: Vec<&str> = visible.iter().map(|(_, name)| *name).collect();
             let mut sel = indices.iter().position(|i| *i == app.ui.dock_tabs.properties).unwrap_or(0);

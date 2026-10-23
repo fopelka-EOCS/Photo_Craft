@@ -10,6 +10,10 @@ license = "MIT OR Apache-2.0"
 rust-version = "1.95"
 
 [workspace.dependencies]
+glam = "0.33"
+fbxcel = "0.9"
+tobj = { version = "4", default-features = false }
+earcutr = "0.5"
 craft-ui = { git = "https://github.com/storytold/craft-libs", rev = "5c874d51eeb3de70e735c8ce87a59a7dedd47675", features = ["serde"] }
 # internal
 photocraft-geom = { path = "crates/geom" }
@@ -32,6 +36,7 @@ photocraft-vector = { path = "crates/vector" }
 photocraft-format = { path = "crates/format" }
 photocraft-automation = { path = "crates/automation" }
 photocraft-plugins = { path = "crates/plugins" }
+photocraft-uv = { path = "crates/uv" }
 photocraft-engine = { path = "crates/engine" }
 photocraft-ui-egui = { path = "crates/ui-egui" }
 photocraft-testkit = { path = "crates/testkit" }

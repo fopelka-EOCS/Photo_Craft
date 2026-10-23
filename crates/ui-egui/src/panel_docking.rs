@@ -14,6 +14,10 @@ const PANELS: &[(&str, &str, Group)] = &[
     ("patterns", "Patterns", Group::Color),
     ("properties", "Properties", Group::Properties),
     ("adjustments", "Adjustments", Group::Properties),
+    #[cfg(feature = "uv-workbench")]
+    ("uvWorkbench", "3D / UV", Group::Properties),
+    #[cfg(feature = "uv-workbench")]
+    ("uvImages", "Images", Group::Properties),
     ("character", "Character", Group::Character),
     ("paragraph", "Paragraph", Group::Character),
     ("navigator", "Navigator", Group::Navigator),
@@ -69,7 +73,7 @@ fn legacy_layout(app: &PhotocraftApp, all: bool) -> Layout<String> {
     let mut layout = Layout::default();
     for group in app.ui.dock.order().into_iter().rev().filter(|g| all || g.shown(&app.ui.panels)) {
         let labels = group.tabs(pro);
-        let visible = if all { group.tabs(pro).iter().copied().enumerate().collect() } else { app.ui.dock.visible_tabs(group, pro) };
+        let visible = if all { group.tabs(pro).iter().copied().enumerate().collect() } else { crate::dock::visible_tabs(app, group, pro) };
         let panels: Vec<String> = visible.iter().filter_map(|(_, label)| normalize(label).map(str::to_owned)).collect();
         if panels.is_empty() {
             continue;
@@ -114,7 +118,7 @@ fn collapsed_members(app: &PhotocraftApp, layout: &Layout<String>) -> std::colle
                 let group = panels.first().and_then(|id| PANELS.iter().find(|p| p.0 == id)).map(|p| p.2);
                 if let Some(group) = group.filter(|group| app.ui.dock.is_collapsed(*group)) {
                     let pro = matches!(app.ui.theme, crate::theme::ThemeKind::Pro | crate::theme::ThemeKind::ProMedium);
-                    let native: Vec<_> = app.ui.dock.visible_tabs(group, pro).iter().filter_map(|(_, name)| normalize(name)).collect();
+                    let native: Vec<_> = crate::dock::visible_tabs(app, group, pro).iter().filter_map(|(_, name)| normalize(name)).collect();
                     if panels.len() == native.len() && panels.iter().all(|panel| native.contains(&panel.as_str())) {
                         collapsed.extend(panels.iter().cloned());
                     }
