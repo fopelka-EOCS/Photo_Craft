@@ -70,3 +70,89 @@ fn shape_thumbnail_double_click_picks_the_fill_colour() {
     app.run("edit.undo", json!({})).unwrap();
     assert_eq!(*app.session.active().unwrap().doc, *before);
 }
+
+/// The popovers' Color Picker edits the stroke too, previews it on the canvas, and fails
+/// gracefully (never panics) when its target goes stale or its fields are garbage.
+#[test]
+fn stroke_picker_previews_commits_and_rejects_stale_or_bad_targets() {
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    app.run("file.new", json!({"width": 64, "height": 48})).unwrap();
+    let id = LayerId(
+        app.run("shape.create", json!({"rect": [8, 8, 40, 30], "fill": "#336699", "stroke": {"width": 4, "color": [1.0, 0.0, 0.0, 0.5]}})).unwrap()["layer"]
+            .as_u64()
+            .unwrap(),
+    );
+    let stroke = |app: &PhotocraftApp| match &app.session.active().unwrap().doc.layer(id).unwrap().content {
+        LayerContent::Shape(sh) => sh.stroke.clone(),
+        _ => None,
+    };
+    let dialog = open_paint(&mut app, Paint::Stroke, Some(id), false, [0.0, 0.0, 0.0, 1.0]).unwrap();
+    assert_eq!(app.ui.dialog_mut(dialog).unwrap().fields["color"], "#ff0000", "opens on the stroke colour");
+    app.ui.dialog_mut(dialog).unwrap().fields.insert("color".into(), json!("#00ff00"));
+    let (shown, _) = display_doc(&mut app, 0).unwrap();
+    let LayerContent::Shape(sh) = &shown.layer(id).unwrap().content else { panic!() };
+    assert_eq!(sh.stroke.as_ref().unwrap().paint, Fill::Solid(Color::rgba(0.0, 1.0, 0.0, 0.5)), "previewed with the stroke's alpha");
+    assert_eq!(sh.fill, fill(&app, id), "the fill is untouched");
+    crate::dialogs::confirm(&mut app, dialog).unwrap();
+    let after = stroke(&app).unwrap();
+    assert_eq!((after.paint, after.width), (Fill::Solid(Color::rgba(0.0, 1.0, 0.0, 0.5)), 4.0));
+
+    // Neither a layer nor the tool options: nothing to open.
+    assert!(open_paint(&mut app, Paint::Fill, None, false, [0.0; 4]).is_none());
+    // A deleted layer, another document, garbage fields: errors, not panics.
+    let dialog = open_paint(&mut app, Paint::Fill, Some(id), false, [0.0; 4]).unwrap();
+    let mut f = app.ui.dialog_mut(dialog).unwrap().fields.clone();
+    for (key, value) in [
+        ("__params", json!(null)),
+        ("__params", json!({"layer": "x"})),
+        ("__params", json!({"layer": 9999, "document": 0, "tool": false})),
+        ("color", json!(12)),
+    ] {
+        let mut bad = f.clone();
+        bad.insert(key.into(), value);
+        assert!(confirm(&mut app, &bad).is_err(), "{key}");
+    }
+    f.insert("color".into(), json!("#0000ff"));
+    app.run("layer.delete", json!({})).unwrap();
+    assert!(confirm(&mut app, &f).is_err(), "the layer is gone");
+    assert!(display_doc(&mut app, 0).is_none());
+}
+
+/// From the options bar without a selected shape, OK sets the next shape's colour and turns the
+/// paint on, and edits no document.
+#[test]
+fn tool_only_picker_sets_the_next_shapes_colour() {
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    app.run("file.new", json!({"width": 64, "height": 48})).unwrap();
+    app.ui.tool_options.shape_fill = false;
+    let history = app.session.active().unwrap().history.past_len();
+    let dialog = open_paint(&mut app, Paint::Fill, None, true, [0.1, 0.2, 0.3, 1.0]).unwrap();
+    assert_eq!(app.ui.dialog_mut(dialog).unwrap().fields["__label"], "Color Picker (Fill Color)");
+    app.ui.dialog_mut(dialog).unwrap().fields.insert("color".into(), json!("#ff8800"));
+    crate::dialogs::confirm(&mut app, dialog).unwrap();
+    assert!(app.ui.tool_options.shape_fill);
+    assert_eq!(color_picker_ui::hex([app.session.tools.foreground[0], app.session.tools.foreground[1], app.session.tools.foreground[2]]), "#ff8800");
+    assert_eq!(app.session.active().unwrap().history.past_len(), history);
+}
+
+/// A locked selected shape refuses the options bar's Color Picker before anything changes: the
+/// next shape's colour stays as it was, as does the document.
+#[test]
+fn locked_shape_refuses_the_options_bar_picker_without_changing_the_next_shapes_colour() {
+    for lock in ["all", "pixels"] {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 64, "height": 48})).unwrap();
+        let id = LayerId(app.run("shape.create", json!({"rect": [8, 8, 40, 30], "fill": "#336699"})).unwrap()["layer"].as_u64().unwrap());
+        app.run("layer.lockLayers", json!({lock: true})).unwrap();
+        let (fg, options) = (app.session.tools.foreground, app.ui.tool_options.clone());
+        let history = app.session.active().unwrap().history.past_len();
+        let dialog = open_paint(&mut app, Paint::Fill, Some(id), true, fg).unwrap();
+        app.ui.dialog_mut(dialog).unwrap().fields.insert("color".into(), json!("#ff8800"));
+        let f = app.ui.dialog_mut(dialog).unwrap().fields.clone();
+        assert_eq!(confirm(&mut app, &f).unwrap_err(), "shape layer is locked", "{lock}");
+        assert_eq!(app.session.tools.foreground, fg, "{lock}: the next shape's colour is unchanged");
+        assert_eq!(app.ui.tool_options, options);
+        assert_eq!(app.session.active().unwrap().history.past_len(), history);
+        assert_eq!(fill(&app, id), Some(Fill::Solid(Color::rgb(0.2, 0.4, 0.6))));
+    }
+}
