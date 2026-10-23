@@ -3978,6 +3978,34 @@ curves	Smooth	Wygładź
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Karta GPU
+
+# Contributor workflow labels
+	Canceled or failed exports leave every tab open.	Anulowany lub nieudany eksport pozostawia wszystkie karty otwarte.
+	Choose at least one valid page	Wybierz co najmniej jedną prawidłową stronę
+	Click to select pages. Shift-click selects a range.	Kliknij, aby wybrać strony. Shift-klik wybiera zakres.
+	Close exported tabs after successful export	Zamknij wyeksportowane karty po udanym eksporcie
+	Current edits are included. Each page keeps its size and resolution.	Uwzględniono bieżące zmiany. Każda strona zachowuje rozmiar i rozdzielczość.
+	Export All Tabs to PDF	Eksportuj wszystkie karty do PDF
+	Exported {count} tabs to {path}; closed {closed} tabs	Wyeksportowano {count} kart do {path}; zamknięto {closed} kart
+	Loading preview…	Ładowanie podglądu…
+	Open PDF pages	Otwórz strony PDF
+	Open all {count} pages	Otwórz wszystkie strony ({count})
+	Open selected ({count})	Otwórz zaznaczone ({count})
+	Opened {count} PDF page(s) in separate tabs	Otwarto {count} stron PDF w osobnych kartach
+	PDF import cancelled	Anulowano import PDF
+	PDF saves the visible pages with flattened layers.	PDF zapisuje widoczne strony ze spłaszczonymi warstwami.
+	Page {n}	Strona {n}
+	Page {n} — {width} × {height} in	Strona {n} — {width} × {height} cali
+	Pages open as RGB 8-bit images. PDF text and vector objects are rasterized.	Strony są otwierane jako 8-bitowe obrazy RGB. Tekst i obiekty wektorowe PDF są rasteryzowane.
+	Preview page: {width} × {height} pixels	Podgląd strony: {width} × {height} pikseli
+	Preview unavailable	Podgląd niedostępny
+	Resolution (ppi)	Rozdzielczość (ppi)
+	{count} pages • Each selected page opens in its own tab	{count} stron • Każda wybrana strona otwiera się we własnej karcie
+	{count} tabs will be combined in left-to-right tab order.	{count} kart zostanie połączonych w kolejności od lewej do prawej.
+	Drop an image, PSD or PDF anywhere to open it.	Upuść obraz, PSD lub PDF w dowolnym miejscu, aby go otworzyć.
+	Each artboard becomes one PDF page. Layers are flattened; transparency is preserved.	Każdy obszar roboczy staje się stroną PDF. Warstwy są spłaszczane; przezroczystość zostaje zachowana.
+	Export All Tabs to PDF…	Eksportuj wszystkie karty do PDF…
+
 # Actions: a step dialog holds a suspended recording (#7365)
 	Confirm or cancel the open action step dialog first	Najpierw zatwierdź lub anuluj otwarte okno kroku operacji
 	Pro Medium Gray	Pro (średni szary)

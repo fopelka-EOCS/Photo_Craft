@@ -4107,6 +4107,34 @@ cameraRaw	Dehaze	Odstranění oparu
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Adaptér GPU
+
+# Contributor workflow labels
+	Canceled or failed exports leave every tab open.	Při zrušeném nebo neúspěšném exportu zůstanou všechny karty otevřené.
+	Choose at least one valid page	Vyberte alespoň jednu platnou stránku
+	Click to select pages. Shift-click selects a range.	Kliknutím vyberte stránky. Shift-klik vybere rozsah.
+	Close exported tabs after successful export	Po úspěšném exportu zavřít exportované karty
+	Current edits are included. Each page keeps its size and resolution.	Aktuální úpravy jsou zahrnuty. Každá stránka si zachová velikost a rozlišení.
+	Export All Tabs to PDF	Exportovat všechny karty do PDF
+	Exported {count} tabs to {path}; closed {closed} tabs	Exportováno {count} karet do {path}; zavřeno {closed} karet
+	Loading preview…	Načítání náhledu…
+	Open PDF pages	Otevřít stránky PDF
+	Open all {count} pages	Otevřít všech {count} stránek
+	Open selected ({count})	Otevřít vybrané ({count})
+	Opened {count} PDF page(s) in separate tabs	Otevřeno {count} stránek PDF v samostatných kartách
+	PDF import cancelled	Import PDF zrušen
+	PDF saves the visible pages with flattened layers.	PDF ukládá viditelné stránky se sloučenými vrstvami.
+	Page {n}	Stránka {n}
+	Page {n} — {width} × {height} in	Stránka {n} — {width} × {height} palců
+	Pages open as RGB 8-bit images. PDF text and vector objects are rasterized.	Stránky se otevřou jako 8bitové obrázky RGB. Text a vektorové objekty PDF se rastrují.
+	Preview page: {width} × {height} pixels	Náhled stránky: {width} × {height} pixelů
+	Preview unavailable	Náhled není dostupný
+	Resolution (ppi)	Rozlišení (ppi)
+	{count} pages • Each selected page opens in its own tab	{count} stránek • Každá vybraná stránka se otevře ve vlastní kartě
+	{count} tabs will be combined in left-to-right tab order.	{count} karet bude spojeno v pořadí zleva doprava.
+	Drop an image, PSD or PDF anywhere to open it.	Přetáhněte sem obrázek, PSD nebo PDF a otevře se.
+	Each artboard becomes one PDF page. Layers are flattened; transparency is preserved.	Každé kreslicí plátno se stane jednou stránkou PDF. Vrstvy se sloučí; průhlednost zůstane zachována.
+	Export All Tabs to PDF…	Exportovat všechny karty do PDF…
+
 # Actions: a step dialog holds a suspended recording (#7365)
 	Confirm or cancel the open action step dialog first	Nejprve potvrďte nebo zrušte otevřený dialog kroku akce
 	Pro Medium Gray	Pro (středně šedý)

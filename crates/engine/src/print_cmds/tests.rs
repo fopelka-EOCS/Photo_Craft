@@ -121,7 +121,7 @@ fn print_dry_run_renders_a_pdf_and_reports_the_platform_backend() {
         assert_eq!(r["pdf"], out);
         let pdf = std::fs::read(&out).unwrap();
         assert!(pdf.starts_with(b"%PDF-1.4"));
-        assert!(String::from_utf8_lossy(&pdf).contains("/MediaBox [0 0 595.28 841.89]"));
+        assert!(String::from_utf8_lossy(&pdf).contains("/MediaBox [0 0 595.280000 841.890000]"));
         let (w, h, cs, data) = pdf_image(&pdf);
         assert_eq!((w, h), (300, 150));
         assert_eq!(cs, "/DeviceRGB");
@@ -548,7 +548,7 @@ fn spool_transport_streams_pdf_and_propagates_refusal() {
         assert!(out["pdf"].is_null(), "spool-only printing leaves no diagnostic PDF");
         let pdf = std::fs::read(format!("{dir}/received.pdf")).unwrap();
         assert!(pdf.starts_with(b"%PDF-1.4"));
-        assert!(String::from_utf8_lossy(&pdf).contains("/MediaBox [0 0 595.28 841.89]"));
+        assert!(String::from_utf8_lossy(&pdf).contains("/MediaBox [0 0 595.280000 841.890000]"));
         let args = std::fs::read_to_string(format!("{dir}/args")).unwrap();
         assert!(args.contains("fit-to-page=false"));
         assert!(args.contains("-n\n3\n"));
@@ -932,6 +932,17 @@ fn the_windows_pdf_check_is_a_no_op_elsewhere() {
     assert!(require_windows_pdf().is_ok());
 }
 
+#[test]
+fn printer_queries_refuse_dry_runs_before_contacting_a_backend() {
+    let mut s = Session::new();
+    for command in ["file.printers", "file.print.printers", "file.print.page"] {
+        for params in [json!({"dryRun": true}), json!({"dryRun": true, "printServer": "127.0.0.1:1", "printer": "Synthetic unavailable printer"})] {
+            let error = s.execute(command, params).unwrap_err().to_string();
+            assert!(error.contains("printer queries are unavailable in a dry run"), "{command}: {error}");
+        }
+    }
+}
+
 /// A 500 × 1000 pt document (72 ppi) on A3 (841.89 × 1190.55 pt): its height sets the fit.
 fn a3_layout(extra: Value) -> Result<PrintLayout> {
     let mut s = Session::new();
@@ -1132,20 +1143,6 @@ fn bad_bleed_is_an_error_not_a_panic() {
         let r = s.execute("file.print", json!({"dryRun": true, "send": false, "output": "", "cornerCropMarks": true, "bleed": bleed}));
         assert!(matches!(r, Err(EngineError::BadParams { .. })), "bleed {bleed}: {r:?}");
     }
-}
-
-#[test]
-fn print_strings_keep_winansi_accents_and_punctuation() {
-    assert_eq!(pdf_string("Café – résumé"), r"(Caf\351 \226 r\351sum\351)");
-    assert_eq!(pdf_string("€ ‘quote’ “double” • Œœ Šš Žž Ÿ"), r"(\200 \221quote\222 \223double\224 \225 \214\234 \212\232 \216\236 \237)");
-    assert_eq!(pdf_string("é7"), r"(\3517)", "octal escapes must have three digits before a digit");
-}
-
-#[test]
-fn print_strings_keep_pdf_delimiters_safe_and_fallback_bounded() {
-    assert_eq!(pdf_string(r"a(b)\c"), r"(a\(b\)\\c)");
-    assert_eq!(pdf_string("\n\r\t\0\u{7f}\u{81}中😀"), "(????????)");
-    assert_eq!(pdf_string(""), "()");
 }
 
 #[test]

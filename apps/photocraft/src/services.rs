@@ -21,7 +21,7 @@ const OPEN_EXTS: &[&str] = &[
     "pcraft", "pdn", "ora", "xcf", "xcfgz", "gz", "kra", "krz", "psd", "psb", "psdt", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "ico",
     "qoi", "exr", "hdr", "pbm", "pgm", "ppm", "pam", "pfm", "pcx", "dds", "xpm", "fits", "fit", "fts", "dpx", "cin", "dcm", "dicom", "dc3", "iff", "lbm",
     "ilbm", "heic", "heif", "hif", "dng", "cr2", "cr3", "nef", "nrw", "arw", "pef", "orf", "rw2", "raf", "abr", "grd", "svg", "svgz", "aco", "act", "ase",
-    "kys", "af", "afdesign", "afphoto", "afpub",
+    "kys", "af", "afdesign", "afphoto", "afpub", "pdf",
 ];
 const SVG_EXTS: &[&str] = &["svg", "svgz"];
 
@@ -40,6 +40,7 @@ fn open_filter_extensions(extensions: &[&str]) -> Vec<String> {
 /// [`OPEN_EXTS`]. An explicit SVG filter also keeps vector artwork discoverable when a native
 /// picker defaults to another filter.
 const OPEN_FILTERS: &[(&str, &[&str])] = &[
+    ("PDF", &["pdf"]),
     ("PhotoCraft", &["pcraft"]),
     ("Photoshop", &["psd", "psb", "psdt"]),
     ("Affinity", &["af", "afdesign", "afphoto", "afpub"]),
@@ -874,6 +875,13 @@ mod tests {
     /// #6337: after All Formats, every format File › Open reads has its own filter, and no filter
     /// offers an extension All Formats doesn't.
     #[test]
+    fn pdf_save_filter_is_unique_and_selected_for_pdf_names() {
+        let filters = save_filters("page.pdf");
+        assert_eq!(filters[0], ("PDF".into(), vec!["pdf".into()]));
+        assert_eq!(filters.iter().filter(|(_, exts)| exts.iter().any(|ext| ext == "pdf")).count(), 1);
+    }
+
+    #[test]
     fn every_open_format_has_its_own_filter() {
         let filters = open_filters();
         assert_eq!(filters[0], ("All Formats", open_filter_extensions(OPEN_EXTS)), "All Formats comes first");
@@ -886,7 +894,7 @@ mod tests {
         all.sort_unstable();
         assert_eq!(named, all, "the named filters cover All Formats exactly");
         let names: Vec<&str> = filters.iter().map(|(name, _)| *name).collect();
-        for name in ["Photoshop", "Affinity", "HEIF", "PNG", "JPEG", "TIFF", "Portable Bitmap", "OpenEXR", "Radiance HDR", "Paint.NET"] {
+        for name in ["PDF", "Photoshop", "Affinity", "HEIF", "PNG", "JPEG", "TIFF", "Portable Bitmap", "OpenEXR", "Radiance HDR", "Paint.NET"] {
             assert!(names.contains(&name), "{name}");
         }
     }

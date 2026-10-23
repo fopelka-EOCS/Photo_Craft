@@ -3376,6 +3376,34 @@ curves	Smooth	Haluskan
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Adaptor GPU
+
+# Contributor workflow labels
+	Canceled or failed exports leave every tab open.	Ekspor yang dibatalkan atau gagal membiarkan semua tab tetap terbuka.
+	Choose at least one valid page	Pilih setidaknya satu halaman yang valid
+	Click to select pages. Shift-click selects a range.	Klik untuk memilih halaman. Shift-klik memilih rentang.
+	Close exported tabs after successful export	Tutup tab yang diekspor setelah ekspor berhasil
+	Current edits are included. Each page keeps its size and resolution.	Perubahan saat ini disertakan. Setiap halaman mempertahankan ukuran dan resolusinya.
+	Export All Tabs to PDF	Ekspor Semua Tab ke PDF
+	Exported {count} tabs to {path}; closed {closed} tabs	Mengekspor {count} tab ke {path}; menutup {closed} tab
+	Loading preview…	Memuat pratinjau…
+	Open PDF pages	Buka halaman PDF
+	Open all {count} pages	Buka semua {count} halaman
+	Open selected ({count})	Buka yang dipilih ({count})
+	Opened {count} PDF page(s) in separate tabs	Membuka {count} halaman PDF di tab terpisah
+	PDF import cancelled	Impor PDF dibatalkan
+	PDF saves the visible pages with flattened layers.	PDF menyimpan halaman yang terlihat dengan lapisan yang diratakan.
+	Page {n}	Halaman {n}
+	Page {n} — {width} × {height} in	Halaman {n} — {width} × {height} inci
+	Pages open as RGB 8-bit images. PDF text and vector objects are rasterized.	Halaman dibuka sebagai gambar RGB 8-bit. Teks dan objek vektor PDF dirasterisasi.
+	Preview page: {width} × {height} pixels	Halaman pratinjau: {width} × {height} piksel
+	Preview unavailable	Pratinjau tidak tersedia
+	Resolution (ppi)	Resolusi (ppi)
+	{count} pages • Each selected page opens in its own tab	{count} halaman • Setiap halaman yang dipilih terbuka di tab tersendiri
+	{count} tabs will be combined in left-to-right tab order.	{count} tab akan digabungkan dalam urutan tab dari kiri ke kanan.
+	Drop an image, PSD or PDF anywhere to open it.	Jatuhkan gambar, PSD, atau PDF di mana saja untuk membukanya.
+	Each artboard becomes one PDF page. Layers are flattened; transparency is preserved.	Setiap artboard menjadi satu halaman PDF. Lapisan diratakan; transparansi dipertahankan.
+	Export All Tabs to PDF…	Ekspor Semua Tab ke PDF…
+
 # Actions: a step dialog holds a suspended recording (#7365)
 	Confirm or cancel the open action step dialog first	Konfirmasi atau batalkan dulu dialog langkah tindakan yang terbuka
 	Pro Medium Gray	Pro Abu-abu Sedang

@@ -4122,6 +4122,34 @@ curves	Smooth	Vloeiend maken
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	GPU-adapter
+
+# Contributor workflow labels
+	Canceled or failed exports leave every tab open.	Bij geannuleerde of mislukte export blijven alle tabbladen open.
+	Choose at least one valid page	Kies minstens één geldige pagina
+	Click to select pages. Shift-click selects a range.	Klik om pagina’s te selecteren. Shift-klik selecteert een bereik.
+	Close exported tabs after successful export	Geëxporteerde tabbladen sluiten na geslaagde export
+	Current edits are included. Each page keeps its size and resolution.	Huidige bewerkingen worden meegenomen. Elke pagina behoudt formaat en resolutie.
+	Export All Tabs to PDF	Alle tabbladen naar PDF exporteren
+	Exported {count} tabs to {path}; closed {closed} tabs	{count} tabbladen geëxporteerd naar {path}; {closed} tabbladen gesloten
+	Loading preview…	Voorbeeld laden…
+	Open PDF pages	PDF-pagina’s openen
+	Open all {count} pages	Alle {count} pagina’s openen
+	Open selected ({count})	Selectie openen ({count})
+	Opened {count} PDF page(s) in separate tabs	{count} PDF-pagina’s geopend in afzonderlijke tabbladen
+	PDF import cancelled	PDF-import geannuleerd
+	PDF saves the visible pages with flattened layers.	PDF slaat de zichtbare pagina’s op met samengevoegde lagen.
+	Page {n}	Pagina {n}
+	Page {n} — {width} × {height} in	Pagina {n} — {width} × {height} inch
+	Pages open as RGB 8-bit images. PDF text and vector objects are rasterized.	Pagina’s openen als 8-bits RGB-afbeeldingen. PDF-tekst en vectorobjecten worden gerasterd.
+	Preview page: {width} × {height} pixels	Voorbeeldpagina: {width} × {height} pixels
+	Preview unavailable	Voorbeeld niet beschikbaar
+	Resolution (ppi)	Resolutie (ppi)
+	{count} pages • Each selected page opens in its own tab	{count} pagina’s • Elke geselecteerde pagina opent in een eigen tabblad
+	{count} tabs will be combined in left-to-right tab order.	{count} tabbladen worden van links naar rechts samengevoegd.
+	Drop an image, PSD or PDF anywhere to open it.	Sleep een afbeelding, PSD of PDF ergens naartoe om deze te openen.
+	Each artboard becomes one PDF page. Layers are flattened; transparency is preserved.	Elk tekengebied wordt één PDF-pagina. Lagen worden samengevoegd; transparantie blijft behouden.
+	Export All Tabs to PDF…	Alle tabbladen naar PDF exporteren…
+
 # Actions: a step dialog holds a suspended recording (#7365)
 	Confirm or cancel the open action step dialog first	Bevestig of annuleer eerst het geopende dialoogvenster van de handelingsstap
 	Pro Medium Gray	Pro middelgrijs

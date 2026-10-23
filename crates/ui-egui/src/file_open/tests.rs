@@ -445,6 +445,21 @@ fn app_with_canvas() -> PhotocraftApp {
     app
 }
 
+#[test]
+fn pdf_drop_on_canvas_waits_for_page_selection_instead_of_placing_pages() {
+    let ctx = egui::Context::default();
+    let mut app = app_with_canvas();
+    let bytes = photocraft_io::export(&app.session.active().unwrap().doc, "pdf", &photocraft_io::ExportOptions::default()).unwrap().bytes;
+    app.open_dropped(&ctx, vec![dropped("pages.PDF", Ok(bytes))], Some(egui::pos2(400.0, 300.0)));
+    assert_eq!(app.session.documents().len(), 1);
+    assert_eq!(app.pending_pdf_pages(), Some(1));
+    assert!(app.drop_places.is_empty());
+    app.open_pdf_pages(&[0]).unwrap();
+    assert_eq!(app.session.documents().len(), 2);
+    assert!(app.session.active().unwrap().source_read_only);
+    assert!(app.session.active().unwrap().path.is_none());
+}
+
 fn layer_count(app: &PhotocraftApp) -> usize {
     app.session.active().unwrap().doc.layers.len()
 }
@@ -1091,5 +1106,68 @@ fn opening_an_open_file_again_shows_its_tab() {
     assert_eq!(app.jobs.opens.len(), 3, "two Untitleds from the template");
     for d in [dir, dir2, dir3, dir4] {
         let _ = std::fs::remove_dir_all(&d);
+    }
+}
+
+#[test]
+fn automation_pdf_save_never_reuses_the_original_source_path() {
+    for (path, bytes) in [("/pics/source.PDF", b"synthetic".as_slice()), ("/pics/renamed.psd", b"%PDF-1.7".as_slice())] {
+        let (mut app, written) = app_with(vec![None]);
+        app.open_automation_bytes(&display_name(path), bytes).unwrap();
+        app.opened_from(path);
+        assert!(app.session.active().unwrap().source_read_only);
+        assert!(app.session.active().unwrap().path.is_none());
+        let result = menus::invoke(&mut app, &egui::Context::default(), "file.save", json!({})).unwrap();
+        assert_eq!(result, json!({"fileDialog": "save"}));
+        answer(&mut app);
+        assert!(written.borrow().is_empty());
+    }
+}
+
+/// A selected PDF page group stays together at the requested tab slot in either import mode.
+#[test]
+fn pdf_selected_pages_drop_as_an_ordered_tab_group() {
+    let mut source = photocraft_engine::Session::new();
+    for color in ["#ff0000", "#00ff00", "#0000ff"] {
+        source.execute("file.new", json!({"width": 8, "height": 8, "background": color})).unwrap();
+    }
+    let docs: Vec<_> = source.documents().iter().map(|s| s.doc.as_ref()).collect();
+    let bytes = photocraft_io::pdf::export_pdf_documents(&docs, &Default::default()).unwrap().bytes;
+    for background in [false, true] {
+        for slot in 0..=2 {
+            let (mut app, _) = app_with(Vec::new());
+            app.open_bytes("before.psd", b"x").unwrap();
+            app.open_bytes("after.psd", b"x").unwrap();
+            app.ui.views[0].zoom = 2.0;
+            app.ui.views[1].zoom = 3.0;
+            let originals: Vec<_> = app.session.documents().iter().map(|s| std::sync::Arc::clone(&s.doc)).collect();
+            app.background_jobs = background;
+            let strip = egui::Rect::from_min_max(egui::pos2(90.0, 14.0), egui::pos2(700.0, 50.0));
+            let tabs = (0..2).map(|i| (i, egui::Rect::from_min_size(egui::pos2(100.0 + i as f32 * 104.0, 20.0), egui::vec2(100.0, 26.0)))).collect();
+            app.tab_strip = Some(crate::canvas::TabStrip { rect: strip, tabs });
+            let ctx = egui::Context::default();
+            app.open_dropped(&ctx, vec![dropped("pages.pdf", Ok(bytes.clone()))], Some(egui::pos2(110.0 + slot as f32 * 104.0, 30.0)));
+            assert_eq!(app.pending_pdf_pages(), Some(3));
+            assert_eq!(app.session.documents().len(), 2, "the picker must not create tabs");
+            app.open_pdf_pages(&[0, 2]).unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+            while !app.jobs.opens.is_empty() && std::time::Instant::now() < deadline {
+                crate::jobs_ui::tick(&mut app, &ctx);
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            assert!(app.jobs.opens.is_empty(), "background import timed out");
+            let mut expected = vec!["before.psd", "after.psd"];
+            expected.splice(slot..slot, ["pages - Page 1.pdf", "pages - Page 3.pdf"]);
+            assert_eq!(doc_names(&app), expected, "background={background}, slot={slot}");
+            assert_eq!(app.session.active_index(), Some(slot));
+            for st in &app.session.documents()[slot..slot + 2] {
+                assert!(st.source_read_only && st.path.is_none());
+            }
+            for (i, original) in originals.iter().enumerate() {
+                let at = app.session.documents().iter().position(|s| s.doc.id == original.id).unwrap();
+                assert!(std::sync::Arc::ptr_eq(original, &app.session.documents()[at].doc));
+                assert_eq!(app.ui.views[at].zoom, 2.0 + i as f32);
+            }
+        }
     }
 }

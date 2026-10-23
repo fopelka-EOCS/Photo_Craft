@@ -4479,6 +4479,34 @@ shape	Appearance	Aspetto
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Adattatore GPU
+
+# Contributor workflow labels
+	Canceled or failed exports leave every tab open.	Le esportazioni annullate o non riuscite lasciano aperte tutte le schede.
+	Choose at least one valid page	Scegli almeno una pagina valida
+	Click to select pages. Shift-click selects a range.	Fai clic per selezionare le pagine. Maiusc-clic seleziona un intervallo.
+	Close exported tabs after successful export	Chiudi le schede esportate dopo un’esportazione riuscita
+	Current edits are included. Each page keeps its size and resolution.	Sono incluse le modifiche attuali. Ogni pagina mantiene dimensioni e risoluzione.
+	Export All Tabs to PDF	Esporta tutte le schede in PDF
+	Exported {count} tabs to {path}; closed {closed} tabs	{count} schede esportate in {path}; {closed} schede chiuse
+	Loading preview…	Caricamento anteprima…
+	Open PDF pages	Apri pagine PDF
+	Open all {count} pages	Apri tutte le {count} pagine
+	Open selected ({count})	Apri selezione ({count})
+	Opened {count} PDF page(s) in separate tabs	{count} pagine PDF aperte in schede separate
+	PDF import cancelled	Importazione PDF annullata
+	PDF saves the visible pages with flattened layers.	Il PDF salva le pagine visibili con i livelli uniti.
+	Page {n}	Pagina {n}
+	Page {n} — {width} × {height} in	Pagina {n} — {width} × {height} pollici
+	Pages open as RGB 8-bit images. PDF text and vector objects are rasterized.	Le pagine si aprono come immagini RGB a 8 bit. Testo e oggetti vettoriali PDF vengono rasterizzati.
+	Preview page: {width} × {height} pixels	Pagina di anteprima: {width} × {height} pixel
+	Preview unavailable	Anteprima non disponibile
+	Resolution (ppi)	Risoluzione (ppi)
+	{count} pages • Each selected page opens in its own tab	{count} pagine • Ogni pagina selezionata si apre nella propria scheda
+	{count} tabs will be combined in left-to-right tab order.	{count} schede verranno combinate nel loro ordine da sinistra a destra.
+	Drop an image, PSD or PDF anywhere to open it.	Trascina un’immagine, PSD o PDF ovunque per aprirlo.
+	Each artboard becomes one PDF page. Layers are flattened; transparency is preserved.	Ogni tavola da disegno diventa una pagina PDF. I livelli vengono uniti; la trasparenza viene mantenuta.
+	Export All Tabs to PDF…	Esporta tutte le schede in PDF…
+
 # Actions: a step dialog holds a suspended recording (#7365)
 	Confirm or cancel the open action step dialog first	Conferma o annulla prima la finestra di dialogo aperta del passo dell’azione
 	Pro Medium Gray	Pro grigio medio

@@ -3843,6 +3843,34 @@ curves	Smooth	Сгладить
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Адаптер GPU
+
+# Contributor workflow labels
+	Canceled or failed exports leave every tab open.	При отмене или ошибке экспорта все вкладки остаются открытыми.
+	Choose at least one valid page	Выберите хотя бы одну допустимую страницу
+	Click to select pages. Shift-click selects a range.	Щёлкните для выбора страниц. Shift-щелчок выбирает диапазон.
+	Close exported tabs after successful export	Закрыть экспортированные вкладки после успешного экспорта
+	Current edits are included. Each page keeps its size and resolution.	Текущие изменения включены. Каждая страница сохраняет размер и разрешение.
+	Export All Tabs to PDF	Экспортировать все вкладки в PDF
+	Exported {count} tabs to {path}; closed {closed} tabs	Экспортировано {count} вкладок в {path}; закрыто {closed} вкладок
+	Loading preview…	Загрузка предпросмотра…
+	Open PDF pages	Открыть страницы PDF
+	Open all {count} pages	Открыть все страницы ({count})
+	Open selected ({count})	Открыть выбранные ({count})
+	Opened {count} PDF page(s) in separate tabs	Открыто {count} страниц PDF в отдельных вкладках
+	PDF import cancelled	Импорт PDF отменён
+	PDF saves the visible pages with flattened layers.	PDF сохраняет видимые страницы со сведёнными слоями.
+	Page {n}	Страница {n}
+	Page {n} — {width} × {height} in	Страница {n} — {width} × {height} дюймов
+	Pages open as RGB 8-bit images. PDF text and vector objects are rasterized.	Страницы открываются как 8-битные изображения RGB. Текст и векторные объекты PDF растрируются.
+	Preview page: {width} × {height} pixels	Предпросмотр страницы: {width} × {height} пикселей
+	Preview unavailable	Предпросмотр недоступен
+	Resolution (ppi)	Разрешение (ppi)
+	{count} pages • Each selected page opens in its own tab	{count} страниц • Каждая выбранная страница открывается в отдельной вкладке
+	{count} tabs will be combined in left-to-right tab order.	{count} вкладок будут объединены в порядке слева направо.
+	Drop an image, PSD or PDF anywhere to open it.	Перетащите изображение, PSD или PDF в любое место окна, чтобы открыть.
+	Each artboard becomes one PDF page. Layers are flattened; transparency is preserved.	Каждая монтажная область становится страницей PDF. Слои объединяются; прозрачность сохраняется.
+	Export All Tabs to PDF…	Экспортировать все вкладки в PDF…
+
 # Actions: a step dialog holds a suspended recording (#7365)
 	Confirm or cancel the open action step dialog first	Сначала подтвердите или отмените открытый диалог шага операции
 	Pro Medium Gray	Средне-серая Pro

@@ -3373,6 +3373,34 @@ curves	Smooth	Glätten
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	GPU-Adapter
+
+# Contributor workflow labels
+	Canceled or failed exports leave every tab open.	Bei abgebrochenem oder fehlgeschlagenem Export bleiben alle Tabs offen.
+	Choose at least one valid page	Wählen Sie mindestens eine gültige Seite
+	Click to select pages. Shift-click selects a range.	Klicken Sie zum Auswählen. Umschalt-Klick wählt einen Bereich.
+	Close exported tabs after successful export	Exportierte Tabs nach erfolgreichem Export schließen
+	Current edits are included. Each page keeps its size and resolution.	Aktuelle Änderungen sind enthalten. Jede Seite behält Größe und Auflösung.
+	Export All Tabs to PDF	Alle Tabs als PDF exportieren
+	Exported {count} tabs to {path}; closed {closed} tabs	{count} Tabs nach {path} exportiert; {closed} Tabs geschlossen
+	Loading preview…	Vorschau wird geladen…
+	Open PDF pages	PDF-Seiten öffnen
+	Open all {count} pages	Alle {count} Seiten öffnen
+	Open selected ({count})	Auswahl öffnen ({count})
+	Opened {count} PDF page(s) in separate tabs	{count} PDF-Seite(n) in separaten Tabs geöffnet
+	PDF import cancelled	PDF-Import abgebrochen
+	PDF saves the visible pages with flattened layers.	PDF speichert die sichtbaren Seiten mit zusammengefassten Ebenen.
+	Page {n}	Seite {n}
+	Page {n} — {width} × {height} in	Seite {n} — {width} × {height} Zoll
+	Pages open as RGB 8-bit images. PDF text and vector objects are rasterized.	Seiten werden als 8-Bit-RGB-Bilder geöffnet. PDF-Text und Vektorobjekte werden gerastert.
+	Preview page: {width} × {height} pixels	Vorschauseite: {width} × {height} Pixel
+	Preview unavailable	Vorschau nicht verfügbar
+	Resolution (ppi)	Auflösung (ppi)
+	{count} pages • Each selected page opens in its own tab	{count} Seiten • Jede ausgewählte Seite öffnet sich in einem eigenen Tab
+	{count} tabs will be combined in left-to-right tab order.	{count} Tabs werden in ihrer Reihenfolge von links nach rechts zusammengeführt.
+	Drop an image, PSD or PDF anywhere to open it.	Ziehe ein Bild, PSD oder PDF an eine beliebige Stelle, um es zu öffnen.
+	Each artboard becomes one PDF page. Layers are flattened; transparency is preserved.	Jede Zeichenfläche wird zu einer PDF-Seite. Ebenen werden zusammengeführt; Transparenz bleibt erhalten.
+	Export All Tabs to PDF…	Alle Tabs als PDF exportieren…
+
 # Actions: a step dialog holds a suspended recording (#7365)
 	Confirm or cancel the open action step dialog first	Bestätige oder brich zuerst den offenen Dialog des Aktionsschritts ab
 	Pro Medium Gray	Pro (Mittelgrau)

@@ -4062,6 +4062,34 @@ curves	Smooth	Εξομάλυνση
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Προσαρμογέας GPU
+
+# Contributor workflow labels
+	Canceled or failed exports leave every tab open.	Οι ακυρωμένες ή αποτυχημένες εξαγωγές αφήνουν όλες τις καρτέλες ανοιχτές.
+	Choose at least one valid page	Επιλέξτε τουλάχιστον μία έγκυρη σελίδα
+	Click to select pages. Shift-click selects a range.	Κάντε κλικ για επιλογή σελίδων. Το Shift-κλικ επιλέγει εύρος.
+	Close exported tabs after successful export	Κλείσιμο των εξαγόμενων καρτελών μετά από επιτυχή εξαγωγή
+	Current edits are included. Each page keeps its size and resolution.	Περιλαμβάνονται οι τρέχουσες αλλαγές. Κάθε σελίδα διατηρεί μέγεθος και ανάλυση.
+	Export All Tabs to PDF	Εξαγωγή όλων των καρτελών σε PDF
+	Exported {count} tabs to {path}; closed {closed} tabs	Εξήχθησαν {count} καρτέλες στο {path}· έκλεισαν {closed} καρτέλες
+	Loading preview…	Φόρτωση προεπισκόπησης…
+	Open PDF pages	Άνοιγμα σελίδων PDF
+	Open all {count} pages	Άνοιγμα και των {count} σελίδων
+	Open selected ({count})	Άνοιγμα επιλεγμένων ({count})
+	Opened {count} PDF page(s) in separate tabs	Άνοιξαν {count} σελίδες PDF σε ξεχωριστές καρτέλες
+	PDF import cancelled	Η εισαγωγή PDF ακυρώθηκε
+	PDF saves the visible pages with flattened layers.	Το PDF αποθηκεύει τις ορατές σελίδες με συγχωνευμένες στρώσεις.
+	Page {n}	Σελίδα {n}
+	Page {n} — {width} × {height} in	Σελίδα {n} — {width} × {height} ίντσες
+	Pages open as RGB 8-bit images. PDF text and vector objects are rasterized.	Οι σελίδες ανοίγουν ως εικόνες RGB 8 bit. Το κείμενο και τα διανυσματικά αντικείμενα PDF γίνονται εικόνες ράστερ.
+	Preview page: {width} × {height} pixels	Σελίδα προεπισκόπησης: {width} × {height} εικονοστοιχεία
+	Preview unavailable	Η προεπισκόπηση δεν είναι διαθέσιμη
+	Resolution (ppi)	Ανάλυση (ppi)
+	{count} pages • Each selected page opens in its own tab	{count} σελίδες • Κάθε επιλεγμένη σελίδα ανοίγει στη δική της καρτέλα
+	{count} tabs will be combined in left-to-right tab order.	Θα συνδυαστούν {count} καρτέλες με τη σειρά τους από αριστερά προς τα δεξιά.
+	Drop an image, PSD or PDF anywhere to open it.	Σύρετε μια εικόνα, PSD ή PDF εδώ για να το ανοίξετε.
+	Each artboard becomes one PDF page. Layers are flattened; transparency is preserved.	Κάθε πίνακας γραφικών γίνεται μία σελίδα PDF. Τα επίπεδα συγχωνεύονται· η διαφάνεια διατηρείται.
+	Export All Tabs to PDF…	Εξαγωγή όλων των καρτελών σε PDF…
+
 # Actions: a step dialog holds a suspended recording (#7365)
 	Confirm or cancel the open action step dialog first	Επιβεβαιώστε ή ακυρώστε πρώτα το ανοιχτό παράθυρο βήματος της ενέργειας
 	Pro Medium Gray	Pro μεσαίου γκρι

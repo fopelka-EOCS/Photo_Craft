@@ -4152,6 +4152,34 @@ layerLabel	No Color	Sem cor
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Adaptador de GPU
+
+# Contributor workflow labels
+	Canceled or failed exports leave every tab open.	Exportações canceladas ou com falha mantêm todas as abas abertas.
+	Choose at least one valid page	Escolha pelo menos uma página válida
+	Click to select pages. Shift-click selects a range.	Clique para selecionar páginas. Shift-clique seleciona um intervalo.
+	Close exported tabs after successful export	Fechar as abas exportadas após a exportação bem-sucedida
+	Current edits are included. Each page keeps its size and resolution.	As edições atuais são incluídas. Cada página mantém seu tamanho e resolução.
+	Export All Tabs to PDF	Exportar todas as abas para PDF
+	Exported {count} tabs to {path}; closed {closed} tabs	{count} abas exportadas para {path}; {closed} abas fechadas
+	Loading preview…	Carregando prévia…
+	Open PDF pages	Abrir páginas PDF
+	Open all {count} pages	Abrir todas as {count} páginas
+	Open selected ({count})	Abrir selecionadas ({count})
+	Opened {count} PDF page(s) in separate tabs	{count} página(s) PDF aberta(s) em abas separadas
+	PDF import cancelled	Importação de PDF cancelada
+	PDF saves the visible pages with flattened layers.	O PDF salva as páginas visíveis com as camadas achatadas.
+	Page {n}	Página {n}
+	Page {n} — {width} × {height} in	Página {n} — {width} × {height} pol.
+	Pages open as RGB 8-bit images. PDF text and vector objects are rasterized.	As páginas abrem como imagens RGB de 8 bits. O texto e os objetos vetoriais do PDF são rasterizados.
+	Preview page: {width} × {height} pixels	Página de prévia: {width} × {height} pixels
+	Preview unavailable	Prévia indisponível
+	Resolution (ppi)	Resolução (ppi)
+	{count} pages • Each selected page opens in its own tab	{count} páginas • Cada página selecionada abre em sua própria aba
+	{count} tabs will be combined in left-to-right tab order.	{count} abas serão combinadas na ordem da esquerda para a direita.
+	Drop an image, PSD or PDF anywhere to open it.	Solte uma imagem, PSD ou PDF em qualquer lugar para abri-lo.
+	Each artboard becomes one PDF page. Layers are flattened; transparency is preserved.	Cada prancheta se torna uma página PDF. As camadas são achatadas; a transparência é preservada.
+	Export All Tabs to PDF…	Exportar todas as abas para PDF…
+
 # Actions: a step dialog holds a suspended recording (#7365)
 	Confirm or cancel the open action step dialog first	Confirme ou cancele primeiro a caixa de diálogo aberta da etapa da ação
 

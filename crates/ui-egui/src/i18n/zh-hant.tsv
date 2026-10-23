@@ -2985,6 +2985,34 @@ curves	Smooth	平滑
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	GPU 介面卡
+
+# Contributor workflow labels
+	Canceled or failed exports leave every tab open.	取消或失敗的匯出會保留所有開啟的分頁。
+	Choose at least one valid page	請至少選取一個有效頁面
+	Click to select pages. Shift-click selects a range.	按一下以選取頁面。按住 Shift 再按一下可選取範圍。
+	Close exported tabs after successful export	匯出成功後關閉已匯出的分頁
+	Current edits are included. Each page keeps its size and resolution.	包含目前的編輯內容。每頁保留原有大小和解析度。
+	Export All Tabs to PDF	將所有分頁匯出為 PDF
+	Exported {count} tabs to {path}; closed {closed} tabs	已將 {count} 個分頁匯出至 {path}；已關閉 {closed} 個分頁
+	Loading preview…	正在載入預覽…
+	Open PDF pages	開啟 PDF 頁面
+	Open all {count} pages	開啟全部 {count} 頁
+	Open selected ({count})	開啟所選頁面（{count}）
+	Opened {count} PDF page(s) in separate tabs	已在個別分頁中開啟 {count} 個 PDF 頁面
+	PDF import cancelled	已取消 PDF 匯入
+	PDF saves the visible pages with flattened layers.	PDF 會將可見頁面儲存為合併圖層後的內容。
+	Page {n}	第 {n} 頁
+	Page {n} — {width} × {height} in	第 {n} 頁 — {width} × {height} 英吋
+	Pages open as RGB 8-bit images. PDF text and vector objects are rasterized.	頁面以 RGB 8 位元影像開啟。PDF 文字和向量物件會被點陣化。
+	Preview page: {width} × {height} pixels	預覽頁面：{width} × {height} 像素
+	Preview unavailable	無法使用預覽
+	Resolution (ppi)	解析度（ppi）
+	{count} pages • Each selected page opens in its own tab	共 {count} 頁 • 每個所選頁面會在個別分頁中開啟
+	{count} tabs will be combined in left-to-right tab order.	將依從左到右的分頁順序合併 {count} 個分頁。
+	Drop an image, PSD or PDF anywhere to open it.	將影像、PSD 或 PDF 拖放到任何位置即可開啟。
+	Each artboard becomes one PDF page. Layers are flattened; transparency is preserved.	每個工作區域會成為一頁 PDF。圖層會合併，透明度會保留。
+	Export All Tabs to PDF…	將所有分頁匯出為 PDF…
+
 # Actions: a step dialog holds a suspended recording (#7365)
 	Confirm or cancel the open action step dialog first	請先確認或取消開啟中的動作步驟對話框
 	Pro Medium Gray	專業中灰

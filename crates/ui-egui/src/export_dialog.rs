@@ -15,7 +15,7 @@ use crate::state::DialogKind;
 use crate::theme::Tokens;
 use crate::{ExportSettings, PhotocraftApp};
 
-const FORMATS: [(&str, &str); 6] = [("png", "PNG"), ("jpg", "JPG"), ("webp", "WebP"), ("tif", "TIFF"), ("tga", "TGA"), ("ico", "ICO")];
+const FORMATS: [(&str, &str); 7] = [("png", "PNG"), ("jpg", "JPG"), ("webp", "WebP"), ("tif", "TIFF"), ("tga", "TGA"), ("ico", "ICO"), ("pdf", "PDF")];
 
 /// Preferences ▸ remembered dialog settings: Export As writes the settings it was used with
 /// last under its command id and seeds the next dialog from them, as Fill, Liquify and the
@@ -121,6 +121,18 @@ pub fn open(app: &mut PhotocraftApp) -> Result<u64, String> {
         f.insert("sizing".into(), json!("scale"));
     }
     Ok(app.ui.open_dialog(DialogKind::Command, f))
+}
+
+/// Combined PDF export has a fixed format and full-size pages.
+pub fn open_all_pdf(app: &mut PhotocraftApp) -> Result<u64, String> {
+    let id = open(app)?;
+    if let Some(d) = app.ui.dialogs.iter_mut().find(|d| d.id == id) {
+        d.fields.insert("__all_pdf".into(), json!(true));
+        d.fields.insert("__label".into(), json!(tl!("Export All Tabs to PDF")));
+        d.fields.insert("format".into(), json!("pdf"));
+        d.fields.insert("closeAfter".into(), json!(false));
+    }
+    Ok(id)
 }
 
 /// Layer › Export As…: the same dialog for just the active layer (trimmed to its pixels).
@@ -300,7 +312,7 @@ fn export_document(doc: &Document, f: &Map<String, Value>, max_side: Option<u32>
         session.execute("image.imageSize", json!({"width": w, "height": h, "resample": resample})).map_err(|e| e.to_string())?;
     }
     let fmt = s_fmt(f);
-    if !f.get("transparency").and_then(Value::as_bool).unwrap_or(true) || fmt == "jpg" {
+    if fmt != "pdf" && (!f.get("transparency").and_then(Value::as_bool).unwrap_or(true) || fmt == "jpg") {
         session.execute("layer.flattenImage", json!({})).map_err(|e| e.to_string())?;
     }
     session.active().map(|d| (*d.doc).clone()).ok_or_else(|| "export failed".into())
@@ -848,6 +860,25 @@ fn preset_fields(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String,
 
 pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     let t = Tokens::get(ui.ctx());
+    if f.get("__all_pdf").and_then(Value::as_bool) == Some(true) {
+        ui.set_width(460.0);
+        ui.label(crate::i18n::fmt(tl!("{count} tabs will be combined in left-to-right tab order."), &[("count", &app.session.documents().len().to_string())]));
+        ui.label(tl!("Current edits are included. Each page keeps its size and resolution."));
+        egui::ScrollArea::vertical().max_height(190.0).show(ui, |ui| {
+            for (i, st) in app.session.documents().iter().enumerate() {
+                ui.label(format!("{}. {}", i + 1, st.doc.name));
+            }
+        });
+        ui.add_space(10.0);
+        let mut close = f.get("closeAfter").and_then(Value::as_bool).unwrap_or(false) && !app.services.write_unconfirmed;
+        if !app.services.write_unconfirmed {
+            crate::widgets::checkbox(ui, &mut close, tl!("Close exported tabs after successful export"));
+        }
+        f.insert("closeAfter".into(), json!(close));
+        ui.label(tl!("Canceled or failed exports leave every tab open."));
+        ui.label(egui::RichText::new(tl!("PDF saves the visible pages with flattened layers.")).color(t.text_dim));
+        return;
+    }
     let Some(doc) = app.session.active().map(|s| s.doc.clone()) else { return };
     ui.horizontal_top(|ui| {
         // Left: settings.
@@ -873,6 +904,13 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
                 crate::widgets::slider_row(ui, tl!("Quality"), &mut q, 1.0..=100.0, "%", None);
                 f.insert("quality".into(), json!(q.round()));
             }
+            if fmt == "pdf" {
+                ui.label(
+                    egui::RichText::new(tl!("Each artboard becomes one PDF page. Layers are flattened; transparency is preserved."))
+                        .color(t.text_dim)
+                        .size(11.5),
+                );
+            }
             if fmt == "tga" {
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new(tl!("Resolution")).color(t.text_dim));
@@ -884,7 +922,7 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
                     }
                 });
             }
-            if fmt != "jpg" {
+            if fmt != "jpg" && fmt != "pdf" {
                 let mut tr = f.get("transparency").and_then(Value::as_bool).unwrap_or(true);
                 crate::widgets::checkbox(ui, &mut tr, tl!("Transparency"));
                 f.insert("transparency".into(), json!(tr));
@@ -991,6 +1029,22 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
 
 /// Export with the dialog's settings: choose a path, render, encode, write.
 pub fn confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value, String> {
+    if f.get("__all_pdf").and_then(Value::as_bool) == Some(true) {
+        let snapshot = photocraft_engine::pdf_export_cmds::Snapshot::capture(&app.session).map_err(|e| e.to_string())?;
+        let close = f.get("closeAfter").and_then(Value::as_bool).unwrap_or(false);
+        return app.pick_save("Combined-pages.pdf", move |app, path| {
+            // A browser download can still be cancelled after its writer returns.
+            let close = close && !app.services.write_unconfirmed;
+            let write = app.services.write.as_mut().ok_or("no writer configured")?;
+            let result = snapshot.write(&mut app.session, &path, close, |path, bytes| write(path, bytes)).map_err(|e| e.to_string())?;
+            app.ui.status = crate::i18n::fmt(
+                tl!("Exported {count} tabs to {path}; closed {closed} tabs"),
+                &[("count", &result["tabs"].to_string()), ("path", &path), ("closed", &result["closed"].to_string())],
+            );
+            app.ui.status_error = false;
+            Ok(result)
+        });
+    }
     remember(app, f);
     if let Some(layers) = f.get("__layers").and_then(Value::as_array) {
         let ids: Vec<_> = layers.iter().filter_map(Value::as_u64).map(photocraft_doc::LayerId).collect();

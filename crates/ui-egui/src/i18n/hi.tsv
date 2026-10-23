@@ -534,3 +534,30 @@ cameraRaw	Yellow	पीला
 	Missing delete command	हटाने का कमांड नहीं मिला
 	Invalid delete command	हटाने का कमांड अमान्य है
 	Layer deleted, but confirmation preference could not be saved: {error}	लेयर हटा दी गई, लेकिन पुष्टि की प्राथमिकता सहेजी नहीं जा सकी: {error}
+
+# Contributor-original AI-assisted PDF workflow labels; native-language review pending.
+	Canceled or failed exports leave every tab open.	रद्द या विफल निर्यात के बाद सभी टैब खुले रहते हैं।
+	Choose at least one valid page	कम से कम एक मान्य पृष्ठ चुनें
+	Click to select pages. Shift-click selects a range.	पृष्ठ चुनने के लिए क्लिक करें। पृष्ठों की श्रेणी चुनने के लिए Shift-क्लिक करें।
+	Close exported tabs after successful export	सफल निर्यात के बाद निर्यात किए गए टैब बंद करें
+	Current edits are included. Each page keeps its size and resolution.	वर्तमान संपादन शामिल हैं। हर पृष्ठ का आकार और रिज़ॉल्यूशन बना रहता है।
+	Export All Tabs to PDF	सभी टैब PDF में निर्यात करें
+	Exported {count} tabs to {path}; closed {closed} tabs	{path} में {count} टैब निर्यात किए; {closed} टैब बंद किए
+	Loading preview…	पूर्वावलोकन लोड हो रहा है…
+	Open PDF pages	PDF पृष्ठ खोलें
+	Open all {count} pages	सभी {count} पृष्ठ खोलें
+	Open selected ({count})	चुने हुए खोलें ({count})
+	Opened {count} PDF page(s) in separate tabs	अलग-अलग टैब में {count} PDF पृष्ठ खोले गए
+	PDF import cancelled	PDF आयात रद्द किया गया
+	PDF saves the visible pages with flattened layers.	PDF दृश्य पृष्ठों को एकीकृत परतों के साथ सहेजता है।
+	Page {n}	पृष्ठ {n}
+	Page {n} — {width} × {height} in	पृष्ठ {n} — {width} × {height} इंच
+	Pages open as RGB 8-bit images. PDF text and vector objects are rasterized.	पृष्ठ RGB 8-बिट छवियों के रूप में खुलते हैं। PDF पाठ और वेक्टर ऑब्जेक्ट रास्टर छवियों में बदल जाते हैं।
+	Preview page: {width} × {height} pixels	पूर्वावलोकन पृष्ठ: {width} × {height} पिक्सेल
+	Preview unavailable	पूर्वावलोकन उपलब्ध नहीं है
+	Resolution (ppi)	रिज़ॉल्यूशन (ppi)
+	{count} pages • Each selected page opens in its own tab	{count} पृष्ठ • हर चुना हुआ पृष्ठ अपने टैब में खुलता है
+	{count} tabs will be combined in left-to-right tab order.	{count} टैब बाएँ से दाएँ क्रम में जोड़े जाएँगे।
+	Export All Tabs to PDF…	सभी टैब PDF में निर्यात करें…
+	Drop an image, PSD or PDF anywhere to open it.	छवि, PSD या PDF खोलने के लिए उसे कहीं भी छोड़ें।
+	Each artboard becomes one PDF page. Layers are flattened; transparency is preserved.	हर आर्टबोर्ड एक PDF पृष्ठ बनता है। परतें एकीकृत होती हैं; पारदर्शिता बनी रहती है।

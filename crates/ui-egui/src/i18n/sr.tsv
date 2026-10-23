@@ -4434,6 +4434,34 @@ shape	Appearance	Izgled
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	GPU adapter
+
+# Contributor workflow labels
+	Canceled or failed exports leave every tab open.	Отказан или неуспешан извоз оставља све картице отворене.
+	Choose at least one valid page	Изаберите бар једну важећу страницу
+	Click to select pages. Shift-click selects a range.	Кликните да изаберете странице. Shift-клик бира опсег.
+	Close exported tabs after successful export	Затвори извезене картице после успешног извоза
+	Current edits are included. Each page keeps its size and resolution.	Тренутне измене су укључене. Свака страница задржава величину и резолуцију.
+	Export All Tabs to PDF	Извези све картице у PDF
+	Exported {count} tabs to {path}; closed {closed} tabs	Извезено {count} картица у {path}; затворено {closed} картица
+	Loading preview…	Учитавање прегледа…
+	Open PDF pages	Отвори PDF странице
+	Open all {count} pages	Отвори све странице ({count})
+	Open selected ({count})	Отвори изабране ({count})
+	Opened {count} PDF page(s) in separate tabs	Отворено {count} PDF страница у засебним картицама
+	PDF import cancelled	Увоз PDF-а је отказан
+	PDF saves the visible pages with flattened layers.	PDF чува видљиве странице са спојеним слојевима.
+	Page {n}	Страница {n}
+	Page {n} — {width} × {height} in	Страница {n} — {width} × {height} инча
+	Pages open as RGB 8-bit images. PDF text and vector objects are rasterized.	Странице се отварају као 8-битне RGB слике. Текст и векторски објекти PDF-а се растеризују.
+	Preview page: {width} × {height} pixels	Преглед странице: {width} × {height} пиксела
+	Preview unavailable	Преглед није доступан
+	Resolution (ppi)	Резолуција (ppi)
+	{count} pages • Each selected page opens in its own tab	{count} страница • Свака изабрана страница се отвара у својој картици
+	{count} tabs will be combined in left-to-right tab order.	{count} картица ће бити спојено по редоследу слева надесно.
+	Drop an image, PSD or PDF anywhere to open it.	Превуците слику, PSD или PDF било где да га отворите.
+	Each artboard becomes one PDF page. Layers are flattened; transparency is preserved.	Свака радна површина постаје једна PDF страница. Слојеви се спајају; провидност се чува.
+	Export All Tabs to PDF…	Извези све картице у PDF…
+
 # Actions: a step dialog holds a suspended recording (#7365)
 	Confirm or cancel the open action step dialog first	Prvo potvrdite ili otkažite otvoreni dijalog koraka radnje
 	Pro Medium Gray	Pro srednje siva

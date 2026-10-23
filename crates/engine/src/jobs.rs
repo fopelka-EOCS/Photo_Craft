@@ -491,6 +491,8 @@ pub enum OpenSource {
     Bytes(Arc<Vec<u8>>),
     /// A path the worker reads itself (native), so even the read stays off the UI thread.
     Path(String),
+    /// Pages explicitly selected in the PDF import picker.
+    PdfPages { bytes: Arc<Vec<u8>>, pages: Vec<usize>, resolution: f32 },
 }
 
 /// The command id open jobs report (there is no engine command: opening is the shell's).
@@ -529,6 +531,7 @@ impl Session {
     /// result is `{held, name, warnings, color}` (`color` the question): take it with
     /// [`Session::take_held_open`] once answered.
     pub fn start_open(&mut self, name: &str, source: OpenSource) -> Result<Started> {
+        let split_pdf = matches!(&source, OpenSource::PdfPages { .. });
         let label = format!("Opening {name}");
         let name_w = name.to_string();
         let name_a = name.to_string();
@@ -540,14 +543,22 @@ impl Session {
             false,
             move |ctx| {
                 ctx.progress(0.0, "Reading");
-                let bytes = match source {
-                    OpenSource::Bytes(b) => b,
-                    OpenSource::Path(p) => Arc::new(read_path(&p)?),
+                let (bytes, pages, resolution) = match source {
+                    OpenSource::Bytes(b) => (b, None, 144.0),
+                    OpenSource::Path(p) => (Arc::new(read_path(&p)?), None, 144.0),
+                    OpenSource::PdfPages { bytes, pages, resolution } => (bytes, Some(pages), resolution),
                 };
                 ctx.check()?;
                 ctx.progress(0.02, "Decoding");
-                let imported = ctx.stage(0.02, 0.95, "Decoding", |ctl| photocraft_io::import_with_options_and_interrupt(&name_w, &bytes, &opts, ctl)).map_err(
-                    |e| match e {
+                let imported = ctx
+                    .stage(0.02, 0.95, "Decoding", |ctl| match &pages {
+                        Some(pages) => {
+                            photocraft_io::pdf::import_pdf_pages_with(&name_w, &bytes, Some(pages), photocraft_io::pdf::ImportOptions { resolution }, ctl)
+                        }
+                        None => photocraft_io::import_with_options_and_interrupt(&name_w, &bytes, &opts, ctl),
+                    })
+                    .map_err(
+                        |e| match e {
                         photocraft_io::IoError::Cancelled => EngineError::Cancelled,
                         e => EngineError::Other(e.to_string()),
                     },
@@ -566,6 +577,22 @@ impl Session {
                 Ok(imported)
             },
             move |s, mut r: photocraft_io::ImportResult| {
+                if split_pdf {
+                    let documents = pdf_page_documents(&r.document)?;
+                    let mut indices = Vec::new();
+                    let mut ids = Vec::new();
+                    for doc in documents {
+                        let (index, _) = s.open_document(doc, None);
+                        if let Some(st) = s.active_mut() {
+                            st.source_read_only = true;
+                        }
+                        ids.push(s.documents().get(index).ok_or(EngineError::NoDocument)?.doc.id.0);
+                        indices.push(index);
+                    }
+                    let index = *indices.first().ok_or_else(|| EngineError::Other("no PDF pages selected".into()))?;
+                    s.set_active(index);
+                    return Ok(json!({"document": index, "docId": ids.first(), "documents": indices, "documentIds": ids, "name": name_a, "warnings": r.warnings, "color": null}));
+                }
                 // File Handling's ACEScg option, before the colour prompt looks at the profile.
                 crate::file_cmds::tag_exr_colorspace(s, &name_a, &mut r.document);
                 crate::file_cmds::raw_defaults(s, &r.warnings, &mut r.document);
@@ -1032,6 +1059,21 @@ impl Session {
         }
         self.jobs.events.push(JobEvent { id: job.id, command: job.command.clone(), label: job.label.clone(), document: job.doc, outcome });
     }
+}
+
+/// Turn imported PDF artboards into independent, origin-aligned editing documents.
+pub fn pdf_page_documents(doc: &Document) -> Result<Vec<Document>> {
+    let stem = std::path::Path::new(&doc.name).file_stem().unwrap_or_default().to_string_lossy();
+    doc.artboards()
+        .iter()
+        .rev()
+        .map(|(id, _, _)| {
+            let mut page = crate::artboard_cmds::artboard_document(doc, *id)?.ok_or_else(|| EngineError::Other("missing PDF page".into()))?;
+            page.id = DocId::fresh();
+            page.name = format!("{stem} - {}.pdf", page.name);
+            Ok(page)
+        })
+        .collect()
 }
 
 /// Engine commands for the job table (the control channel and MCP use them too).

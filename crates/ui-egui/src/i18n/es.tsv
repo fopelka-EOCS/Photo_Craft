@@ -4324,6 +4324,34 @@ navigator	Zoom	Zoom
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Adaptador de GPU
+
+# Contributor workflow labels
+	Canceled or failed exports leave every tab open.	Las exportaciones canceladas o fallidas dejan todas las pestañas abiertas.
+	Choose at least one valid page	Elija al menos una página válida
+	Click to select pages. Shift-click selects a range.	Haga clic para seleccionar páginas. Mayús-clic selecciona un intervalo.
+	Close exported tabs after successful export	Cerrar las pestañas exportadas tras exportar correctamente
+	Current edits are included. Each page keeps its size and resolution.	Se incluyen las ediciones actuales. Cada página conserva su tamaño y resolución.
+	Export All Tabs to PDF	Exportar todas las pestañas a PDF
+	Exported {count} tabs to {path}; closed {closed} tabs	{count} pestañas exportadas a {path}; {closed} pestañas cerradas
+	Loading preview…	Cargando vista previa…
+	Open PDF pages	Abrir páginas PDF
+	Open all {count} pages	Abrir las {count} páginas
+	Open selected ({count})	Abrir selección ({count})
+	Opened {count} PDF page(s) in separate tabs	{count} página(s) PDF abierta(s) en pestañas separadas
+	PDF import cancelled	Importación de PDF cancelada
+	PDF saves the visible pages with flattened layers.	El PDF guarda las páginas visibles con las capas acopladas.
+	Page {n}	Página {n}
+	Page {n} — {width} × {height} in	Página {n} — {width} × {height} pulg.
+	Pages open as RGB 8-bit images. PDF text and vector objects are rasterized.	Las páginas se abren como imágenes RGB de 8 bits. El texto y los objetos vectoriales del PDF se rasterizan.
+	Preview page: {width} × {height} pixels	Página de vista previa: {width} × {height} píxeles
+	Preview unavailable	Vista previa no disponible
+	Resolution (ppi)	Resolución (ppp)
+	{count} pages • Each selected page opens in its own tab	{count} páginas • Cada página seleccionada se abre en su propia pestaña
+	{count} tabs will be combined in left-to-right tab order.	Se combinarán {count} pestañas en su orden de izquierda a derecha.
+	Drop an image, PSD or PDF anywhere to open it.	Suelte una imagen, PSD o PDF en cualquier lugar para abrirlo.
+	Each artboard becomes one PDF page. Layers are flattened; transparency is preserved.	Cada mesa de trabajo se convierte en una página PDF. Las capas se acoplan; se conserva la transparencia.
+	Export All Tabs to PDF…	Exportar todas las pestañas a PDF…
+
 # Actions: a step dialog holds a suspended recording (#7365)
 	Confirm or cancel the open action step dialog first	Confirme o cancele primero el cuadro de diálogo abierto del paso de la acción
 	Pro Medium Gray	Pro (gris medio)

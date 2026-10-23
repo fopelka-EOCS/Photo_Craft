@@ -31,3 +31,5 @@ mod system_locale;
 mod ui_scale_canvas;
 mod variables_data_sets;
 mod workspace_presets;
+
+mod pdf_workflow;

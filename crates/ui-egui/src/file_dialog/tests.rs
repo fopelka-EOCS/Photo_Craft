@@ -1472,3 +1472,29 @@ fn save_a_copy_appends_copy_unless_the_preference_says_not_to() {
         );
     }
 }
+
+#[test]
+fn pdf_binder_closes_tabs_only_after_a_confirmed_write() {
+    for unconfirmed in [false, true] {
+        let (mut app, open, written) = app();
+        app.run("layer.new.layer", json!({})).unwrap();
+        let before = app.session.active().unwrap().doc.clone();
+        let dirty = app.session.active().unwrap().is_dirty();
+        let fields = json!({"__all_pdf": true, "closeAfter": true});
+        crate::export_dialog::confirm(&mut app, fields.as_object().unwrap()).unwrap();
+        let ctx = egui::Context::default();
+        app.poll_file_dialog(&ctx, None);
+        // Check the platform's confirmation capability when the writer is actually used.
+        app.services.write_unconfirmed = unconfirmed;
+        answer(&open, Some(FileDialogAnswer::SaveTo("Combined-pages.pdf".into())));
+        app.poll_file_dialog(&ctx, None);
+        assert_eq!(*written.borrow(), ["Combined-pages.pdf"]);
+        if unconfirmed {
+            let st = app.session.active().expect("download must retain the edited tab");
+            assert!(std::sync::Arc::ptr_eq(&st.doc, &before));
+            assert_eq!(st.is_dirty(), dirty);
+        } else {
+            assert!(app.session.documents().is_empty());
+        }
+    }
+}

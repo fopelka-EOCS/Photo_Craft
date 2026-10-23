@@ -71,7 +71,7 @@ fn a_flat_rgb_document_saves_as_one_page_pdf() {
     let out = export(&d).unwrap();
     let pdf = &out.bytes;
     check_structure(pdf);
-    assert!(has(pdf, "/MediaBox [0 0 4.00 2.00]"), "page = image size at 72 pt/in");
+    assert!(has(pdf, "/MediaBox [0 0 4.000000 2.000000]"), "page = image size at 72 pt/in");
     assert!(has(pdf, "/Width 4 /Height 2 /ColorSpace /DeviceRGB"), "RGB is DeviceRGB");
     assert_eq!(stream_after(pdf, "/Subtype /Image"), vec![255u8; 4 * 2 * 3], "the white paper, 8-bit");
     assert!(out.warnings.iter().any(|w| w.contains("flattened")), "layers are not preserved");
@@ -110,7 +110,7 @@ fn the_page_measures_at_the_document_resolution() {
     d.layers = vec![Layer::new("Paper", LayerContent::Raster(solid(fmt, 0, 0, 300, 150, &[1.0, 1.0, 1.0, 1.0])))];
     d.resolution_dpi = 300.0;
     let out = export(&d).unwrap();
-    assert!(has(&out.bytes, "/MediaBox [0 0 72.00 36.00]"), "300 px at 300 dpi is one inch");
+    assert!(has(&out.bytes, "/MediaBox [0 0 72.000000 36.000000]"), "300 px at 300 dpi is one inch");
 }
 
 #[test]
@@ -128,4 +128,42 @@ fn other_modes_are_refused_with_an_actionable_error() {
     let e = export(&d).unwrap_err().to_string();
     assert!(e.contains("RGB") && e.contains("Mode"), "{e}");
     assert!(crate::export(&d, "x.pdf", &crate::ExportOptions::default()).is_err());
+}
+
+#[test]
+fn nonzero_cmyk_ink_and_transparency_survive_the_shared_writer() {
+    let mut d = doc(ColorMode::Cmyk);
+    let fmt = PixelFormat::new(ColorMode::Cmyk, SampleType::F32, true);
+    d.layers = vec![Layer::new("Ink", LayerContent::Raster(solid(fmt, 0, 0, 4, 2, &[0.1, 0.2, 0.3, 0.4, 0.5])))];
+    let out = export(&d).unwrap();
+    assert_eq!(stream_after(&out.bytes, "/Subtype /Image"), [26, 51, 77, 102].repeat(8));
+    assert_eq!(stream_after(&out.bytes, "/ColorSpace /DeviceGray /BitsPerComponent 8"), vec![128; 8]);
+    check_structure(&out.bytes);
+}
+
+#[test]
+fn transparent_rgb_pixels_keep_their_straight_color_and_soft_mask() {
+    let mut d = doc(ColorMode::Rgb);
+    let fmt = PixelFormat::new(ColorMode::Rgb, SampleType::F32, true);
+    d.layers = vec![Layer::new("Transparent color", LayerContent::Raster(solid(fmt, 0, 0, 4, 2, &[0.25, 0.5, 0.75, 0.5])))];
+    let out = export(&d).unwrap();
+    assert_eq!(stream_after(&out.bytes, "/Subtype /Image"), [64, 128, 191].repeat(8));
+    assert_eq!(stream_after(&out.bytes, "/ColorSpace /DeviceGray /BitsPerComponent 8"), vec![128; 8]);
+    check_structure(&out.bytes);
+}
+
+#[test]
+fn pdf_export_respects_the_embed_color_profile_option() {
+    for (mode, device) in [(ColorMode::Rgb, "/DeviceRGB"), (ColorMode::Grayscale, "/DeviceGray"), (ColorMode::Cmyk, "/DeviceCMYK")] {
+        let mut d = doc(mode);
+        d.icc_profile = Some(std::sync::Arc::new(vec![1, 2, 3, 4, 5, 6, 7, 8]));
+        let mut opts = crate::ExportOptions::default();
+        for embed in [false, true] {
+            opts.encode.embed_icc = embed;
+            let out = super::export_pdf(&d, &opts).unwrap();
+            assert_eq!(has(&out.bytes, "/ICCBased"), embed);
+            assert!(has(&out.bytes, device));
+            check_structure(&out.bytes);
+        }
+    }
 }

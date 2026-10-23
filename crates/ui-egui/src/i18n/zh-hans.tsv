@@ -3021,6 +3021,34 @@ curves	Smooth	平滑
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	GPU 适配器
+
+# Contributor workflow labels
+	Canceled or failed exports leave every tab open.	取消或失败的导出会保留所有打开的标签页。
+	Choose at least one valid page	请至少选择一个有效页面
+	Click to select pages. Shift-click selects a range.	单击选择页面。按住 Shift 单击可选择范围。
+	Close exported tabs after successful export	导出成功后关闭已导出的标签页
+	Current edits are included. Each page keeps its size and resolution.	包含当前编辑内容。每页保留原有大小和分辨率。
+	Export All Tabs to PDF	将所有标签页导出为 PDF
+	Exported {count} tabs to {path}; closed {closed} tabs	已将 {count} 个标签页导出到 {path}；已关闭 {closed} 个标签页
+	Loading preview…	正在加载预览…
+	Open PDF pages	打开 PDF 页面
+	Open all {count} pages	打开全部 {count} 页
+	Open selected ({count})	打开所选页面（{count}）
+	Opened {count} PDF page(s) in separate tabs	已在单独的标签页中打开 {count} 个 PDF 页面
+	PDF import cancelled	已取消 PDF 导入
+	PDF saves the visible pages with flattened layers.	PDF 将可见页面保存为合并图层后的内容。
+	Page {n}	第 {n} 页
+	Page {n} — {width} × {height} in	第 {n} 页 — {width} × {height} 英寸
+	Pages open as RGB 8-bit images. PDF text and vector objects are rasterized.	页面以 RGB 8 位图像打开。PDF 文本和矢量对象会被栅格化。
+	Preview page: {width} × {height} pixels	预览页面：{width} × {height} 像素
+	Preview unavailable	预览不可用
+	Resolution (ppi)	分辨率（ppi）
+	{count} pages • Each selected page opens in its own tab	共 {count} 页 • 每个所选页面在单独的标签页中打开
+	{count} tabs will be combined in left-to-right tab order.	将按从左到右的标签页顺序合并 {count} 个标签页。
+	Drop an image, PSD or PDF anywhere to open it.	将图像、PSD 或 PDF 拖放到任意位置即可打开。
+	Each artboard becomes one PDF page. Layers are flattened; transparency is preserved.	每个画板成为一页 PDF。图层将合并，透明度会保留。
+	Export All Tabs to PDF…	将所有标签页导出为 PDF…
+
 # Actions: a step dialog holds a suspended recording (#7365)
 	Confirm or cancel the open action step dialog first	请先确认或取消打开的动作步骤对话框
 	Pro Medium Gray	专业中灰

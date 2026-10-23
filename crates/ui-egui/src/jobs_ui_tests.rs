@@ -1091,3 +1091,41 @@ fn open_identity_keeps_same_poll_results_in_the_profile_queue() {
     assert!(app.held_opens.is_empty());
     control.assert_untouched(&app);
 }
+
+/// A multi-page PDF completion uses admitted identities even after other handlers reorder tabs.
+#[test]
+fn pdf_open_completion_keeps_all_page_identities_after_reorder() {
+    let mut app = identity_app();
+    let control = IdentityControl::capture(&app);
+    let pages: Vec<_> = (0..2)
+        .map(|i| {
+            let image = photocraft_io::pdf_writer::RasterImage {
+                width: 1,
+                height: 1,
+                channels: 3,
+                data: vec![0x78, 0x01, 0x01, 3, 0, 0xfc, 0xff, 0, 0, 0, 0, 3, 0, 1],
+                jpeg: false,
+                icc: None,
+                alpha: None,
+            };
+            photocraft_io::pdf_writer::RasterPage { paper: (72.0, 36.0), image, content: format!("q {} 0 0 rg 0 0 72 36 re f Q", i) }
+        })
+        .collect();
+    let bytes = photocraft_io::pdf_writer::write_pdf(&pages, None);
+    let result = match app
+        .session
+        .start_open("binder.pdf", photocraft_engine::jobs::OpenSource::PdfPages { bytes: Arc::new(bytes), pages: vec![0, 1], resolution: 72.0 })
+        .unwrap()
+    {
+        Started::Done(value) => value,
+        Started::Job(job) => app.session.wait_job(job).unwrap(),
+    };
+    let ids: Vec<_> = result["documentIds"].as_array().unwrap().iter().map(|v| photocraft_doc::DocId(v.as_u64().unwrap())).collect();
+    assert_eq!(ids.len(), 2);
+    assert_eq!(result["docId"], json!(ids[0].0));
+    app.session.move_document(2, 0).unwrap();
+    super::finish_open(&mut app, "binder.pdf", None, &result, Some(0)).unwrap();
+    assert_eq!(app.session.documents().iter().take(2).map(|s| s.doc.id).collect::<Vec<_>>(), ids);
+    assert_eq!(app.session.active().unwrap().doc.id, ids[0]);
+    control.assert_untouched(&app);
+}

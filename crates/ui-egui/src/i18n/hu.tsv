@@ -4278,6 +4278,34 @@ cameraRaw	Yellow	Sárga
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	GPU-adapter
+
+# Contributor workflow labels
+	Canceled or failed exports leave every tab open.	Megszakított vagy sikertelen exportáláskor minden lap nyitva marad.
+	Choose at least one valid page	Válasszon ki legalább egy érvényes oldalt
+	Click to select pages. Shift-click selects a range.	Kattintással választhat oldalakat. Shift-kattintással tartományt jelölhet ki.
+	Close exported tabs after successful export	Exportált lapok bezárása sikeres exportálás után
+	Current edits are included. Each page keeps its size and resolution.	A jelenlegi módosítások is szerepelnek. Minden oldal megőrzi méretét és felbontását.
+	Export All Tabs to PDF	Minden lap exportálása PDF-be
+	Exported {count} tabs to {path}; closed {closed} tabs	{count} lap exportálva ide: {path}; {closed} lap bezárva
+	Loading preview…	Előnézet betöltése…
+	Open PDF pages	PDF-oldalak megnyitása
+	Open all {count} pages	Mind a(z) {count} oldal megnyitása
+	Open selected ({count})	Kijelöltek megnyitása ({count})
+	Opened {count} PDF page(s) in separate tabs	{count} PDF-oldal külön lapon megnyitva
+	PDF import cancelled	PDF-importálás megszakítva
+	PDF saves the visible pages with flattened layers.	A PDF a látható oldalakat összevont rétegekkel menti.
+	Page {n}	{n}. oldal
+	Page {n} — {width} × {height} in	{n}. oldal — {width} × {height} hüvelyk
+	Pages open as RGB 8-bit images. PDF text and vector objects are rasterized.	Az oldalak 8 bites RGB-képként nyílnak meg. A PDF szövege és vektoros objektumai raszterizálódnak.
+	Preview page: {width} × {height} pixels	Előnézeti oldal: {width} × {height} képpont
+	Preview unavailable	Az előnézet nem érhető el
+	Resolution (ppi)	Felbontás (ppi)
+	{count} pages • Each selected page opens in its own tab	{count} oldal • Minden kijelölt oldal saját lapon nyílik meg
+	{count} tabs will be combined in left-to-right tab order.	{count} lap lesz egyesítve a lapok balról jobbra haladó sorrendjében.
+	Drop an image, PSD or PDF anywhere to open it.	Húzzon ide bárhová egy képet, PSD- vagy PDF-fájlt a megnyitáshoz.
+	Each artboard becomes one PDF page. Layers are flattened; transparency is preserved.	Minden rajztáblából egy PDF-oldal lesz. A rétegek összevonódnak, az átlátszóság megmarad.
+	Export All Tabs to PDF…	Minden lap exportálása PDF-be…
+
 # Actions: a step dialog holds a suspended recording (#7365)
 	Confirm or cancel the open action step dialog first	Előbb hagyd jóvá vagy vond vissza a művelet lépésének nyitott párbeszédablakát
 	Pro Medium Gray	Pro középszürke

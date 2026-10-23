@@ -3854,6 +3854,34 @@ curves	Smooth	Làm mượt
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Bộ điều hợp GPU
+
+# Contributor workflow labels
+	Canceled or failed exports leave every tab open.	Xuất bị hủy hoặc thất bại sẽ giữ mọi thẻ đang mở.
+	Choose at least one valid page	Chọn ít nhất một trang hợp lệ
+	Click to select pages. Shift-click selects a range.	Nhấp để chọn trang. Giữ Shift và nhấp để chọn một dải.
+	Close exported tabs after successful export	Đóng các thẻ đã xuất sau khi xuất thành công
+	Current edits are included. Each page keeps its size and resolution.	Bao gồm các chỉnh sửa hiện tại. Mỗi trang giữ nguyên kích thước và độ phân giải.
+	Export All Tabs to PDF	Xuất tất cả thẻ sang PDF
+	Exported {count} tabs to {path}; closed {closed} tabs	Đã xuất {count} thẻ tới {path}; đã đóng {closed} thẻ
+	Loading preview…	Đang tải bản xem trước…
+	Open PDF pages	Mở các trang PDF
+	Open all {count} pages	Mở tất cả {count} trang
+	Open selected ({count})	Mở các trang đã chọn ({count})
+	Opened {count} PDF page(s) in separate tabs	Đã mở {count} trang PDF trong các thẻ riêng
+	PDF import cancelled	Đã hủy nhập PDF
+	PDF saves the visible pages with flattened layers.	PDF lưu các trang hiển thị với các lớp đã gộp phẳng.
+	Page {n}	Trang {n}
+	Page {n} — {width} × {height} in	Trang {n} — {width} × {height} inch
+	Pages open as RGB 8-bit images. PDF text and vector objects are rasterized.	Các trang được mở dưới dạng ảnh RGB 8 bit. Văn bản và đối tượng vectơ PDF được raster hóa.
+	Preview page: {width} × {height} pixels	Trang xem trước: {width} × {height} pixel
+	Preview unavailable	Không có bản xem trước
+	Resolution (ppi)	Độ phân giải (ppi)
+	{count} pages • Each selected page opens in its own tab	{count} trang • Mỗi trang đã chọn mở trong một thẻ riêng
+	{count} tabs will be combined in left-to-right tab order.	Sẽ kết hợp {count} thẻ theo thứ tự từ trái sang phải.
+	Drop an image, PSD or PDF anywhere to open it.	Thả ảnh, PSD hoặc PDF vào bất cứ đâu để mở.
+	Each artboard becomes one PDF page. Layers are flattened; transparency is preserved.	Mỗi bảng vẽ trở thành một trang PDF. Các lớp được gộp phẳng; độ trong suốt được giữ lại.
+	Export All Tabs to PDF…	Xuất tất cả thẻ sang PDF…
+
 # Actions: a step dialog holds a suspended recording (#7365)
 	Confirm or cancel the open action step dialog first	Hãy xác nhận hoặc hủy hộp thoại bước hành động đang mở trước
 	Pro Medium Gray	Pro xám vừa

@@ -4092,6 +4092,34 @@ cameraData	Lens	Lens
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	GPU bağdaştırıcısı
+
+# Contributor workflow labels
+	Canceled or failed exports leave every tab open.	İptal edilen veya başarısız dışa aktarmalar tüm sekmeleri açık bırakır.
+	Choose at least one valid page	En az bir geçerli sayfa seçin
+	Click to select pages. Shift-click selects a range.	Sayfaları seçmek için tıklayın. Shift ile tıklamak bir aralık seçer.
+	Close exported tabs after successful export	Başarılı dışa aktarmadan sonra dışa aktarılan sekmeleri kapat
+	Current edits are included. Each page keeps its size and resolution.	Geçerli düzenlemeler dahil edilir. Her sayfa boyutunu ve çözünürlüğünü korur.
+	Export All Tabs to PDF	Tüm Sekmeleri PDF Olarak Dışa Aktar
+	Exported {count} tabs to {path}; closed {closed} tabs	{count} sekme {path} konumuna aktarıldı; {closed} sekme kapatıldı
+	Loading preview…	Önizleme yükleniyor…
+	Open PDF pages	PDF sayfalarını aç
+	Open all {count} pages	{count} sayfanın tümünü aç
+	Open selected ({count})	Seçilenleri aç ({count})
+	Opened {count} PDF page(s) in separate tabs	{count} PDF sayfası ayrı sekmelerde açıldı
+	PDF import cancelled	PDF içe aktarma iptal edildi
+	PDF saves the visible pages with flattened layers.	PDF, görünür sayfaları düzleştirilmiş katmanlarla kaydeder.
+	Page {n}	Sayfa {n}
+	Page {n} — {width} × {height} in	Sayfa {n} — {width} × {height} inç
+	Pages open as RGB 8-bit images. PDF text and vector objects are rasterized.	Sayfalar 8 bit RGB görüntüleri olarak açılır. PDF metinleri ve vektör nesneleri rasterleştirilir.
+	Preview page: {width} × {height} pixels	Önizleme sayfası: {width} × {height} piksel
+	Preview unavailable	Önizleme kullanılamıyor
+	Resolution (ppi)	Çözünürlük (ppi)
+	{count} pages • Each selected page opens in its own tab	{count} sayfa • Seçilen her sayfa kendi sekmesinde açılır
+	{count} tabs will be combined in left-to-right tab order.	{count} sekme soldan sağa sekme sırasıyla birleştirilecektir.
+	Drop an image, PSD or PDF anywhere to open it.	Açmak için bir görüntü, PSD veya PDF dosyasını herhangi bir yere bırakın.
+	Each artboard becomes one PDF page. Layers are flattened; transparency is preserved.	Her çalışma yüzeyi bir PDF sayfası olur. Katmanlar düzleştirilir; saydamlık korunur.
+	Export All Tabs to PDF…	Tüm Sekmeleri PDF Olarak Dışa Aktar…
+
 # Actions: a step dialog holds a suspended recording (#7365)
 	Confirm or cancel the open action step dialog first	Önce açık eylem adımı iletişim kutusunu onaylayın veya iptal edin
 	Pro Medium Gray	Pro Orta Gri

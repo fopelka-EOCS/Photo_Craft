@@ -4040,6 +4040,34 @@ curves	Smooth	スムーズ
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	GPU アダプター
+
+# Contributor workflow labels
+	Canceled or failed exports leave every tab open.	書き出しがキャンセルまたは失敗した場合、すべてのタブは開いたままです。
+	Choose at least one valid page	有効なページを1つ以上選択してください
+	Click to select pages. Shift-click selects a range.	クリックでページを選択します。Shift キーを押しながらクリックすると範囲を選択できます。
+	Close exported tabs after successful export	書き出し成功後に書き出したタブを閉じる
+	Current edits are included. Each page keeps its size and resolution.	現在の編集内容を含めます。各ページのサイズと解像度は維持されます。
+	Export All Tabs to PDF	すべてのタブを PDF に書き出し
+	Exported {count} tabs to {path}; closed {closed} tabs	{count} 個のタブを {path} に書き出し、{closed} 個のタブを閉じました
+	Loading preview…	プレビューを読み込み中…
+	Open PDF pages	PDF ページを開く
+	Open all {count} pages	全 {count} ページを開く
+	Open selected ({count})	選択したページを開く（{count}）
+	Opened {count} PDF page(s) in separate tabs	{count} ページの PDF を別々のタブで開きました
+	PDF import cancelled	PDF の読み込みをキャンセルしました
+	PDF saves the visible pages with flattened layers.	PDF は表示中のページをレイヤーを統合して保存します。
+	Page {n}	ページ {n}
+	Page {n} — {width} × {height} in	ページ {n} — {width} × {height} インチ
+	Pages open as RGB 8-bit images. PDF text and vector objects are rasterized.	ページは RGB 8 ビット画像として開きます。PDF のテキストとベクトルオブジェクトはラスタライズされます。
+	Preview page: {width} × {height} pixels	プレビューページ：{width} × {height} ピクセル
+	Preview unavailable	プレビューを表示できません
+	Resolution (ppi)	解像度（ppi）
+	{count} pages • Each selected page opens in its own tab	{count} ページ • 選択した各ページを個別のタブで開きます
+	{count} tabs will be combined in left-to-right tab order.	{count} 個のタブを左から右の順に結合します。
+	Drop an image, PSD or PDF anywhere to open it.	画像、PSD、PDFをここにドロップすると開きます。
+	Each artboard becomes one PDF page. Layers are flattened; transparency is preserved.	各アートボードが1つのPDFページになります。レイヤーは統合され、透明度は保持されます。
+	Export All Tabs to PDF…	すべてのタブをPDFに書き出し…
+
 # Actions: a step dialog holds a suspended recording (#7365)
 	Confirm or cancel the open action step dialog first	先に開いているアクションのステップのダイアログを確定またはキャンセルしてください
 	Pro Medium Gray	プロ(中間グレー)

@@ -59,6 +59,7 @@ pub use ora::losses as ora_losses;
 pub mod pattern_map;
 mod pcraft_cache;
 pub mod pdf;
+pub mod pdf_writer;
 mod pdn;
 pub use pcraft_cache::PcraftExportCache;
 pub mod pixels;
@@ -124,6 +125,9 @@ pub enum IoError {
     /// An SVG that does not parse (or is too large to rasterise).
     #[error("SVG: {0}")]
     Svg(String),
+    /// PDF parsing, rendering or writing failed.
+    #[error("PDF: {0}")]
+    Pdf(String),
     /// A background import or save was cancelled ([`import_with`], [`export_with`]).
     #[error("cancelled")]
     Cancelled,
@@ -373,6 +377,9 @@ fn import_psd(name: &str, bytes: &[u8], ctl: &photocraft_raster::Interrupt) -> R
 }
 
 fn import_stages(name: &str, bytes: &[u8], ctl: &photocraft_raster::Interrupt, opts: &ImportOptions) -> Result<ImportResult, IoError> {
+    if has_extension(name, "pdf") || bytes.starts_with(b"%PDF-") {
+        return pdf::import_pdf(name, bytes, ctl);
+    }
     // A declared native extension must reach its loader so malformed bundles retain format errors.
     if has_extension(name, photocraft_format::EXTENSION) || photocraft_format::is_pcraft(bytes) {
         let document = photocraft_format::load_from_bytes(bytes)?;
@@ -493,6 +500,9 @@ fn export_stages(doc: &Document, name_or_ext: &str, opts: &ExportOptions, ctl: &
     if ext == "pdn" {
         return Err(IoError::Unsupported("PDN is import-only; save as .pcraft to preserve all layers and blend modes".into()));
     }
+    if ext == "pdf" {
+        return pdf::export_pdf(doc, opts);
+    }
     if affinity::EXTENSIONS.contains(&ext.as_str()) {
         return Err(IoError::Unsupported("Affinity export is not implemented; save a new PSD, PNG or .pcraft copy".into()));
     }
@@ -506,9 +516,6 @@ fn export_stages(doc: &Document, name_or_ext: &str, opts: &ExportOptions, ctl: &
     }
     if ext == "ora" {
         return ora::export(doc);
-    }
-    if ext == "pdf" {
-        return pdf::export(doc);
     }
     if ext == photocraft_format::EXTENSION {
         let doc = named_for_file(doc, name_or_ext);

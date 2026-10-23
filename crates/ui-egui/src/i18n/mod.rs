@@ -1465,6 +1465,47 @@ mod tests {
     }
 
     #[test]
+    fn pdf_picker_and_binder_labels_exist_in_every_registered_language() {
+        let labels = [
+            "Canceled or failed exports leave every tab open.",
+            "Choose at least one valid page",
+            "Click to select pages. Shift-click selects a range.",
+            "Close exported tabs after successful export",
+            "Current edits are included. Each page keeps its size and resolution.",
+            "Export All Tabs to PDF",
+            "Exported {count} tabs to {path}; closed {closed} tabs",
+            "Loading preview…",
+            "Open PDF pages",
+            "Open all {count} pages",
+            "Open selected ({count})",
+            "Opened {count} PDF page(s) in separate tabs",
+            "PDF import cancelled",
+            "PDF saves the visible pages with flattened layers.",
+            "Page {n}",
+            "Page {n} — {width} × {height} in",
+            "Pages open as RGB 8-bit images. PDF text and vector objects are rasterized.",
+            "Preview page: {width} × {height} pixels",
+            "Preview unavailable",
+            "Resolution (ppi)",
+            "{count} pages • Each selected page opens in its own tab",
+            "{count} tabs will be combined in left-to-right tab order.",
+            "Export All Tabs to PDF…",
+            "Drop an image, PSD or PDF anywhere to open it.",
+            "Each artboard becomes one PDF page. Layers are flattened; transparency is preserved.",
+        ];
+        for lang in Lang::all().filter(|l| *l != Lang::EN) {
+            for label in labels {
+                let translated = lang.catalog().plain(label).unwrap_or_else(|| panic!("{}: missing PDF label {label:?}", lang.code()));
+                let mut expected = placeholders(label);
+                let mut actual = placeholders(translated);
+                expected.sort();
+                actual.sort();
+                assert_eq!(expected, actual, "{}: PDF placeholders for {label}", lang.code());
+            }
+        }
+    }
+
+    #[test]
     fn mixer_brush_ui_strings_have_translations_in_every_registered_language() {
         const STRINGS: &[&str] = &[
             "Mixer Brush",
