@@ -339,6 +339,11 @@ fn check_layer_budget(doc_sel: Option<&Surface>, l: &Layer, h: &Homography) -> R
     while let Some((l, sel)) = stack.pop() {
         match &l.content {
             LayerContent::Group(g) => stack.extend(g.children.iter().map(|c| (c, None))),
+            LayerContent::Text(t) if keeps_pixels(t) => {
+                if let Some(c) = &t.cache {
+                    check_budget(c.content_bounds(), h, &format!("layer \"{}\"", l.name))?;
+                }
+            }
             LayerContent::Text(_) | LayerContent::Shape(_) => {}
             LayerContent::Smart(sm) => {
                 if let Some(c) = &sm.cache {
@@ -434,6 +439,14 @@ fn apply_transform(
                 return Err(EngineError::Other("Distort and Perspective need rasterized type (Type › Rasterize Type Layer)".into()));
             };
             t.transform = a.mul(&t.transform);
+            // Without its font, a type layer keeps its look: Photoshop transforms the pixels it has
+            // (warning they may look fuzzy) instead of setting the text in a substitute (#7278).
+            if keeps_pixels(t)
+                && let Some(c) = &mut t.cache
+            {
+                let src = c.content_bounds();
+                *c = warp_surface(c, src, h, interp)?;
+            }
         }
         LayerContent::Shape(sh) => match affine {
             Some(a) => crate::vector_cmds::transform_shape(sh, &a),
@@ -539,8 +552,15 @@ pub fn split_selected(surf: &Surface, sel: &Surface) -> Result<(Surface, Surface
     Ok((lifted, rest))
 }
 
+/// A type layer whose fonts are missing is transformed as the pixels it shows (#7278).
+fn keeps_pixels(t: &photocraft_doc::TextLayer) -> bool {
+    t.cache.is_some() && !crate::type_extra_cmds::missing_fonts_in_layer(t).is_empty()
+}
+
 pub(crate) fn refresh_text(doc: &Document, l: &mut Layer) {
     match &mut l.content {
+        // Its pixels were transformed with it: only the saved type record follows.
+        LayerContent::Text(t) if keeps_pixels(t) => crate::type_cmds::refresh_record(doc, t),
         LayerContent::Text(t) => crate::type_cmds::refresh(doc, t),
         LayerContent::Shape(sh) => crate::vector_cmds::refresh_shape(doc, sh),
         LayerContent::Smart(_) => {
@@ -1003,6 +1023,33 @@ mod tests {
         assert_eq!(active_bounds(&s), Rect::new(0, 2, 10_000, 10));
     }
 
+    /// #7278 review: a type layer whose font is missing warps its pixels, so that warp is priced
+    /// too, and one past the budget is refused before anything changes.
+    #[test]
+    fn a_missing_font_type_layer_past_the_pixel_budget_is_refused_and_changes_nothing() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 16, "height": 16})).unwrap();
+        let r = s.execute("type.create", json!({"x": 2, "y": 10, "text": "Hi", "size": 8, "font": "NoSuchFamily7278"})).unwrap();
+        let id = LayerId(r["layer"].as_u64().unwrap());
+        s.edit("psd pixels", |doc, _| {
+            let LayerContent::Text(t) = &mut doc.layer_mut(id).unwrap().content else { panic!() };
+            let mut c = Surface::new(t.cache.as_ref().unwrap().format());
+            c.fill_rect(Rect::new(10, 2, 11, 10), &[1.0, 0.0, 0.0, 1.0]);
+            t.cache = Some(c);
+            Ok(())
+        })
+        .unwrap();
+        let st = s.active().unwrap();
+        let (before, revision, steps) = (st.doc.clone(), st.revision, st.history.past_len());
+        let mut p = stretch(2e5);
+        p["layer"] = json!(id.0);
+        let err = s.execute("edit.transform", p).unwrap_err().to_string();
+        assert!(err.starts_with("not enough memory for transforming pixels") && err.ends_with("the document was not changed"), "{err}");
+        let st = s.active().unwrap();
+        assert!(st.doc == before, "the document is untouched");
+        assert_eq!((st.revision, st.history.past_len()), (revision, steps));
+    }
+
     #[test]
     fn a_group_with_one_layer_past_the_budget_is_not_half_transformed() {
         let mut s = column();
@@ -1178,6 +1225,32 @@ mod tests {
         assert!((t.transform.m[0] - 2.0).abs() < 1e-9);
         // Perspective on type is refused, like Photoshop.
         assert!(s.execute("edit.transform", json!({"layer": id, "quad": [[0, 0], [10, 0], [12, 10], [-2, 10]]})).is_err());
+    }
+
+    /// #7278: a type layer whose font is missing keeps the pixels it shows through a transform,
+    /// as Photoshop does, instead of being set again in a substitute font. It stays a type layer.
+    #[test]
+    fn a_type_layer_with_a_missing_font_transforms_its_pixels() {
+        let mut s = session();
+        let r = s.execute("type.create", json!({"x": 10, "y": 50, "text": "Hi", "size": 20, "font": "NoSuchFamily7278"})).unwrap();
+        let id = LayerId(r["layer"].as_u64().unwrap());
+        // The pixels a PSD brings, set in the real font: a block the fallback face would never draw.
+        s.edit("psd pixels", |doc, _| {
+            let LayerContent::Text(t) = &mut doc.layer_mut(id).unwrap().content else { panic!() };
+            let mut c = Surface::new(t.cache.as_ref().unwrap().format());
+            c.fill_rect(Rect::new(20, 30, 40, 40), &[1.0, 0.0, 0.0, 1.0]);
+            t.cache = Some(c);
+            Ok(())
+        })
+        .unwrap();
+        s.execute("edit.transform", json!({"layer": id.0, "matrix": [1, 0, 0, 1, 25, 5]})).unwrap();
+        let st = s.active().unwrap();
+        let LayerContent::Text(t) = &st.doc.layer(id).unwrap().content else { panic!("still a type layer") };
+        assert!((t.transform.m[4] - 35.0).abs() < 1e-9 && (t.transform.m[5] - 55.0).abs() < 1e-9, "{:?}", t.transform);
+        let c = t.cache.as_ref().unwrap();
+        assert_eq!(c.content_bounds(), Rect::new(45, 35, 65, 45));
+        assert!(c.pixel(55, 40)[0] > 0.99);
+        assert!(t.psd_raw.is_some());
     }
 
     #[test]

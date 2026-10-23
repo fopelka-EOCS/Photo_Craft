@@ -616,6 +616,15 @@ pub fn refresh_at(dpi: f32, format: PixelFormat, t: &mut TextLayer) {
     t.psd_raw = Some(Arc::new(photocraft_text::psd::build_tysh(t, dpi, layout.bounds())));
 }
 
+/// [`refresh`] without the re-render: the saved type record follows `t` (its transform), the
+/// pixels stay as they are.
+pub(crate) fn refresh_record(doc: &Document, t: &mut TextLayer) {
+    let dpi = doc.resolution_dpi;
+    let mut eng = photocraft_text::shared().lock().unwrap_or_else(|e| e.into_inner());
+    let bounds = eng.layout(t, dpi).bounds();
+    t.psd_raw = Some(Arc::new(photocraft_text::psd::build_tysh(t, dpi, bounds)));
+}
+
 /// Refuses to change a type layer under Lock All (its own or an enclosing group's), with
 /// Photoshop's message. Every command that edits a type layer's text calls it first (#3132, #4188).
 pub(crate) fn check_text_unlocked(doc: &Document, id: LayerId) -> Result<()> {
