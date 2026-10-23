@@ -842,6 +842,9 @@ pub struct TypePrefs {
     pub font_preview: FontPreview,
     pub fill_new_type_layers_with_placeholder: bool,
     pub recent_fonts: u32,
+    /// Favourite font families, starred in the font menu (`type.font.favorite`), in the order
+    /// they were added.
+    pub favorite_fonts: Vec<String>,
 }
 
 impl Default for TypePrefs {
@@ -855,6 +858,7 @@ impl Default for TypePrefs {
             font_preview: FontPreview::Medium,
             fill_new_type_layers_with_placeholder: true,
             recent_fonts: 10,
+            favorite_fonts: Vec::new(),
         }
     }
 }

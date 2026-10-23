@@ -1665,13 +1665,95 @@ pub(crate) fn fonts_ready(ui: &mut egui::Ui, width: f32) -> bool {
     false
 }
 
-/// Searchable font-family combo box.
-fn font_picker(ui: &mut egui::Ui, current: &mut String, width: f32, preview: photocraft_engine::prefs::FontPreview, recents: &[String]) -> bool {
-    family_picker_in(ui, "type-font", current, width, &families(), preview, recents)
+/// The font menu's local library (`photocraft_engine::font_library_cmds`): the recent fonts it
+/// lists first and the favourites it stars, read before the menu is drawn, plus the font whose
+/// star was clicked, starred or un-starred by [`FontLibrary::finish`] afterwards, and the style
+/// picked from a family's expanded styles.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct FontLibrary {
+    pub recent: Vec<String>,
+    pub favorites: Vec<String>,
+    pub toggled: Option<String>,
+    /// The style picked under a family's ">" (with the family), for the caller to apply.
+    pub picked_style: Option<String>,
+    /// Family traits to filter by instead of the installed fonts' (tests).
+    pub traits: Option<Arc<crate::font_filters::TraitsMap>>,
+    /// Each family's style names instead of the installed fonts' (tests).
+    pub styles: Option<Arc<HashMap<String, Vec<String>>>>,
+    /// The user's own text for the preview at the top of the menu (else it shows a sample).
+    pub preview_text: Option<String>,
 }
 
-/// Maximum height of the font menu.
-const FONT_MENU_HEIGHT: f32 = 460.0;
+/// The text the font menu's preview sets: the selected characters while typing, else the type
+/// target's whole text, on one line and at most 60 characters. `None` without a type target or
+/// with blank text (the preview then shows its sample).
+fn preview_text(app: &PhotocraftApp) -> Option<String> {
+    let (layer, range) = target(app)?;
+    let text = &text_layer(&app.session.active()?.doc, LayerId(layer))?.text;
+    let chosen: String = match range {
+        Some([a, b]) => text.chars().skip(a).take(b.saturating_sub(a)).collect(),
+        None => text.clone(),
+    };
+    let line = chosen.split(['\n', '\r', '\u{2028}', '\u{2029}']).map(str::trim).filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" ");
+    let line: String = line.chars().take(60).collect();
+    (!line.is_empty()).then_some(line)
+}
+
+impl FontLibrary {
+    pub(crate) fn of(app: &PhotocraftApp) -> Self {
+        use photocraft_engine::font_library_cmds as lib;
+        // The recent fonts are the shell's (`PhotocraftApp::note_recent_font`), the favourites the engine's.
+        Self { recent: app.ui.recent_fonts.clone(), favorites: lib::favorite_fonts(&app.session), ..Default::default() }
+    }
+
+    /// The style names a family's ">" expands to.
+    fn styles_of(&self, family: &str) -> Vec<String> {
+        match &self.styles {
+            Some(map) => map.get(family).cloned().unwrap_or_else(|| vec!["Regular".into()]),
+            None => styles(family),
+        }
+    }
+
+    /// Star or un-star the clicked font, through the engine command.
+    pub(crate) fn finish(self, app: &mut PhotocraftApp) {
+        if let Some(family) = self.toggled
+            && let Err(e) = app.run("type.font.favorite", json!({"family": family}))
+        {
+            app.ui.status = e;
+        }
+    }
+}
+
+/// Searchable font-family combo box, with the recent and favourite fonts of `app`. `Some` when a
+/// family was picked, holding the style when it was picked from the family's expanded styles.
+fn font_picker(app: &mut PhotocraftApp, ui: &mut egui::Ui, current: &mut String, width: f32) -> Option<Option<String>> {
+    let preview = app.session.prefs().type_.font_preview;
+    let mut library = FontLibrary { preview_text: preview_text(app), ..FontLibrary::of(app) };
+    let changed = family_picker_in(ui, "type-font", current, width, &families(), preview, &mut library);
+    let style = library.picked_style.take();
+    library.finish(app);
+    if !changed {
+        return None;
+    }
+    // Each family applied is recorded, an arrow step too, as `PhotocraftApp::note_recent_font` says.
+    app.note_recent_font(current);
+    Some(style)
+}
+
+/// Maximum height of the font menu: room for the search/filter bar over the font list, so only
+/// the list scrolls.
+const FONT_MENU_HEIGHT: f32 = 520.0;
+/// The font list's height (it scrolls inside the menu, under the fixed search field).
+const FONT_LIST_HEIGHT: f32 = 440.0;
+/// The font list's width: star, style expander, name, format badge and sample.
+const FONT_LIST_WIDTH: f32 = 420.0;
+/// Room the search row keeps for Clear All, and for the filter buttons when they follow the field.
+const FONT_CLEAR_WIDTH: f32 = 84.0;
+const FONT_BUTTONS_WIDTH: f32 = 112.0;
+/// Room right of the font list's viewport for its scroll bar.
+const FONT_SCROLL_BAR_WIDTH: f32 = 14.0;
+/// Room for the format badge (O, TT, VAR) left of the sample.
+const FONT_BADGE_WIDTH: f32 = 28.0;
 
 /// [`font_picker`] over a given family list (tests pass their own).
 #[cfg(test)]
@@ -1683,7 +1765,7 @@ fn font_picker_in(
     preview: photocraft_engine::prefs::FontPreview,
     recents: &[String],
 ) -> bool {
-    family_picker_in(ui, "type-font", current, width, families, preview, recents)
+    family_picker_in(ui, "type-font", current, width, families, preview, &mut FontLibrary { recent: recents.to_vec(), ..FontLibrary::default() })
 }
 
 /// Shared by the Type options, Character, style and Glyphs panels. Selection changes still
@@ -1695,7 +1777,7 @@ pub(crate) fn family_picker_in(
     width: f32,
     families: &[String],
     preview: photocraft_engine::prefs::FontPreview,
-    recents: &[String],
+    library: &mut FontLibrary,
 ) -> bool {
     let mut changed = false;
     // A font picked from the open menu (click or Enter): the field keeps the focus afterwards.
@@ -1719,7 +1801,15 @@ pub(crate) fn family_picker_in(
         .close_behavior(if matches!(close, egui::PopupCloseBehavior::IgnoreClicks) { close } else { egui::PopupCloseBehavior::CloseOnClickOutside });
 
     let response = combo.show_ui(ui, |ui| {
-        let height_id = search_id.with("height");
+        // Positions kept between frames are relative to the menu's left edge: the menu moves
+        // (the window's edge pushes it after a resize), and screen positions from an earlier
+        // frame would pad the search row out and widen the menu, an empty strip beside the list.
+        let origin = ui.cursor().min.x;
+        // Freshly opened (not drawn last pass): the preview starts on the current font.
+        let pass_id = search_id.with("pass");
+        let pass = ui.ctx().cumulative_pass_nr();
+        let opened = ui.data(|d| d.get_temp::<u64>(pass_id)).is_none_or(|p| p.saturating_add(1) < pass);
+        ui.data_mut(|d| d.insert_temp(pass_id, pass));
         // Each opening focuses the search, including a reopen on the very next pass. Keep
         // asking through the invisible sizing pass, until the field receives focus.
         let mut focus = ui.data(|d| d.get_temp(focus_id)).unwrap_or(true);
@@ -1728,10 +1818,61 @@ pub(crate) fn family_picker_in(
         let down = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown));
         let up = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp));
         let enter = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-        if focus {
-            ui.memory_mut(|m| m.request_focus(search_id.with("input")));
+        // The filter bar beside the search field, as in Photoshop: the class list toggle, Show
+        // Variable / Favorite / Similar Fonts and Clear All (`font_filters`).
+        let filters_id = search_id.with("filters");
+        let mut filters: crate::font_filters::FontFilters = ui.data(|d| d.get_temp(filters_id)).unwrap_or_default();
+        // The preview on top: the font last under the pointer, else the current one.
+        let preview_id = search_id.with("preview-font");
+        if opened {
+            ui.data_mut(|d| d.remove::<String>(preview_id));
         }
-        let r = ui.add(egui::TextEdit::singleline(&mut q).id(search_id.with("input")).hint_text(tl!("Search fonts")).desired_width(200.0));
+        let previewed: String = ui.data(|d| d.get_temp(preview_id)).unwrap_or_else(|| current.clone());
+        let previewed_label = labels.and_then(|l| l.get(previewed.as_str())).map_or(previewed.as_str(), String::as_str).to_string();
+        // Everything above the list is as wide as the class and font lists below, measured last
+        // frame: never wider, so the menu has no empty strip beside the list.
+        let (list_left_id, body_id) = (search_id.with("list-left"), search_id.with("body"));
+        let class_w = crate::font_filters::CLASS_COLUMN_WIDTH;
+        let estimate = FONT_LIST_WIDTH + 16.0 + if filters.hide_classes { 0.0 } else { class_w + 14.0 };
+        let body: Option<egui::Rect> = ui.data(|d| d.get_temp(body_id));
+        let menu_width = body.map_or(estimate, |b| b.width());
+        // Divider lines span the space they are given: cap it, or they stretch the menu.
+        if body.is_some() {
+            ui.set_max_width(menu_width);
+        }
+        crate::font_filters::preview_banner(ui, &previewed, &previewed_label, library.preview_text.as_deref(), menu_width);
+        // The filter buttons over the class list, and the search field over the fonts, starting
+        // where the list does.
+        let list_left: Option<f32> = ui.data(|d| d.get_temp::<f32>(list_left_id)).map(|x| origin + x);
+        let menu_right = body.map(|b| origin + b.right());
+        let r = ui
+            .horizontal(|ui| {
+                if !filters.hide_classes {
+                    ui.allocate_ui_with_layout(egui::vec2(class_w, 24.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        crate::font_filters::filter_buttons(ui, &mut filters);
+                    });
+                }
+                if let Some(x) = list_left.filter(|_| !filters.hide_classes) {
+                    let pad = x - ui.cursor().min.x;
+                    if pad > 0.0 {
+                        ui.add_space(pad);
+                    }
+                }
+                // The field fills the row up to Clear All (and the buttons, which follow it when
+                // the class list is hidden).
+                let trailing = FONT_CLEAR_WIDTH + if filters.hide_classes { FONT_BUTTONS_WIDTH } else { 0.0 };
+                let search_w = menu_right.map_or(FONT_LIST_WIDTH - trailing, |right| right - ui.cursor().min.x - trailing).clamp(120.0, FONT_LIST_WIDTH);
+                if focus {
+                    ui.memory_mut(|m| m.request_focus(search_id.with("input")));
+                }
+                let r = ui.add(egui::TextEdit::singleline(&mut q).id(search_id.with("input")).hint_text(tl!("Search fonts")).desired_width(search_w));
+                if filters.hide_classes {
+                    crate::font_filters::filter_buttons(ui, &mut filters);
+                }
+                crate::font_filters::clear_all(ui, &mut filters);
+                r
+            })
+            .inner;
         if focus {
             // The opening click can release after several focused frames. Keep the request
             // pending through that release, which can hand focus back to the combo button.
@@ -1742,10 +1883,13 @@ pub(crate) fn family_picker_in(
             d.insert_temp(search_id, q.clone());
         });
         let ql = q.to_lowercase();
+        let lookup = crate::font_filters::lookup_in(library.traits.clone());
         // The recent group stays as it was when the menu opened: each arrow step applies (and so
         // records) a family, and moving it to the top would send the next step back up.
-        let open_recents: Vec<String> = ui.data_mut(|d| d.get_temp_mut_or_insert_with(recents_id, || recents.to_vec()).clone());
-        let (rows, n_recent) = font_menu_rows(families, labels, &ql, &open_recents);
+        let open_recents: Vec<String> = ui.data_mut(|d| d.get_temp_mut_or_insert_with(recents_id, || library.recent.clone()).clone());
+        // No recent group while a filter is on: the filters narrow the alphabetical list alone.
+        let (mut rows, n_recent) = font_menu_rows(families, labels, &ql, if filters.any() { &[] } else { &open_recents });
+        let comparable = crate::font_filters::apply(&mut rows, &filters, &library.favorites, current, &lookup);
         // A recent family is listed twice. The current family's row is the one the last arrow
         // selected while it still shows that family, else its alphabetical copy, so the arrows
         // step through the alphabet as on the closed field.
@@ -1780,59 +1924,154 @@ pub(crate) fn family_picker_in(
         }
         let preview = crate::font_preview::sample(preview);
         let row_h = preview.map_or(28.0, |(_, [_, h])| (h + 4.0).max(28.0));
-
-        // Wrap the font rows in a ScrollArea so only the list scrolls: the search field above
-        // stays fixed at the top of the popup.
+        let expanded_id = search_id.with("expanded");
+        let mut expanded: Vec<String> = ui.data(|d| d.get_temp(expanded_id)).unwrap_or_default();
         let mut hovered: Option<String> = None;
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for (i, (f, label)) in rows.into_iter().enumerate() {
-                if i == n_recent && n_recent > 0 {
-                    ui.separator();
-                }
-                // Highlighted by its fill alone, as Photoshop's font menu is. A selectable button lays
-                // out its frame's stroke only once hovered or selected, so with the theme's stroke the
-                // row under the pointer (and the selected one) grew and pushed the rows below down:
-                // the list jumped as the pointer moved (#7406). One row only, though a recent
-                // family is listed twice.
-                let mut button = egui::Button::selectable(selected == Some(i), label).truncate().stroke(egui::Stroke::NONE);
-                if let Some((size, [_, h])) = preview {
-                    button = button
-                        .right_text(egui::Atom::custom(ui.id().with(("font-sample", f)), egui::vec2(crate::font_preview::slot_width(ui.ctx(), f, size), h)));
-                }
-                let response = ui.add_sized([330.0, row_h], button);
-                if stepped == Some(i) {
-                    response.scroll_to_me(Some(egui::Align::Center));
-                }
-                if let Some((size, _)) = preview
-                    && ui.is_rect_visible(response.rect)
-                {
-                    crate::font_preview::paint(ui, f, response.rect, size);
-                }
-                if response.hovered() {
-                    hovered = Some(f.clone());
-                }
-                if press.chosen(ui, &response) {
-                    *current = f.clone();
-                    // A served family not fetched yet: start now, before any text needs it.
-                    photocraft_text::served::request(f);
-                    changed = true;
-                    picked = true;
-                    ui.data_mut(|d| d.remove::<String>(search_id));
-                    hovered = None;
-                    ui.close();
-                }
+        ui.separator();
+        let body = ui.horizontal_top(|ui| {
+            if !filters.hide_classes {
+                crate::font_filters::class_list(ui, &mut filters);
+                ui.separator();
+            }
+            // The list scrolls under the fixed search field and filters, and keeps one height
+            // whatever it holds (egui never grows a popup back after a short list, #1369).
+            let list = egui::ScrollArea::vertical().id_salt(search_id.with("list")).max_height(FONT_LIST_HEIGHT).auto_shrink([true, false]);
+            // Top to bottom, though the list sits beside the class list.
+            let shown = list.show(ui, |ui| {
+                ui.vertical(|ui| {
+                    ui.set_width(FONT_LIST_WIDTH);
+                    let weak = |ui: &mut egui::Ui, text: &str| {
+                        ui.label(egui::RichText::new(text).weak());
+                    };
+                    if filters.similar && !comparable {
+                        weak(ui, tl!("No similar fonts: the current font doesn't say what it looks like."));
+                    }
+                    if rows.is_empty() {
+                        weak(
+                            ui,
+                            if filters.favorites && library.favorites.is_empty() {
+                                tl!("No favorite fonts yet: click the star beside a font to add it.")
+                            } else {
+                                tl!("No fonts match these filters.")
+                            },
+                        );
+                    }
+                    // The first `n_recent` rows are the recent group, above a line (`font_menu_rows`).
+                    for (i, &(f, label)) in rows.iter().enumerate() {
+                        let recent_row = i < n_recent;
+                        if i == n_recent && n_recent > 0 {
+                            ui.separator();
+                        }
+                        // Only rows on screen read their font's format and styles.
+                        let visible = ui.is_rect_visible(egui::Rect::from_min_size(ui.cursor().min, egui::vec2(FONT_LIST_WIDTH, row_h)));
+                        let format = if visible { lookup(f).map(|t| t.format) } else { None };
+                        let styles = if visible { library.styles_of(f) } else { Vec::new() };
+                        let open = !recent_row && expanded.contains(f);
+                        let favorite = library.favorites.contains(f);
+                        // Highlighted by its fill alone, as Photoshop's font menu is: a hovered or selected
+                        // row's stroke grew it and pushed the rows below down (#7406).
+                        let slot = preview.map_or(0.0, |(size, _)| crate::font_preview::slot_width(ui.ctx(), f, size));
+                        // One row lit, though a recent family is listed twice.
+                        let mut button = egui::Button::selectable(selected == Some(i), label).truncate().stroke(egui::Stroke::NONE);
+                        let [_, h] = preview.map_or([0.0, 16.0], |(_, b)| b);
+                        button = button.right_text(egui::Atom::custom(ui.id().with(("font-sample", f, recent_row)), egui::vec2(slot + FONT_BADGE_WIDTH, h)));
+                        let response = ui
+                            .allocate_ui_with_layout(egui::vec2(FONT_LIST_WIDTH, row_h), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                ui.spacing_mut().item_spacing.x = 2.0;
+                                // The star adds the font to (or removes it from) the favourites; it never picks it.
+                                let tip = if favorite { tl!("Remove from Favorites") } else { tl!("Add to Favorites") };
+                                if crate::icons::button(ui, if favorite { "star-filled" } else { "star" }, 22.0, false, tip).clicked() {
+                                    library.toggled = Some(f.clone());
+                                }
+                                // A family with several styles expands to list them (">").
+                                if styles.len() > 1 && !recent_row {
+                                    let (icon, tip) = if open { ("chevron-down", tl!("Hide Styles")) } else { ("chevron-right", tl!("Show Styles")) };
+                                    if crate::icons::button(ui, icon, 16.0, false, tip).clicked() {
+                                        if open {
+                                            expanded.retain(|e| e != f);
+                                        } else {
+                                            expanded.push(f.clone());
+                                        }
+                                    }
+                                } else {
+                                    ui.add_space(16.0);
+                                }
+                                ui.add_sized([ui.available_width(), row_h], button)
+                            })
+                            .inner;
+                        if stepped == Some(i) {
+                            response.scroll_to_me(Some(egui::Align::Center));
+                        }
+                        if let Some((size, _)) = preview
+                            && ui.is_rect_visible(response.rect)
+                        {
+                            crate::font_preview::paint(ui, f, response.rect, size);
+                        }
+                        // The format badge (O, TT, VAR) just left of the sample.
+                        if let Some(format) = format {
+                            let center = egui::pos2(response.rect.right() - 8.0 - slot - FONT_BADGE_WIDTH / 2.0, response.rect.center().y);
+                            let t = crate::theme::Tokens::get(ui.ctx());
+                            ui.painter().text(center, egui::Align2::CENTER_CENTER, format.badge(), egui::FontId::proportional(10.0), t.text_dim);
+                            let tip = egui::Rect::from_center_size(center, egui::vec2(FONT_BADGE_WIDTH, 14.0));
+                            ui.interact(tip, ui.id().with(("font-format", f, recent_row)), egui::Sense::hover())
+                                .on_hover_text(crate::font_filters::format_tip(format));
+                        }
+                        if response.hovered() {
+                            hovered = Some(f.clone());
+                        }
+                        if press.chosen(ui, &response) {
+                            *current = f.clone();
+                            // A served family not fetched yet: start now, before any text needs it.
+                            photocraft_text::served::request(f);
+                            changed = true;
+                            picked = true;
+                            ui.data_mut(|d| d.remove::<String>(search_id));
+                            hovered = None;
+                            ui.close();
+                        }
+                        if !open {
+                            continue;
+                        }
+                        // The family's styles, each picking the family in that style.
+                        for style in &styles {
+                            let style_row = ui
+                                .horizontal(|ui| {
+                                    ui.add_space(46.0);
+                                    ui.add_sized(
+                                        [ui.available_width(), 22.0],
+                                        egui::Button::selectable(false, style_label(style)).truncate().stroke(egui::Stroke::NONE),
+                                    )
+                                })
+                                .inner;
+                            if style_row.clicked() {
+                                *current = f.clone();
+                                photocraft_text::served::request(f);
+                                library.picked_style = Some(style.clone());
+                                changed = true;
+                                picked = true;
+                                ui.data_mut(|d| d.remove::<String>(search_id));
+                                hovered = None;
+                                ui.close();
+                            }
+                        }
+                    }
+                })
+            });
+            ui.data_mut(|d| d.insert_temp(list_left_id, shown.inner_rect.left() - origin));
+            shown.inner_rect.right()
+        });
+        // The lists' own extent, from the class list to the font list's scroll bar: the row
+        // itself stretches with the popup, so it can't tell when the popup is too wide.
+        let list_right = body.inner + FONT_SCROLL_BAR_WIDTH;
+        let body = egui::Rect::from_min_max(body.response.rect.min, egui::pos2(list_right.min(body.response.rect.right()), body.response.rect.bottom()));
+        ui.data_mut(|d| {
+            d.insert_temp(filters_id, filters);
+            d.insert_temp(expanded_id, expanded);
+            d.insert_temp(body_id, body.translate(egui::vec2(-origin, 0.0)));
+            if let Some(f) = &hovered {
+                d.insert_temp(preview_id, f.clone());
             }
         });
-        // egui measures a popup only when it opens and never lets it grow back, so a filtered
-        // list would leave the menu short after the query is cleared (#1369). Keep the unfiltered
-        // height while searching. Measured after the rows: before them `min_rect` only holds the
-        // search field, and the cache would shrink the menu to it.
-        if ql.is_empty() {
-            let h = ui.min_rect().height();
-            ui.data_mut(|d| d.insert_temp(height_id, h));
-        } else if let Some(h) = ui.data(|d| d.get_temp::<f32>(height_id)) {
-            ui.set_min_height(h.min(FONT_MENU_HEIGHT));
-        }
         if accept { None } else { hovered }
     });
     press.after(&response.response);
@@ -2197,13 +2436,22 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
     // Font family and style menus (one placeholder in their place while the fonts load).
     if fonts_ready(ui, 170.0 + ui.spacing().item_spacing.x + 110.0) {
-        if font_picker(ui, &mut fam, 170.0, app.session.prefs().type_.font_preview, &app.ui.recent_fonts) {
-            app.note_recent_font(&fam);
+        if let Some(picked) = font_picker(app, ui, &mut fam, 170.0) {
             app.ui.tool_options.type_font = fam.clone();
             let st = styles(&fam);
-            style = if st.contains(&style) { style } else { st.first().cloned().unwrap_or_else(|| "Regular".into()) };
+            let picked = picked.filter(|s| st.contains(s));
+            style = match &picked {
+                Some(s) => s.clone(),
+                None if st.contains(&style) => style,
+                None => st.first().cloned().unwrap_or_else(|| "Regular".into()),
+            };
             app.ui.tool_options.type_style = style.clone();
-            apply(app, ui.ctx(), json!({"font": fam}));
+            // Only a style picked under the family's ">" is set: otherwise each selected layer
+            // keeps its own face in the new family (#3556).
+            match picked {
+                Some(s) => apply(app, ui.ctx(), json!({"font": fam, "fontStyle": s})),
+                None => apply(app, ui.ctx(), json!({"font": fam})),
+            }
         }
         let opts: Vec<(String, String)> = styles(&fam).into_iter().map(|s| (s.clone(), style_label(&s))).collect();
         let opts_ref: Vec<(String, &str)> = opts.iter().map(|(a, b)| (a.clone(), b.as_str())).collect();
@@ -2694,10 +2942,12 @@ fn type_sections(app: &mut PhotocraftApp, ui: &mut egui::Ui, character: bool, pa
         let mut ready = true;
         row(ui, &mut |ui| {
             ready = fonts_ready(ui, full);
-            if ready && font_picker(ui, &mut fam, full, app.session.prefs().type_.font_preview, &app.ui.recent_fonts) {
-                app.note_recent_font(&fam);
+            if ready && let Some(picked) = font_picker(app, ui, &mut fam, full) {
                 app.ui.tool_options.type_font = fam.clone();
-                apply(app, ui.ctx(), json!({"font": fam}));
+                match picked {
+                    Some(style) => apply(app, ui.ctx(), json!({"font": fam, "fontStyle": style})),
+                    None => apply(app, ui.ctx(), json!({"font": fam})),
+                }
             }
         });
         row(ui, &mut |ui| {

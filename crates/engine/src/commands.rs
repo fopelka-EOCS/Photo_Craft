@@ -1556,6 +1556,7 @@ fn build() -> Vec<CommandSpec> {
     v.extend(crate::distort_cmds::specs());
     v.extend(crate::analysis_cmds::specs());
     v.extend(crate::notes_cmds::specs());
+    v.extend(crate::font_library_cmds::specs());
     v.extend(crate::history_cmds::specs());
     v.extend(crate::history_menu_cmds::specs());
     v.extend(crate::history_source_cmds::specs());
