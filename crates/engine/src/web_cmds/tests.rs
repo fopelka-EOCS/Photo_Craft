@@ -636,7 +636,10 @@ fn image_assets_are_generated_now_and_on_save() {
     let s2 = session(8);
     let doc = s2.active().unwrap().doc.clone();
     let mut d = (*doc).clone();
-    d.layers.push(Layer::new("default 200% @2x", LayerContent::Group(photocraft_doc::Group { children: vec![], expanded: false, artboard: None })));
+    d.layers.push(Layer::new(
+        "default 200% @2x",
+        LayerContent::Group(photocraft_doc::Group { children: vec![], expanded: false, artboard: None, frame_stroke: None }),
+    ));
     let lid = d.layers[1].id;
     d.layer_mut(lid).unwrap().name = "icon.png".into();
     let (files, errors) = generate_assets(&d, &dir);
@@ -677,8 +680,10 @@ fn image_assets_never_write_one_file_twice() {
     let dir = tmp("asset-variant-collisions");
     d.layer_mut(top).unwrap().name = "icon.png".into();
     d.layer_mut(logo).unwrap().name = "Logo".into();
-    d.layers
-        .push(Layer::new("default 50% + 200% + 200% @2x", LayerContent::Group(photocraft_doc::Group { children: vec![], expanded: false, artboard: None })));
+    d.layers.push(Layer::new(
+        "default 50% + 200% + 200% @2x",
+        LayerContent::Group(photocraft_doc::Group { children: vec![], expanded: false, artboard: None, frame_stroke: None }),
+    ));
     let (files, errors) = generate_assets(&d, &dir);
     let names: Vec<_> = files.iter().map(|p| std::path::Path::new(p).file_name().unwrap().to_string_lossy().into_owned()).collect();
     assert_eq!(names, ["icon.png", "icon@2x.png"]);
@@ -706,7 +711,7 @@ fn image_assets_reject_traversal_from_names_and_defaults() {
     d.layer_mut(id).unwrap().name = "safe.png".into();
     d.layers.push(Layer::new(
         "default ../ + /outside/ + ..\\bad/ + C:\\drive/ + 50% nested/",
-        LayerContent::Group(photocraft_doc::Group { children: vec![], expanded: false, artboard: None }),
+        LayerContent::Group(photocraft_doc::Group { children: vec![], expanded: false, artboard: None, frame_stroke: None }),
     ));
     let (files, errors) = generate_assets(&d, &dir);
     assert_eq!(
