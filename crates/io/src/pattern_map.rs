@@ -9,7 +9,7 @@ use std::sync::Arc;
 use photocraft_color::{ColorMode, PixelFormat, SampleType};
 use photocraft_doc::{Document, Pattern};
 use photocraft_geom::Rect;
-use photocraft_psd::patterns::{PatternBudget, PsdPattern, block_key, mode_channels, parse_pattern_block_with, write_pattern_block};
+use photocraft_psd::patterns::{PatternBudget, PsdPattern, block_has_user_mask, block_key, mode_channels, parse_pattern_block_with, write_pattern_block};
 use photocraft_raster::Surface;
 
 use crate::pixels::{deinterleave, interleave, max_sample, psd_depth, sample_for_depth, zero_sample};
@@ -126,9 +126,12 @@ pub fn from_global_blocks(doc: &Document) -> Vec<Pattern> {
 
 /// Global blocks to write: the raw ones while they still match [`Document::patterns`], else the
 /// raw pattern blocks replaced by one written from the document (at the first one's position).
+/// Raw blocks with transparency where older PhotoCraft builds put it, which Photoshop refuses,
+/// are rewritten too (#8054).
 pub fn export_global_blocks(doc: &Document) -> Vec<photocraft_doc::PsdGlobalBlock> {
     let raw = &doc.metadata.psd_global_blocks;
-    if from_global_blocks(doc) == doc.patterns {
+    let legacy = raw.iter().any(|(_, k, d)| PATTERN_KEYS.contains(k) && block_has_user_mask(d));
+    if !legacy && from_global_blocks(doc) == doc.patterns {
         return raw.clone();
     }
     let key = block_key(psd_depth(doc.depth));
@@ -216,5 +219,31 @@ mod tests {
         d2.metadata.psd_global_blocks = out;
         assert_eq!(from_global_blocks(&d2), d.patterns);
         assert_eq!(read_pat(&write_pat(&d.patterns).unwrap()).unwrap(), d.patterns);
+    }
+
+    #[test]
+    fn transparent_pattern_blocks_from_older_builds_are_rewritten_on_save() {
+        // #8054: Define Pattern over transparency, then a Pattern Fill layer; Photoshop refused
+        // the PSD because the pattern's transparency sat in the user mask array.
+        let mut d = Document::new("x", photocraft_geom::Size { width: 4, height: 4 }, ColorMode::Rgb, SampleType::U16);
+        d.patterns.push(pattern(ColorMode::Rgb, SampleType::U16, true));
+        let out = export_global_blocks(&d);
+        assert_eq!(out.len(), 1);
+        assert!(!block_has_user_mask(&out[0].2));
+        // Move the transparency into the user mask array, as older builds wrote it: a 16-bit
+        // pattern's array is raw, so it is the last 8 + 23 + 5 × 3 × 2 bytes of the pattern.
+        let mut legacy = out[0].2.to_vec();
+        let end = 4 + u32::from_be_bytes([legacy[0], legacy[1], legacy[2], legacy[3]]) as usize;
+        legacy[end - (8 + 23 + 30) - 4..end].rotate_left(4);
+        assert!(block_has_user_mask(&legacy));
+        d.metadata.psd_global_blocks = vec![(*b"8BIM", *b"Pat2", Arc::new(legacy))];
+        assert_eq!(from_global_blocks(&d), d.patterns, "older files still open");
+        // The patterns are unchanged, but the block is rewritten rather than kept.
+        let out = export_global_blocks(&d);
+        assert_eq!(out.len(), 1);
+        assert!(!block_has_user_mask(&out[0].2));
+        let mut back = d.clone();
+        back.metadata.psd_global_blocks = out;
+        assert_eq!(from_global_blocks(&back), d.patterns);
     }
 }
