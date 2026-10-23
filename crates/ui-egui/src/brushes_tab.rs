@@ -347,6 +347,8 @@ pub(crate) fn grid_cell_width(cell: f32, scale: f32) -> f32 {
     cell * if scale.is_finite() { scale.clamp(*PREVIEW_SCALE_RANGE.start(), *PREVIEW_SCALE_RANGE.end()) } else { 1.0 }
 }
 
+/// A docked list row whose hidden preview parts leave room for the remaining parts.
+/// Drops use its vertical midpoint regardless of which parts are visible.
 fn list_row(ui: &mut egui::Ui, p: &BrushPreset, d: &Draw<'_>, indent: f32, acts: &mut Vec<Action>) {
     let t = Tokens::get(ui.ctx());
     let k = list_row_height(d.scale) / 44.0;
@@ -495,7 +497,7 @@ fn card_tip_rect(cell: egui::Rect, number_h: Option<f32>, size: f32, scale: f32)
     egui::Rect::from_center_size(room.center(), egui::Vec2::splat(if side.is_finite() { side.max(1.0) } else { 1.0 }))
 }
 
-/// One preset in the Brush Preset picker: a 2 × 2 grid whose bottom row (the name) spans both
+/// One preset card in the picker or docked grid: a 2 × 2 grid whose bottom row (the name) spans both
 /// columns — tip at the top left, stroke preview at the top right. A part that's off loses its
 /// cell (the other takes the room): with only the tip and the name on, the name moves into the
 /// stroke's cell and the bottom row is gone. At least one part is always on. `show` is the three
@@ -503,7 +505,8 @@ fn card_tip_rect(cell: egui::Rect, number_h: Option<f32>, size: f32, scale: f32)
 /// column or a fixed cell, [`CARD_TIP_ONLY_W`]/[`CARD_TIP_NAME_W`]), and `scale` the footer
 /// slider: heights and padding floor at [`CARD_MIN_H_SCALE`], the text holds its 1.0 size
 /// ([`CARD_NAME_FONT`], [`CARD_NUM_FONT`]), and at or below [`CARD_COMPACT_SCALE`] the tips
-/// drop their size numbers and take their cell whole.
+/// drop their size numbers and take their cell whole. `horizontal_drop` selects left/right
+/// drop ordering independently of the visible parts.
 #[allow(clippy::too_many_arguments)]
 fn preset_card(
     ui: &mut egui::Ui,
@@ -513,6 +516,7 @@ fn preset_card(
     show: (bool, bool, bool),
     width: f32,
     scale: f32,
+    horizontal_drop: bool,
     acts: &mut Vec<Action>,
 ) {
     let (show_name, show_stroke, show_tip) = show;
@@ -611,9 +615,7 @@ fn preset_card(
         );
     }
     let resp = resp.on_hover_text(&p.name);
-    // A tip-only card's grid drops between columns, like the Brushes tab's: the rest drop between
-    // rows (there is a row under the tip there).
-    preset_interactions(ui, &resp, card, p, presets, tip_only, acts);
+    preset_interactions(ui, &resp, card, p, presets, horizontal_drop, acts);
 }
 
 /// Indent of one nested folder level.
@@ -779,7 +781,17 @@ fn draw_nodes(ui: &mut egui::Ui, d: &Draw, nodes: &[Node], depth: usize, acts: &
                         ui.horizontal(|ui| {
                             ui.add_space(left);
                             for p in row {
-                                preset_card(ui, p, d.current.is_some_and(|n| p.name.eq_ignore_ascii_case(n)), d.presets, d.show, cell, scale, acts);
+                                preset_card(
+                                    ui,
+                                    p,
+                                    d.current.is_some_and(|n| p.name.eq_ignore_ascii_case(n)),
+                                    d.presets,
+                                    d.show,
+                                    cell,
+                                    scale,
+                                    tip_only(d.show),
+                                    acts,
+                                );
                             }
                         });
                     }
@@ -789,7 +801,17 @@ fn draw_nodes(ui: &mut egui::Ui, d: &Draw, nodes: &[Node], depth: usize, acts: &
                         ui.horizontal(|ui| {
                             ui.add_space(indent);
                             for p in row {
-                                preset_card(ui, p, d.current.is_some_and(|n| p.name.eq_ignore_ascii_case(n)), d.presets, d.show, card_w, scale, acts);
+                                preset_card(
+                                    ui,
+                                    p,
+                                    d.current.is_some_and(|n| p.name.eq_ignore_ascii_case(n)),
+                                    d.presets,
+                                    d.show,
+                                    card_w,
+                                    scale,
+                                    tip_only(d.show),
+                                    acts,
+                                );
                             }
                         });
                     }
@@ -808,7 +830,7 @@ fn draw_nodes(ui: &mut egui::Ui, d: &Draw, nodes: &[Node], depth: usize, acts: &
                     ui.horizontal(|ui| {
                         ui.add_space(left);
                         for p in row {
-                            preset_card(ui, p, d.current.is_some_and(|n| p.name.eq_ignore_ascii_case(n)), d.presets, d.show, cell, scale, acts);
+                            preset_card(ui, p, d.current.is_some_and(|n| p.name.eq_ignore_ascii_case(n)), d.presets, d.show, cell, scale, true, acts);
                         }
                     });
                 }

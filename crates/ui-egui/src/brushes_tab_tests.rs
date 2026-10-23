@@ -7,6 +7,8 @@ use egui_kittest::kittest::{NodeT, Queryable};
 
 use super::*;
 
+/// Drag previews preserve the library until a drop; grid ordering uses the horizontal halves
+/// even when the preview's name or stroke is shown.
 #[test]
 fn dragging_a_brush_shows_its_tip_preview() {
     for theme in crate::theme::ThemeKind::ALL {
@@ -47,6 +49,32 @@ fn dragging_a_brush_shows_its_tip_preview() {
             assert!(h.query_by_role_and_label(Role::Image, &name).is_none(), "preview disappears on release");
             assert_eq!(h.state().session.tools.brush, brush, "preview does not change brush settings");
             assert_eq!(h.state().session.tools.presets, presets, "dropping on the source preserves the library");
+            if mode == 1 {
+                let target = presets[1].name.clone();
+                for show in [(true, true, true), (true, false, true), (false, true, false), (false, false, true)] {
+                    for after in [false, true] {
+                        h.state_mut().session.tools.presets = presets.clone();
+                        let st = &mut h.state_mut().ui.brushes_panel;
+                        (st.show_name, st.show_stroke, st.show_tip) = show;
+                        h.run_steps(4);
+                        let start = h.get_by_role_and_label(Role::Button, &name).rect().center();
+                        let cell = h.get_by_role_and_label(Role::Button, &target).rect();
+                        // Opposite vertical and horizontal halves expose accidental row ordering.
+                        let offset = vec2(cell.width() * 0.25, -cell.height() * 0.25);
+                        let end = cell.center() + if after { offset } else { -offset };
+                        h.drag_at(start);
+                        h.run_steps(1);
+                        h.hover_at(end);
+                        h.run_steps(3);
+                        h.drop_at(end);
+                        h.run_steps(4);
+                        let ordered: Vec<_> =
+                            h.state().session.tools.presets.iter().filter(|p| p.name == name || p.name == target).map(|p| p.name.as_str()).collect();
+                        let expected = if after { [target.as_str(), name.as_str()] } else { [name.as_str(), target.as_str()] };
+                        assert_eq!(ordered, expected, "grid drop after={after}, parts={show:?}, theme={theme:?}");
+                    }
+                }
+            }
         }
     }
 }
