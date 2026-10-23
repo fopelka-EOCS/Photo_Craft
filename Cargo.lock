@@ -5035,6 +5035,7 @@ dependencies = [
  "photocraft-geom",
  "photocraft-psd",
  "photocraft-raster",
+ "png 0.18.1",
  "rayon",
  "skrifa",
 ]

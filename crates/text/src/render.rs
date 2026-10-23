@@ -215,7 +215,7 @@ fn draw_pass(layout: &TextLayout, transform: &Xform, sink: &mut impl LineSink, o
 
 /// Font units (scaled to px, y up) → text space for a placed glyph: scales, faux italic,
 /// baseline shift, and the vertical-type orientation.
-fn glyph_xform(layout: &TextLayout, g: &PlacedGlyph, face_skew_deg: f32) -> Xform {
+pub(crate) fn glyph_xform(layout: &TextLayout, g: &PlacedGlyph, face_skew_deg: f32) -> Xform {
     let Some(st) = layout.styles.get(g.style as usize) else { return Xform([1.0, 0.0, 0.0, -1.0, g.x as f64, g.y as f64]) };
     let hs = if st.horizontal_scale > 0.0 { st.horizontal_scale } else { 1.0 } as f64;
     let vs = if st.vertical_scale > 0.0 { st.vertical_scale } else { 1.0 } as f64;
@@ -233,7 +233,7 @@ fn glyph_xform(layout: &TextLayout, g: &PlacedGlyph, face_skew_deg: f32) -> Xfor
 }
 
 /// The horizontal centre (text space) of a placed glyph: the pen position plus half its advance.
-fn glyph_center(layout: &TextLayout, g: &PlacedGlyph, font: &skrifa::FontRef, size_px: f32, coords: &[NormalizedCoord]) -> f64 {
+pub(crate) fn glyph_center(layout: &TextLayout, g: &PlacedGlyph, font: &skrifa::FontRef, size_px: f32, coords: &[NormalizedCoord]) -> f64 {
     let hs = layout.styles.get(g.style as usize).map_or(1.0, |st| if st.horizontal_scale > 0.0 { st.horizontal_scale } else { 1.0 });
     let advance = match g.orient {
         GlyphOrient::Horizontal => font.glyph_metrics(Size::new(size_px), LocationRef::new(coords)).advance_width(GlyphId::new(g.id)).unwrap_or(0.0),
@@ -291,6 +291,14 @@ fn rect_from_bounds([x0, y0, x1, y1]: [f64; 4]) -> Rect {
 pub fn ink_rect_warped(layout: &TextLayout, transform: &Affine, warp: Option<&Warp>) -> Rect {
     let mut b = Bounds::default();
     draw(layout, &Xform(transform.m), &mut b, None, warp);
+    // Colour bitmap glyphs (emoji) have no outline to measure: their picture's corners do.
+    for p in crate::bitmap_glyphs::placed(layout, warp) {
+        let to_doc = Xform(transform.m).mul(&p.to_text);
+        let (w, h) = (f64::from(p.width), f64::from(p.height));
+        for corner in [(0.0, 0.0), (w, 0.0), (w, h), (0.0, h)] {
+            b.add(to_doc.apply(corner.0, corner.1));
+        }
+    }
     b.rect.map(rect_from_bounds).unwrap_or(Rect::EMPTY)
 }
 
@@ -352,6 +360,7 @@ pub fn rasterize_warped(layout: &TextLayout, transform: &Affine, format: PixelFo
         let a = c.alpha.clamp(0.0, 1.0);
         composite(&mut acc, &cov, w, stride, &comps, a, antialias);
     }
+    crate::bitmap_glyphs::composite(&mut acc, w, h, &format, &xf, &crate::bitmap_glyphs::placed(layout, warp));
     // Unpremultiply.
     unpremultiply(&mut acc, n, stride, format.sample);
     surface.write_region_par(rect, &acc);
