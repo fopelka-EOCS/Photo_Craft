@@ -3605,7 +3605,7 @@ mod tests {
                 })
                 .to_string(),
             ));
-            assert_eq!(app.ui.tool, crate::state::Tool::Brush, "{bad}");
+            assert_eq!(app.ui.tool, crate::state::Tool::Move, "{bad}");
             assert_eq!(app.ui.tool_options.feather, 12.0);
         }
     }
