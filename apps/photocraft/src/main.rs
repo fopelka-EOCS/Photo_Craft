@@ -35,6 +35,14 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+// Use mimalloc on the desktop so a closed document's memory goes back to the OS. glibc's malloc
+// keeps large freed allocations in its arenas (RSS stayed at a big document's ~2 GiB peak after it
+// was closed, #8743); mimalloc purges freed pages on a decay timer. The wasm build keeps the
+// browser's allocator.
+#[cfg(not(target_arch = "wasm32"))]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 mod app_dirs;
 mod app_icon;
 mod appearance;

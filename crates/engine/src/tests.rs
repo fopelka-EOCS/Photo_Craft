@@ -64,6 +64,25 @@ fn file_new_at_the_size_limit_does_not_fill_every_tile() {
 }
 
 #[test]
+fn closing_a_document_releases_its_memory() {
+    // #8743: a closed document's tiles and undo history must not stay resident in the session, so
+    // the shell can drop the GPU side and the allocator can return the pages to the OS. A future
+    // "keep closed documents for quick reopen" cache would reintroduce the leak; this guards it.
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 2048, "height": 2048, "background": "white"})).unwrap();
+    // Paint so the document holds real tiles and an undo step, not just an empty canvas.
+    s.execute("edit.fill", json!({"contents": "black"})).unwrap();
+    let tracked = |s: &Session| -> usize { s.documents().iter().map(DocState::memory_bytes).sum() };
+    assert!(tracked(&s) > 0, "a filled 2048² document should hold pixel bytes");
+
+    let closed = s.close(0).expect("the document closes");
+    assert!(s.documents().is_empty(), "no document stays open");
+    assert_eq!(s.active_index(), None, "and nothing stays active");
+    assert_eq!(tracked(&s), 0, "the session retains no memory for the closed document");
+    drop(closed);
+}
+
+#[test]
 fn command_ids_are_unique_and_documented() {
     let mut seen = std::collections::HashSet::new();
     for c in command_specs() {
