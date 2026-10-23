@@ -902,6 +902,9 @@ const ADJUSTMENTS: &[Adjustment] = &[
 /// Properties panel writes an existing Vibrance layer's edit as class `vibrance` (#8534).
 const ADJUSTMENT_CLASS_NAMES: &[(&str, &str)] = &[("vibrance", "Vbrn")];
 
+/// The adjustment for a recorded descriptor class: its four-character code (`Vbrn`, trailing
+/// spaces ignored) or a string id Photoshop uses for it instead (`vibrance`, see
+/// [`ADJUSTMENT_CLASS_NAMES`]). `None` for a class that is not an adjustment this table knows.
 fn adjustment_by_class(c: &str) -> Option<&'static Adjustment> {
     let c = c.trim_end();
     let c = ADJUSTMENT_CLASS_NAMES.iter().find(|(name, _)| *name == c).map_or(c, |(_, code)| code);
