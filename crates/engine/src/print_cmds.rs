@@ -191,6 +191,11 @@ fn cups_spool(job: &PrintJob) -> std::result::Result<String, SpoolError> {
 /// `craft-print` (`lpstat`, the Windows spooler) where that is the route; over IPP for a named
 /// server and where there is no `lp` (a sandbox).
 fn system_printers(_s: &mut Session, p: &Value) -> Result<Value> {
+    #[cfg(test)]
+    if tests::PRINTER_DISCOVERY_CALLS.with(|calls| calls.get().map(|count| calls.set(Some(count.saturating_add(1)))).is_some()) {
+        return Err(other("synthetic printer discovery backend"));
+    }
+    require_live_printer_query(p)?;
     let named = p.get("printServer").and_then(Value::as_str).filter(|v| !v.is_empty());
     if named.is_none() && system_spooler().is_some() {
         let list = craft_print::printers();
@@ -1033,7 +1038,19 @@ fn print_windows(page: &PrintPage, p: &Value, title: &str, copies: u32) -> Resul
     )
 }
 
-fn printers(_: &mut Session, _: &Value) -> Result<Value> {
+/// Reject dry-run discovery and settings queries before contacting external printer services.
+/// This also keeps command validation independent of disconnected printers and print servers.
+fn require_live_printer_query(p: &Value) -> Result<()> {
+    if p.get("dryRun").and_then(Value::as_bool).unwrap_or(false) {
+        Err(other("printer queries are unavailable in a dry run; omit dryRun to query the live printer backend"))
+    } else {
+        Ok(())
+    }
+}
+
+/// List native printers, rejecting dry runs before calling the platform backend.
+fn printers(_: &mut Session, p: &Value) -> Result<Value> {
+    require_live_printer_query(p)?;
     match craft_print::rgb::printers() {
         Ok(list) => Ok(json!({"supported": true, "printers": list.iter().map(|p| json!({"name": p.name, "default": p.default})).collect::<Vec<_>>()})),
         Err(craft_print::rgb::PrintError::Unsupported) => Ok(json!({"supported": false, "printers": []})),
@@ -1041,7 +1058,9 @@ fn printers(_: &mut Session, _: &Value) -> Result<Value> {
     }
 }
 
+/// Query paper dimensions and printable bounds for the selected printer and orientation.
 fn printer_page(_: &mut Session, p: &Value) -> Result<Value> {
+    require_live_printer_query(p)?;
     // Checked before the printer, so a bad value is the error whether or not a printer answers.
     let landscape = match p.get("orientation").filter(|v| !v.is_null()) {
         None => None,
@@ -1095,11 +1114,14 @@ fn print(s: &mut Session, p: &Value) -> Result<Value> {
     do_print(s, p, "file.print")
 }
 
+/// Print one copy using remembered settings and overrides; dry runs skip printer discovery.
 fn print_one_copy(s: &mut Session, p: &Value) -> Result<Value> {
     let mut q = last_print(s).unwrap_or_else(|| json!({}));
     // A printer remembered from an earlier session may be gone: then the default takes the job,
     // as the Print dialog falls back (#7410). A list that can't be read decides nothing.
-    if let Ok(listed) = system_printers(s, &q) {
+    if !p.get("dryRun").and_then(Value::as_bool).unwrap_or(false)
+        && let Ok(listed) = system_printers(s, &q)
+    {
         let names: Vec<&str> = listed["printers"].as_array().into_iter().flatten().filter_map(|p| p["name"].as_str()).collect();
         drop_vanished_printer(&mut q, &names);
     }
@@ -1271,6 +1293,7 @@ fn has_paths(s: &Session) -> std::result::Result<(), String> {
     if d.doc.paths.is_empty() && d.doc.work_path.is_none() { Err("the document has no paths".into()) } else { Ok(()) }
 }
 
+/// Register printing, printer-query, packaging, and path-export commands with their parameters.
 pub fn specs() -> Vec<CommandSpec> {
     macro_rules! spec {
         ($id:expr, $label:expr, $menu:expr, $sc:expr, $params:expr, $enabled:expr, $run:expr) => {
@@ -1286,7 +1309,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Printers",
             menu: &[],
             shortcut: None,
-            params: r##"{} → {supported, printers: [{name, default}]} (supported: Windows; elsewhere Print spools with lp)"##,
+            params: r##"{"dryRun":bool=false} → {supported, printers: [{name, default}]} (supported: Windows; elsewhere Print spools with lp; dryRun refuses live device queries)"##,
             enabled: |_| Ok(()),
             journal: false,
             run: printers,
@@ -1296,7 +1319,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Printer Page",
             menu: &[],
             shortcut: None,
-            params: r##"{"printer":name? (default printer),"printerSettings":hex?,"orientation":"portrait|landscape"? (turn the settings, or the printer's own, that way)} → {printer, paper: [w,h] pt, printable: [x,y,w,h] pt from the top-left, dpi: [x,y], printerSettings: hex (only with orientation: the turned settings)} (Windows)"##,
+            params: r##"{"printer":name? (default printer),"printerSettings":hex?,"orientation":"portrait|landscape"? (turn the settings, or the printer's own, that way),"dryRun":bool=false (refuse live device queries)} → {printer, paper: [w,h] pt, printable: [x,y,w,h] pt from the top-left, dpi: [x,y], printerSettings: hex (only with orientation: the turned settings)} (Windows)"##,
             enabled: |_| Ok(()),
             journal: false,
             run: printer_page,
@@ -1306,7 +1329,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Printers",
             menu: &[],
             shortcut: None,
-            params: r##"{} → {printers:[{name, default}], default:name|null} (the system spooler's printers; a name is Print's "printer")"##,
+            params: r##"{"printServer":str?,"dryRun":bool=false} → {printers:[{name, default}], default:name|null} (the system spooler's printers; a name is Print's "printer"; dryRun refuses live device queries)"##,
             enabled: crate::commands::always,
             journal: false,
             run: system_printers,

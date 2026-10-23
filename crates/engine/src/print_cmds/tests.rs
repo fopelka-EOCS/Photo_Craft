@@ -1,6 +1,24 @@
 use super::*;
 use photocraft_doc::{Knot, NamedPath, Path, Subpath};
 
+thread_local! {
+    /// Optional per-test discovery probe; intercepts calls before any native or network backend.
+    pub(super) static PRINTER_DISCOVERY_CALLS: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
+/// Remembered printer settings must not trigger discovery during a command-level dry run.
+#[test]
+fn print_one_copy_dry_run_skips_remembered_printer_discovery() {
+    let mut s = session("rgb", 8);
+    s.file_menu.last_print = Some(json!({"printer": "Synthetic remembered printer", "paper": "a4"}));
+    PRINTER_DISCOVERY_CALLS.set(Some(0));
+    let result = s.execute("file.printOneCopy", json!({"dryRun": true}));
+    let calls = PRINTER_DISCOVERY_CALLS.replace(None);
+    assert_eq!(calls, Some(0), "dry runs must not enter printer discovery");
+    assert!(result.is_ok(), "{result:?}");
+    assert_eq!(last_print(&s).unwrap()["printer"], "Synthetic remembered printer");
+}
+
 /// Compares signed-offset layout with actual PDF image operators and whole-page mirroring
 /// across scale/fit/orientation cases, while checking the source document stays unchanged.
 #[test]
@@ -930,6 +948,18 @@ fn windows_pdf_component_is_detected_by_loading_its_dll() {
 #[test]
 fn the_windows_pdf_check_is_a_no_op_elsewhere() {
     assert!(require_windows_pdf().is_ok());
+}
+
+/// Dry-run queries reject both implicit and explicitly unavailable printer backends before discovery.
+#[test]
+fn printer_queries_refuse_dry_runs_before_contacting_a_backend() {
+    let mut s = Session::new();
+    for command in ["file.printers", "file.print.printers", "file.print.page"] {
+        for params in [json!({"dryRun": true}), json!({"dryRun": true, "printServer": "127.0.0.1:1", "printer": "Synthetic unavailable printer"})] {
+            let error = s.execute(command, params).unwrap_err().to_string();
+            assert!(error.contains("printer queries are unavailable in a dry run"), "{command}: {error}");
+        }
+    }
 }
 
 /// A 500 × 1000 pt document (72 ppi) on A3 (841.89 × 1190.55 pt): its height sets the fit.

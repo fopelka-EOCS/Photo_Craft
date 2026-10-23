@@ -371,6 +371,24 @@ pub(crate) fn translate_doc(doc: &mut Document, cmd: &str, dx: i32, dy: i32) -> 
     Ok(())
 }
 
+/// Only a sole artboard covering the original canvas represents the canvas itself.
+fn canvas_artboard(doc: &Document) -> Option<photocraft_doc::LayerId> {
+    let boards = doc.artboards();
+    match boards.as_slice() {
+        [(id, _, board)] if board.rect == doc.bounds() => Some(*id),
+        _ => None,
+    }
+}
+
+/// Fit the previously identified canvas board to the new bounds and discard its obsolete size preset.
+fn fit_canvas_artboard(doc: &mut Document, id: Option<photocraft_doc::LayerId>) {
+    let bounds = doc.bounds();
+    if let Some(board) = id.and_then(|id| doc.layer_mut(id)).and_then(|layer| layer.artboard_mut()) {
+        board.rect = bounds;
+        board.preset.clear();
+    }
+}
+
 /// Crops the document to `r` (in current document coordinates).
 /// A frame that extends past the canvas fills the Background's new area with `extension` (the
 /// background colour, as Photoshop's Crop tool does); other layers get transparent pixels there.
@@ -379,6 +397,7 @@ fn crop_doc(doc: &mut Document, cmd: &str, r: Rect, delete_pixels: bool, extensi
     let (Some(dx), Some(dy)) = (r.x0.checked_neg(), r.y0.checked_neg()) else {
         return Err(bad(cmd, format!("the crop origin ({}, {}) can't be moved to (0, 0) within the 32-bit coordinate range", r.x0, r.y0)));
     };
+    let canvas_board = canvas_artboard(doc);
     let old_canvas = doc.bounds();
     let extends = r.x0 < old_canvas.x0 || r.y0 < old_canvas.y0 || r.x1 > old_canvas.x1 || r.y1 > old_canvas.y1;
     if delete_pixels {
@@ -386,6 +405,7 @@ fn crop_doc(doc: &mut Document, cmd: &str, r: Rect, delete_pixels: bool, extensi
     }
     translate_doc(doc, cmd, dx, dy)?;
     doc.size = Size::new(r.width(), r.height());
+    fit_canvas_artboard(doc, canvas_board);
     // A Background cannot hold transparent pixels: like an opaque Canvas Size extension, the area
     // an extending Crop adds is filled with the extension (background) colour.
     if extends
@@ -717,6 +737,7 @@ fn crop_angle(p: &Value) -> Result<Option<f64>> {
 /// rotated image) are then filled from their surroundings, in the same step (#3823).
 fn rotated_crop(s: &mut Session, r: Rect, angle: f64, delete: bool, content_aware: bool, crop_target: &CropTarget) -> Result<Value> {
     const CMD: &str = "image.crop";
+    let canvas_board = canvas_artboard(&s.active().ok_or(EngineError::NoDocument)?.doc);
     let size = s.active().ok_or(EngineError::NoDocument)?.doc.size;
     let (w, h) = (f64::from(r.width()), f64::from(r.height()));
     let (cx, cy) = (f64::from(r.x0) + w / 2.0, f64::from(r.y0) + h / 2.0);
@@ -773,6 +794,7 @@ fn rotated_crop(s: &mut Session, r: Rect, angle: f64, delete: bool, content_awar
             }
             doc.selection = None;
             crop_target.apply(doc);
+            fit_canvas_artboard(doc, canvas_board);
             Ok(())
         })
     })?;
