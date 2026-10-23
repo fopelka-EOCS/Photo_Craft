@@ -755,15 +755,15 @@ pub fn corners_affine(p: &[f64; 8], frame: [f64; 4]) -> Option<Affine> {
 /// for a source of `size` warped by `warp`: the inverse of [`crate::smart_map::plld_bytes`]'s
 /// quad. As for `SoLd`'s `Trnf` (#3677), affine corners frame a single-patch custom warp's
 /// control-point box (which may spill past the source), else the source rect; projective corners
-/// frame the source rect, as `parse_smart_perspective` reads them. `PlLd` stores no source size:
+/// frame the same box, as `parse_smart_perspective` reads them. `PlLd` stores no source size:
 /// without the source file (`None`) the layer is taken as placed at 100 %, the edge lengths being
 /// its size (a custom warp's box needs no size); position and rotation stay right, only Replace
 /// Contents and re-renders depend on the scale. Import and export (which keeps an unedited record
 /// verbatim) both place a `PlLd` layer with this.
 pub fn plld_transform(p: &[f64; 8], size: Option<(f64, f64)>, warp: Option<&photocraft_geom::warp::Warp>) -> (Affine, Option<[f64; 9]>) {
     let (w, h) = size.unwrap_or_else(|| ((p[2] - p[0]).hypot(p[3] - p[1]), (p[6] - p[0]).hypot(p[7] - p[1])));
-    let perspective = corners_perspective([[p[0], p[1]], [p[2], p[3]], [p[4], p[5]], [p[6], p[7]]], (w, h));
-    let frame = if perspective.is_some() { [0.0, 0.0, w, h] } else { placed_frame(warp, w, h) };
+    let frame = placed_frame(warp, w, h);
+    let perspective = corners_perspective_frame([[p[0], p[1]], [p[2], p[3]], [p[4], p[5]], [p[6], p[7]]], frame);
     (corners_affine(p, frame).unwrap_or(Affine::IDENTITY), perspective)
 }
 
@@ -823,8 +823,10 @@ pub fn parse_plld_warp(data: &[u8]) -> PlldWarp {
 
 /// The projective placement of a `SoLd` / `SoLE` block whose corners aren't a parallelogram
 /// (Distort, Perspective): source pixels → document pixels, row-major 3×3. Read from
-/// `nonAffineTransform` (the placed corners), else `Trnf`. `None` for affine placements, which
-/// [`parse_smart`]'s affine holds exactly.
+/// `nonAffineTransform` (the placed corners), else `Trnf`. The corners frame the warp's
+/// control-point box like the affine ones ([`placed_frame`]): Photoshop warps first, then
+/// distorts the warped box (a split warp on a football in perspective lands as Photoshop's only
+/// this way). `None` for affine placements, which [`parse_smart`]'s affine holds exactly.
 pub fn parse_smart_perspective(key: &[u8; 4], data: &[u8]) -> Option<[f64; 9]> {
     if key != b"SoLd" && key != b"SoLE" {
         return None;
@@ -838,18 +840,24 @@ pub fn parse_smart_perspective(key: &[u8; 4], data: &[u8]) -> Option<[f64; 9]> {
         (p.len() == 8 && p.iter().all(|v| v.is_finite())).then(|| [[p[0], p[1]], [p[2], p[3]], [p[4], p[5]], [p[6], p[7]]])
     };
     let q = quad("nonAffineTransform").or_else(|| quad("Trnf"))?;
-    corners_perspective(q, (w, h))
+    let frame = placed_frame(parse_placed_warp(key, data).as_ref(), w, h);
+    corners_perspective_frame(q, frame)
 }
 
 /// The projective placement of a `w` × `h` source onto corners `q` that aren't a parallelogram;
 /// `None` for affine corners (see [`corners_affine`]) or an empty size.
 pub fn corners_perspective(q: [[f64; 2]; 4], (w, h): (f64, f64)) -> Option<[f64; 9]> {
+    corners_perspective_frame(q, [0.0, 0.0, w, h])
+}
+
+/// [`corners_perspective`] for a source box `frame` (left, top, right, bottom).
+pub fn corners_perspective_frame(q: [[f64; 2]; 4], frame: [f64; 4]) -> Option<[f64; 9]> {
     // A parallelogram (top-left + bottom-right = top-right + bottom-left) is affine.
     let tol = 1e-6 * (1.0 + q.iter().flatten().fold(0.0f64, |m, v| m.max(v.abs())));
-    if (0..2).all(|i| (q[0][i] + q[2][i] - q[1][i] - q[3][i]).abs() <= tol) || w <= 0.0 || h <= 0.0 {
+    if (0..2).all(|i| (q[0][i] + q[2][i] - q[1][i] - q[3][i]).abs() <= tol) || frame[2] <= frame[0] || frame[3] <= frame[1] {
         return None;
     }
-    photocraft_algo::transform::Homography::rect_to_quad([0.0, 0.0, w, h], q).map(|m| m.0)
+    photocraft_algo::transform::Homography::rect_to_quad(frame, q).map(|m| m.0)
 }
 
 /// `masterFXSwitch` from an `lfx2` block (defaults to `true`).
@@ -879,6 +887,29 @@ mod tests {
             .with("Mnm ", values(min))
             .with("Mxm ", values(max));
         Descriptor::new("null").with("Grad", Value::Descriptor(gradient))
+    }
+
+    /// Distort/Perspective corners frame the warp's control-point box, as the affine ones do: the
+    /// box's corners land on the stored quad, not the source rect's.
+    #[test]
+    fn perspective_corners_frame_the_warp_box() {
+        use photocraft_geom::warp::{BezierMesh, Warp, WarpStyle};
+        let mut mesh = BezierMesh::identity([0.0, 0.0, 40.0, 20.0], 1, 1);
+        assert!(mesh.split_u(0.5));
+        mesh.points[0] = [-8.0, -4.0];
+        let mut warp = Warp::preset(WarpStyle::Custom, 0.0, [0.0, 0.0, 40.0, 20.0]);
+        warp.mesh = Some(mesh);
+        let frame = placed_frame(Some(&warp), 40.0, 20.0);
+        assert_eq!(frame, [-8.0, -4.0, 40.0, 20.0]);
+        let q = [[100.0, 100.0], [300.0, 120.0], [280.0, 220.0], [110.0, 200.0]];
+        let h = photocraft_algo::transform::Homography(corners_perspective_frame(q, frame).expect("projective"));
+        for ((x, y), c) in [(-8.0, -4.0), (40.0, -4.0), (40.0, 20.0), (-8.0, 20.0)].into_iter().zip(q) {
+            let (u, v) = h.apply(x, y);
+            assert!((u - c[0]).abs() < 1e-9 && (v - c[1]).abs() < 1e-9);
+        }
+        // The `PlLd` record reads the same corners the same way.
+        let p = [100.0, 100.0, 300.0, 120.0, 280.0, 220.0, 110.0, 200.0];
+        assert_eq!(plld_transform(&p, Some((40.0, 20.0)), Some(&warp)).1, Some(h.0));
     }
 
     #[test]
