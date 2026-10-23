@@ -519,33 +519,49 @@ pub fn cancel_stale(app: &mut PhotocraftApp) -> bool {
     true
 }
 
-/// Finish the pen path: a work path (Path mode) or a new shape layer (Shape mode).
-pub fn pen_commit(app: &mut PhotocraftApp, closed: bool) {
+/// Finish the pen path: a work path (Path mode) or a new shape layer (Shape mode). A commit the
+/// document refuses (a locked shape layer to add to…) keeps the draft, so nothing drawn is lost
+/// and it can be committed again; `false` then.
+pub fn pen_commit(app: &mut PhotocraftApp, closed: bool) -> bool {
     // The control channel is drained after `sync_views`, so a document switch in this frame has
     // not been seen yet: never commit the path into the document it was not drawn on.
     if !cancel_stale(app) {
-        return;
+        return false;
     }
-    let Some(mut pen) = app.ui.pen.take() else { return };
-    app.ui.pen_doc = None;
+    let Some(draft) = app.ui.pen.take() else { return true };
+    let doc = app.ui.pen_doc.take();
+    let mut pen = draft.clone();
+    if pen.curvature {
+        curvature_refresh(&mut pen, closed);
+    }
+    if !commit_path(app, &pen, closed) {
+        app.ui.pen = Some(draft);
+        app.ui.pen_doc = doc;
+        return false;
+    }
     if app.ui.direct_selection.target == Some(crate::direct_select::PathRef::Pen) {
         // Its anchors are no longer the Pen's: the committed path is another path.
         app.ui.direct_selection = Default::default();
     }
-    if pen.curvature {
-        curvature_refresh(&mut pen, closed);
-    }
-    commit_path(app, &pen, closed);
+    true
 }
 
-/// Commit a finished Pen, Freeform Pen or Curvature Pen path, as one History step: a new shape
-/// layer (Shape mode), else a subpath of the targeted vector mask, else the work path.
-fn commit_path(app: &mut PhotocraftApp, pen: &PenPath, closed: bool) {
+/// Commit a finished Pen, Freeform Pen or Curvature Pen path, as one History step: in Shape mode a
+/// new shape layer, or with a Path Operation other than New Layer a subpath of the selected shape
+/// layer; in Path mode a subpath of the targeted vector mask, else of the selected path or a new
+/// work path. An added subpath takes the options bar's Path Operation (#1397). `false` when the
+/// document refused it, with the reason in the status bar.
+fn commit_path(app: &mut PhotocraftApp, pen: &PenPath, closed: bool) -> bool {
     if pen.knots.len() < 2 {
-        return;
+        return true;
     }
     let path = pen_to_json(pen, closed);
-    let r = if app.ui.tool_options.vector_mode == "shape" {
+    let op = pen_path_op(&app.ui.tool_options);
+    let into_shape = op.and_then(|_| selected_shape(&app.session)).map(|s| s.layer.0);
+    let r = if let (Some(op), Some(layer), "shape") = (op, into_shape, app.ui.tool_options.vector_mode.as_str()) {
+        // The selected shape layer keeps its fill and stroke; the new component cuts, intersects…
+        app.run("shape.create", json!({"kind": "path", "path": path, "addTo": layer, "op": op}))
+    } else if app.ui.tool_options.vector_mode == "shape" {
         let fill = if closed { fill_param(app) } else { Value::Null };
         let stroke = if closed {
             stroke_param(app)
@@ -565,7 +581,10 @@ fn commit_path(app: &mut PhotocraftApp, pen: &PenPath, closed: bool) {
         // A targeted vector mask takes the new subpath (#196), as in Photoshop.
         let mut p = photocraft_engine::vector_cmds::path_json(&existing);
         if let (Some(subs), Some(new)) = (p.get_mut("subpaths").and_then(Value::as_array_mut), path.get("subpaths").and_then(Value::as_array)) {
-            subs.extend(new.iter().cloned());
+            subs.extend(new.iter().cloned().map(|mut sp| {
+                sp["op"] = json!(op.unwrap_or("combine"));
+                sp
+            }));
         }
         app.run("layer.vectorMask.edit", json!({"layer": id, "path": p}))
     } else {
@@ -580,14 +599,16 @@ fn commit_path(app: &mut PhotocraftApp, pen: &PenPath, closed: bool) {
         let name = target.clone().unwrap_or_else(|| "work".into());
         let mut params = json!({"name": name, "path": path});
         if target.is_some() {
-            params["op"] = json!("combine");
+            params["op"] = json!(op.unwrap_or("combine"));
         }
         app.run("path.set", params).inspect(|_| app.ui.selected_path = Some(name))
     };
     if let Err(e) = r {
         app.ui.status = e;
         app.ui.status_error = true;
+        return false;
     }
+    true
 }
 
 /// Does `doc` have the path the Paths panel calls `name`: "work", or a saved path's name?
@@ -648,6 +669,90 @@ fn with_resumed_subpath(doc: &Document, r: &Resumed, drawn: &Value) -> Option<Va
         slot.insert(key.into(), new.get(key)?.clone());
     }
     Some(p)
+}
+
+/// The Pen's Path Operations (#1397), in Photoshop's menu order: the `pen_path_op` value, its
+/// label and its icon.
+pub(crate) const PATH_OPS: [(&str, &str, &str); 5] = [
+    ("newLayer", "New Layer", "path-op-new-layer"),
+    ("combine", "Combine Shapes", "path-op-combine"),
+    ("subtract", "Subtract Front Shape", "path-op-subtract"),
+    ("intersect", "Intersect Shape Areas", "path-op-intersect"),
+    ("exclude", "Exclude Overlapping Shapes", "path-op-exclude"),
+];
+
+/// The operation (`path.set` / `shape.create` `op`) a new Pen path is added with; None for a new
+/// shape layer (New Layer, in Shape mode). Path mode has no New Layer: there it combines.
+pub(crate) fn pen_path_op(o: &ToolOptions) -> Option<&'static str> {
+    let op = PATH_OPS.iter().map(|(v, ..)| *v).find(|v| *v == o.pen_path_op).unwrap_or("newLayer");
+    match op {
+        "newLayer" if o.vector_mode == "shape" => None,
+        "newLayer" => Some("combine"),
+        op => Some(op),
+    }
+}
+
+/// What the Path Operations menu's Merge Shape Components merges, as a command, its params and
+/// the number of shape components there: in Shape mode the selected shape layer; in Path mode
+/// the path the Pen draws into (a targeted vector mask, the selected path, else the Work Path).
+fn merge_target(app: &PhotocraftApp) -> Option<(&'static str, Value, usize)> {
+    let st = app.session.active()?;
+    if app.ui.tool_options.vector_mode == "shape" {
+        let id = st.active_layer?;
+        let LayerContent::Shape(sh) = &st.doc.layer(id)?.content else { return None };
+        return Some(("layer.combineShapes.mergeShapeComponents", json!({"layer": id.0}), sh.path.components().len()));
+    }
+    if let Some((id, p)) = targeted_vector_mask(app) {
+        return Some(("path.mergeShapeComponents", json!({"name": "layer", "layer": id}), p.components().len()));
+    }
+    let name = app.ui.selected_path.clone().filter(|n| path_exists(&st.doc, n)).unwrap_or_else(|| "work".into());
+    let path = if name == "work" { st.doc.work_path.as_ref() } else { st.doc.paths.iter().find(|p| p.name == name).map(|p| &p.path) }?;
+    Some(("path.mergeShapeComponents", json!({"name": name}), path.components().len()))
+}
+
+/// The Path Operations button of the Pen, Freeform Pen and Curvature Pen (#1397), Photoshop's:
+/// how the next path combines with the shape or path it is drawn into, and Merge Shape Components.
+/// Its icon shows the current operation.
+fn path_operations_menu(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    let shape = app.ui.tool_options.vector_mode == "shape";
+    let current = pen_path_op(&app.ui.tool_options).unwrap_or("newLayer");
+    let icon = PATH_OPS.iter().find(|(v, ..)| *v == current).map_or("path-op-combine", |(.., i)| *i);
+    let resp = crate::icons::button_with_icon_size(ui, icon, 24.0, 16.0, false, tl!("Path operations"));
+    let resp = crate::brush_picker::named(resp, "Path operations");
+    let merge = merge_target(app).filter(|(.., n)| *n > 1);
+    let mut run = None;
+    egui::Popup::menu(&resp).show(|ui| {
+        ui.set_min_width(240.0);
+        for (value, label, glyph) in PATH_OPS {
+            // New Layer makes a shape layer: Path mode has none.
+            if ui.add_enabled_ui(shape || value != "newLayer", |ui| path_op_button(ui, glyph, tl!(label), value == current)).inner.clicked() {
+                app.ui.tool_options.pen_path_op = value.into();
+                ui.close();
+            }
+        }
+        ui.separator();
+        if ui.add_enabled_ui(merge.is_some(), |ui| path_op_button(ui, "path-op-merge", tl!("Merge Shape Components"), false)).inner.clicked() {
+            run = merge.clone();
+            ui.close();
+        }
+    });
+    if let Some((id, params, _)) = run
+        && let Err(e) = app.run(id, params)
+    {
+        app.ui.status = e;
+        app.ui.status_error = true;
+    }
+}
+
+/// A Path Operations menu row: its icon and label, highlighted when it is the current operation.
+fn path_op_button(ui: &mut egui::Ui, glyph: &str, label: &str, checked: bool) -> egui::Response {
+    let icon = ui.id().with((glyph, "icon"));
+    let b = egui::Button::new((egui::Atom::custom(icon, vec2(16.0, 16.0)), label, egui::Atom::grow())).selected(checked).atom_ui(ui);
+    if let Some(r) = b.rect(icon) {
+        crate::icons::paint(ui, r, glyph, 16.0, Tokens::get(ui.ctx()).icon);
+    }
+    b.response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), checked, label));
+    b.response
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -761,8 +866,9 @@ pub fn curvature_down(app: &mut PhotocraftApp, x: f64, y: f64) {
     if !cancel_stale(app) {
         return;
     }
-    if app.ui.pen.as_ref().is_some_and(|p| !p.curvature) {
-        pen_commit(app, false);
+    // A Pen draft whose commit is refused stays as it is: no Curvature anchor is added to it.
+    if app.ui.pen.as_ref().is_some_and(|p| !p.curvature) && !pen_commit(app, false) {
+        return;
     }
     let hit = curvature_hit(app, x, y);
     if hit == Some(0) && app.ui.pen.as_ref().is_some_and(|p| p.knots.len() >= 3) {
@@ -870,7 +976,9 @@ pub fn path_to_selection(app: &mut PhotocraftApp, params: Value) -> Result<Value
     if app.ui.pen.as_ref().is_some_and(|p| p.knots.len() >= 2) {
         // The finished path becomes the work path, or a shape layer's path or a vector mask.
         let on_layer = app.ui.tool_options.vector_mode == "shape" || targeted_vector_mask(app).is_some();
-        pen_commit(app, false);
+        if !pen_commit(app, false) {
+            return Err(app.ui.status.clone());
+        }
         app.ui.selected_path = Some(if on_layer { "layer" } else { "work" }.into());
     }
     let name = active_path_name(app)
@@ -1346,6 +1454,9 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: Tool) -> bo
                 o.stroke_width = enabled_stroke_width(o.stroke_width);
             }
         }
+        crate::widgets::vline(ui, 22.0);
+        path_operations_menu(app, ui);
+        let o = &mut app.ui.tool_options;
         if tool == Tool::Pen {
             crate::widgets::vline(ui, 22.0);
             crate::widgets::checkbox(ui, &mut o.pen_auto_add_delete, tl!("Auto Add/Delete"));
@@ -2962,7 +3073,9 @@ mod tests {
                 "pen" => pen_down(&mut app, 150.0, 150.0, false),
                 "curvature" => curvature_down(&mut app, 150.0, 150.0),
                 "undo" => assert!(!pen_undo_last_point(&mut app)),
-                "commit" => pen_commit(&mut app, true),
+                "commit" => {
+                    pen_commit(&mut app, true);
+                }
                 _ => {
                     assert!(app.run("file.close", json!({})).is_err());
                 }
@@ -3067,7 +3180,9 @@ mod tests {
                     "pen" => pen_down(&mut app, 150.0, 150.0, false),
                     "curvature" => curvature_down(&mut app, 150.0, 150.0),
                     "undo" => assert!(!pen_undo_last_point(&mut app)),
-                    "commit" => pen_commit(&mut app, true),
+                    "commit" => {
+                        pen_commit(&mut app, true);
+                    }
                     _ => app.sync_views(),
                 }
                 let source = app.session.documents().iter().find(|d| d.doc.id == owner).unwrap();
@@ -3633,6 +3748,10 @@ mod path_selection_tests;
 #[cfg(test)]
 #[path = "pen_draw_tests.rs"]
 mod pen_draw_tests;
+
+#[cfg(test)]
+#[path = "pen_path_ops_tests.rs"]
+mod pen_path_ops_tests;
 
 #[cfg(test)]
 #[path = "vector_paint_tests.rs"]
