@@ -771,7 +771,7 @@ fn file_info_translations_survive_undo_and_psd_round_trip() {
     for depth in [8, 16, 32] {
         let mut s = session(8, 8, depth);
         s.edit("Set metadata", |doc, _| {
-            doc.metadata.xmp = Some(MULTILINGUAL_XMP.to_string());
+            doc.metadata.xmp = Some(MULTILINGUAL_XMP.into());
             Ok(())
         })
         .unwrap();
@@ -781,7 +781,7 @@ fn file_info_translations_survive_undo_and_psd_round_trip() {
         assert!(s.undo());
         assert_eq!(doc(&s).metadata.xmp.as_deref(), Some(MULTILINGUAL_XMP));
         assert!(s.redo());
-        assert_eq!(doc(&s).metadata.xmp.as_deref(), Some(edited.as_str()));
+        assert_eq!(doc(&s).metadata.xmp.as_deref(), Some(&*edited));
         let (bytes, _) = encode(doc(&s), "x.psd", None).unwrap();
         let back = photocraft_io::import("x.psd", &bytes).unwrap().document;
         assert_translations_kept(back.metadata.xmp.as_deref().unwrap());
@@ -1414,6 +1414,18 @@ fn reveal_in_finder_reveals_the_documents_saved_path() {
     let r = s.execute("file.revealInFinder", json!({"document": 0, "dryRun": true})).unwrap();
     assert_eq!(r["program"], json!(program));
     assert_eq!(r["args"], json!(args));
+}
+
+#[cfg(windows)]
+#[test]
+fn reveal_in_finder_on_windows_passes_the_clicked_tabs_saved_path() {
+    let mut s = session(8, 8, 8);
+    s.active_mut().unwrap().path = Some("C:/项目 图片/海报 🖼.png".into());
+    s.execute("file.new", json!({"width": 8, "height": 8, "name": "other"})).unwrap();
+
+    let r = s.execute("file.revealInFinder", json!({"document": 0, "dryRun": true})).unwrap();
+    assert_eq!(r["program"], "explorer");
+    assert_eq!(r["args"], json!(["/select,", r"C:\项目 图片\海报 🖼.png"]));
 }
 
 /// "Include All Subfolders" (AUTO-219-5, #3753): Batch and Image Processor take the images in
