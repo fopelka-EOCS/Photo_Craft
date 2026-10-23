@@ -191,6 +191,9 @@ struct StrokeCursor {
 /// 125,000); smaller ones are not worth the hand-off.
 const PARALLEL_DAB_NODES: usize = 16_384;
 
+/// Bound completed output buffers independently of the document's size.
+const RENDER_BATCH_TILES: usize = 64;
+
 /// Distance between dabs along a stroke for brush radius `r`: a twentieth of the radius, so a
 /// drag is many small pushes and its edge stays smooth.
 fn dab_spacing(r: f64) -> f64 {
@@ -774,15 +777,10 @@ pub fn apply_liquify(src: &Surface, field: &LiquifyField) -> Surface {
         }
         Some((*t, outp))
     };
-    #[cfg(not(target_arch = "wasm32"))]
-    let done: Vec<(Rect, Vec<f32>)> = {
-        use rayon::prelude::*;
-        tiles.par_iter().filter_map(work).collect()
-    };
-    #[cfg(target_arch = "wasm32")]
-    let done: Vec<(Rect, Vec<f32>)> = tiles.iter().filter_map(work).collect();
-    for (r, v) in done {
-        out.write_region(r, &v);
+    for batch in tiles.chunks(RENDER_BATCH_TILES) {
+        for (r, v) in par::map(batch.len(), true, |i| batch.get(i).and_then(work)).into_iter().flatten() {
+            out.write_region(r, &v);
+        }
     }
     if alpha {
         out.prune();
