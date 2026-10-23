@@ -251,3 +251,7 @@ sync_github_name = true
 
 [people.benandez]
 real_name = "Martin Ball"
+
+[people.diegochagas]
+real_name = "Diego Chagas"
+display_name = "Diego Chagas"
