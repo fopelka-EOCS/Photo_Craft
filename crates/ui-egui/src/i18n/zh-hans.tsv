@@ -3040,3 +3040,7 @@ curves	Smooth	平滑
 
 # Print preview image (#8236)
 	Print preview image	Print preview image
+
+# Foreground/background Color Picker shortcuts (#8762).
+	Color Picker (Foreground Color)	拾色器（前景色）
+	Color Picker (Background Color)	拾色器（背景颜色）

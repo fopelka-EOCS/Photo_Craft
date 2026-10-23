@@ -3873,3 +3873,7 @@ curves	Smooth	Làm mượt
 
 # Print preview image (#8236)
 	Print preview image	Print preview image
+
+# Foreground/background Color Picker shortcuts (#8762).
+	Color Picker (Foreground Color)	Bộ chọn màu (Màu trước)
+	Color Picker (Background Color)	Bộ chọn màu (Màu nền)
