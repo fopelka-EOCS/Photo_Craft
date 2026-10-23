@@ -1500,6 +1500,9 @@ fn merge_layers(s: &mut Session) -> Result<Value> {
         if solo.layers.is_empty() {
             return Err(EngineError::Other("the selected layers are all hidden".into()));
         }
+        // Photoshop keeps the bottommost selected layer's style live on the merged layer, where it
+        // re-applies to the merged pixels: bake the stack without it so it is not applied twice.
+        let lowest_style = std::mem::take(&mut solo.layers[0].effects);
 
         if is_background {
             let base = doc.layer(lowest_id).ok_or(EngineError::NoLayer(lowest_id))?.clone();
@@ -1510,6 +1513,7 @@ fn merge_layers(s: &mut Session) -> Result<Value> {
             merged.id = lowest_id;
             merged.blend = base.blend;
             merged.opacity = 1.0;
+            merged.effects = lowest_style;
             *crate::pixels_mut(&mut merged)? = crate::pixels::composite_layers(&solo, fmt, None);
             for id in &ids[1..] {
                 doc.remove(*id);
@@ -1530,6 +1534,7 @@ fn merge_layers(s: &mut Session) -> Result<Value> {
             // lower chain's pixels to the upper chain's base.
             let base = crate::clip_group::base_of(doc, top_id);
             merged.clipped = base.is_some() && solo.layers.iter().all(|l| l.clipped && crate::clip_group::base_of(doc, l.id) == base);
+            merged.effects = lowest_style;
             *crate::pixels_mut(&mut merged)? = crate::pixels::composite_layers_uncropped(&solo, fmt);
             let mid = merged.id;
             // Hidden selected layers are discarded, as in Photoshop.
@@ -2551,6 +2556,76 @@ mod tests {
             let after = photocraft_compose::render(doc(&s), doc(&s).bounds());
             let worst = before.px.iter().zip(&after.px).map(|(a, b)| a.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0.0f32, f32::max)).fold(0.0f32, f32::max);
             assert!(worst <= 1.5 / 255.0, "depth {depth}: merge layers dropped the shadow (off by {worst})");
+        }
+    }
+
+    #[test]
+    fn merging_down_keeps_the_lower_layers_style_live_on_the_union() {
+        // Merge Down over a styled layer keeps its style live, as in Photoshop, where it
+        // re-composes over the merged pixels: the glow that only surrounded the lower layer now
+        // surrounds the union of both layers' content.
+        let probe = |s: &Session| {
+            let d = doc(s);
+            photocraft_compose::render(d, d.bounds()).get(75, 26)
+        };
+        for depth in [8, 16, 32] {
+            let mut s = session(depth);
+            let lower = rect_layer(&mut s, Rect::new(10, 10, 30, 30));
+            let upper = rect_layer(&mut s, Rect::new(60, 20, 72, 32));
+            s.execute("layer.layerStyle.outerGlow", json!({"layer": lower.0, "blend": "normal", "size": 6, "color": "#000000", "add": true})).unwrap();
+            let before = probe(&s);
+            assert!(before.iter().all(|v| *v > 0.9), "depth {depth}: the glow never reaches the probe before the merge: {before:?}");
+            s.execute("layer.mergeDown", json!({"layer": upper.0})).unwrap();
+            let merged = doc(&s).layer(lower).unwrap().clone();
+            assert!(doc(&s).layer(upper).is_none());
+            assert_eq!(merged.effects.items.len(), 1);
+            assert!(merged.effects.items.iter().all(photocraft_doc::Effect::enabled), "the style stays live on the merged layer");
+            let after = probe(&s);
+            assert!(
+                after.iter().take(3).zip(&before).all(|(a, b)| *a < *b - 0.03),
+                "depth {depth}: the glow re-applies to the merged union: {before:?} -> {after:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn merging_selected_layers_keeps_the_bottom_layers_style_live_on_the_union() {
+        // ⌘E over two selected layers keeps the bottommost one's style live, as in Photoshop.
+        for depth in [8, 16, 32] {
+            let mut s = session(depth);
+            let lower = rect_layer(&mut s, Rect::new(10, 10, 30, 30));
+            let upper = rect_layer(&mut s, Rect::new(60, 20, 72, 32));
+            s.execute("layer.layerStyle.outerGlow", json!({"layer": lower.0, "blend": "normal", "size": 6, "color": "#000000", "add": true})).unwrap();
+            select_all(&mut s, &[lower, upper]);
+            let m = LayerId(s.execute("layer.mergeLayers", json!({})).unwrap()["layer"].as_u64().unwrap());
+            assert!(!doc(&s).layer(m).unwrap().effects.items.is_empty(), "depth {depth}: the style survives Merge Layers");
+            let d = doc(&s);
+            let after = photocraft_compose::render(d, d.bounds()).get(75, 26);
+            assert!(after.iter().take(3).all(|v| *v < 0.97), "depth {depth}: the glow re-applies to the merged union: {after:?}");
+        }
+    }
+
+    #[test]
+    fn merging_down_inside_the_shaped_layer_is_a_pixel_match() {
+        // With the upper layer fully inside the lower one's shape, the union is the same shape, so
+        // a correct merge is a pixel-for-pixel match: the style is neither lost, nor applied
+        // twice, and Global Light follows the document instead of `Document::new` defaults.
+        for depth in [8, 16, 32] {
+            let mut s = session(depth);
+            let lower = rect_layer(&mut s, Rect::new(10, 10, 60, 60));
+            let upper = rect_layer(&mut s, Rect::new(25, 25, 45, 45));
+            s.edit("light", |doc, _| {
+                doc.global_light = photocraft_doc::GlobalLight { angle: 20.0, altitude: 40.0 };
+                Ok(())
+            })
+            .unwrap();
+            s.execute("layer.layerStyle.dropShadow", json!({"layer": lower.0, "blend": "normal", "useGlobalLight": true, "angle": 120, "distance": 5, "spread": 0, "size": 0, "opacity": 100, "color": "#000000"})).unwrap();
+            let before = photocraft_compose::render(doc(&s), doc(&s).bounds());
+            s.execute("layer.mergeDown", json!({"layer": upper.0})).unwrap();
+            assert!(!doc(&s).layer(lower).unwrap().effects.items.is_empty());
+            let after = photocraft_compose::render(doc(&s), doc(&s).bounds());
+            let worst = before.px.iter().zip(&after.px).map(|(a, b)| a.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0.0f32, f32::max)).fold(0.0f32, f32::max);
+            assert!(worst <= 1.5 / 255.0, "depth {depth}: merge down changed the composite (off by {worst})");
         }
     }
 
