@@ -898,8 +898,17 @@ const ADJUSTMENTS: &[Adjustment] = &[
     Adjustment { class: "GdMp", suffix: "gradientMap", from: gradient_map_from, to: gradient_map_to },
 ];
 
+/// Classes Photoshop records by string id for an adjustment the table knows by its code: the
+/// Properties panel writes an existing Vibrance layer's edit as class `vibrance` (#8534).
+const ADJUSTMENT_CLASS_NAMES: &[(&str, &str)] = &[("vibrance", "Vbrn")];
+
+/// The adjustment for a recorded descriptor class: its four-character code (`Vbrn`, trailing
+/// spaces ignored) or a string id Photoshop uses for it instead (`vibrance`, see
+/// [`ADJUSTMENT_CLASS_NAMES`]). `None` for a class that is not an adjustment this table knows.
 fn adjustment_by_class(c: &str) -> Option<&'static Adjustment> {
-    ADJUSTMENTS.iter().find(|a| a.class.trim_end() == c.trim_end())
+    let c = c.trim_end();
+    let c = ADJUSTMENT_CLASS_NAMES.iter().find(|(name, _)| *name == c).map_or(c, |(_, code)| code);
+    ADJUSTMENTS.iter().find(|a| a.class.trim_end() == c)
 }
 
 const PHOTO_FILTER_FIELDS: &[F] = &[F("Clr ", "color", Kind::Color), F("Dnst", "density", Kind::Long), F("PrsL", "preserveLuminosity", Kind::Bool)];
