@@ -141,6 +141,35 @@ fn export_refuses_a_non_array_layers_value() {
     assert_eq!(skipped, [Skipped { action: "Targets".into(), step: 0, id: "layer.setProps".into() }]);
 }
 
+/// Several explicit layers with several properties: per layer (in list order), per property
+/// (rename last), each pitched to that layer's `Idnt`; an unrepresentable id anywhere uses
+/// all-or-nothing rather than the typed layers before it (#7246, coord with #8371).
+#[test]
+fn a_list_with_properties_exports_exact_targets_in_order() {
+    let (_s, first, second) = two_layers();
+    let action = Action::new("Targets", vec![("layer.setProps".into(), json!({"layers": [first, second], "opacity": 0.5, "blend": "Multiply"}))]);
+    let (bytes, skipped) = export("S", &[&action], &[], false).unwrap();
+    assert_eq!(skipped, []);
+    let file = atn::parse(&bytes).unwrap();
+    let items = &file.actions[0].items;
+    let expected: Vec<u64> = [first, second].iter().flat_map(|&l| [l, l]).collect();
+    assert_eq!(items.len(), expected.len(), "{expected:?}: one property Set per layer, properties split per item");
+    for (item, id) in items.iter().zip(expected) {
+        let d = item.descriptor.as_ref().unwrap();
+        let [ReferenceItem::Identifier { class, id: target }] = get_ref(d, "null").unwrap() else { panic!("{d:?}") };
+        assert!(class.class_id.is("Lyr "), "{class:?}");
+        assert_eq!(*target as u64, id, "each property event pitches its own layer by id");
+        assert_eq!(get_obj(d, "T   ").unwrap().items.len(), 1, "one property Set per layer keeps every property event a `setd`");
+        assert_eq!(item.event.id(), "setd");
+    }
+
+    let malformed = Action::new("Targets", vec![("layer.setProps".into(), json!({"layers": [first, "nope"], "opacity": 0.5}))]);
+    let e = export("S", &[&malformed], &[], false).unwrap_err();
+    assert!(e.contains("layer.setProps"), "{e}");
+    let (_, skipped) = export("S", &[&malformed], &[], true).unwrap();
+    assert_eq!(skipped, [Skipped { action: "Targets".into(), step: 0, id: "layer.setProps".into() }]);
+}
+
 /// A numeric `layer` the reference can't hold refuses as well: exporting it silently would
 /// aim the step at the active layer instead (#7246, review).
 #[test]
