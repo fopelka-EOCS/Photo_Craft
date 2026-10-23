@@ -278,7 +278,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: storytold/craft-fonts
-          ref: abb83316d96aa59c1cf64784289e378fe9fa5695
+          ref: a71c20e30af613287c504f7e685ca8fad77752bc
           path: craft-fonts
 
       - name: Test with craft-fonts
