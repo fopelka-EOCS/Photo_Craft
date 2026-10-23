@@ -228,6 +228,10 @@ pub(crate) enum Refresh {
     /// Type, shapes and smart objects (after a resampling map). Smart objects whose source is
     /// unavailable keep their (already mapped) cache.
     All,
+    /// [`Refresh::All`] after Image Size resampled every layer's pixels, type included: type set
+    /// in a font that isn't installed keeps its resampled pixels instead of re-rendering in a
+    /// substitute face (#8860).
+    Resampled,
 }
 
 pub(crate) fn refresh(doc: &mut Document, what: Refresh) {
@@ -236,8 +240,9 @@ pub(crate) fn refresh(doc: &mut Document, what: Refresh) {
             match &mut l.content {
                 LayerContent::Group(g) => rec(snapshot, &mut g.children, what),
                 LayerContent::Shape(sh) => crate::vector_cmds::refresh_shape(snapshot, sh),
-                LayerContent::Text(t) if what == Refresh::All => crate::type_cmds::refresh(snapshot, t),
-                LayerContent::Smart(_) if what == Refresh::All => {
+                LayerContent::Text(t) if what == Refresh::Resampled && t.cache.is_some() && !crate::type_extra_cmds::missing_fonts_in_layer(t).is_empty() => {}
+                LayerContent::Text(t) if what != Refresh::Shapes => crate::type_cmds::refresh(snapshot, t),
+                LayerContent::Smart(_) if what != Refresh::Shapes => {
                     let _ = crate::smart_cmds::refresh_layer(snapshot, l);
                 }
                 _ => {}

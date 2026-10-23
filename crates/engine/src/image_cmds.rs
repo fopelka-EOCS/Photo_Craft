@@ -320,7 +320,7 @@ pub(crate) fn resample_doc(doc: &mut Document, nw: u32, nh: u32, filter: Resampl
     // Vector geometry, guides and marks scale with the pixels; vectors re-render sharp.
     crate::canvas_geom::transform_geometry(doc, &photocraft_geom::Affine { m: [sx, 0.0, 0.0, sy, 0.0, 0.0] });
     doc.size = Size::new(nw, nh);
-    crate::canvas_geom::refresh(doc, crate::canvas_geom::Refresh::All);
+    crate::canvas_geom::refresh(doc, crate::canvas_geom::Refresh::Resampled);
 }
 
 fn bad(cmd: &str, msg: impl Into<String>) -> EngineError {
@@ -1227,6 +1227,37 @@ mod tests {
             crate::type_cmds::refresh(d, &mut t);
             let after = t.cache.unwrap().content_bounds().height();
             assert!(after.abs_diff(h0 * k) <= 2, "{params}: re-rendered {h0} -> {after}");
+        }
+    }
+
+    /// Type in a font that isn't installed keeps its own pixels (a PSD's rendering), resampled,
+    /// through Image Size instead of re-rendering in a substitute face (#8860). Export As
+    /// previews through Image Size, so its preview showed the wrong font. Type in an installed
+    /// font still re-renders.
+    #[test]
+    fn image_size_keeps_the_pixels_of_type_in_a_missing_font() {
+        for depth in [8, 16, 32] {
+            for (font, kept) in [("No Such Font 8860", true), ("", false)] {
+                let mut s = Session::new();
+                s.execute("file.new", json!({"width": 100, "height": 100, "depth": depth})).unwrap();
+                let cache = s
+                    .edit("type", |doc, active| {
+                        let mut t = photocraft_doc::TextLayer { text: "Hello!".into(), font_family: font.into(), size_pt: 26.0, ..Default::default() };
+                        t.transform = photocraft_geom::Affine::translate(10.0, 60.0);
+                        // Deliberately not what PhotoCraft would draw, so a re-render shows.
+                        let fmt = doc.pixel_format();
+                        let mut cache = Surface::new(fmt);
+                        cache.fill_rect(Rect::new(10, 20, 90, 60), &photocraft_raster::from_rgba(&fmt, [0.4, 0.2, 0.6, 1.0]));
+                        t.cache = Some(cache.clone());
+                        *active = Some(doc.insert_above(None, Layer::new("Hello!", LayerContent::Text(t))));
+                        Ok(cache)
+                    })
+                    .unwrap();
+                s.execute("image.imageSize", json!({"width": 50, "height": 50, "resample": "bilinear"})).unwrap();
+                let LayerContent::Text(t) = &doc(&s).layers.last().unwrap().content else { panic!("type layer") };
+                let resampled = resize_surface_in_canvas(&cache, 0.5, 0.5, Resample::Bilinear, Rect::from_xywh(0, 0, 100, 100));
+                assert_eq!(t.cache.as_ref() == Some(&resampled), kept, "font {font:?}, depth {depth}");
+            }
         }
     }
 
