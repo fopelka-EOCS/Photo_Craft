@@ -313,6 +313,7 @@ fn path_to_selection_matches_analytic_shape() {
     let area: f64 = m.iter().map(|v| f64::from(*v)).sum();
     let want = std::f64::consts::PI * 3600.0;
     assert!((area - want).abs() / want < 0.005, "{area} vs {want}");
+    assert!(doc(&s).work_path.is_none(), "the conversion spends the Work Path, as in Photoshop");
     // Pixel-level: centres well inside/outside are exact; edge pixels match the analytic coverage.
     let at = |x: usize, y: usize| m[y * 200 + x];
     assert_eq!(at(100, 100), 1.0);
@@ -327,9 +328,12 @@ fn path_to_selection_matches_analytic_shape() {
     s.execute("path.toSelection", json!({"name": "Sq", "mode": "subtract"})).unwrap();
     let half: f64 = selection_mask(&s).iter().map(|v| f64::from(*v)).sum();
     assert!((half - want / 2.0).abs() / want < 0.005);
-    // Non-anti-aliased selections are binary; feather softens.
+    // Non-anti-aliased selections are binary; feather softens. Each pass re-sets the same
+    // geometry as the Work Path because a spent Work Path is gone (saved paths keep working).
+    s.execute("path.set", json!({"path": path_json(&c)})).unwrap();
     s.execute("path.toSelection", json!({"antiAlias": false})).unwrap();
     assert!(selection_mask(&s).iter().all(|v| *v == 0.0 || *v == 1.0));
+    s.execute("path.set", json!({"path": path_json(&c)})).unwrap();
     s.execute("path.toSelection", json!({"feather": 8})).unwrap();
     let m = selection_mask(&s);
     assert!(m[100 * 200 + 160] > 0.2 && m[100 * 200 + 160] < 0.8);

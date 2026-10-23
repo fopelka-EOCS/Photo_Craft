@@ -1090,7 +1090,8 @@ fn path_rename(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn path_to_selection(s: &mut Session, p: &Value) -> Result<Value> {
-    let path = resolve_path(s, p.get("name").and_then(Value::as_str))?;
+    let name = p.get("name").and_then(Value::as_str).map(str::to_string);
+    let path = resolve_path(s, name.as_deref())?;
     let feather = f64p(p, "feather").unwrap_or(0.0) as f32;
     let aa = p.get("antiAlias").and_then(Value::as_bool).unwrap_or(true);
     let mode = SelectionMode::parse(p.get("mode").and_then(Value::as_str).unwrap_or("replace"));
@@ -1106,6 +1107,13 @@ fn path_to_selection(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let selected = s.edit("Make Selection", |doc, _| {
         doc.selection = sel::combine(doc.selection.as_ref(), &mask, area, mode);
+        // Converting the Work Path to a selection spends it, as in Photoshop: the Work Path is
+        // a scratch pad, and its conversion to a selection removes it (a "saved" path or the
+        // layer-owned shape/mask paths survive). One history step keeps path and selection
+        // together, so undo restores both.
+        if is_work(name.as_deref()) && doc.work_path.is_some() {
+            doc.work_path = None;
+        }
         Ok(doc.selection.is_some())
     })?;
     Ok(json!({ "selected": selected }))

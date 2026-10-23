@@ -462,16 +462,19 @@ fn commit_path(app: &mut PhotocraftApp, pen: &PenPath, closed: bool) {
         }
         app.run("layer.vectorMask.edit", json!({"layer": id, "path": p}))
     } else {
-        // Photoshop adds the new subpath to the path selected in the Paths panel, which is the
-        // Work Path right after drawing one, so path after path builds up there (#4721). With
-        // no path selected the Work Path stays the pen's landing pad: the new subpath joins it
-        // (op combine — the engine creates it when there is none), so a deselected Work Path is
-        // never silently replaced by an invisible commit (that destroyed hidden work; a fresh
-        // Work Path is the Paths panel's New Path, as in Photoshop). The drawn path ends up
-        // selected.
+        // Photoshop adds the new subpath to the path selected in the Paths panel, which is
+        // the Work Path right after drawing one, so path after path builds up there (#4721).
+        // With no path selected the Work Path is a scratch buffer: a new drawing replaces it
+        // (path.set without an op), so the old subpaths are gone for good and never resurface
+        // with the next Make Selection or commit. (`append`-overwrite-here was tried and
+        // caught live: the deselected subpaths came back with the next drawing and its
+        // selection.) The drawn path ends up selected.
         let target = app.ui.selected_path.clone().filter(|n| app.session.active().is_some_and(|st| path_exists(&st.doc, n)));
         let name = target.clone().unwrap_or_else(|| "work".into());
-        let params = json!({"name": name, "path": path, "op": "combine"});
+        let mut params = json!({"name": name, "path": path});
+        if target.is_some() {
+            params["op"] = json!("combine");
+        }
         app.run("path.set", params).inspect(|_| app.ui.selected_path = Some(name))
     };
     if let Err(e) = r {
@@ -718,18 +721,20 @@ pub fn with_active_path(app: &PhotocraftApp, id: &str, params: Value) -> Value {
 
 /// ⌘↩ / Ctrl+Enter (#306): load a path as a selection, like Photoshop with a Pen or Path
 /// Selection tool or a path selected in the Paths panel. A path being drawn with the Pen is
-/// finished first and loads; otherwise [`active_path_name`]. `params` may set feather, mode…
+/// finished first and loads; otherwise [`active_path_name`]. Converting the Work Path spends
+/// it (the engine removes it in the same history step; saved paths and layer-owned paths
+/// survive). `params` may set feather, mode…
 pub fn path_to_selection(app: &mut PhotocraftApp, params: Value) -> Result<Value, String> {
     if app.ui.pen.as_ref().is_some_and(|p| p.knots.len() >= 2) {
         // The finished path becomes the work path, or a shape layer's path or a vector mask.
         // Only the layer-owned path stays the Paths panel's target: after an ordinary path's
-        // selection is made, Photoshop deselects it and `run`'s lifecycle clears the target.
+        // conversion the Work Path is spent, and `run`'s lifecycle clears the target.
         if app.ui.tool_options.vector_mode == "shape" || targeted_vector_mask(app).is_some() {
             pen_commit(app, false);
             app.ui.selected_path = Some("layer".into());
         } else {
-            // `pen_commit` targets the work path it makes; the Make Selection below then
-            // deselects it, as in Photoshop, so only the selection outline stays visible.
+            // `pen_commit` targets the work path it makes; the Make Selection below consumes
+            // it, as in Photoshop, so only the selection outline stays visible.
             pen_commit(app, false);
         }
     }
@@ -2450,14 +2455,15 @@ mod tests {
         assert_eq!(saved.subpaths.len(), 2);
         assert_eq!(work(&app).subpaths.len(), 2, "the Work Path is left alone");
         assert_eq!(app.ui.selected_path.as_deref(), Some("Saved"));
-        // No path selected: the Work Path stays the pen's landing pad — the new subpath joins
-        // it, as in Photoshop (#4721), and the deselected subpaths survive. A silent
-        // replacement was destroying invisible work.
+        // No path selected: drawing anew replaces the scratch Work Path, as in Photoshop —
+        // the old subpaths are gone for good and never resurface with the next drawing
+        // (reported live 2026-10-23: a deselected join made the old path come back and
+        // put its region into the next Make Selection).
         app.ui.selected_path = None;
         draw(&mut app, 320.0);
         let wp = work(&app);
-        assert_eq!(wp.subpaths.len(), 3, "the two old subpaths stay; the new one joins");
-        assert_eq!(wp.subpaths[2].knots[0].anchor.x, 320.0);
+        assert_eq!(wp.subpaths.len(), 1, "the old subpaths do not resurface with the next drawing");
+        assert_eq!(wp.subpaths[0].knots[0].anchor.x, 320.0);
         assert_eq!(app.ui.selected_path.as_deref(), Some("work"));
     }
 

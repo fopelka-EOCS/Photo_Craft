@@ -1488,7 +1488,7 @@ mod tests {
         choose(&mut app, &Context::default(), "path.toSelection");
         let dialog = app.ui.dialogs.last().map(|d| d.id).unwrap();
         crate::dialogs::confirm(&mut app, dialog).unwrap();
-        assert!(app.session.active().unwrap().doc.work_path.is_some());
+        assert!(app.session.active().unwrap().doc.work_path.is_none(), "the finished and converted Work Path is spent, as in Photoshop");
         assert!(app.session.active().unwrap().doc.selection.is_some());
     }
 
