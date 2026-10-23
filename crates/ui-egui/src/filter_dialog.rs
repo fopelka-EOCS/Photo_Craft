@@ -2456,6 +2456,7 @@ mod tests {
         assert_eq!(sm.smart_filters.len(), 1, "the preview adds the Curves smart filter");
         assert_eq!(shown.size, crate::proxy::proxy_document(&doc, k).size);
         // The 16 px square at (16, 16) is a 4 px square at (4, 4) on the proxy, not 16 px at (16, 16).
+        assert_eq!(sm.cache.as_ref().unwrap().content_bounds(), photocraft_geom::Rect::new(4, 4, 8, 8));
         // Bicubic reduction blends the square's boundary with transparency; compare all alpha
         // values with a reduced full-size result, and require opacity only in the interior.
         for y in 0..shown.size.height as i32 {

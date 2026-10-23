@@ -6,7 +6,7 @@
 //! formulas), the identity at `bend = 0` and continuous in `bend`. The mapping is evaluated per
 //! point; the renderer subdivides long segments so straight edges bend.
 
-use photocraft_doc::text::{TextShape, TextWarp};
+use photocraft_doc::text::{TextAlign, TextShape, TextWarp};
 use photocraft_doc::vector::Subpath;
 use photocraft_geom::warp::{StyleWarp, WarpStyle};
 
@@ -103,9 +103,32 @@ impl Warp {
 
     /// How to place a glyph whose horizontal centre is at text-space `cx`.
     pub fn place_glyph(&self, cx: f64) -> Placement {
+        self.place_glyph_aligned(cx, TextAlign::Left)
+    }
+
+    /// Place a glyph within one closed-path lap, anchored for its paragraph's alignment.
+    /// Open paths keep their original start/end bounds for every alignment.
+    pub fn place_glyph_aligned(&self, cx: f64, align: TextAlign) -> Placement {
         match &self.0 {
             Kind::Style(_) => Placement::Bend,
-            Kind::Path(p) => p.frame(cx).map_or(Placement::Hidden, Placement::Frame),
+            Kind::Path(p) => p.frame(cx, align).map_or(Placement::Hidden, Placement::Frame),
+        }
+    }
+
+    /// Nearest path position and signed distance from its baseline, in unwarped text space.
+    /// Shared by the Type tool's path hit test and caret placement.
+    pub fn project(&self, x: f64, y: f64) -> Option<(f64, f64)> {
+        match &self.0 {
+            Kind::Path(p) => p.project(x, y),
+            Kind::Style(_) => None,
+        }
+    }
+
+    /// Closed paths repeat their coordinates at this length; open paths do not repeat.
+    pub fn closed_length(&self) -> Option<f64> {
+        match &self.0 {
+            Kind::Path(p) if p.closed => Some(p.length()),
+            _ => None,
         }
     }
 }
@@ -114,7 +137,7 @@ impl Warp {
 /// with `flip`), of the point on the path nearest (`x`, `y`): the `start` that puts the type's
 /// origin where the Type tool clicked on the path. `None` for a path without length.
 pub fn arc_length_at(path: &Subpath, flip: bool, x: f64, y: f64) -> Option<f64> {
-    PathFrame::new(path, 0.0, flip).map(|f| f.project(x, y))
+    PathFrame::new(path, 0.0, flip).and_then(|f| f.project(x, y).map(|(along, _)| along))
 }
 
 /// Most cubic segments of a type path that are followed (a hostile file cannot make this large).
@@ -128,9 +151,11 @@ struct PathFrame {
     /// Arc length at each point.
     cum: Vec<f64>,
     start: f64,
+    closed: bool,
 }
 
 impl PathFrame {
+    /// Flatten a finite, bounded path and record cumulative lengths in travel order.
     fn new(path: &Subpath, start: f32, flip: bool) -> Option<PathFrame> {
         let mut pts: Vec<(f64, f64)> = Vec::new();
         for seg in path.segments().iter().take(MAX_PATH_SEGMENTS) {
@@ -163,31 +188,17 @@ impl PathFrame {
             }
             cum.push(acc);
         }
-        (pts.len() >= 2 && acc.is_finite() && acc > 1e-6 && start.is_finite()).then(|| PathFrame { pts, cum, start: f64::from(start) })
+        (pts.len() >= 2 && acc.is_finite() && acc > 1e-6 && start.is_finite()).then(|| PathFrame { pts, cum, start: f64::from(start), closed: path.closed })
     }
 
+    /// Total distance along the flattened path, including a closed path's return segment.
     fn length(&self) -> f64 {
         self.cum.last().copied().unwrap_or(0.0)
     }
 
-    /// Arc length of the point on the flattened path nearest (`x`, `y`).
-    fn project(&self, x: f64, y: f64) -> f64 {
-        let mut best = (f64::INFINITY, 0.0);
-        for (i, w) in self.pts.windows(2).enumerate() {
-            let [a, b] = [w[0], w[1]];
-            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
-            let len2 = dx * dx + dy * dy;
-            let t = if len2 > 0.0 { (((x - a.0) * dx + (y - a.1) * dy) / len2).clamp(0.0, 1.0) } else { 0.0 };
-            let d = (a.0 + dx * t - x).hypot(a.1 + dy * t - y);
-            if d < best.0 {
-                best = (d, self.cum.get(i).copied().unwrap_or(0.0) + len2.sqrt() * t);
-            }
-        }
-        best.1
-    }
-
     /// Point and unit tangent at arc length `s`; past either end the end tangent continues straight.
     fn at(&self, s: f64) -> ((f64, f64), (f64, f64)) {
+        let s = if self.closed { s.rem_euclid(self.length()) } else { s };
         let last = self.pts.len() - 1;
         let i = self.cum.partition_point(|&c| c < s).clamp(1, last);
         let (a, b) = (self.pts[i - 1], self.pts[i]);
@@ -197,19 +208,57 @@ impl PathFrame {
         ((a.0 + t.0 * along, a.1 + t.1 * along), t)
     }
 
+    /// Map baseline distance and normal offset into the path's local coordinates.
     fn apply(&self, x: f64, y: f64) -> (f64, f64) {
         let (p, t) = self.at(self.start + x);
         (p.0 - t.1 * y, p.1 + t.0 * y)
     }
 
     /// The rigid map for a glyph centred at text-space `cx`; `None` outside the path.
-    fn frame(&self, cx: f64) -> Option<[f64; 6]> {
+    fn frame(&self, cx: f64, align: TextAlign) -> Option<[f64; 6]> {
         let s = self.start + cx;
-        if !(0.0..=self.length()).contains(&s) {
+        let length = self.length();
+        let visible = if self.closed {
+            // Half-open bounds keep both ends of a lap from landing on the same point.
+            match align {
+                TextAlign::Center | TextAlign::JustifyCenter => (-length / 2.0..length / 2.0).contains(&cx),
+                TextAlign::Right | TextAlign::JustifyRight => cx > -length && cx <= 0.0,
+                _ => (0.0..length).contains(&cx),
+            }
+        } else {
+            (0.0..=length).contains(&s)
+        };
+        if !visible {
             return None;
         }
         let (p, t) = self.at(s);
         Some([t.0, t.1, -t.1, t.0, p.0 - t.0 * cx, p.1 - t.1 * cx])
+    }
+
+    /// Find the closest baseline point and return arc distance plus signed normal offset.
+    fn project(&self, x: f64, y: f64) -> Option<(f64, f64)> {
+        if !x.is_finite() || !y.is_finite() {
+            return None;
+        }
+        let mut best: Option<(f64, f64, f64)> = None;
+        for (i, pair) in self.pts.windows(2).enumerate() {
+            let [a, b] = pair else { continue };
+            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+            let len = dx.hypot(dy);
+            if len <= 1e-12 {
+                continue;
+            }
+            let (tx, ty) = (dx / len, dy / len);
+            let along = ((x - a.0) * tx + (y - a.1) * ty).clamp(0.0, len);
+            let (qx, qy) = (a.0 + tx * along, a.1 + ty * along);
+            let distance = (x - qx).hypot(y - qy);
+            if best.is_none_or(|v| distance < v.0) {
+                let s = self.cum.get(i).copied()? + along - self.start;
+                let s = if self.closed { s.rem_euclid(self.length()) } else { s };
+                best = Some((distance, s, -(x - qx) * ty + (y - qy) * tx));
+            }
+        }
+        best.map(|(_, s, cross)| (s, cross))
     }
 }
 
@@ -217,9 +266,75 @@ impl PathFrame {
 mod tests {
     use super::*;
 
+    /// Projection inverts baseline coordinates in both path travel directions.
+    #[test]
+    fn path_projection_matches_caret_coordinates_and_flip() {
+        for flip in [false, true] {
+            let shape = TextShape::Path { path: Subpath::polyline(&[(10.0, 20.0), (10.0, 220.0)]), start: 30.0, flip };
+            let warp = Warp::on_path(&shape).unwrap();
+            for (x, y) in [(0.0, -20.0), (40.0, 5.0), (100.0, -10.0)] {
+                let (px, py) = warp.apply(x, y);
+                let (rx, ry) = warp.project(px, py).unwrap();
+                assert!((rx - x).abs() < 1e-6 && (ry - y).abs() < 1e-6);
+            }
+            assert!(warp.project(f64::NAN, 0.0).is_none());
+        }
+    }
+
+    /// A closed path can cross its stored seam without granting an extra visible lap.
+    #[test]
+    fn closed_path_continues_past_the_original_seam_for_one_lap() {
+        let mut path = Subpath::polyline(&[(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)]);
+        path.closed = true;
+        let warp = Warp::on_path(&TextShape::Path { path, start: 390.0, flip: false }).unwrap();
+        assert!(matches!(warp.place_glyph(20.0), Placement::Frame(_)));
+        assert!(matches!(warp.place_glyph(401.0), Placement::Hidden));
+        let (x, y) = warp.apply(40.0, -10.0);
+        let projected = warp.project(x, y).unwrap();
+        assert!((projected.0 - 40.0).abs() < 1e-6);
+        assert!((projected.1 + 10.0).abs() < 1e-6);
+    }
+
+    /// Prepare a fixed text box for the style-warp regression cases below.
     fn warp(style: &str, value: f32) -> Warp {
         let w = TextWarp { style: psd_style(style).unwrap().into(), value, horizontal_distortion: 0.0, vertical_distortion: 0.0, horizontal: true };
         Warp::new(&w, [0.0, -40.0, 200.0, 10.0]).unwrap()
+    }
+
+    /// Alignment changes the single visible lap but never changes an open path's bounds.
+    #[test]
+    fn path_visibility_uses_alignment_and_preserves_open_endpoints() {
+        let alignments = [TextAlign::Left, TextAlign::Center, TextAlign::Right, TextAlign::JustifyCenter, TextAlign::JustifyRight];
+        for flip in [false, true] {
+            let mut path = Subpath::polyline(&[(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)]);
+            path.closed = true;
+            let warp = Warp::on_path(&TextShape::Path { path, start: 390.0, flip }).unwrap();
+            let length = warp.closed_length().unwrap();
+            for align in alignments {
+                let (inside, outside) = match align {
+                    TextAlign::Center | TextAlign::JustifyCenter => {
+                        (vec![-length / 2.0, -100.0, 0.0, length / 2.0 - 1.0], vec![-length / 2.0 - 1.0, length / 2.0, length])
+                    }
+                    TextAlign::Right | TextAlign::JustifyRight => (vec![-length + 1.0, -100.0, 0.0], vec![-length, 1.0, length]),
+                    _ => (vec![0.0, 100.0, length - 1.0], vec![-1.0, length, length + 1.0]),
+                };
+                for x in inside {
+                    assert!(matches!(warp.place_glyph_aligned(x, align), Placement::Frame(_)), "{align:?}: {x}");
+                }
+                for x in outside.into_iter().chain([f64::NAN, f64::INFINITY]) {
+                    assert_eq!(warp.place_glyph_aligned(x, align), Placement::Hidden);
+                }
+            }
+            let open = Warp::on_path(&TextShape::Path { path: Subpath::polyline(&[(0.0, 0.0), (100.0, 0.0)]), start: 40.0, flip }).unwrap();
+            for align in alignments {
+                for x in [-40.0, 0.0, 60.0] {
+                    assert!(matches!(open.place_glyph_aligned(x, align), Placement::Frame(_)));
+                }
+                for x in [-41.0, 61.0] {
+                    assert_eq!(open.place_glyph_aligned(x, align), Placement::Hidden);
+                }
+            }
+        }
     }
 
     /// #218: the Warp Text dialog shows a layer's PSD style by its short id.

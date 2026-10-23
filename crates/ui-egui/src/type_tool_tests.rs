@@ -933,6 +933,180 @@ fn vertical_type_tool_creates_point_and_paragraph_text_with_one_undo() {
     }
 }
 
+/// #5189: switching from Ellipse to Type preserves the path, and a real canvas click creates
+/// editable curved text at that point, including a flipped, rotated and HiDPI view.
+#[test]
+fn circular_type_canvas_click_edit_and_undo() {
+    for ppp in [1.0, 2.0] {
+        for zoom in [0.5, 2.0] {
+            let mut app = new_app();
+            app.ui.tool_options.type_size = 24.0;
+            let shape = app.run("shape.create", json!({"kind": "ellipse", "rect": [160, 160, 280, 280]})).unwrap()["layer"].as_u64().unwrap();
+            let before = app.session.active().unwrap().history.past_len();
+            let mut h = harness(ppp, app);
+            let v = &mut h.state_mut().ui.views[0];
+            (v.zoom, v.center, v.fit_pending, v.rotation) = (zoom, [300.0, 180.0], false, 0.2);
+            h.state_mut().ui.view.flip_horizontal = true;
+            h.run_steps(2);
+            let point = xf(h.state()).to_screen(300.0, 160.0);
+            click(&mut h, point);
+            let app = h.state_mut();
+            let id = LayerId(app.ui.text_edit.as_ref().expect("the path click starts editing").layer);
+            let st = app.session.active().unwrap();
+            let text = text_layer(&st.doc, id).unwrap();
+            assert!(matches!(&text.shape, photocraft_doc::text::TextShape::Path { path, .. } if path.closed));
+            let warp = super::path_warp(app, id).unwrap();
+            let (x, y) = warp.apply(0.0, 0.0);
+            assert!((x - 300.0).hypot(y - 160.0) < 1.0);
+            super::insert(app, "Circular text");
+            assert_eq!(super::current_text(app, id).as_deref(), Some("Circular text"));
+            super::commit(app);
+            assert_eq!(app.session.active().unwrap().history.past_len(), before + 1);
+            app.run("edit.undo", json!({})).unwrap();
+            assert!(app.session.active().unwrap().doc.layer(id).is_none());
+            assert!(app.session.active().unwrap().doc.layer(LayerId(shape)).is_some());
+            app.run("edit.redo", json!({})).unwrap();
+            assert_eq!(super::current_text(app, id).as_deref(), Some("Circular text"));
+        }
+    }
+}
+
+/// Pointer hit testing and drag selection share the curve used to render the glyphs.
+#[test]
+fn path_type_caret_and_drag_selection_follow_the_curve() {
+    let mut app = new_app();
+    let shape = app.run("shape.create", json!({"kind": "ellipse", "rect": [160, 160, 480, 480]})).unwrap()["layer"].as_u64().unwrap();
+    let id =
+        LayerId(app.run("type.create", json!({"text": "HOHOHOHOHO", "size": 36, "path": {"shape": shape, "start": 400}})).unwrap()["layer"].as_u64().unwrap());
+    let mut h = harness(1.0, app);
+    let point = |h: &mut Harness<'static, PhotocraftApp>, i: usize, fraction: f32| {
+        let app = h.state_mut();
+        let (l, aff, _) = layout(app, id).unwrap();
+        let c = &l.clusters[i];
+        let line = &l.lines[c.line];
+        let (x, y) = super::path_warp(app, id).unwrap().apply(f64::from(c.x + c.advance * fraction), f64::from(line.baseline - line.ascent * 0.35));
+        let p = aff.apply(Point::new(x, y));
+        xf(app).to_screen(p.x as f32, p.y as f32)
+    };
+    let first = point(&mut h, 1, 0.2);
+    click(&mut h, first);
+    assert_eq!(selection(&h), (1, 1));
+    let end = point(&mut h, 6, 0.8);
+    drag(&mut h, first, end);
+    assert_eq!(selection(&h), (1, 7));
+    let app = h.state_mut();
+    let (l, _, text) = layout(app, id).unwrap();
+    let (x, top, _) = l.caret(super::byte_of(&text, 7));
+    let (px, py) = super::path_warp(app, id).unwrap().apply(f64::from(x), f64::from(top));
+    assert_eq!(super::offset_at(app, id, px, py), 7);
+}
+
+/// Type clicks target a visible outline, including the selected saved path, not its fill.
+#[test]
+fn type_path_hit_uses_outline_and_selected_saved_path() {
+    let mut app = new_app();
+    let id = app.run("shape.create", json!({"kind": "ellipse", "rect": [160, 160, 280, 280]})).unwrap()["layer"].as_u64().unwrap();
+    assert!(super::hit_path(&app, 300.0, 160.0).is_some());
+    assert!(super::hit_path(&app, 300.0, 300.0).is_none(), "the interior creates point text");
+    app.run("layer.setProps", json!({"layer": id, "visible": false})).unwrap();
+    assert!(super::hit_path(&app, 300.0, 160.0).is_none());
+    app.run("path.set", json!({"name": "Curve", "path": {"subpaths": [{"closed": false, "knots": [[20, 40], [200, 40]]}]}})).unwrap();
+    app.ui.selected_path = Some("Curve".into());
+    let hit = super::hit_path(&app, 80.0, 40.0).unwrap();
+    assert_eq!(hit["name"], "Curve");
+    assert!((hit["start"].as_f64().unwrap() - 60.0).abs() < 0.01);
+    app.ui.tool = crate::state::Tool::HorizontalTypeMask;
+    assert!(super::hit_path(&app, 80.0, 40.0).is_none());
+}
+
+/// Overflow must not make pointer projection pick hidden glyphs on another lap or paragraph.
+#[test]
+fn overflowing_path_hit_uses_each_lines_visible_alignment_lap() {
+    use photocraft_doc::text::{ParagraphRun, ParagraphStyle, TextAlign, TextShape};
+    use photocraft_doc::vector::Subpath;
+    for alignments in [vec![TextAlign::Center], vec![TextAlign::Left, TextAlign::Center, TextAlign::Right]] {
+        for flip in [false, true] {
+            let line = "M".repeat(100);
+            let text = vec![line.as_str(); alignments.len()].join("\n");
+            let mut path = Subpath::polyline(&[(0.0, 0.0), (400.0, 0.0), (400.0, 400.0), (0.0, 400.0)]);
+            path.closed = true;
+            let layer = photocraft_doc::TextLayer {
+                text: text.clone(),
+                size_pt: 36.0,
+                shape: TextShape::Path { path, start: 0.0, flip },
+                paragraphs: alignments
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &align)| ParagraphRun {
+                        len: line.len() + usize::from(i + 1 < alignments.len()),
+                        style: ParagraphStyle { align, ..Default::default() },
+                    })
+                    .collect(),
+                ..Default::default()
+            };
+            let layout = photocraft_text::TextEngine::new().layout(&layer, 72.0);
+            let warp = photocraft_text::warp::Warp::on_path(&layer.shape).unwrap();
+            let length = warp.closed_length().unwrap();
+            for (i, &align) in alignments.iter().enumerate() {
+                let line = &layout.lines[i];
+                let x = if align == TextAlign::Left { length * 0.125 } else { -length * 0.375 };
+                let y = line.baseline - line.ascent * 0.35;
+                let (px, py) = warp.apply(x, f64::from(y));
+                let (qx, qy) = super::project_text(&warp, &layout, px as f32, py as f32).unwrap();
+                assert!((f64::from(qx) - x).abs() < 1e-3, "{align:?}: projected {qx} instead of {x}");
+                assert!((qy - y).abs() < 1e-3);
+                assert_eq!(photocraft_text::hit_char(&layout, &text, qx, qy).0, photocraft_text::hit_char(&layout, &text, x as f32, y).0);
+            }
+        }
+    }
+}
+
+/// Selecting hidden overflow must not paint a highlight over unselected visible text.
+#[test]
+fn path_selection_overlay_excludes_hidden_laps() {
+    for align in ["left", "center", "right"] {
+        for flip in [false, true] {
+            let mut app = new_app();
+            let shape = app.run("shape.create", json!({"kind": "ellipse", "rect": [160, 160, 400, 400]})).unwrap()["layer"].as_u64().unwrap();
+            let id = LayerId(
+                app.run("type.create", json!({"text": "M".repeat(100), "size": 36, "path": {"shape": shape, "flip": flip}})).unwrap()["layer"]
+                    .as_u64()
+                    .unwrap(),
+            );
+            app.run("type.setStyle", json!({"layer": id.0, "align": align})).unwrap();
+            super::edit_active(&mut app).unwrap();
+            let xf = ViewXform {
+                rect: egui::Rect::from_min_size(Pos2::ZERO, vec2(800.0, 700.0)),
+                zoom: 1.0,
+                center: [360.0, 360.0],
+                flip: false,
+                rotation: 0.0,
+                aspect: 1.0,
+            };
+            let mut h = Harness::builder()
+                .with_size(vec2(800.0, 700.0))
+                .build_ui_state(move |ui, app: &mut PhotocraftApp| super::draw_overlay(app, ui.painter(), &xf), app);
+            PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ProMedium);
+            let visible = match align {
+                "left" => 0,
+                "center" => 50,
+                _ => 99,
+            };
+            let hidden = if align == "left" { 99 } else { 0 };
+            for (index, expected) in [(hidden, 0), (visible, 1)] {
+                let ed = h.state_mut().ui.text_edit.as_mut().unwrap();
+                ed.anchor = index;
+                ed.caret = index + 1;
+                h.run_steps(2);
+                let accent = crate::theme::Tokens::get(&h.ctx).accent;
+                let fill = egui::Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 110);
+                let highlights = h.output().shapes.iter().filter(|s| matches!(&s.shape, egui::Shape::Path(p) if p.closed && p.fill == fill)).count();
+                assert_eq!(highlights, expected, "{align}, flip={flip}, selected character {index}");
+            }
+        }
+    }
+}
+
 /// #668: ⌘/Ctrl+T while typing shows or hides the Character panel, as in Photoshop, instead of
 /// starting Free Transform on the layer being typed into.
 #[test]
@@ -2789,6 +2963,35 @@ fn justify_buttons_are_greyed_on_point_text() {
     assert!(h.get_by_label("Justify all").accesskit_node().is_disabled(), "one of the formatted layers is point text");
 }
 
+/// A paragraph-box drag keeps its geometry even when the press hits a path outline.
+#[test]
+fn path_text_does_not_take_over_paragraph_box_drags() {
+    for ppp in [1.0, 2.0] {
+        for zoom in [0.5, 1.0, 2.0] {
+            let mut app = new_app();
+            app.ui.extras.snap = false;
+            app.run("shape.create", json!({"kind": "ellipse", "rect": [600, 300, 400, 300]})).unwrap();
+            let mut h = harness(ppp, app);
+            let view = &mut h.state_mut().ui.views[0];
+            (view.zoom, view.center, view.fit_pending) = (zoom, [800.0, 450.0], false);
+            h.run_steps(2);
+            assert!(super::hit_path(h.state(), 800.0, 300.0).is_some());
+            let before = h.state().session.active().unwrap().history.past_len();
+            let a = xf(h.state()).to_screen(800.0, 300.0);
+            let b = xf(h.state()).to_screen(1000.0, 500.0);
+            drag(&mut h, a, b);
+            let id = LayerId(h.state().ui.text_edit.as_ref().expect("new paragraph edit").layer);
+            let layer = text(h.state(), id);
+            assert!(
+                matches!(layer.shape, photocraft_doc::text::TextShape::Box { width, height, .. } if (width - 200.0).abs() < 1.0 && (height - 200.0).abs() < 1.0),
+                "ppp {ppp}, zoom {zoom}: {:?}",
+                layer.shape
+            );
+            assert_eq!(h.state().session.active().unwrap().history.past_len(), before + 1);
+        }
+    }
+}
+
 /// The paragraph box's document rect: its text-space origin through the layer transform, then
 /// width and height. Only what the symmetric-resize tests need (identity linear part).
 fn box_doc_rect(app: &PhotocraftApp, id: LayerId) -> [f64; 4] {
@@ -2869,4 +3072,67 @@ fn alt_mirrors_side_and_corner_drags_and_clamps_at_the_minimum() {
     app.ui.extras.snap = false;
     drag(&mut app, [540.0, 480.0], [590.0, 530.0], Modifiers::ALT);
     assert_eq!(box_doc_rect(&app, id), [250.0, 250.0, 340.0, 280.0]);
+}
+
+#[test]
+fn unselected_work_path_is_not_a_type_click_target() {
+    let mut app = new_app();
+    app.run("path.set", json!({"name": "work", "path": {"subpaths": [{"closed": false, "knots": [[200, 200], [600, 200]]}]}})).unwrap();
+    app.ui.selected_path = None;
+    assert!(super::hit_path(&app, 400.0, 200.0).is_none());
+    super::pointer_up(&mut app, [400.0, 200.0], [400.0, 200.0]);
+    let id = LayerId(app.ui.text_edit.as_ref().unwrap().layer);
+    assert_eq!(text(&app, id).shape, photocraft_doc::text::TextShape::Point);
+    super::commit(&mut app);
+    app.ui.selected_path = Some("work".into());
+    assert!(super::hit_path(&app, 400.0, 200.0).is_some());
+}
+
+#[test]
+fn review_path_ime_caret_is_warped_once() {
+    let mut app = new_app();
+    let shape = app.run("shape.create", json!({"kind":"ellipse","rect":[160,160,480,480]})).unwrap()["layer"].as_u64().unwrap();
+    let id = LayerId(app.run("type.create", json!({"text":"HOHOHO","size":36,"path":{"shape":shape,"start":400}})).unwrap()["layer"].as_u64().unwrap());
+    super::edit_active(&mut app).unwrap();
+    let ed = app.ui.text_edit.as_mut().unwrap();
+    ed.anchor = 3;
+    ed.caret = 3;
+    let (l, aff, text) = layout(&mut app, id).unwrap();
+    let (x, top, bot) = l.caret(super::byte_of(&text, 3));
+    let warp = super::path_warp(&app, id).unwrap();
+    let xf = ViewXform {
+        rect: egui::Rect::from_min_size(Pos2::ZERO, vec2(800.0, 700.0)),
+        zoom: 1.0,
+        center: [400.0, 400.0],
+        flip: false,
+        rotation: 0.0,
+        aspect: 1.0,
+    };
+    let expected = |y: f32| {
+        let (x, y) = l.to_text(x, y);
+        let (x, y) = warp.apply(f64::from(x), f64::from(y));
+        let p = aff.apply(Point::new(x, y));
+        xf.to_screen(p.x as f32, p.y as f32)
+    };
+    let expected = egui::Rect::from_two_pos(expected(top), expected(bot)).expand(1.0);
+    let mut h =
+        Harness::builder().with_size(vec2(800.0, 700.0)).build_ui_state(move |ui, app: &mut PhotocraftApp| super::draw_overlay(app, ui.painter(), &xf), app);
+    PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ProMedium);
+    h.run_steps(2);
+    let got = h.output().platform_output.ime.as_ref().unwrap().cursor_rect;
+    assert!((got.min - expected.min).length() < 0.01 && (got.max - expected.max).length() < 0.01, "got {got:?}, expected {expected:?}");
+}
+
+#[test]
+fn selected_saved_path_wins_over_an_intersecting_work_path() {
+    let mut app = new_app();
+    app.run("path.set", json!({"name":"work","path":{"subpaths":[{"closed":false,"knots":[[400,100],[400,300]]}]}})).unwrap();
+    app.run("path.set", json!({"name":"Curve","path":{"subpaths":[{"closed":false,"knots":[[200,200],[600,200]]}]}})).unwrap();
+    app.ui.selected_path = Some("Curve".into());
+    super::pointer_up(&mut app, [400.0, 200.0], [400.0, 200.0]);
+    let id = LayerId(app.ui.text_edit.as_ref().unwrap().layer);
+    let w = super::path_warp(&app, id).unwrap();
+    let a = w.apply(0.0, 0.0);
+    let b = w.apply(10.0, 0.0);
+    assert!((b.0 - a.0 - 10.0).abs() < 0.01 && (b.1 - a.1).abs() < 0.01, "the selected horizontal saved path wins: {a:?} -> {b:?}");
 }

@@ -8,9 +8,11 @@ use std::collections::HashMap;
 use std::sync::{Arc, PoisonError};
 
 use egui::{Color32, Pos2, Stroke};
+use photocraft_doc::text::TextAlign;
 use photocraft_doc::{Document, LayerContent, LayerId, TextLayer};
 use photocraft_geom::{Affine, Point};
 use photocraft_text::TextLayout;
+use photocraft_text::warp::Warp;
 use serde_json::json;
 
 use crate::PhotocraftApp;
@@ -52,6 +54,75 @@ fn to_text(aff: &Affine, x: f64, y: f64) -> (f32, f32) {
     (p.x as f32, p.y as f32)
 }
 
+/// Prepare the edited layer's curve for document-pointer projection and selection overlays.
+fn path_warp(app: &PhotocraftApp, id: LayerId) -> Option<Warp> {
+    Warp::on_path(&text_layer(&app.session.active()?.doc, id)?.shape)
+}
+
+/// Normalize projection into the nearest visual line's alignment-specific visible lap.
+fn project_text(warp: &Warp, layout: &TextLayout, x: f32, y: f32) -> Option<(f32, f32)> {
+    let (mut x, y) = warp.project(f64::from(x), f64::from(y))?;
+    if let Some(length) = warp.closed_length() {
+        let (_, cross) = layout.to_line(x as f32, y as f32);
+        let align = layout.closest_line(cross).map(|(_, line)| line.align).unwrap_or_default();
+        // The unsigned projection can land on hidden overflow when layout spans several laps.
+        // Match place_glyph_aligned, including the zero endpoint of right-aligned text.
+        match align {
+            TextAlign::Center | TextAlign::JustifyCenter if x >= length / 2.0 => x -= length,
+            TextAlign::Right | TextAlign::JustifyRight if x > 0.0 => x -= length,
+            _ => {}
+        }
+    }
+    Some((x as f32, y as f32))
+}
+
+/// Paths the Type tool can follow, with their engine source parameters. A shape keeps its
+/// geometry in document space, and saved paths use the Paths panel's selected name.
+pub(crate) fn type_paths(app: &PhotocraftApp) -> Vec<(photocraft_doc::vector::Path, serde_json::Value)> {
+    let Some(st) = app.session.active() else { return Vec::new() };
+    let mut paths = Vec::new();
+    if let Some(id) = st.active_layer
+        && let Some(l) = st.doc.layer(id)
+        && st.doc.path_of(id).is_some_and(|p| st.doc.shown_at(&p))
+        && let LayerContent::Shape(sh) = &l.content
+    {
+        paths.push((sh.path.clone(), json!({"shape": id.0})));
+    }
+    let Some(name) = app.ui.selected_path.as_deref() else { return paths };
+    let path = if name == "work" { st.doc.work_path.as_ref() } else { st.doc.paths.iter().find(|p| p.name == name).map(|p| &p.path) };
+    if let Some(path) = path {
+        paths.push((path.clone(), json!({"name": name})));
+    }
+    paths
+}
+
+/// Hit the visible outline, rather than its filled interior. The tolerance stays constant on
+/// screen at every zoom. `start` is arc length, shared with glyph placement in the text engine.
+pub(crate) fn hit_path(app: &PhotocraftApp, x: f64, y: f64) -> Option<serde_json::Value> {
+    if app.ui.tool != crate::state::Tool::Type || app.ui.text_edit.is_some() || !app.ui.view.shows(app.ui.view.show.target_path) {
+        return None;
+    }
+    let tolerance = 6.0 / f64::from(app.point_zoom().max(0.01));
+    for (path, source) in type_paths(app) {
+        for (index, sub) in path.subpaths.into_iter().enumerate() {
+            if sub.knots.len() > 100_000 {
+                continue;
+            }
+            let shape = photocraft_doc::text::TextShape::Path { path: sub, start: 0.0, flip: false };
+            let Some(warp) = Warp::on_path(&shape) else { continue };
+            let Some((start, _)) = warp.project(x, y) else { continue };
+            let (px, py) = warp.apply(start, 0.0);
+            if (x - px).hypot(y - py) <= tolerance {
+                let mut params = source.clone();
+                params["subpath"] = json!(index);
+                params["start"] = json!(start);
+                return Some(params);
+            }
+        }
+    }
+    None
+}
+
 /// Topmost shown type layer (it and every group around it visible, #4320) whose laid-out text
 /// contains the document point.
 pub(crate) fn hit_layer(app: &mut PhotocraftApp, x: f64, y: f64) -> Option<LayerId> {
@@ -75,6 +146,12 @@ pub(crate) fn hit_layer(app: &mut PhotocraftApp, x: f64, y: f64) -> Option<Layer
         });
         let Some((l, aff, _)) = layout(app, *id) else { return shown };
         let (tx, ty) = to_text(&aff, x, y);
+        if let Some(warp) = path_warp(app, *id) {
+            return project_text(&warp, &l, tx, ty).is_some_and(|(px, py)| {
+                let (qx, qy) = warp.apply(f64::from(px), f64::from(py));
+                (qx - f64::from(tx)).hypot(qy - f64::from(ty)) <= f64::from(slop) && photocraft_text::text_point_inside(&l, px, py, slop)
+            });
+        }
         shown || photocraft_text::text_point_inside(&l, tx, ty, slop)
     })
 }
@@ -182,15 +259,12 @@ fn hit_offset(app: &mut PhotocraftApp, id: LayerId, x: f64, y: f64) -> usize {
 /// The character offset of the caret position nearest document point (`x`, `y`) in layer `id`.
 pub(crate) fn offset_at(app: &mut PhotocraftApp, id: LayerId, x: f64, y: f64) -> usize {
     let Some((l, aff, text)) = layout(app, id) else { return 0 };
-    let (tx, ty) = to_text(&aff, x, y);
-    // Type on a path: the point's place along the path is the position in the (single) line.
-    let shape = app.session.active().and_then(|s| text_layer(&s.doc, id).map(|t| t.shape.clone()));
-    let (tx, ty) = match shape {
-        Some(photocraft_doc::text::TextShape::Path { path, start, flip }) => {
-            photocraft_text::warp::arc_length_at(&path, flip, f64::from(tx), f64::from(ty)).map_or((tx, ty), |s| ((s - f64::from(start)) as f32, -1.0))
-        }
-        _ => (tx, ty),
-    };
+    let (mut tx, mut ty) = to_text(&aff, x, y);
+    if let Some(warp) = path_warp(app, id)
+        && let Some((px, py)) = project_text(&warp, &l, tx, ty)
+    {
+        (tx, ty) = (px, py);
+    }
     photocraft_text::hit_char(&l, &text, tx, ty).0
 }
 
@@ -393,12 +467,12 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
     p["orientation"] = json!(if app.ui.tool.is_vertical_type() { "vertical" } else { "horizontal" });
     if w >= min && h >= min {
         p["box"] = json!([start[0].min(end[0]).round(), start[1].min(end[1]).round(), w.round(), h.round()]);
+    } else if let Some(path) = hit_path(app, start[0], start[1]) {
+        p["path"] = path;
     } else {
         p["x"] = json!(start[0].round());
         p["y"] = json!(start[1].round());
     }
-    // A click on a shown path starts type on that path, from the point clicked (Photoshop).
-    let on_path = if p.get("box").is_none() { path_at(app, start[0], start[1]) } else { None };
     let key = session_key(app);
     p["coalesce"] = json!(key);
     if let Ok(v) = app.run("type.create", p)
@@ -406,14 +480,6 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
     {
         if o.type_aa != "sharp" {
             let _ = app.run("type.edit", json!({"layer": id, "antialias": o.type_aa, "coalesce": key}));
-        }
-        if let Some(mut q) = on_path {
-            q["layer"] = json!(id);
-            q["at"] = json!([start[0], start[1]]);
-            q["coalesce"] = json!(key);
-            if let Err(e) = app.run("type.attachToPath", q) {
-                app.ui.status = e;
-            }
         }
         // A Type Mask's text is a hidden working layer: the canvas shows the mask overlay
         // instead, and committing turns it into the selection.
@@ -439,29 +505,9 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
     }
 }
 
-/// The shown path a Type tool click at document point (`x`, `y`) puts type on, as
-/// `type.attachToPath` params naming it (`shape`, `subpath`): the active shape layer's path, else
-/// the work path, within a few screen pixels, as in Photoshop. Only the horizontal Type tool
-/// starts path type for now; vertical type on a path is not laid out yet.
+/// The cursor and creation share the same visible, selected path hit test.
 pub(crate) fn path_at(app: &PhotocraftApp, x: f64, y: f64) -> Option<serde_json::Value> {
-    if app.ui.tool != crate::state::Tool::Type || app.ui.text_edit.is_some() || !app.ui.view.shows(app.ui.view.show.target_path) {
-        return None;
-    }
-    let tol = f64::from(6.0 / app.point_zoom().max(0.01));
-    let hit = |p: &photocraft_doc::vector::Path| {
-        let s = match photocraft_vector::edit::hit(p, Point::new(x, y), tol, &[])? {
-            photocraft_vector::edit::Hit::Anchor([s, _]) | photocraft_vector::edit::Hit::Segment([s, _], _) => s,
-            photocraft_vector::edit::Hit::Handle(..) => return None,
-        };
-        p.subpaths.get(s).filter(|sp| sp.knots.len() >= 2).map(|_| s)
-    };
-    if let Some((id, p)) = crate::vector_ui::active_shape_path(app)
-        && let Some(s) = hit(&p)
-    {
-        return Some(json!({"shape": id, "subpath": s}));
-    }
-    let work = app.session.active()?.doc.work_path.as_ref()?;
-    hit(work).map(|s| json!({"subpath": s}))
+    hit_path(app, x, y)
 }
 
 /// The Type tool's pointer over a path it can follow: Photoshop's I-beam crossed by a dotted
@@ -1222,9 +1268,10 @@ pub fn draw_overlay(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewX
         draw_mask_overlay(app, painter, xf, id);
     }
     let t = crate::theme::Tokens::get(painter.ctx());
+    let warp = path_warp(app, id);
     // Text space → screen.
     let scr_t = |x: f32, y: f32| -> Pos2 {
-        let p = aff.apply(Point::new(x as f64, y as f64));
+        let p = aff.apply(Point::new(f64::from(x), f64::from(y)));
         xf.to_screen(p.x as f32, p.y as f32)
     };
     let shape = app.session.active().and_then(|s| text_layer(&s.doc, id).map(|t| t.shape.clone()));
@@ -1260,6 +1307,18 @@ pub fn draw_overlay(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewX
     let has_transform = crate::type_transform::draw(app, painter, xf, mods);
     let frame = Stroke::new(1.0, t.accent);
     match shape {
+        Some(photocraft_doc::text::TextShape::Path { path, .. }) => {
+            let path = photocraft_doc::vector::Path::new(vec![path]);
+            crate::vector_ui::draw_outline(
+                painter,
+                &path,
+                &|q| {
+                    let p = aff.apply(Point::new(q[0], q[1]));
+                    xf.to_screen(p.x as f32, p.y as f32)
+                },
+                t.accent,
+            );
+        }
         Some(photocraft_doc::text::TextShape::Box { x, y, width, height }) => {
             if !has_transform {
                 let c = [scr_t(x, y), scr_t(x + width, y), scr_t(x + width, y + height), scr_t(x, y + height)];
@@ -1297,6 +1356,20 @@ pub fn draw_overlay(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewX
     let (a, b) = (byte_of(&text, ed.caret.min(ed.anchor)), byte_of(&text, ed.caret.max(ed.anchor)));
     if a < b {
         let fill = Color32::from_rgba_unmultiplied(t.accent.r(), t.accent.g(), t.accent.b(), 110);
+        if let Some(warp) = &warp {
+            // One quad per cluster: a single rectangle across a circle cuts through its centre.
+            for cluster in l.clusters.iter().filter(|c| c.range.start >= a && c.range.end <= b) {
+                let Some(line) = l.lines.get(cluster.line) else { continue };
+                let (center, _) = l.to_text(cluster.x + cluster.advance * 0.5, line.baseline);
+                if matches!(warp.place_glyph_aligned(f64::from(center), line.align), photocraft_text::warp::Placement::Hidden) {
+                    continue;
+                }
+                let (x0, x1) = (cluster.x, cluster.x + cluster.advance);
+                let (top, bot) = (line.baseline - line.ascent, line.baseline + line.descent);
+                painter.add(egui::Shape::convex_polygon(vec![scr(x0, top), scr(x1, top), scr(x1, bot), scr(x0, bot)], fill, Stroke::NONE));
+            }
+            return;
+        }
         for (li, ln) in l.lines.iter().enumerate() {
             let xs: Vec<(f32, f32)> =
                 l.clusters.iter().filter(|c| c.line == li && c.range.start >= a && c.range.end <= b).map(|c| (c.x, c.x + c.advance)).collect();
@@ -3185,6 +3258,7 @@ mod tests {
                 Ok(())
             })
             .unwrap();
+        app.ui.selected_path = Some("work".into());
         assert!(path_at(&app, 200.0, 101.0).is_some());
         assert!(path_at(&app, 200.0, 160.0).is_none(), "off the path");
         let before = app.session.active().unwrap().history.entries().len();
@@ -3218,6 +3292,7 @@ mod tests {
                 Ok(())
             })
             .unwrap();
+        app.ui.selected_path = Some("work".into());
         pointer_up(&mut app, [300.0, 20.0], [300.0, 20.0]);
         insert(&mut app, "ABCDEFGH");
         let id = LayerId(app.ui.text_edit.as_ref().unwrap().layer);

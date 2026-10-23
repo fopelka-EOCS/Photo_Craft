@@ -181,6 +181,8 @@ pub struct PlacedGlyph {
     pub style: u32,
     /// Orientation of the outline (vertical type).
     pub orient: GlyphOrient,
+    /// Paragraph alignment used to bound closed-path placement to one lap.
+    pub align: TextAlign,
 }
 
 /// Underline/strikethrough rectangle (text space px).
@@ -207,6 +209,8 @@ pub struct LineInfo {
     pub ascent: f32,
     pub descent: f32,
     pub paragraph: usize,
+    /// Alignment of this visual line, shared by glyph placement and pointer hit testing.
+    pub align: TextAlign,
 }
 
 /// A grapheme cluster (caret stops, hit testing, selection), in line space.
@@ -272,7 +276,7 @@ impl TextLayout {
 
     /// The visual line nearest to a line-space ordinate, including its ascent and descent.
     /// Pointer hit testing uses this even where adjacent lines share a caret byte offset.
-    fn closest_line(&self, y: f32) -> Option<(usize, &LineInfo)> {
+    pub fn closest_line(&self, y: f32) -> Option<(usize, &LineInfo)> {
         self.lines.iter().enumerate().min_by(|a, b| {
             let d = |l: &LineInfo| {
                 if y < l.baseline - l.ascent {
@@ -1001,6 +1005,7 @@ impl Layouter {
                             y: baseline + g.y,
                             style: si,
                             orient: GlyphOrient::Horizontal,
+                            align: ps.align,
                         });
                         if let Some(v) = &vm {
                             let upright = class == 1 || (class == 2 && !plain.contains(&g.id));
@@ -1093,6 +1098,7 @@ impl Layouter {
                     ascent,
                     descent,
                     paragraph: pi,
+                    align: ps.align,
                 });
             }
             pending_space += ps.space_after_pt * k;

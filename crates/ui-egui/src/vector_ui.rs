@@ -1193,26 +1193,27 @@ pub fn draw_overlay(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform
             crate::anchor_tools::draw_hover(app, painter, &to_scr, accent, painter.ctx().input(|i| i.modifiers));
         }
     } else if paths {
-        // The shape's or vector mask's path stays visible as an outline with any tool. Path
-        // Selection and the Pen tools add anchor squares; Direct Selection has its own overlay
-        // above. The Work Path is drawn only while it is the path selected in the Paths panel or
-        // a path tool is active, as in Photoshop: a Work Path left unselected (one a PSD arrived
-        // with, or after Ctrl-click Load as Selection) would otherwise cover the marching ants (#6551).
         let anchors = shows_anchors(tool);
-        if let Some(wp) = &doc.work_path
-            && (anchors || app.ui.selected_path.as_deref() == Some("work"))
-        {
-            draw_path(wp, anchors);
-        }
-        // The saved path selected in the Paths panel is the target path (#6550).
-        if let Some(p) = selected_saved_path(app) {
-            draw_path(p, anchors);
-        }
-        let st = app.session.active();
-        if let Some(l) = st.and_then(|s| s.active_layer.and_then(|id| s.doc.layer(id)))
-            && let LayerContent::Shape(sh) = &l.content
-        {
-            draw_path(&sh.path, anchors);
+        if tool == Tool::Type && app.ui.text_edit.is_none() {
+            for (path, _) in crate::type_tool::type_paths(app) {
+                draw_path(&path, false);
+            }
+        } else {
+            if let Some(wp) = &doc.work_path
+                && (anchors || app.ui.selected_path.as_deref() == Some("work"))
+            {
+                draw_path(wp, anchors);
+            }
+            // The saved path selected in the Paths panel is the target path (#6550).
+            if let Some(p) = selected_saved_path(app) {
+                draw_path(p, anchors);
+            }
+            let st = app.session.active();
+            if let Some(l) = st.and_then(|s| s.active_layer.and_then(|id| s.doc.layer(id)))
+                && let LayerContent::Shape(sh) = &l.content
+            {
+                draw_path(&sh.path, anchors);
+            }
         }
         // A targeted vector mask shows its path with any tool (#196).
         if let Some((_, p)) = targeted_vector_mask(app) {
@@ -2580,7 +2581,7 @@ mod tests {
         assert!(app.session.active().unwrap().doc.work_path.is_some());
         finish_shape(&mut app, Tool::Rectangle, [100.0, 100.0], [160.0, 150.0], egui::Modifiers::NONE);
         let toggle = |app: &mut PhotocraftApp, id: &str| crate::menus::invoke(app, &ctx, id, Value::Null).unwrap();
-        for tool in [Tool::Pen, Tool::PathSelection, Tool::DirectSelection, Tool::Rectangle] {
+        for tool in [Tool::Pen, Tool::PathSelection, Tool::DirectSelection, Tool::Rectangle, Tool::Type] {
             app.ui.tool = tool;
             assert!(app.ui.view.show.target_path && app.ui.view.extras);
             assert!(overlay_shapes(&app, &ctx) > 0, "{tool:?}: the paths are drawn by default");
