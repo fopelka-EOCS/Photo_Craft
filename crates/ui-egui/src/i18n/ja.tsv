@@ -4059,3 +4059,16 @@ curves	Smooth	スムーズ
 
 # Print preview image (#8236)
 	Print preview image	Print preview image
+	Create Frame Animation	フレームアニメーションを作成
+	Make Frames From Layers	レイヤーからフレームを作成
+	Forever	無限
+	Once	1 回
+	No delay	遅延なし
+	First frame	最初のフレーム
+	Duplicate Selected Frame	選択したフレームを複製
+	Delete Selected Frame	選択したフレームを削除
+	{seconds} sec.	{seconds} 秒
+	{count} times	{count} 回
+	{n} frames	{n} フレーム
+	Frames before	前のフレーム
+	Frames after	後のフレーム
