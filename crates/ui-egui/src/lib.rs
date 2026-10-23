@@ -105,6 +105,7 @@ mod filter_preview_ui;
 mod filter_preview_worker;
 pub mod flick_pan;
 mod font_preview;
+mod frame_strip_ui;
 pub mod frame_tool;
 pub mod gallery_ui;
 pub mod gpu_canvas;
@@ -159,6 +160,7 @@ pub mod notices;
 pub mod nudge_bundle;
 mod numeric_expression;
 pub mod object_finder;
+mod onion_skin;
 mod opacity_keys;
 pub mod open_prompt;
 pub mod outline;
@@ -2300,6 +2302,9 @@ impl eframe::App for PhotocraftApp {
             filter_preview_worker::discard_closed(self);
             shortcuts::handle(self, ctx);
         }
+        // The Timeline's keys use where the panel was drawn last frame; a frame that doesn't draw it
+        // (full-screen modes hide the docked panel) must not leave the old place behind.
+        self.ui.timeline.panel_rect = None;
         let arrived: Vec<(String, Vec<u8>)> =
             self.services.inbox.as_ref().map(|q| std::mem::take(&mut *q.lock().unwrap_or_else(|e| e.into_inner()))).unwrap_or_default();
         for (name, bytes) in arrived {
@@ -2437,6 +2442,10 @@ impl eframe::App for PhotocraftApp {
         }
         if (chrome && self.ui.panels.dock) || tabbed_in {
             panels::right_dock(self, ui);
+        }
+        // The docked Timeline spans the canvas column: after the side panels, before the canvas.
+        if chrome {
+            timeline_ui::dock(self, ui);
         }
         let t = theme::Tokens::get(&ctx);
         let backdrop = if chrome { prefs_ui::pasteboard_color(self).unwrap_or(t.canvas) } else { egui::Color32::BLACK };
@@ -3316,6 +3325,8 @@ mod alt_click_tests;
 mod status_bar_tests;
 #[cfg(test)]
 mod stroke_timing_tests;
+#[cfg(test)]
+mod timeline_dock_tests;
 
 #[cfg(test)]
 mod polygon_lasso_tests;

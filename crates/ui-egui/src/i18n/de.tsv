@@ -3392,3 +3392,19 @@ curves	Smooth	Glätten
 
 # Print preview image (#8236)
 	Print preview image	Print preview image
+	Create Frame Animation	Frame-Animation erstellen
+	Make Frames From Layers	Frames aus Ebenen erstellen
+	Forever	Endlos
+	Once	Einmal
+	No delay	Keine Verzögerung
+	First frame	Erster Frame
+	Duplicate Selected Frame	Ausgewählten Frame duplizieren
+	Delete Selected Frame	Ausgewählten Frame löschen
+	{seconds} sec.	{seconds} Sek.
+	{count} times	{count}-mal
+	{n} frames	{n} Einzelbilder
+	Frames before	Frames davor
+	Frames after	Frames danach
+	Tween	Zwischenbilder
+	Last frame	Letzter Frame
+	Frames to add	Hinzuzufügende Frames

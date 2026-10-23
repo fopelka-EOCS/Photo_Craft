@@ -4297,3 +4297,19 @@ cameraRaw	Yellow	Sárga
 
 # Print preview image (#8236)
 	Print preview image	Print preview image
+	Create Frame Animation	Képkockás animáció létrehozása
+	Make Frames From Layers	Képkockák létrehozása rétegekből
+	Forever	Folyamatosan
+	Once	Egyszer
+	No delay	Nincs késleltetés
+	First frame	Első képkocka
+	Duplicate Selected Frame	Kijelölt képkocka kettőzése
+	Delete Selected Frame	Kijelölt képkocka törlése
+	{seconds} sec.	{seconds} mp
+	{count} times	{count}×
+	{n} frames	{n} képkocka
+	Frames before	Előző képkockák
+	Frames after	Következő képkockák
+	Tween	Átmenet
+	Last frame	Utolsó képkocka
+	Frames to add	Hozzáadandó képkockák

@@ -14,6 +14,7 @@ pub mod adjust_params;
 pub mod align_cmds;
 mod allocation;
 pub mod analysis_cmds;
+mod animation_cmds;
 pub mod artboard_cmds;
 pub mod atn_cmds;
 pub mod automate_cmds;
@@ -132,6 +133,7 @@ mod variables_cmds;
 pub use variables_cmds::{export_data_sets_with, import_data_sets_text};
 pub mod vector_cmds;
 mod video_cmds;
+pub use animation_cmds::MAX_TWEEN;
 pub use video_cmds::render_video_with;
 pub mod vp_cmds;
 pub mod warp_cmds;
@@ -840,6 +842,8 @@ impl Session {
         let mut doc = (*before).clone();
         let mut active = st.active_layer;
         let r = f(&mut doc, &mut active)?;
+        // An edit made while a frame of the animation is selected changes that frame only.
+        doc.capture_animation_frame();
         if let (Some(k), Some(id)) = (restrict, active) {
             channel_cmds::restrict_to_color(&before, &mut doc, id, k);
         }

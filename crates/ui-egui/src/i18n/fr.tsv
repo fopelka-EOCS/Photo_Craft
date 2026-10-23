@@ -4423,3 +4423,19 @@ shape	Appearance	Apparence
 
 # Print preview image (#8236)
 	Print preview image	Print preview image
+	Create Frame Animation	Créer une animation image par image
+	Make Frames From Layers	Créer des images à partir des calques
+	Forever	Indéfiniment
+	Once	Une fois
+	No delay	Aucun délai
+	First frame	Première image
+	Duplicate Selected Frame	Dupliquer l’image sélectionnée
+	Delete Selected Frame	Supprimer l’image sélectionnée
+	{seconds} sec.	{seconds} s
+	{count} times	{count} fois
+	{n} frames	{n} images
+	Frames before	Images avant
+	Frames after	Images après
+	Tween	Interpolation
+	Last frame	Dernière image
+	Frames to add	Images à ajouter
