@@ -1090,6 +1090,7 @@ fn path_rename(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn path_to_selection(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "path.toSelection";
     let name = p.get("name").and_then(Value::as_str).map(str::to_string);
     let path = resolve_path(s, name.as_deref())?;
     let feather = f64p(p, "feather").unwrap_or(0.0) as f32;
@@ -1104,6 +1105,12 @@ fn path_to_selection(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if feather > 0.0 {
         mask = sel::feather(&mask, area.width() as usize, area.height() as usize, feather);
+    }
+    // A path with no drawn area (a straight two-point line, a single knot) rasterizes to an
+    // empty mask. Photoshop alerts and keeps the path; silently succeeding would spend the
+    // Work Path for nothing.
+    if mask.iter().all(|v| *v == 0.0) {
+        return Err(bad(CMD, "the path has no area to select"));
     }
     let selected = s.edit("Make Selection", |doc, _| {
         doc.selection = sel::combine(doc.selection.as_ref(), &mask, area, mode);
