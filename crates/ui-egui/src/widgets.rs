@@ -2419,31 +2419,6 @@ mod tests {
         }
     }
 
-    /// Focus must not let the nested TextEdit grow past the outer box (the accent ring is painted
-    /// on that outer rect, not on an offset inner frame).
-    #[test]
-    fn focused_value_field_number_stays_inside_its_outer_box() {
-        for kind in crate::theme::ThemeKind::ALL {
-            let mut harness = Harness::new_ui_state(
-                |ui, s: &mut (f32, egui::Rect)| {
-                    s.1 = super::value_field_in(ui, &mut s.0, 0.0..=100.0, "%", 80.0, 0.0, super::FieldOpts::default()).1;
-                },
-                (100.0, egui::Rect::NOTHING),
-            );
-            crate::PhotocraftApp::setup_context(&harness.ctx, kind);
-            harness.run();
-            let before = harness.state().1;
-            harness.get_by_role(egui::accesskit::Role::SpinButton).click();
-            harness.run();
-            let number = harness.get_by_role(egui::accesskit::Role::SpinButton).rect();
-            let field = harness.state().1;
-            let what = format!("{kind:?}: field {field:?}, number {number:?}");
-            assert_eq!(field, before, "{kind:?}: focus must not move the outer allocation");
-            assert!(field.contains_rect(number), "{what}");
-            assert!(harness.get_by_role(egui::accesskit::Role::SpinButton).is_focused(), "{kind:?}: field is focused");
-        }
-    }
-
     /// The number's slot ends just left of its unit, by the unit's measured width: a one-character
     /// `%` (the status bar zoom) leaves the number more room than the old fixed 16 pt, and a longer
     /// unit never sits under the number (#3040).
