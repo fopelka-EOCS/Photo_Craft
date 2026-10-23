@@ -4092,6 +4092,23 @@ cameraData	Lens	Lens
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	GPU bağdaştırıcısı
+
+# Color panel menu: modes, copy commands and colour ramps (#6000)
+	Hue Cube	Renk Tonu Küpü
+	Brightness Cube	Parlaklık Küpü
+	Color Wheel	Renk Çarkı
+	RGB Sliders	RGB Kaydırıcıları
+	HSB Sliders	HSB Kaydırıcıları
+	CMYK Sliders	CMYK Kaydırıcıları
+	Lab Sliders	Lab Kaydırıcıları
+	Web Color Sliders	Web Rengi Kaydırıcıları
+	Copy Color as HTML	Rengi HTML Olarak Kopyala
+	Copy Color's Hex Code	Rengin Onaltılık Kodunu Kopyala
+	RGB Spectrum	RGB Spektrumu
+	CMYK Spectrum	CMYK Spektrumu
+	Grayscale Ramp	Gri Tonlama Şeridi
+	Current Colors	Geçerli Renkler
+	Make Ramp Web Safe	Şeridi Web Renkleriyle Sınırla
 # Actions: a step dialog holds a suspended recording (#7365)
 	Confirm or cancel the open action step dialog first	Önce açık eylem adımı iletişim kutusunu onaylayın veya iptal edin
 	Pro Medium Gray	Pro Orta Gri
@@ -4100,14 +4117,11 @@ cameraData	Lens	Lens
 	Pro Light Gray	Pro Açık Gri
 	Pro Light	Profesyonel Işık
 	Resize Windows to Fit	Pencereleri sığacak şekilde boyutlandır
-
 	EXR	EXR
-
 # Paragraph direction (TYPE-218-2)
 	Automatic paragraph direction	Otomatik paragraf yönü
 	Left-to-right paragraph direction	Soldan sağa paragraf yönü
 	Right-to-left paragraph direction	Sağdan sola paragraf yönü
 	Not rendered: this adjustment ({key}) is kept as imported.	Görüntülenmiyor: bu ayarlama ({key}) içe aktarıldığı gibi korunuyor.
-
 # Print preview image (#8236)
 	Print preview image	Print preview image

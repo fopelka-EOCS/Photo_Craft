@@ -3373,6 +3373,23 @@ curves	Smooth	Lisser
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Adaptateur GPU
+
+# Color panel menu: modes, copy commands and colour ramps (#6000)
+	Hue Cube	Cube de teinte
+	Brightness Cube	Cube de luminosité
+	Color Wheel	Roue chromatique
+	RGB Sliders	Curseurs RVB
+	HSB Sliders	Curseurs TSL
+	CMYK Sliders	Curseurs CMJN
+	Lab Sliders	Curseurs Lab
+	Web Color Sliders	Curseurs de couleurs Web
+	Copy Color as HTML	Copier la couleur en HTML
+	Copy Color's Hex Code	Copier le code hexadécimal de la couleur
+	RGB Spectrum	Spectre RVB
+	CMYK Spectrum	Spectre CMJN
+	Grayscale Ramp	Barre de niveaux de gris
+	Current Colors	Couleurs actuelles
+	Make Ramp Web Safe	Limiter la barre aux couleurs Web
 # Actions: a step dialog holds a suspended recording (#7365)
 	Confirm or cancel the open action step dialog first	Validez ou annulez d’abord la boîte de dialogue ouverte de l’étape de l’action
 	Pro Medium Gray	Pro gris moyen
@@ -3381,7 +3398,6 @@ curves	Smooth	Lisser
 	Pro Light Gray	Pro gris clair
 	Pro Light	Pro clair
 	Resize Windows to Fit	Redimensionner les fenêtres
-
 	EXR	EXR
 	(none)	(aucun)
 	32-bit Preview Options	Options d'aperçu 32 bits
@@ -4414,12 +4430,10 @@ layers	Fill	Remplissage
 layers	Fill:	Remplissage :
 navigator	Zoom	Zoom
 shape	Appearance	Apparence
-
 # Paragraph direction (TYPE-218-2)
 	Automatic paragraph direction	Sens du paragraphe automatique
 	Left-to-right paragraph direction	Sens du paragraphe de gauche à droite
 	Right-to-left paragraph direction	Sens du paragraphe de droite à gauche
 	Not rendered: this adjustment ({key}) is kept as imported.	Non rendu : ce réglage ({key}) est conservé tel qu'importé.
-
 # Print preview image (#8236)
 	Print preview image	Print preview image

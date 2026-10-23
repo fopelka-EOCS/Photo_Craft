@@ -3571,6 +3571,24 @@ curves	Smooth	매끄럽게
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	GPU 어댑터
+
+# Color panel menu: modes, copy commands and colour ramps (#6000)
+	Hue Cube	색조 큐브
+	Brightness Cube	밝기 큐브
+	Color Wheel	색상환
+	Grayscale Slider	회색 음영 슬라이더
+	RGB Sliders	RGB 슬라이더
+	HSB Sliders	HSB 슬라이더
+	CMYK Sliders	CMYK 슬라이더
+	Lab Sliders	Lab 슬라이더
+	Web Color Sliders	웹 색상 슬라이더
+	Copy Color as HTML	색상을 HTML로 복사
+	Copy Color's Hex Code	색상의 16진수 코드 복사
+	RGB Spectrum	RGB 스펙트럼
+	CMYK Spectrum	CMYK 스펙트럼
+	Grayscale Ramp	회색 음영 램프
+	Current Colors	현재 색상
+	Make Ramp Web Safe	램프를 웹 안전 색상으로 만들기
 # Actions: a step dialog holds a suspended recording (#7365)
 	Confirm or cancel the open action step dialog first	먼저 열려 있는 액션 단계 대화 상자를 확인하거나 취소하세요
 	Pro Medium Gray	프로 중간 회색
@@ -3579,14 +3597,11 @@ curves	Smooth	매끄럽게
 	Pro Light Gray	프로 밝은 회색
 	Pro Light	프로 밝게
 	Resize Windows to Fit	창 크기 맞추기
-
 	EXR	EXR
-
 # Paragraph direction (TYPE-218-2)
 	Automatic paragraph direction	자동 단락 방향
 	Left-to-right paragraph direction	왼쪽에서 오른쪽 단락 방향
 	Right-to-left paragraph direction	오른쪽에서 왼쪽 단락 방향
 	Not rendered: this adjustment ({key}) is kept as imported.	렌더링되지 않음: 이 조정({key})은 가져온 상태 그대로 유지됩니다.
-
 # Print preview image (#8236)
 	Print preview image	Print preview image

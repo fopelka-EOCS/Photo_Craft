@@ -2985,6 +2985,24 @@ curves	Smooth	平滑
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	GPU 介面卡
+
+# Color panel menu: modes, copy commands and colour ramps (#6000)
+	Hue Cube	色相立方體
+	Brightness Cube	亮度立方體
+	Color Wheel	色輪
+	Grayscale Slider	灰階滑桿
+	RGB Sliders	RGB 滑桿
+	HSB Sliders	HSB 滑桿
+	CMYK Sliders	CMYK 滑桿
+	Lab Sliders	Lab 滑桿
+	Web Color Sliders	網頁色彩滑桿
+	Copy Color as HTML	將色彩複製為 HTML
+	Copy Color's Hex Code	複製色彩的十六進位碼
+	RGB Spectrum	RGB 色譜
+	CMYK Spectrum	CMYK 色譜
+	Grayscale Ramp	灰階色帶
+	Current Colors	目前色彩
+	Make Ramp Web Safe	讓色帶成為網頁安全色
 # Actions: a step dialog holds a suspended recording (#7365)
 	Confirm or cancel the open action step dialog first	請先確認或取消開啟中的動作步驟對話框
 	Pro Medium Gray	專業中灰
@@ -2993,14 +3011,11 @@ curves	Smooth	平滑
 	Pro Light Gray	專業淺灰
 	Pro Light	專業淺色
 	Resize Windows to Fit	調整視窗大小以符合
-
 	EXR	EXR
-
 # Paragraph direction (TYPE-218-2)
 	Automatic paragraph direction	自動段落方向
 	Left-to-right paragraph direction	由左至右的段落方向
 	Right-to-left paragraph direction	由右至左的段落方向
 	Not rendered: this adjustment ({key}) is kept as imported.	未算繪：此調整（{key}）依匯入時的原樣保留。
-
 # Print preview image (#8236)
 	Print preview image	Print preview image

@@ -4324,6 +4324,23 @@ navigator	Zoom	Zoom
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Adaptador de GPU
+
+# Color panel menu: modes, copy commands and colour ramps (#6000)
+	Hue Cube	Cubo de tono
+	Brightness Cube	Cubo de brillo
+	Color Wheel	Rueda de color
+	RGB Sliders	Reguladores RGB
+	HSB Sliders	Reguladores HSB
+	CMYK Sliders	Reguladores CMYK
+	Lab Sliders	Reguladores Lab
+	Web Color Sliders	Reguladores de colores web
+	Copy Color as HTML	Copiar color como HTML
+	Copy Color's Hex Code	Copiar código hexadecimal del color
+	RGB Spectrum	Espectro RGB
+	CMYK Spectrum	Espectro CMYK
+	Grayscale Ramp	Rampa de escala de grises
+	Current Colors	Colores actuales
+	Make Ramp Web Safe	Hacer rampa segura para web
 # Actions: a step dialog holds a suspended recording (#7365)
 	Confirm or cancel the open action step dialog first	Confirme o cancele primero el cuadro de diálogo abierto del paso de la acción
 	Pro Medium Gray	Pro (gris medio)
@@ -4332,14 +4349,11 @@ navigator	Zoom	Zoom
 	Pro Light Gray	Pro (gris claro)
 	Pro Light	Pro (claro)
 	Resize Windows to Fit	Redimensionar ventanas para ajustar
-
 	EXR	EXR
-
 # Paragraph direction (TYPE-218-2)
 	Automatic paragraph direction	Dirección de párrafo automática
 	Left-to-right paragraph direction	Dirección de párrafo de izquierda a derecha
 	Right-to-left paragraph direction	Dirección de párrafo de derecha a izquierda
 	Not rendered: this adjustment ({key}) is kept as imported.	No se renderiza: este ajuste ({key}) se conserva tal como se importó.
-
 # Print preview image (#8236)
 	Print preview image	Print preview image

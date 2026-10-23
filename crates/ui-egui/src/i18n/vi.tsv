@@ -3854,6 +3854,24 @@ curves	Smooth	Làm mượt
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Bộ điều hợp GPU
+
+# Color panel menu: modes, copy commands and colour ramps (#6000)
+	Hue Cube	Khối sắc màu
+	Brightness Cube	Khối độ sáng
+	Color Wheel	Bánh xe màu
+	Grayscale Slider	Thanh trượt thang xám
+	RGB Sliders	Thanh trượt RGB
+	HSB Sliders	Thanh trượt HSB
+	CMYK Sliders	Thanh trượt CMYK
+	Lab Sliders	Thanh trượt Lab
+	Web Color Sliders	Thanh trượt màu web
+	Copy Color as HTML	Sao chép màu dạng HTML
+	Copy Color's Hex Code	Sao chép mã hex của màu
+	RGB Spectrum	Phổ RGB
+	CMYK Spectrum	Phổ CMYK
+	Grayscale Ramp	Dải thang xám
+	Current Colors	Màu hiện tại
+	Make Ramp Web Safe	Giới hạn dải màu ở màu web
 # Actions: a step dialog holds a suspended recording (#7365)
 	Confirm or cancel the open action step dialog first	Hãy xác nhận hoặc hủy hộp thoại bước hành động đang mở trước
 	Pro Medium Gray	Pro xám vừa
@@ -3862,14 +3880,11 @@ curves	Smooth	Làm mượt
 	Pro Light Gray	Pro xám nhạt
 	Pro Light	Pro sáng
 	Resize Windows to Fit	Đổi cỡ cửa sổ cho vừa ảnh
-
 	EXR	EXR
-
 # Paragraph direction (TYPE-218-2)
 	Automatic paragraph direction	Hướng đoạn văn tự động
 	Left-to-right paragraph direction	Hướng đoạn văn từ trái sang phải
 	Right-to-left paragraph direction	Hướng đoạn văn từ phải sang trái
 	Not rendered: this adjustment ({key}) is kept as imported.	Không được kết xuất: điều chỉnh này ({key}) được giữ nguyên như khi nhập.
-
 # Print preview image (#8236)
 	Print preview image	Print preview image

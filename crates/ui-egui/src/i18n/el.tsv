@@ -4062,6 +4062,23 @@ curves	Smooth	Εξομάλυνση
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Προσαρμογέας GPU
+
+# Color panel menu: modes, copy commands and colour ramps (#6000)
+	Hue Cube	Κύβος απόχρωσης
+	Brightness Cube	Κύβος φωτεινότητας
+	Color Wheel	Χρωματικός τροχός
+	RGB Sliders	Ρυθμιστικά RGB
+	HSB Sliders	Ρυθμιστικά HSB
+	CMYK Sliders	Ρυθμιστικά CMYK
+	Lab Sliders	Ρυθμιστικά Lab
+	Web Color Sliders	Ρυθμιστικά χρωμάτων ιστού
+	Copy Color as HTML	Αντιγραφή χρώματος ως HTML
+	Copy Color's Hex Code	Αντιγραφή δεκαεξαδικού κωδικού χρώματος
+	RGB Spectrum	Φάσμα RGB
+	CMYK Spectrum	Φάσμα CMYK
+	Grayscale Ramp	Διαβάθμιση του γκρι
+	Current Colors	Τρέχοντα χρώματα
+	Make Ramp Web Safe	Μόνο χρώματα ιστού στη διαβάθμιση
 # Actions: a step dialog holds a suspended recording (#7365)
 	Confirm or cancel the open action step dialog first	Επιβεβαιώστε ή ακυρώστε πρώτα το ανοιχτό παράθυρο βήματος της ενέργειας
 	Pro Medium Gray	Pro μεσαίου γκρι
@@ -4070,14 +4087,11 @@ curves	Smooth	Εξομάλυνση
 	Pro Light Gray	Pro ανοιχτού γκρι
 	Pro Light	Φωτεινό Pro
 	Resize Windows to Fit	Προσαρμογή μεγέθους παραθύρων
-
 	EXR	EXR
-
 # Paragraph direction (TYPE-218-2)
 	Automatic paragraph direction	Αυτόματη κατεύθυνση παραγράφου
 	Left-to-right paragraph direction	Κατεύθυνση παραγράφου από αριστερά προς τα δεξιά
 	Right-to-left paragraph direction	Κατεύθυνση παραγράφου από δεξιά προς τα αριστερά
 	Not rendered: this adjustment ({key}) is kept as imported.	Δεν αποδίδεται: αυτή η προσαρμογή ({key}) διατηρείται όπως εισήχθη.
-
 # Print preview image (#8236)
 	Print preview image	Print preview image

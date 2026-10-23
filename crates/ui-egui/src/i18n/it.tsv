@@ -4479,6 +4479,23 @@ shape	Appearance	Aspetto
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Adattatore GPU
+
+# Color panel menu: modes, copy commands and colour ramps (#6000)
+	Hue Cube	Cubo tonalità
+	Brightness Cube	Cubo luminosità
+	Color Wheel	Ruota dei colori
+	RGB Sliders	Cursori RGB
+	HSB Sliders	Cursori HSB
+	CMYK Sliders	Cursori CMYK
+	Lab Sliders	Cursori Lab
+	Web Color Sliders	Cursori colori web
+	Copy Color as HTML	Copia colore come HTML
+	Copy Color's Hex Code	Copia codice esadecimale del colore
+	RGB Spectrum	Spettro RGB
+	CMYK Spectrum	Spettro CMYK
+	Grayscale Ramp	Barra scala di grigio
+	Current Colors	Colori correnti
+	Make Ramp Web Safe	Limita la barra ai colori web
 # Actions: a step dialog holds a suspended recording (#7365)
 	Confirm or cancel the open action step dialog first	Conferma o annulla prima la finestra di dialogo aperta del passo dell’azione
 	Pro Medium Gray	Pro grigio medio
@@ -4487,14 +4504,11 @@ shape	Appearance	Aspetto
 	Pro Light Gray	Pro grigio chiaro
 	Pro Light	Pro chiaro
 	Resize Windows to Fit	Ridimensiona finestre per adattare
-
 	EXR	EXR
-
 # Paragraph direction (TYPE-218-2)
 	Automatic paragraph direction	Direzione del paragrafo automatica
 	Left-to-right paragraph direction	Direzione del paragrafo da sinistra a destra
 	Right-to-left paragraph direction	Direzione del paragrafo da destra a sinistra
 	Not rendered: this adjustment ({key}) is kept as imported.	Non renderizzato: questa regolazione ({key}) viene conservata come importata.
-
 # Print preview image (#8236)
 	Print preview image	Print preview image
