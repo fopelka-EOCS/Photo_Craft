@@ -114,7 +114,7 @@ pub(crate) fn lens_flare(src: &Image, out: Rect, ctx: &Ctx, brightness: f32, cen
     let bright = brightness.clamp(10.0, 300.0) / 100.0;
     let d = design(lens);
 
-    let (w, h) = (out.width().max(0) as usize, out.height().max(0) as usize);
+    let (w, h) = (out.width() as usize, out.height() as usize);
     let mut light = vec![[0.0f32; 3]; w * h];
     let (ox, oy) = (out.x0 as f32, out.y0 as f32);
 
@@ -133,8 +133,8 @@ pub(crate) fn lens_flare(src: &Image, out: Rect, ctx: &Ctx, brightness: f32, cen
                 if let Some(v) = profile(e.knots, fx.hypot(fy) / g.unit)
                     && let Some(px) = light.get_mut(y * w + x)
                 {
-                    for k in 0..3 {
-                        px[k] += v[k];
+                    for (p, v) in px.iter_mut().zip(v) {
+                        *p += v;
                     }
                 }
             }
@@ -156,8 +156,8 @@ pub(crate) fn lens_flare(src: &Image, out: Rect, ctx: &Ctx, brightness: f32, cen
             }
             let along = ((fx * cos + fy * sin) / g.unit).abs();
             let k = (1.0 - smoothstep(half * (1.0 - taper), half, along)) * (-across * across).exp();
-            for c in 0..3 {
-                px[c] += k * s.rgb[c];
+            for (p, c) in px.iter_mut().zip(s.rgb) {
+                *p += k * c;
             }
         }
     }
@@ -184,8 +184,8 @@ pub(crate) fn lens_flare(src: &Image, out: Rect, ctx: &Ctx, brightness: f32, cen
             let pos = (rad - r0) / length;
             let env = ((pos.min(1.0 - pos)) / fade).clamp(0.0, 1.0);
             if let Some(v) = light.get_mut(ly as usize * w + lx as usize) {
-                for k in 0..3 {
-                    v[k] += env * r.rgb[k];
+                for (p, c) in v.iter_mut().zip(r.rgb) {
+                    *p += env * c;
                 }
             }
         }

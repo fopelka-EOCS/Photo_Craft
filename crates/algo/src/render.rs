@@ -106,8 +106,6 @@ pub(crate) fn fibers(src: &Image, out: Rect, ctx: &Ctx, variance: f32, strength:
     res
 }
 
-/// One lens-flare ghost: position along the flare→centre axis, radius and tint.
-
 pub(crate) struct LightingSpec<'a> {
     pub lights: &'a [Light],
     pub gloss: f32,
