@@ -23,23 +23,33 @@ fn write_png(path: &Path, w: u32, h: u32, seed: u8) {
     std::fs::write(path, photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &Default::default()).unwrap()).unwrap();
 }
 
-fn ok(cmd: &mut Command) -> (String, String) {
+/// What a successful run printed.
+struct Printed {
+    stdout: String,
+    stderr: String,
+}
+
+fn ok(cmd: &mut Command) -> Printed {
     let o = cmd.output().unwrap();
-    let (out, err) = (String::from_utf8_lossy(&o.stdout).into_owned(), String::from_utf8_lossy(&o.stderr).into_owned());
-    assert!(o.status.success(), "exit {:?}\nstdout: {out}\nstderr: {err}", o.status);
-    (out, err)
+    let (stdout, stderr) = (String::from_utf8_lossy(&o.stdout).into_owned(), String::from_utf8_lossy(&o.stderr).into_owned());
+    assert!(o.status.success(), "exit {:?}\nstdout: {stdout}\nstderr: {stderr}", o.status);
+    Printed { stdout, stderr }
 }
 
 #[test]
 fn usage_and_unknown_command() {
     let o = bin().output().unwrap();
     assert_eq!(o.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&o.stderr).contains("USAGE"));
+    assert!(String::from_utf8_lossy(&o.stderr).contains("convert"));
     let o = bin().arg("frobnicate").output().unwrap();
     assert_eq!(o.status.code(), Some(2));
-    let (out, _) = ok(bin().arg("--help"));
+    // `help` names a subcommand or nothing: anything else is a usage error too.
+    let o = bin().args(["help", "frobnicate"]).output().unwrap();
+    assert_eq!(o.status.code(), Some(2));
+    assert!(!o.stderr.is_empty());
+    let out = ok(bin().arg("--help")).stdout;
     assert!(out.contains("convert"));
-    let (out, _) = ok(bin().arg("--version"));
+    let out = ok(bin().arg("--version")).stdout;
     assert!(out.starts_with("photocraft-cli "));
 }
 
@@ -53,7 +63,7 @@ fn every_subcommand_answers_help() {
             let o = bin().current_dir(&d).arg(sub).arg(help).arg("--out").arg("x.png").stdin(Stdio::null()).output().unwrap();
             let out = String::from_utf8_lossy(&o.stdout);
             assert_eq!(o.status.code(), Some(0), "{sub} {help}: {}", String::from_utf8_lossy(&o.stderr));
-            assert!(out.contains("USAGE") && out.contains("photocraft-cli batch"), "{sub} {help}: {out}");
+            assert!(out.contains(&format!("photocraft-cli {sub}")), "{sub} {help}: {out}");
         }
     }
     assert_eq!(std::fs::read_dir(&d).unwrap().count(), 0, "help wrote nothing");
@@ -73,7 +83,7 @@ fn unknown_flags_are_usage_errors() {
         let o = cmd.output().unwrap();
         let err = String::from_utf8_lossy(&o.stderr);
         assert_eq!(o.status.code(), Some(2), "{err}");
-        assert!(err.contains(&format!("unknown flag {flag}")), "{err}");
+        assert!(err.contains(flag), "{err}");
     };
     for typo in [&["--fromat", "jpg"][..], &["--fromat=jpg"][..]] {
         fails(bin().args(["batch", "--actions"]).arg(&actions).arg("--in").arg(&input).arg("--out").arg(&out_dir).args(typo), "--fromat");
@@ -86,13 +96,13 @@ fn unknown_flags_are_usage_errors() {
     fails(bin().args(["info", "--json"]).arg(input.join("a.png")), "--json");
     let o = bin().args(["commands", "--json=yes"]).output().unwrap();
     assert_eq!(o.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&o.stderr).contains("--json takes no value"));
+    assert!(String::from_utf8_lossy(&o.stderr).contains("--json"));
     // Every flag still works in both forms.
-    let (out, _) = ok(bin().args(["commands", "--json", "--filter=gaussian"]));
+    let out = ok(bin().args(["commands", "--json", "--filter=gaussian"])).stdout;
     assert!(out.contains("filter.blur.gaussianBlur"), "{out}");
     // The Elliptical Marquee is a `select.rect` option, found by its keywords (#5060).
     for needle in ["ellipse", "marquee"] {
-        let (out, _) = ok(bin().args(["commands", "--filter", needle]));
+        let out = ok(bin().args(["commands", "--filter", needle])).stdout;
         assert!(out.contains("select.rect"), "{needle}: {out}");
     }
     ok(bin().args(["batch", "--actions"]).arg(&actions).arg(format!("--in={}", input.display())).arg("--out").arg(&out_dir).args([
@@ -101,7 +111,7 @@ fn unknown_flags_are_usage_errors() {
         "80",
     ]));
     assert!(out_dir.join("a.jpg").exists());
-    let (out, _) = ok(bin().arg("info").arg(input.join("a.png")).arg("--compact"));
+    let out = ok(bin().arg("info").arg(input.join("a.png")).arg("--compact")).stdout;
     assert!(!out.trim().contains('\n'), "compact JSON is one line");
 }
 
@@ -128,7 +138,7 @@ fn convert_errors() {
     let o = bin().args(["convert", "/missing/in.png"]).arg(d.join("x.png")).output().unwrap();
     assert_eq!(o.status.code(), Some(1));
     let o = bin().args(["convert", "only-one"]).output().unwrap();
-    assert_eq!(o.status.code(), Some(1));
+    assert_eq!(o.status.code(), Some(2));
     std::fs::remove_dir_all(d).unwrap();
 }
 
@@ -137,14 +147,14 @@ fn info_prints_layer_tree_json() {
     let d = tmp("info");
     let a = d.join("a.png");
     write_png(&a, 10, 6, 3);
-    let (out, _) = ok(bin().arg("info").arg(&a));
+    let out = ok(bin().arg("info").arg(&a)).stdout;
     let v: Value = serde_json::from_str(&out).unwrap();
     assert_eq!(v["width"], 10);
     assert_eq!(v["height"], 6);
     // An RGBA PNG opens as a normal "Layer 0", not the locked Background (as in Photoshop).
     assert_eq!(v["layers"][0]["name"], "Layer 0");
     assert!(v.get("history").is_none());
-    let (out, _) = ok(bin().arg("info").arg(&a).arg("--compact"));
+    let out = ok(bin().arg("info").arg(&a).arg("--compact")).stdout;
     assert_eq!(out.trim().lines().count(), 1);
     std::fs::remove_dir_all(d).unwrap();
 }
@@ -173,10 +183,10 @@ fn info_and_convert_report_decode_warnings() {
     for (name, bytes, warning, export) in cases {
         let file = d.join(name);
         std::fs::write(&file, bytes).unwrap();
-        let (out, _) = ok(bin().arg("info").arg(&file).arg("--compact"));
+        let out = ok(bin().arg("info").arg(&file).arg("--compact")).stdout;
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["warnings"], json!(warning.into_iter().collect::<Vec<_>>()), "{name}");
-        let (_, err) = ok(bin().arg("convert").arg(&file).arg(d.join(format!("{name}.png"))));
+        let err = ok(bin().arg("convert").arg(&file).arg(d.join(format!("{name}.png")))).stderr;
         let expected: Vec<String> = warning.into_iter().chain(export).map(|w| format!("warning: {w}")).collect();
         assert_eq!(
             err.trim(),
@@ -194,18 +204,19 @@ fn info_and_convert_report_decode_warnings() {
 fn run_commands_and_save() {
     let d = tmp("run");
     let out_pc = d.join("r.pcraft");
-    let (out, _) = ok(bin()
+    let out = ok(bin()
         .args(["run", "--new", r#"{"width":40,"height":30,"name":"Run"}"#])
         .args(["--cmd", "layer.new.layer", "--params", r#"{"name":"Ink"}"#])
         .args(["--cmd", "paint.stroke", "--params", r##"{"points":[[2,2,1],[30,20,1]],"size":5,"color":"#00ff00"}"##])
         .args(["--cmd", "document.inspect"])
         .arg("--out")
-        .arg(&out_pc));
+        .arg(&out_pc))
+    .stdout;
     let lines: Vec<Value> = out.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     assert_eq!(lines.len(), 3);
     assert_eq!(lines[2]["command"], "document.inspect");
     assert_eq!(lines[2]["result"]["name"], "Run");
-    let (info, _) = ok(bin().arg("info").arg(&out_pc));
+    let info = ok(bin().arg("info").arg(&out_pc)).stdout;
     let v: Value = serde_json::from_str(&info).unwrap();
     // Saving a native document gives the reopened bundle its output filename.
     assert_eq!(v["name"], "r.pcraft");
@@ -246,13 +257,14 @@ fn run_stops_after_failed_action_without_exporting() {
 fn run_continues_after_successful_action_and_exports() {
     let d = tmp("run-successful-action");
     let out = d.join("result.png");
-    let (stdout, _) = ok(bin()
+    let stdout = ok(bin()
         .args(["run", "--new", r#"{"width":8,"height":8}"#])
         .args(["--cmd", "actions.record", "--params", r#"{"name":"Add"}"#])
         .args(["--cmd", "layer.new.layer", "--cmd", "actions.stop"])
         .args(["--cmd", "actions.play", "--params", r#"{"action":"Add"}"#])
         .args(["--cmd", "document.inspect", "--out"])
-        .arg(&out));
+        .arg(&out))
+    .stdout;
     let rows: Vec<Value> = stdout.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
     let playback = rows.iter().find(|row| row["command"] == "actions.play").unwrap();
     assert_eq!(playback["result"]["ran"], 1);
@@ -267,10 +279,13 @@ fn run_errors() {
     let o = bin().args(["run", "--new", "{}", "--cmd", "no.such"]).output().unwrap();
     assert_eq!(o.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&o.stderr).contains("unknown command"));
+    // Neither a --cmd nor --out, and JSON that doesn't parse, are usage errors naming the flag.
     let o = bin().args(["run", "--new", "{}", "--params", "{}"]).output().unwrap();
-    assert_eq!(o.status.code(), Some(1));
+    assert_eq!(o.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&o.stderr).contains("--cmd"));
     let o = bin().args(["run", "--new", "{", "--cmd", "x"]).output().unwrap();
-    assert_eq!(o.status.code(), Some(1));
+    assert_eq!(o.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&o.stderr).contains("--new"));
     // Params must be a JSON object, for `--new` and for each `--params`.
     let o = bin().args(["run", "--new", "[3]", "--cmd", "layer.new.layer"]).output().unwrap();
     assert_eq!(o.status.code(), Some(1));
@@ -310,10 +325,10 @@ fn batch_applies_actions_to_directory() {
     std::fs::write(inp.join("notes.txt"), "ignored").unwrap();
     let actions = d.join("actions.json");
     std::fs::write(&actions, json!([{"command": "layer.new.layer", "params": {"name": "Batch"}}]).to_string()).unwrap();
-    let (out, _) = ok(bin().args(["batch", "--actions"]).arg(&actions).arg("--in").arg(&inp).arg("--out").arg(&outp).args(["--format", "pcraft"]));
+    let out = ok(bin().args(["batch", "--actions"]).arg(&actions).arg("--in").arg(&inp).arg("--out").arg(&outp).args(["--format", "pcraft"])).stdout;
     assert!(out.contains("2 succeeded, 0 failed"), "{out}");
     for n in ["one", "two"] {
-        let (info, _) = ok(bin().arg("info").arg(outp.join(format!("{n}.pcraft"))));
+        let info = ok(bin().arg("info").arg(outp.join(format!("{n}.pcraft")))).stdout;
         let v: Value = serde_json::from_str(&info).unwrap();
         assert_eq!(v["layers"][0]["name"], "Batch");
     }
@@ -347,7 +362,7 @@ fn batch_skips_recorded_view_and_save_steps() {
         assert!(o.status.success(), "{name}: {stdout}\n{stderr}");
         assert!(stdout.contains("1 succeeded, 0 failed"), "{name}: {stdout}");
         let output = d.join(name).join("a.png");
-        let (info, _) = ok(bin().arg("info").arg(&output));
+        let info = ok(bin().arg("info").arg(&output)).stdout;
         let info: Value = serde_json::from_str(&info).unwrap();
         assert_eq!((info["width"].as_u64(), info["height"].as_u64()), (Some(8), Some(12)), "{name}: {info}");
         assert_eq!(std::fs::read(&source).unwrap(), original, "{name} changed its input");
@@ -433,8 +448,8 @@ fn batch_format_with_leading_dot() {
     }
 }
 
-/// #491: `--quality` outside 1-100 is an error for every subcommand, whatever the number's size,
-/// and nothing is written.
+/// #491: `--quality` outside 1-100 is a usage error for every subcommand, whatever the number's
+/// size, and nothing is written.
 #[test]
 fn quality_outside_1_to_100_is_refused() {
     let d = tmp("quality");
@@ -450,12 +465,12 @@ fn quality_outside_1_to_100_is_refused() {
         run.arg("run").arg(&a).args(["--cmd", "image.adjustments.invert", "--out"]).arg(&out).args(["--quality", q]);
         for cmd in [&mut convert, &mut run] {
             let o = cmd.output().unwrap();
-            assert_eq!(o.status.code(), Some(1), "--quality {q}");
-            assert!(String::from_utf8_lossy(&o.stderr).contains(&format!("bad --quality `{q}`: expected a whole number from 1 to 100")), "--quality {q}");
+            assert_eq!(o.status.code(), Some(2), "--quality {q}");
+            assert!(String::from_utf8_lossy(&o.stderr).contains("--quality"), "--quality {q}");
             assert!(!out.exists(), "--quality {q} wrote a file");
         }
         let o = batch_with(&d, &input, "qb", invert, &["--format", "jpg", "--quality", q]);
-        assert_eq!(o.status.code(), Some(1), "batch --quality {q}");
+        assert_eq!(o.status.code(), Some(2), "batch --quality {q}");
         assert!(!d.join("qb").exists(), "batch --quality {q} wrote a folder");
     }
     // The documented range still encodes, lower quality making a smaller file.
@@ -471,7 +486,7 @@ fn quality_outside_1_to_100_is_refused() {
 }
 
 /// DPX converts both ways, `info` reports its size, mode and depth, and `--dpx-bits` picks the
-/// bits per sample (byte 803 of the header); anything but 8, 10, 12 or 16 is refused (#1049).
+/// bits per sample (byte 803 of the header); anything but 8, 10, 12 or 16 is a usage error (#1049).
 #[test]
 fn dpx_converts_both_ways_with_the_bits_asked_for() {
     let d = tmp("dpx");
@@ -488,7 +503,7 @@ fn dpx_converts_both_ways_with_the_bits_asked_for() {
         let bytes = std::fs::read(&out).unwrap();
         assert_eq!((&bytes[..4], bytes[803]), (&b"SDPX"[..], want), "--dpx-bits {bits:?}");
     }
-    let (info, _) = ok(bin().arg("info").arg(d.join("a.dpx")).arg("--compact"));
+    let info = ok(bin().arg("info").arg(d.join("a.dpx")).arg("--compact")).stdout;
     let v: Value = serde_json::from_str(&info).unwrap();
     assert_eq!((v["width"].as_u64(), v["height"].as_u64()), (Some(8), Some(4)), "{v}");
     assert!(info.contains("16") && info.to_lowercase().contains("rgb"), "{info}");
@@ -498,15 +513,16 @@ fn dpx_converts_both_ways_with_the_bits_asked_for() {
     for bad in ["24", "0", "abc"] {
         let out = d.join("bad.dpx");
         let o = bin().arg("convert").arg(&a).arg(&out).args(["--dpx-bits", bad]).output().unwrap();
-        assert_eq!(o.status.code(), Some(1), "--dpx-bits {bad}");
-        assert!(String::from_utf8_lossy(&o.stderr).contains(&format!("bad --dpx-bits `{bad}`: expected 8, 10, 12 or 16")), "--dpx-bits {bad}");
+        let err = String::from_utf8_lossy(&o.stderr);
+        assert_eq!(o.status.code(), Some(2), "--dpx-bits {bad}");
+        assert!(err.contains("--dpx-bits") && err.contains("expected 8, 10, 12 or 16"), "--dpx-bits {bad}: {err}");
         assert!(!out.exists(), "--dpx-bits {bad} wrote a file");
     }
 }
 
 /// DDS converts both ways; `--dds-compression` picks the FourCC (bytes 84–87; none writes
 /// uncompressed pixels) and `--dds-mipmaps` the mip count (bytes 28–31). A compression that
-/// isn't none, bc1, bc2 or bc3 is refused and nothing is written (#1327).
+/// isn't none, bc1, bc2 or bc3 is a usage error and nothing is written (#1327).
 #[test]
 fn dds_converts_both_ways_with_the_compression_asked_for() {
     let d = tmp("dds");
@@ -531,14 +547,14 @@ fn dds_converts_both_ways_with_the_compression_asked_for() {
     for bad in ["bc7", "dxt2", ""] {
         let out = d.join("bad.dds");
         let o = bin().arg("convert").arg(&a).arg(&out).args(["--dds-compression", bad]).output().unwrap();
-        assert_eq!(o.status.code(), Some(1), "--dds-compression {bad}");
-        assert!(String::from_utf8_lossy(&o.stderr).contains(&format!("bad --dds-compression `{bad}`")), "--dds-compression {bad}");
+        assert_eq!(o.status.code(), Some(2), "--dds-compression {bad}");
+        assert!(String::from_utf8_lossy(&o.stderr).contains("--dds-compression"), "--dds-compression {bad}");
         assert!(!out.exists(), "--dds-compression {bad} wrote a file");
     }
 }
 
-/// `--tga-bits` picks a TGA's bits per pixel (byte 16 of its header); anything but 24 or 32 is
-/// refused and nothing is written.
+/// `--tga-bits` picks a TGA's bits per pixel (byte 16 of its header); anything but 24 or 32 is a
+/// usage error and nothing is written.
 #[test]
 fn tga_bits_choose_the_targa_depth() {
     let d = tmp("tga-bits");
@@ -557,14 +573,15 @@ fn tga_bits_choose_the_targa_depth() {
     for bad in ["16", "0", "abc", ""] {
         let out = d.join("bad.tga");
         let o = bin().arg("convert").arg(&a).arg(&out).args(["--tga-bits", bad]).output().unwrap();
-        assert_eq!(o.status.code(), Some(1), "--tga-bits {bad}");
-        assert!(String::from_utf8_lossy(&o.stderr).contains(&format!("bad --tga-bits `{bad}`: expected 24 or 32")), "--tga-bits {bad}");
+        let err = String::from_utf8_lossy(&o.stderr);
+        assert_eq!(o.status.code(), Some(2), "--tga-bits {bad}");
+        assert!(err.contains("--tga-bits") && err.contains("expected 24 or 32"), "--tga-bits {bad}: {err}");
         assert!(!out.exists(), "--tga-bits {bad} wrote a file");
     }
 }
 
 /// `--jpeg-format` picks the JPEG's scans: progressive writes a progressive frame (SOF2). One it
-/// doesn't name is refused and nothing is written.
+/// doesn't name is a usage error and nothing is written.
 #[test]
 fn jpeg_format_chooses_the_scans() {
     let d = tmp("jpeg-format");
@@ -584,8 +601,9 @@ fn jpeg_format_chooses_the_scans() {
     for bad in ["Progressive", "1", ""] {
         let out = d.join("bad.jpg");
         let o = bin().arg("convert").arg(&a).arg(&out).args(["--jpeg-format", bad]).output().unwrap();
-        assert_eq!(o.status.code(), Some(1), "--jpeg-format {bad}");
-        assert!(String::from_utf8_lossy(&o.stderr).contains(&format!("bad --jpeg-format `{bad}`")), "--jpeg-format {bad}");
+        let err = String::from_utf8_lossy(&o.stderr);
+        assert_eq!(o.status.code(), Some(2), "--jpeg-format {bad}");
+        assert!(err.contains("--jpeg-format") && err.contains("expected baseline, optimized or progressive"), "--jpeg-format {bad}: {err}");
         assert!(!out.exists(), "--jpeg-format {bad} wrote a file");
     }
 }
@@ -625,7 +643,7 @@ fn batch_refuses_to_write_over_its_inputs() {
         }
     }
     // A separate folder runs as before, leaving the originals alone.
-    let (out, _) = ok(bin().current_dir(&d).args(["batch", "--actions"]).arg(&actions).args(["--in", "in", "--out", "out"]));
+    let out = ok(bin().current_dir(&d).args(["batch", "--actions"]).arg(&actions).args(["--in", "in", "--out", "out"])).stdout;
     assert!(out.contains("2 succeeded, 0 failed"), "{out}");
     assert_eq!(snapshot(), before);
     // `--in-place` opts in: each result replaces its original.
@@ -667,16 +685,16 @@ fn convert_refuses_to_write_over_its_input() {
     assert_eq!(std::fs::read(d.join("in.png")).unwrap(), before);
     // `--in-place` opts in: the result replaces the original, which still opens.
     ok(bin().current_dir(&d).args(["convert", "in.png", "in.png", "--in-place"]));
-    let (out, _) = ok(bin().current_dir(&d).args(["info", "in.png", "--compact"]));
+    let Printed { stdout: out, .. } = ok(bin().current_dir(&d).args(["info", "in.png", "--compact"]));
     let info: Value = serde_json::from_str(&out).unwrap();
     assert_eq!((info["width"].as_u64(), info["height"].as_u64()), (Some(8), Some(4)), "{info}");
 }
 
 #[test]
 fn commands_listing() {
-    let (out, _) = ok(bin().arg("commands"));
+    let out = ok(bin().arg("commands")).stdout;
     assert!(out.contains("file.new"));
-    let (out, _) = ok(bin().args(["commands", "--json", "--filter", "layer.new"]));
+    let out = ok(bin().args(["commands", "--json", "--filter", "layer.new"])).stdout;
     let v: Value = serde_json::from_str(&out).unwrap();
     assert!(
         v.as_array()
@@ -690,7 +708,7 @@ fn commands_listing() {
 fn in_process_run_matches_binary() {
     let mut out = Vec::new();
     let mut err = Vec::new();
-    let code = photocraft_cli::run(&["commands".into(), "--filter".into(), "file.new".into()], &mut out, &mut err);
+    let code = photocraft_cli::run(["commands", "--filter", "file.new"], &mut out, &mut err);
     assert_eq!(code, 0);
     assert!(String::from_utf8(out).unwrap().contains("file.new"));
 }
@@ -700,20 +718,8 @@ fn mcp_stdio_handshake_and_tool_call() {
     let mut child = bin().arg("mcp").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
     let mut stdin = child.stdin.take().unwrap();
     let mut stdout = BufReader::new(child.stdout.take().unwrap());
-    let mut send = |v: Value| {
-        writeln!(stdin, "{v}").unwrap();
-        stdin.flush().unwrap();
-    };
-    let mut recv = |id: u64| -> Value {
-        loop {
-            let mut line = String::new();
-            assert!(stdout.read_line(&mut line).unwrap() > 0, "server closed");
-            let v: Value = serde_json::from_str(&line).unwrap();
-            if v["id"] == id {
-                return v;
-            }
-        }
-    };
+    let mut send = |v: Value| mcp_send(&mut stdin, v);
+    let mut recv = |id: u64| mcp_recv(&mut stdout, id);
     send(json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
         "protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}));
     let init = recv(1);
@@ -729,6 +735,63 @@ fn mcp_stdio_handshake_and_tool_call() {
     send(json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"doc_render_preview","arguments":{}}}));
     let r = recv(4);
     assert_eq!(r["result"]["content"][0]["type"], "image", "{r}");
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// Send one JSON-RPC line to an `mcp` child.
+fn mcp_send(stdin: &mut impl Write, v: Value) {
+    writeln!(stdin, "{v}").unwrap();
+    stdin.flush().unwrap();
+}
+
+/// Read an `mcp` child's lines up to the reply to `id`.
+fn mcp_recv(stdout: &mut impl BufRead, id: u64) -> Value {
+    loop {
+        let mut line = String::new();
+        assert!(stdout.read_line(&mut line).unwrap() > 0, "server closed");
+        let v: Value = serde_json::from_str(&line).unwrap();
+        if v["id"] == id {
+            return v;
+        }
+    }
+}
+
+/// `mcp --bridge` takes a port or anything with a `:`; anything else is a usage error. A bare port
+/// means 127.0.0.1, and the bridge connects at the first call, so with no app there the call fails
+/// naming that address.
+#[test]
+fn mcp_bridge_takes_a_port_or_an_address() {
+    let o = bin().args(["mcp", "--bridge", "nope"]).stdin(Stdio::null()).output().unwrap();
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert_eq!(o.status.code(), Some(2), "{err}");
+    assert!(err.contains("invalid value 'nope' for '--bridge"), "{err}");
+    assert!(err.contains("expected a port, 0-65535 (--bridge also takes 127.0.0.1:<PORT>)"), "{err}");
+
+    // Nothing listens on port 1 in a test run. The token only has to be well-formed.
+    let token = "a".repeat(64);
+    let mut child = bin()
+        .args(["mcp", "--bridge", "1", "--control-token", token.as_str()])
+        .env_remove("PHOTOCRAFT_CONTROL_TOKEN")
+        .env_remove("PHOTOCRAFT_CONTROL_TOKEN_FILE")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    mcp_send(
+        &mut stdin,
+        json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+        "protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}),
+    );
+    mcp_recv(&mut stdout, 1);
+    mcp_send(&mut stdin, json!({"jsonrpc":"2.0","method":"notifications/initialized"}));
+    mcp_send(&mut stdin, json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"session_list","arguments":{}}}));
+    let r = mcp_recv(&mut stdout, 2);
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    assert!(r["result"]["content"][0]["text"].as_str().unwrap_or_default().contains("127.0.0.1:1"), "{r}");
     let _ = child.kill();
     let _ = child.wait();
 }
@@ -761,7 +824,7 @@ fn batch_fails_inputs_that_share_an_output_name() {
     assert_eq!(std::fs::read_dir(&out_dir).unwrap().count(), 1);
     // Keeping each file's format, every input gets its own output.
     let out_dir = d.join("same");
-    let (out, _) = ok(bin().args(["batch", "--actions"]).arg(&actions).arg("--in").arg(&input).arg("--out").arg(&out_dir));
+    let out = ok(bin().args(["batch", "--actions"]).arg(&actions).arg("--in").arg(&input).arg("--out").arg(&out_dir)).stdout;
     assert!(out.contains("3 succeeded, 0 failed"), "{out}");
 }
 
@@ -777,7 +840,7 @@ fn droplet_runs_an_action_on_files() {
     )
     .unwrap();
     let out_dir = d.join("out");
-    let (out, _) = ok(bin().arg("droplet").arg(&droplet).arg(d.join("a.png")).arg(d.join("b.png")).arg("--out").arg(&out_dir));
+    let out = ok(bin().arg("droplet").arg(&droplet).arg(d.join("a.png")).arg(d.join("b.png")).arg("--out").arg(&out_dir)).stdout;
     assert_eq!(out.lines().filter(|l| l.starts_with("ok")).count(), 2, "{out}");
     let img = photocraft_codecs::decode(&std::fs::read(out_dir.join("a.png")).unwrap()).unwrap();
     assert_eq!(img.dimensions(), (4, 8));
@@ -789,7 +852,7 @@ fn droplet_runs_an_action_on_files() {
 fn tiff_output_is_flat_unless_tiff_layers_is_given() {
     let d = tmp("tiff-layers");
     let layer_count = |path: &std::path::Path| -> usize {
-        let (info, _) = ok(bin().arg("info").arg(path));
+        let info = ok(bin().arg("info").arg(path)).stdout;
         let v: Value = serde_json::from_str(&info).unwrap();
         v["layers"].as_array().unwrap().len()
     };
@@ -815,19 +878,38 @@ fn tiff_output_is_flat_unless_tiff_layers_is_given() {
 }
 
 /// Issue #1108: a non-Unicode argument (a Latin-1 file name on Linux) used to panic in
-/// `std::env::args()` before anything was printed. It is a usage error naming the argument.
+/// `std::env::args()` before anything was printed. clap reads the arguments as they are: a path
+/// takes one, and text (`--filter`) refuses it with a usage error.
 #[cfg(unix)]
 #[test]
-fn a_non_unicode_argument_is_a_usage_error_not_a_panic() {
+fn a_non_unicode_path_is_taken_and_non_unicode_text_is_a_usage_error() {
+    use std::ffi::OsStr;
     use std::os::unix::ffi::OsStrExt;
-    let name = std::ffi::OsStr::from_bytes(b"caf\xe9.png");
-    for args in [vec![std::ffi::OsStr::new("info"), name], vec![std::ffi::OsStr::new("convert"), name, std::ffi::OsStr::new("out.png")]] {
-        let o = bin().args(&args).output().unwrap();
+    let d = tmp("non-unicode");
+    let name = OsStr::from_bytes(b"caf\xe9.png");
+    // No such file yet: the handler runs and fails on it (exit 1), no usage error.
+    for args in [vec![OsStr::new("info"), name], vec![OsStr::new("convert"), name, OsStr::new("out.png")]] {
+        let o = bin().current_dir(&d).args(&args).output().unwrap();
         let err = String::from_utf8_lossy(&o.stderr);
-        assert_eq!(o.status.code(), Some(2), "{err}");
-        assert!(err.contains("argument 2 is not valid Unicode") && err.contains("caf\u{fffd}.png"), "{err}");
+        assert_eq!(o.status.code(), Some(1), "{args:?}: {err}");
         assert!(!err.contains("panicked"), "{err}");
     }
+    // Linux file systems take the name (macOS ones refuse it). `convert` reads it; `info` opens
+    // through the automation layer, which still needs UTF-8 paths, and says so (exit 1).
+    if cfg!(target_os = "linux") {
+        write_png(&d.join(name), 8, 4, 3);
+        ok(bin().current_dir(&d).arg("convert").arg(name).arg("out.png"));
+        assert!(d.join("out.png").is_file());
+        let o = bin().current_dir(&d).arg("info").arg(name).output().unwrap();
+        let err = String::from_utf8_lossy(&o.stderr);
+        assert_eq!(o.status.code(), Some(1), "{err}");
+        assert!(err.contains("UTF-8"), "{err}");
+    }
+    let o = bin().args([OsStr::new("commands"), OsStr::new("--filter"), name]).output().unwrap();
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert_eq!((o.status.code(), o.stdout.is_empty()), (Some(2), true), "{err}");
+    assert!(err.contains("UTF-8") && !err.contains("panicked"), "{err}");
+    std::fs::remove_dir_all(d).unwrap();
 }
 
 /// `batch --actions set.atn`: a Photoshop Actions file plays like an Actions set, and its steps
@@ -850,7 +932,7 @@ fn batch_plays_a_photoshop_actions_file() {
     let o = bin().args(["batch", "--actions"]).arg(&atn).arg("--in").arg(&input).arg("--out").arg(&out_dir).output().unwrap();
     assert!(!o.status.success());
     assert!(String::from_utf8_lossy(&o.stderr).contains("--action"), "{}", String::from_utf8_lossy(&o.stderr));
-    let (_, err) = ok(bin().args(["batch", "--actions"]).arg(&atn).args(["--action", "Negative", "--in"]).arg(&input).arg("--out").arg(&out_dir));
+    let err = ok(bin().args(["batch", "--actions"]).arg(&atn).args(["--action", "Negative", "--in"]).arg(&input).arg("--out").arg(&out_dir)).stderr;
     assert!(out_dir.join("a.png").exists());
     assert!(!err.contains("warning"), "{err}");
     // The unsupported step is warned about, and fails the file as Photoshop would stop on it.
@@ -860,31 +942,40 @@ fn batch_plays_a_photoshop_actions_file() {
     assert!(!o.status.success());
 }
 
-/// `photocraft_cli::run` in-process: `(exit code, stdout, stderr)`.
-fn invoke(args: &[&str]) -> (i32, String, String) {
-    let (mut out, mut err) = (Vec::new(), Vec::new());
-    let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
-    let code = photocraft_cli::run(&args, &mut out, &mut err);
-    (code, String::from_utf8(out).unwrap(), String::from_utf8(err).unwrap())
+/// What `photocraft_cli::run` returned and wrote, in-process.
+struct Invoke {
+    code: i32,
+    stdout: String,
+    stderr: String,
+}
+
+fn invoke(args: &[&str]) -> Invoke {
+    let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+    let code = photocraft_cli::run(args, &mut stdout, &mut stderr);
+    Invoke { code, stdout: String::from_utf8(stdout).unwrap(), stderr: String::from_utf8(stderr).unwrap() }
 }
 
 const SUBCOMMANDS: [&str; 8] = ["convert", "info", "run", "batch", "droplet", "commands", "mcp", "serve"];
 
-/// Pins top-level dispatch: help goes to stdout (exit 0), no arguments is a usage error on stderr.
+/// Pins top-level dispatch: help and the version go to stdout (exit 0), no arguments is a usage
+/// error on stderr. There is no `version` subcommand.
 #[test]
 fn top_level_help_version_and_no_arguments() {
-    let (code, out, err) = invoke(&[]);
+    let Invoke { code, stdout: out, stderr: err } = invoke(&[]);
     assert_eq!((code, out.is_empty(), err.is_empty()), (2, true, false));
     for help in ["--help", "-h", "help"] {
-        let (code, out, err) = invoke(&[help]);
+        let Invoke { code, stdout: out, stderr: err } = invoke(&[help]);
         assert_eq!((code, out.is_empty(), err.is_empty()), (0, false, true), "{help}");
     }
-    for version in ["--version", "version"] {
-        let (code, out, err) = invoke(&[version]);
+    for version in ["--version", "-V"] {
+        let Invoke { code, stdout: out, stderr: err } = invoke(&[version]);
         assert_eq!((code, err.as_str()), (0, ""), "{version}");
-        assert!(out.starts_with("photocraft-cli "), "{version}: {out}");
+        assert!(out.starts_with("photocraft-cli ") && out.ends_with('\n') && out.lines().count() == 1, "{version}: {out}");
     }
-    let (code, out, err) = invoke(&["frobnicate"]);
+    let Invoke { code, stdout: out, stderr: err } = invoke(&["version"]);
+    assert_eq!((code, out.is_empty()), (2, true));
+    assert!(err.contains("version"), "{err}");
+    let Invoke { code, stdout: out, stderr: err } = invoke(&["frobnicate"]);
     assert_eq!((code, out.is_empty()), (2, true));
     assert!(err.contains("frobnicate"), "{err}");
 }
@@ -895,7 +986,7 @@ fn top_level_help_version_and_no_arguments() {
 fn every_subcommand_help_returns_on_stdout() {
     for sub in SUBCOMMANDS {
         for help in ["--help", "-h"] {
-            let (code, out, err) = invoke(&[sub, help]);
+            let Invoke { code, stdout: out, stderr: err } = invoke(&[sub, help]);
             assert_eq!((code, out.is_empty(), err.is_empty()), (0, false, true), "{sub} {help}: {err}");
             // `commands` would also exit 0 with output if it ran; its list names `file.new`, help doesn't.
             assert!(!out.contains("file.new"), "{sub} {help} ran instead of printing help: {out}");
@@ -909,34 +1000,47 @@ fn every_subcommand_rejects_an_unknown_flag() {
     for sub in SUBCOMMANDS {
         for flag in [&["--fromat"][..], &["--fromat=jpg"][..], &["--fromat", "jpg"][..]] {
             let args: Vec<&str> = [sub].into_iter().chain(flag.iter().copied()).collect();
-            let (code, out, err) = invoke(&args);
+            let Invoke { code, stdout: out, stderr: err } = invoke(&args);
             assert_eq!((code, out.is_empty()), (2, true), "{args:?}: {err}");
             assert!(err.contains("--fromat"), "{args:?}: {err}");
         }
     }
 }
 
-/// `--flag=value`, a bare flag given a value, a value flag without one, and repeated flags.
+/// `--flag=value`, a bare flag given a value, a value flag without one, repeated flags, and values
+/// that start with `-`.
 #[test]
 fn flag_value_forms_and_repeats() {
     let ids = |out: &str| out.lines().filter_map(|l| l.split_whitespace().next()).map(str::to_owned).collect::<Vec<_>>();
-    let (code, eq, err) = invoke(&["commands", "--filter=file.new"]);
+    let Invoke { code, stdout: eq, stderr: err } = invoke(&["commands", "--filter=file.new"]);
     assert_eq!(code, 0, "{err}");
-    let (_, spaced, _) = invoke(&["commands", "--filter", "file.new"]);
+    let spaced = invoke(&["commands", "--filter", "file.new"]).stdout;
     assert_eq!(eq, spaced);
     assert!(ids(&eq).contains(&"file.new".to_string()), "{eq}");
-    // The last of a repeated value flag wins, whichever order they come in.
-    let (code, out, err) = invoke(&["commands", "--filter", "zzz-no-match", "--filter", "file.new"]);
+    // A repeated flag is a usage error naming it, more likely a mistake than a choice.
+    for repeat in [&["commands", "--filter", "zzz-no-match", "--filter", "file.new"][..], &["commands", "--json", "--json"][..]] {
+        let Invoke { code, stdout: out, stderr: err } = invoke(repeat);
+        assert_eq!((code, out.is_empty()), (2, true), "{repeat:?}");
+        assert!(err.contains(repeat[1]) && err.contains("cannot be used multiple times"), "{repeat:?}: {err}");
+    }
+    let Invoke { code, stderr: err, .. } = invoke(&["convert", "a.png", "b.jpg", "--quality", "80", "--quality", "60"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("--quality"), "{err}");
+    // A value starting with `-` needs `=`; without it the token is a flag, never the value. A
+    // negative number is still a value.
+    let Invoke { code, stdout: out, stderr: err } = invoke(&["commands", "--filter=-zzz-no-match"]);
+    assert_eq!((code, out.as_str()), (0, ""), "{err}");
+    for value in ["-zzz-no-match", "--json"] {
+        let Invoke { code, stdout: out, .. } = invoke(&["commands", "--filter", value]);
+        assert_eq!((code, out.is_empty()), (2, true), "--filter {value}");
+    }
+    let Invoke { code, stderr: err, .. } = invoke(&["commands", "--filter", "-1"]);
     assert_eq!(code, 0, "{err}");
-    assert_eq!(out, eq);
-    let (code, out, err) = invoke(&["commands", "--filter", "file.new", "--filter", "zzz-no-match"]);
-    assert_eq!(code, 0, "{err}");
-    assert!(out.is_empty(), "{out}");
     // A bare flag takes no value; a value flag needs one.
-    let (code, out, err) = invoke(&["commands", "--json=1"]);
+    let Invoke { code, stdout: out, stderr: err } = invoke(&["commands", "--json=1"]);
     assert_eq!((code, out.is_empty()), (2, true));
     assert!(err.contains("--json"), "{err}");
-    let (code, out, err) = invoke(&["commands", "--filter"]);
+    let Invoke { code, stdout: out, stderr: err } = invoke(&["commands", "--filter"]);
     assert_eq!((code, out.is_empty()), (2, true));
     assert!(err.contains("--filter"), "{err}");
 }
@@ -945,7 +1049,7 @@ fn flag_value_forms_and_repeats() {
 /// `--params` ahead of every `--cmd` fails naming `--params`.
 #[test]
 fn run_pairs_params_with_the_preceding_cmd() {
-    let (code, out, err) = invoke(&[
+    let Invoke { code, stdout: out, stderr: err } = invoke(&[
         "run",
         "--new",
         r#"{"width":8,"height":8}"#,
@@ -973,7 +1077,7 @@ fn run_pairs_params_with_the_preceding_cmd() {
     // Layers list top first: Third, the unnamed middle one, First, Background. Pairing --params
     // with --cmd by position (params[i] -> cmd[i]) would name the middle one Third instead.
     assert_eq!((names[0], names[2]), ("Third", "First"), "{names:?}");
-    let (code, _, err) = invoke(&["run", "--new", "{}", "--params", "{}", "--cmd", "layer.new.layer"]);
+    let Invoke { code, stderr: err, .. } = invoke(&["run", "--new", "{}", "--params", "{}", "--cmd", "layer.new.layer"]);
     assert_ne!(code, 0);
     assert!(err.contains("--params"), "{err}");
 }
@@ -991,4 +1095,44 @@ fn convert_opens_a_raw_at_the_raw_defaults_resolution() {
     let doc = photocraft_io::import("IMG_0001.psd", &std::fs::read(&psd).unwrap()).unwrap().document;
     assert_eq!(doc.resolution_dpi, 300.0);
     std::fs::remove_dir_all(d).unwrap();
+}
+
+/// `--out=-image.png` writes `-image.png`; `--out -image.png` is a usage error and writes nothing.
+#[test]
+fn a_value_starting_with_a_dash_is_written_with_equals() {
+    let d = tmp("dash-value");
+    let o = bin().current_dir(&d).args(["run", "--new", r#"{"width":4,"height":4}"#, "--out", "-image.png"]).output().unwrap();
+    assert_eq!(o.status.code(), Some(2), "{}", String::from_utf8_lossy(&o.stderr));
+    assert_eq!(std::fs::read_dir(&d).unwrap().count(), 0);
+    ok(bin().current_dir(&d).args(["run", "--new", r#"{"width":4,"height":4}"#, "--out=-image.png"]));
+    assert!(d.join("-image.png").is_file());
+    std::fs::remove_dir_all(d).unwrap();
+}
+
+/// `run` takes exactly one of `<FILE>` or `--new`, and `mcp`/`serve` one of `--control-token` or
+/// `--control-token-file`: anything else is a usage error naming the flags, before any work.
+#[test]
+fn either_or_flags_are_usage_errors() {
+    let Invoke { code, stderr: err, .. } = invoke(&["run", "a.png", "--new", "{}", "--cmd", "layer.new.layer"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("--new") && err.contains("cannot be used with"), "{err}");
+    let Invoke { code, stderr: err, .. } = invoke(&["run", "--cmd", "layer.new.layer"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("--new"), "{err}");
+    let Invoke { code, stderr: err, .. } = invoke(&["run", "--new", "{}", "--cmd", "layer.new.layer", "--params", "{"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("--params"), "{err}");
+    let token = "a".repeat(64);
+    for sub in ["mcp", "serve"] {
+        let o = bin().args([sub, "--control-token", token.as_str(), "--control-token-file", "token"]).stdin(Stdio::null()).output().unwrap();
+        let err = String::from_utf8_lossy(&o.stderr);
+        assert_eq!(o.status.code(), Some(2), "{sub}: {err}");
+        assert!(err.contains("--control-token-file") && err.contains("cannot be used with"), "{sub}: {err}");
+    }
+    for port in ["70000", "x"] {
+        let o = bin().args(["serve", "--port", port]).stdin(Stdio::null()).output().unwrap();
+        let err = String::from_utf8_lossy(&o.stderr);
+        assert_eq!(o.status.code(), Some(2), "--port {port}: {err}");
+        assert!(err.contains("--port"), "--port {port}: {err}");
+    }
 }
