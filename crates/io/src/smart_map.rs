@@ -1283,9 +1283,9 @@ fn enumv(t: &str, v: &str) -> Value {
 }
 
 /// The mesh of a split warp: a custom warp of more than one patch, which `SoLd` stores as
-/// `quiltWarp` and `PlLd` can't store.
+/// `quiltWarp` and `PlLd` can't store. An unedited Cylinder is written as itself instead.
 fn split_mesh(w: Option<&Warp>) -> Option<&BezierMesh> {
-    w.filter(|w| w.style == WarpStyle::Custom).and_then(|w| w.mesh.as_ref()).filter(|m| m.points.len() != 16 && m.is_valid())
+    w.filter(|w| w.style == WarpStyle::Custom && w.cylinder_values().is_none()).and_then(|w| w.mesh.as_ref()).filter(|m| m.points.len() != 16 && m.is_valid())
 }
 
 /// The warp `SoLd` stores: none, with a message, for a split warp of more patches along a side
@@ -1332,6 +1332,9 @@ fn mesh_points(m: &BezierMesh) -> Value {
 /// custom warp without a usable mesh is written as no warp, with a message.
 fn warp_desc(w: Option<&Warp>, size: (f64, f64), warnings: &mut Vec<String>) -> Value {
     let none = Warp::none([0.0, 0.0, size.0, size.1]);
+    if let Some(c) = w.and_then(Warp::cylinder_values) {
+        return Value::Descriptor(cylinder_desc(c, w.map_or(none.bounds, |w| w.bounds)));
+    }
     let mut w = w.unwrap_or(&none).clone();
     let mesh = match (&w.style, &w.mesh) {
         (WarpStyle::Custom, Some(m)) if m.points.len() == 16 => Some(m.clone()),
@@ -1382,6 +1385,25 @@ fn quilt_desc(w: &Warp, mesh: &BezierMesh, old: Option<&Descriptor>) -> Value {
             .with("deformNumCols", Value::Integer(mesh.nx() as i32))
             .with("customEnvelopeWarp", Value::Descriptor(envelope)),
     )
+}
+
+/// A Cylinder warp as Photoshop writes it: `warpCylinder` with its handles in `warpValues`.
+fn cylinder_desc(values: [f64; 7], bounds: [f64; 4]) -> Descriptor {
+    let [x0, y0, x1, y1] = bounds;
+    let rect = Descriptor::new("classFloatRect")
+        .with("Top ", Value::Double(y0))
+        .with("Left", Value::Double(x0))
+        .with("Btom", Value::Double(y1))
+        .with("Rght", Value::Double(x1));
+    Descriptor::new("warp")
+        .with("warpStyle", enumv("warpStyle", "warpCylinder"))
+        .with("warpValues", Value::List(values.iter().map(|v| Value::Double(*v)).collect()))
+        .with("warpPerspective", Value::Double(0.0))
+        .with("warpPerspectiveOther", Value::Double(0.0))
+        .with("warpRotate", enumv("Ornt", "Hrzn"))
+        .with("bounds", Value::Descriptor(rect))
+        .with("uOrder", Value::Integer(4))
+        .with("vOrder", Value::Integer(4))
 }
 
 fn ratio(n: i32, d: i32) -> Value {
@@ -3260,7 +3282,14 @@ mod tests {
         arc.h_distort = 10.0;
         let mut c = Warp::preset(WarpStyle::Custom, 0.0, bounds);
         c.mesh = Some(custom);
-        for (w, back) in [(Some(arc.clone()), Some(arc)), (Some(c.clone()), Some(c)), (Some(multi.clone()), Some(multi)), (None, None)] {
+        let cylinder = Warp::cylinder([0.0, 30.0, 60.0, 0.0, 0.2, -0.1, 0.9], bounds).expect("cylinder");
+        for (w, back) in [
+            (Some(arc.clone()), Some(arc)),
+            (Some(c.clone()), Some(c)),
+            (Some(multi.clone()), Some(multi)),
+            (Some(cylinder.clone()), Some(cylinder)),
+            (None, None),
+        ] {
             let mut warnings = Vec::new();
             let spec = PlacedSpec {
                 idnt: "i",
