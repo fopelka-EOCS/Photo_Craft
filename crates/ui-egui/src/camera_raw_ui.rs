@@ -78,8 +78,8 @@ pub struct CameraRawDialog {
     /// The last worker failure the status bar shows, with the preview revision it failed on.
     preview_error: Option<(String, u64)>,
     /// Settings before each finished edit, so Ctrl+Z works inside the dialog (#4100).
-    undo: Vec<CameraRaw>,
-    redo: Vec<CameraRaw>,
+    undo: Vec<EditState>,
+    redo: Vec<EditState>,
     /// Params at pointer-down. One drag is one undo step.
     edit_origin: Option<CameraRaw>,
     /// Edit › Auto while it is on: the settings it replaced and the ones it set.
@@ -217,11 +217,8 @@ impl CameraRawDialog {
     fn set_white_balance(&mut self, mode: &str) {
         let (temperature, tint) = match mode {
             "asShot" => {
-                // An Auto result of (0, 0) is As Shot too: forget it, or the mode would still read Auto.
-                // Any other result is kept, so undoing back to it reads Auto again.
-                if self.white_balance_auto == Some((0.0, 0.0)) {
-                    self.white_balance_auto = None;
-                }
+                // Forget Auto, or an Auto result of (0, 0) would still read as Auto. Undo puts it back.
+                self.white_balance_auto = None;
                 (0.0, 0.0)
             }
             "auto" => {
@@ -1151,35 +1148,53 @@ fn report_file_error(app: &mut PhotocraftApp, r: Result<Value, String>) {
 
 const RAW_UNDO_LIMIT: usize = 40;
 
+/// One dialog undo step: the settings, and what Edit › Auto, B&W and White Balance › Auto
+/// remember about them, so undo and redo bring those back with the settings.
+#[derive(Clone, Debug)]
+struct EditState {
+    params: CameraRaw,
+    auto: Option<(AutoTone, AutoTone)>,
+    black_and_white: Option<(f32, f32)>,
+    white_balance_auto: Option<(f32, f32)>,
+}
+
+impl EditState {
+    fn of(d: &CameraRawDialog) -> Self {
+        Self { params: d.params.clone(), auto: d.auto, black_and_white: d.black_and_white, white_balance_auto: d.white_balance_auto }
+    }
+
+    fn restore(self, d: &mut CameraRawDialog) {
+        if d.params.point_curve != self.params.point_curve {
+            d.curve_state = Default::default();
+        }
+        d.params = self.params;
+        d.auto = self.auto;
+        d.black_and_white = self.black_and_white;
+        d.white_balance_auto = self.white_balance_auto;
+        d.dirty = true;
+        d.edit_origin = None;
+    }
+}
+
 fn remember_edit(d: &mut CameraRawDialog) {
     if d.undo.len() == RAW_UNDO_LIMIT {
         d.undo.remove(0);
     }
-    d.undo.push(d.params.clone());
+    d.undo.push(EditState::of(d));
     d.redo.clear();
 }
 
 fn undo_edit(d: &mut CameraRawDialog) -> bool {
     let Some(prev) = d.undo.pop() else { return false };
-    d.redo.push(d.params.clone());
-    if d.params.point_curve != prev.point_curve {
-        d.curve_state = Default::default();
-    }
-    d.params = prev;
-    d.dirty = true;
-    d.edit_origin = None;
+    d.redo.push(EditState::of(d));
+    prev.restore(d);
     true
 }
 
 fn redo_edit(d: &mut CameraRawDialog) -> bool {
     let Some(next) = d.redo.pop() else { return false };
-    d.undo.push(d.params.clone());
-    if d.params.point_curve != next.point_curve {
-        d.curve_state = Default::default();
-    }
-    d.params = next;
-    d.dirty = true;
-    d.edit_origin = None;
+    d.undo.push(EditState::of(d));
+    next.restore(d);
     true
 }
 
@@ -2076,11 +2091,49 @@ mod tests {
         app.camera_raw.as_mut().unwrap().white_balance_auto = Some((0.0, 0.0));
         let r = ui(&mut app, json!({"whiteBalance": "asShot"}));
         assert_eq!((r["whiteBalance"].clone(), r["params"]["temperature"].clone()), (json!("asShot"), json!(0.0)));
-        // Any other Auto result survives As Shot, so undo reads Auto again.
+        // Undo brings back what Auto set, and reads Auto again; redo is As Shot.
         let r = ui(&mut app, json!({"whiteBalance": "auto"}));
         assert_eq!(r["whiteBalance"], "auto");
         assert_eq!(ui(&mut app, json!({"whiteBalance": "asShot"}))["whiteBalance"], "asShot");
-        assert_eq!(ui(&mut app, json!({"undo": true}))["whiteBalance"], "auto");
+        let r = ui(&mut app, json!({"undo": true}));
+        assert_eq!(r["whiteBalance"], "auto");
+        assert!(r["params"]["temperature"].as_f64().unwrap() < 0.0, "{}", r["params"]);
+        assert_eq!(ui(&mut app, json!({"redo": true}))["whiteBalance"], "asShot");
+        ui(&mut app, json!({"cancel": true}));
+    }
+
+    #[test]
+    fn undo_and_redo_bring_back_what_auto_and_black_and_white_remember() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        let ctx = egui::Context::default();
+        app.run("file.new", json!({"width": 64, "height": 48})).unwrap();
+        app.run("layer.new.layer", json!({})).unwrap();
+        app.run("edit.fill", json!({"color": "#3a2a20"})).unwrap();
+        let ui = |app: &mut PhotocraftApp, v: Value| menu(app, &ctx, "filter.cameraRaw", &json!({"ui": v})).unwrap().unwrap();
+        menu(&mut app, &ctx, "filter.cameraRaw", &json!({})).unwrap().unwrap();
+        // B&W off, then undo: B&W is on again and still knows the colour it replaced.
+        ui(&mut app, json!({"set": {"saturation": 20, "vibrance": 15}}));
+        ui(&mut app, json!({"blackAndWhite": true}));
+        let r = ui(&mut app, json!({"blackAndWhite": false}));
+        assert_eq!(r["params"]["saturation"], 20.0);
+        let r = ui(&mut app, json!({"undo": true}));
+        assert_eq!((r["blackAndWhite"].clone(), r["params"]["saturation"].clone()), (json!(true), json!(-100.0)));
+        let r = ui(&mut app, json!({"blackAndWhite": false}));
+        assert_eq!((r["params"]["saturation"].clone(), r["params"]["vibrance"].clone()), (json!(20.0), json!(15.0)));
+        // Auto off, then undo: Auto is on again, and off puts back the settings before it.
+        let on = ui(&mut app, json!({"auto": true}));
+        assert!(on["params"]["exposure"].as_f64().unwrap() > 0.0, "{}", on["params"]);
+        assert_eq!(ui(&mut app, json!({"auto": false}))["params"]["exposure"], 0.0);
+        let r = ui(&mut app, json!({"undo": true}));
+        assert_eq!((r["auto"].clone(), r["params"].clone()), (json!(true), on["params"].clone()));
+        let r = ui(&mut app, json!({"auto": false}));
+        assert_eq!((r["auto"].clone(), r["params"]["exposure"].clone()), (json!(false), json!(0.0)));
+        // Undo past Auto on turns it off; redo turns it on again.
+        ui(&mut app, json!({"undo": true}));
+        let r = ui(&mut app, json!({"undo": true}));
+        assert_eq!((r["auto"].clone(), r["params"]["exposure"].clone()), (json!(false), json!(0.0)));
+        let r = ui(&mut app, json!({"redo": true}));
+        assert_eq!((r["auto"].clone(), r["params"].clone()), (json!(true), on["params"].clone()));
         ui(&mut app, json!({"cancel": true}));
     }
 
