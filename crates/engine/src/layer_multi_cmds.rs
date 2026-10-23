@@ -1017,10 +1017,57 @@ pub(crate) fn note_insert(s: &mut Session, before: &Document) {
 /// Content bounds used by Align/Distribute: the layer's pixels (type and shape layers use their
 /// rendered pixels), or the union of a group's children. Fill and adjustment layers have none.
 pub fn layer_bounds(l: &Layer) -> Option<Rect> {
+    layer_bounds_in(l, None)
+}
+
+/// [`layer_bounds`] in a document of bounds `canvas`: the frame a shape's gradients are laid out
+/// in when they aren't aligned with the layer, so an opacity stop measures as it renders. Without
+/// it the shape's own reach stands in.
+pub fn layer_bounds_in(l: &Layer, canvas: Option<Rect>) -> Option<Rect> {
     let r = match &l.content {
-        LayerContent::Group(g) => g.children.iter().filter_map(layer_bounds).fold(Rect::EMPTY, |a, b| a.union(&b)),
+        LayerContent::Group(g) => g.children.iter().filter_map(|c| layer_bounds_in(c, canvas)).fold(Rect::EMPTY, |a, b| a.union(&b)),
+        LayerContent::Shape(sh) => shape_pixel_bounds(sh, canvas).unwrap_or_else(|| {
+            let cached = l.surface().map(|s| s.content_bounds()).unwrap_or(Rect::EMPTY);
+            // A fill that shows everywhere covers the canvas, rendered yet or not.
+            match canvas {
+                Some(c) if cached.is_empty() && unbounded_fill(sh) => c,
+                _ => cached,
+            }
+        }),
         _ => l.surface().map(|s| s.content_bounds()).unwrap_or(Rect::EMPTY),
     };
+    (!r.is_empty()).then_some(r)
+}
+
+/// Whether the shape's fill shows everywhere (an inverted path, or below 100 % density), so it has
+/// no extent of its own.
+fn unbounded_fill(sh: &photocraft_doc::ShapeLayer) -> bool {
+    sh.fill.is_some() && (sh.path.inverted || (sh.density.is_finite() && sh.density < 1.0))
+}
+
+/// Largest area [`shape_pixel_bounds`] renders to find a shape's extent; beyond it the path and
+/// stroke bounds stand in.
+const SHAPE_BOUNDS_MAX_PX: u64 = 64 << 20;
+
+/// The pixels a shape layer draws, wherever they fall. Its cache is rendered clipped to the
+/// canvas, so a shape partly off the canvas measured from it looked smaller and Align moved it
+/// by the wrong amount, a little more on each click (#8660). The shape is rendered again over
+/// everything it can draw (its path, stroke and feather), unclipped, and measured from that. A fill
+/// that shows everywhere (an inverted path, or below 100 % density) has no extent of its own and
+/// keeps the canvas-clipped measure (`None`).
+fn shape_pixel_bounds(sh: &photocraft_doc::ShapeLayer, canvas: Option<Rect>) -> Option<Rect> {
+    if unbounded_fill(sh) {
+        return None;
+    }
+    let reach = photocraft_compose::shape_bounds(sh)?.inflate(1);
+    if u64::from(reach.width()) * u64::from(reach.height()) > SHAPE_BOUNDS_MAX_PX {
+        return photocraft_compose::hard_shape_bounds(sh);
+    }
+    // Gradients lay out in the document's frame (as the cached render does); the feather and the
+    // clip cover the shape's whole reach, beyond the canvas too.
+    let frame = canvas.unwrap_or(reach);
+    let shape = photocraft_vector::CompiledShape::with_frames(sh, photocraft_vector::DEFAULT_TOLERANCE, reach, frame);
+    let r = shape.render(PixelFormat::GRAYA8, reach).content_bounds();
     (!r.is_empty()).then_some(r)
 }
 
@@ -1065,7 +1112,7 @@ impl Edge {
 
 /// Selected top-level layers that have content bounds, bottom-to-top.
 fn bounded_selection(doc: &Document, sel: &[LayerId]) -> Vec<(LayerId, Rect)> {
-    top_level(doc, sel).into_iter().filter_map(|id| Some((id, layer_bounds(doc.layer(id)?)?))).collect()
+    top_level(doc, sel).into_iter().filter_map(|id| Some((id, layer_bounds_in(doc.layer(id)?, Some(doc.bounds()))?))).collect()
 }
 
 fn align(s: &mut Session, p: &Value, kind: &str) -> Result<Value> {
@@ -2361,6 +2408,59 @@ mod tests {
                 assert_eq!(bounds(&s, a), Rect::new(10, 5, 20, 15));
             }
         }
+    }
+
+    /// #8660: a shape partly off the canvas aligns by everything it draws, not the part on the
+    /// canvas, so one click aligns the layers and a second moves nothing.
+    #[test]
+    fn align_uses_a_shape_layers_full_extent_off_the_canvas() {
+        let mut s = session(8);
+        let shape =
+            LayerId(s.execute("shape.create", json!({"kind": "rect", "rect": [-20, 10, 40, 20], "fill": "#ff0000"})).unwrap()["layer"].as_u64().unwrap());
+        assert_eq!(bounds(&s, shape), Rect::new(-20, 10, 20, 30), "the shape's own extent, not the canvas-clipped render");
+        let pixels = rect_layer(&mut s, Rect::new(30, 40, 60, 50));
+        select_all(&mut s, &[shape, pixels]);
+        s.execute("layer.align.leftEdges", json!({})).unwrap();
+        assert_eq!(bounds(&s, pixels), Rect::new(-20, 40, 10, 50));
+        assert_eq!(bounds(&s, shape), Rect::new(-20, 10, 20, 30));
+        s.execute("layer.align.leftEdges", json!({})).unwrap();
+        assert_eq!(bounds(&s, pixels), Rect::new(-20, 40, 10, 50), "a second click moves nothing");
+        // Centred: the union is -20..20 wide on the shape's side and 30 px for the pixel layer.
+        s.execute("layer.align.horizontalCenters", json!({})).unwrap();
+        assert_eq!(bounds(&s, shape), Rect::new(-20, 10, 20, 30));
+        assert_eq!(bounds(&s, pixels), Rect::new(-15, 40, 15, 50));
+        // A feathered shape is measured by its soft edge too, which reaches past the path.
+        let soft =
+            LayerId(s.execute("shape.create", json!({"kind": "rect", "rect": [-20, 50, 40, 20], "fill": "#00ff00"})).unwrap()["layer"].as_u64().unwrap());
+        s.edit("feather", |doc, _| {
+            if let Some(LayerContent::Shape(sh)) = doc.layer_mut(soft).map(|l| &mut l.content) {
+                sh.feather = 4.0;
+            }
+            Ok(())
+        })
+        .unwrap();
+        let b = bounds(&s, soft);
+        assert!(b.x0 < -20 && b.x1 > 20 && b.y0 < 50 && b.y1 > 70, "{b:?}");
+        // Measured as Align does, in the document's frame: the feather off the canvas still counts.
+        let in_doc = layer_bounds_in(doc(&s).layer(soft).unwrap(), Some(doc(&s).bounds())).unwrap();
+        assert_eq!(in_doc, b);
+        // A fill that shows everywhere keeps the canvas-clipped measure.
+        s.edit("invert", |doc, _| {
+            if let Some(LayerContent::Shape(sh)) = doc.layer_mut(soft).map(|l| &mut l.content) {
+                sh.feather = 0.0;
+                sh.path.inverted = true;
+            }
+            Ok(())
+        })
+        .unwrap();
+        let LayerContent::Shape(sh) = &doc(&s).layer(soft).unwrap().content else { panic!("shape") };
+        assert_eq!(shape_pixel_bounds(sh, Some(doc(&s).bounds())), None);
+        // Without a cached render yet, such a fill still measures as the canvas, not as empty.
+        let mut uncached = doc(&s).layer(soft).unwrap().clone();
+        if let LayerContent::Shape(sh) = &mut uncached.content {
+            sh.cache = None;
+        }
+        assert_eq!(layer_bounds_in(&uncached, Some(doc(&s).bounds())), Some(doc(&s).bounds()));
     }
 
     #[test]
