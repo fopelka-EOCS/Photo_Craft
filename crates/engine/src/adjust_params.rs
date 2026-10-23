@@ -111,11 +111,16 @@ pub fn from_params(kind: &str, p: &Value, base: Option<&Adjustment>, mode: Color
             Adjustment::Exposure { exposure: r.num("exposure", e, -20.0, 20.0)?, offset: r.num("offset", o, -0.5, 0.5)?, gamma: r.num("gamma", g, 0.01, 9.99)? }
         }
         "vibrance" => {
-            let (v, s) = match base {
-                Some(Adjustment::Vibrance { vibrance, saturation }) => (*vibrance, *saturation),
-                _ => (0.0, 0.0),
+            let (v, s, t, ti) = match base {
+                Some(Adjustment::Vibrance { vibrance, saturation, temperature, tint }) => (*vibrance, *saturation, *temperature, *tint),
+                _ => (0.0, 0.0, 0.0, 0.0),
             };
-            Adjustment::Vibrance { vibrance: r.num("vibrance", v, -100.0, 100.0)?, saturation: r.num("saturation", s, -100.0, 100.0)? }
+            Adjustment::Vibrance {
+                vibrance: r.num("vibrance", v, -100.0, 100.0)?,
+                saturation: r.num("saturation", s, -100.0, 100.0)?,
+                temperature: r.num("temperature", t, -100.0, 100.0)?,
+                tint: r.num("tint", ti, -100.0, 100.0)?,
+            }
         }
         "hueSaturation" => hue_saturation(&r, base)?,
         "levels" => levels(&r, base, mode)?,
@@ -217,7 +222,17 @@ pub fn to_params(adj: &Adjustment) -> Value {
         Adjustment::Threshold { level } => json!({"level": (level * 255.0).round()}),
         Adjustment::Posterize { levels } => json!({"levels": levels}),
         Adjustment::Exposure { exposure, offset, gamma } => json!({"exposure": exposure, "offset": offset, "gamma": gamma}),
-        Adjustment::Vibrance { vibrance, saturation } => json!({"vibrance": vibrance, "saturation": saturation}),
+        Adjustment::Vibrance { vibrance, saturation, temperature, tint } => {
+            // temperature/tint are omitted when 0, as Photoshop omits them from the descriptor.
+            let mut v = json!({"vibrance": vibrance, "saturation": saturation});
+            if *temperature != 0.0 {
+                v["temperature"] = json!(temperature);
+            }
+            if *tint != 0.0 {
+                v["tint"] = json!(tint);
+            }
+            v
+        }
         Adjustment::HueSaturation { hue, saturation, lightness, colorize, ranges } => {
             let mut v = json!({"hue": hue, "saturation": saturation, "lightness": lightness, "colorize": colorize});
             for (key, r) in HUE_RANGES.iter().zip(ranges.iter()) {
@@ -1109,7 +1124,7 @@ mod tests {
             "threshold" => json!({"level": 100}),
             "posterize" => json!({"levels": 7}),
             "exposure" => json!({"exposure": 1.5, "offset": 0.1, "gamma": 1.4}),
-            "vibrance" => json!({"vibrance": 30, "saturation": -20}),
+            "vibrance" => json!({"vibrance": 30, "saturation": -20, "temperature": 15, "tint": -5}),
             "hueSaturation" => {
                 json!({"hue": 25, "saturation": -20, "lightness": 10, "reds": {"hue": 10, "saturation": -30, "lightness": 5, "range": [300, 340, 20, 50]}})
             }

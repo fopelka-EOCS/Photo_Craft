@@ -466,11 +466,12 @@ fn versioned(d: &[u8]) -> Option<Descriptor> {
 }
 
 /// `vibA` (Adobe spec, "Vibrance"): a versioned descriptor with `vibrance` and `Strt`
-/// (saturation), both integers in -100..=100. Photoshop omits a key whose value is 0.
+/// (saturation), both integers in -100..=100, and the legacy white-balance keys `temperature`
+/// and `tint`. Photoshop omits a key whose value is 0.
 fn parse_vibrance(d: &[u8]) -> Option<Adjustment> {
     let desc = versioned(d)?;
     let get = |k: &str| desc_num(&desc, k).unwrap_or(0.0).clamp(-100.0, 100.0);
-    Some(Adjustment::Vibrance { vibrance: get("vibrance"), saturation: get("Strt") })
+    Some(Adjustment::Vibrance { vibrance: get("vibrance"), saturation: get("Strt"), temperature: get("temperature"), tint: get("tint") })
 }
 
 /// `blnc` (Adobe spec, "Color Balance"): shadows, midtones and highlights as three i16 each
@@ -753,10 +754,17 @@ pub fn write(adj: &Adjustment) -> Vec<([u8; 4], Vec<u8>)> {
             };
             return vec![(*b"grdm", write_gradient_map(&stops, *reverse, *dither))];
         }
-        Adjustment::Vibrance { vibrance, saturation } => {
-            let d = Descriptor::new("null")
+        Adjustment::Vibrance { vibrance, saturation, temperature, tint } => {
+            let mut d = Descriptor::new("null")
                 .with("vibrance", Value::Integer(i32::from(clamp_i16(vibrance.clamp(-100.0, 100.0)))))
                 .with("Strt", Value::Integer(i32::from(clamp_i16(saturation.clamp(-100.0, 100.0)))));
+            // Photoshop omits a legacy key whose value is 0.
+            if *temperature != 0.0 {
+                d = d.with("temperature", Value::Integer(i32::from(clamp_i16(temperature.clamp(-100.0, 100.0)))));
+            }
+            if *tint != 0.0 {
+                d = d.with("tint", Value::Integer(i32::from(clamp_i16(tint.clamp(-100.0, 100.0)))));
+            }
             return vec![(*b"vibA", VersionedDescriptor::new(d).to_bytes())];
         }
         Adjustment::ColorBalance { shadows, midtones, highlights, preserve_luminosity } => {
@@ -1037,8 +1045,8 @@ mod tests {
         rt(Adjustment::GradientMap { stops: vec![(0.0, [0.0, 0.0, 0.0]), (1.0, [1.0, 1.0, 1.0])], reverse: false, dither: true });
         rt(Adjustment::SelectiveColor { relative: true, adjustments: std::array::from_fn(|r| [r as f32 * 10.0 - 40.0, 5.0, -100.0, 100.0]) });
         rt(Adjustment::SelectiveColor { relative: false, adjustments: [[0.0; 4]; 9] });
-        rt(Adjustment::Vibrance { vibrance: 35.0, saturation: -12.0 });
-        rt(Adjustment::Vibrance { vibrance: 0.0, saturation: 0.0 });
+        rt(Adjustment::Vibrance { vibrance: 35.0, saturation: -12.0, temperature: 15.0, tint: -5.0 });
+        rt(Adjustment::Vibrance { vibrance: 0.0, saturation: 0.0, temperature: 0.0, tint: 0.0 });
         rt(Adjustment::ColorBalance { shadows: [20.0, -10.0, 5.0], midtones: [-15.0, 10.0, 30.0], highlights: [0.0, 5.0, -100.0], preserve_luminosity: true });
         rt(Adjustment::ColorBalance { shadows: [0.0; 3], midtones: [100.0, 0.0, 0.0], highlights: [0.0; 3], preserve_luminosity: false });
         rt(Adjustment::BlackWhite { weights: [40.0, 60.0, 40.0, 60.0, 20.0, 80.0], tint: None });
@@ -1293,10 +1301,27 @@ mod tests {
     fn vibrance_golden_block() {
         let d = vdesc(Descriptor::new("null").with("vibrance", Value::Integer(-40)).with("Strt", Value::Integer(25)));
         assert_eq!(&d[..4], &[0, 0, 0, 16], "descriptor version 16");
-        assert_eq!(parse(b"vibA", &d, None, Channels::Rgb), Adjustment::Vibrance { vibrance: -40.0, saturation: 25.0 });
+        assert_eq!(parse(b"vibA", &d, None, Channels::Rgb), Adjustment::Vibrance { vibrance: -40.0, saturation: 25.0, temperature: 0.0, tint: 0.0 });
         // Photoshop omits zero values.
         let only = vdesc(Descriptor::new("null").with("Strt", Value::Integer(10)));
-        assert_eq!(parse(b"vibA", &only, None, Channels::Rgb), Adjustment::Vibrance { vibrance: 0.0, saturation: 10.0 });
+        assert_eq!(parse(b"vibA", &only, None, Channels::Rgb), Adjustment::Vibrance { vibrance: 0.0, saturation: 10.0, temperature: 0.0, tint: 0.0 });
+        // The legacy temperature/tint keys are kept (they carry a visible effect in Photoshop).
+        let wb = vdesc(
+            Descriptor::new("null")
+                .with("temperature", Value::Integer(35))
+                .with("vibrance", Value::Integer(28))
+                .with("Strt", Value::Integer(-7))
+                .with("tint", Value::Integer(27)),
+        );
+        assert_eq!(parse(b"vibA", &wb, None, Channels::Rgb), Adjustment::Vibrance { vibrance: 28.0, saturation: -7.0, temperature: 35.0, tint: 27.0 });
+        // Zero temperature/tint are written back omitted, as Photoshop writes them.
+        let b = &write(&Adjustment::Vibrance { vibrance: 5.0, saturation: 0.0, temperature: 0.0, tint: 0.0 })[0].1;
+        let (v, _) = VersionedDescriptor::parse_prefix(b).unwrap();
+        assert!(v.descriptor.get("temperature").is_none() && v.descriptor.get("tint").is_none());
+        let b = &write(&Adjustment::Vibrance { vibrance: 5.0, saturation: 0.0, temperature: -20.0, tint: 0.0 })[0].1;
+        let (v, _) = VersionedDescriptor::parse_prefix(b).unwrap();
+        assert_eq!(v.descriptor.get("temperature"), Some(&Value::Integer(-20)));
+        assert!(v.descriptor.get("tint").is_none());
         // Other descriptor versions are rejected (kept raw).
         let mut v = d.clone();
         v[3] = 17;
