@@ -124,15 +124,13 @@ pub fn from_global_blocks(doc: &Document) -> Vec<Pattern> {
         .collect()
 }
 
-/// Global blocks to write: the raw ones while they still match [`Document::patterns`], else the
-/// raw pattern blocks replaced by one written from the document (at the first one's position).
-/// Raw blocks with transparency where older PhotoCraft builds put it, which Photoshop refuses,
-/// are rewritten too (#8054).
+/// Global blocks to write: the raw ones while they still match [`Document::patterns`] (see
+/// [`repair_legacy_blocks`]), else the raw pattern blocks replaced by one written from the
+/// document (at the first one's position).
 pub fn export_global_blocks(doc: &Document) -> Vec<photocraft_doc::PsdGlobalBlock> {
     let raw = &doc.metadata.psd_global_blocks;
-    let legacy = raw.iter().any(|(_, k, d)| PATTERN_KEYS.contains(k) && block_has_user_mask(d));
-    if !legacy && from_global_blocks(doc) == doc.patterns {
-        return raw.clone();
+    if from_global_blocks(doc) == doc.patterns {
+        return repair_legacy_blocks(raw);
     }
     let key = block_key(psd_depth(doc.depth));
     let fresh = write_pattern_block(&doc.patterns.iter().map(to_psd).collect::<Vec<_>>()).unwrap_or_default();
@@ -152,6 +150,31 @@ pub fn export_global_blocks(doc: &Document) -> Vec<photocraft_doc::PsdGlobalBloc
         out.push((*b"8BIM", key, Arc::new(fresh)));
     }
     out
+}
+
+/// `raw` with each pattern block that keeps transparency where older PhotoCraft builds put it
+/// (which Photoshop refuses, #8054) rewritten in place from its own patterns. Every other block,
+/// unreadable pattern blocks included, is kept verbatim. Blocks are decoded in order with one
+/// shared budget, as [`from_global_blocks`] decodes them.
+fn repair_legacy_blocks(raw: &[photocraft_doc::PsdGlobalBlock]) -> Vec<photocraft_doc::PsdGlobalBlock> {
+    if !raw.iter().any(|(_, k, d)| PATTERN_KEYS.contains(k) && block_has_user_mask(d)) {
+        return raw.to_vec();
+    }
+    let mut budget = PatternBudget::default();
+    raw.iter()
+        .map(|b @ (sig, key, data)| {
+            if !PATTERN_KEYS.contains(key) {
+                return b.clone();
+            }
+            match parse_pattern_block_with(data, &mut budget) {
+                Ok(ps) if block_has_user_mask(data) => match write_pattern_block(&ps) {
+                    Ok(fresh) => (*sig, *key, Arc::new(fresh)),
+                    Err(_) => b.clone(),
+                },
+                _ => b.clone(),
+            }
+        })
+        .collect()
 }
 
 /// Reads a `.pat` pattern file.
@@ -236,14 +259,22 @@ mod tests {
         let end = 4 + u32::from_be_bytes([legacy[0], legacy[1], legacy[2], legacy[3]]) as usize;
         legacy[end - (8 + 23 + 30) - 4..end].rotate_left(4);
         assert!(block_has_user_mask(&legacy));
-        d.metadata.psd_global_blocks = vec![(*b"8BIM", *b"Pat2", Arc::new(legacy))];
+        // A pattern block that doesn't decode (pattern version 2) sits beside it.
+        let unreadable = (*b"8BIM", *b"Patt", Arc::new(vec![0, 0, 0, 8, 0, 0, 0, 2, 0, 0, 0, 0]));
+        let other = (*b"8BIM", *b"Txt2", Arc::new(vec![1]));
+        d.metadata.psd_global_blocks = vec![other.clone(), (*b"8BIM", *b"Pat2", Arc::new(legacy)), unreadable.clone()];
         assert_eq!(from_global_blocks(&d), d.patterns, "older files still open");
-        // The patterns are unchanged, but the block is rewritten rather than kept.
+        // The patterns are unchanged: only the legacy block is rewritten, in place; the other
+        // blocks are kept verbatim.
         let out = export_global_blocks(&d);
-        assert_eq!(out.len(), 1);
-        assert!(!block_has_user_mask(&out[0].2));
+        assert_eq!(out.len(), 3);
+        assert_eq!((&out[0], &out[2]), (&other, &unreadable));
+        assert_eq!(out[1].1, *b"Pat2");
+        assert!(!block_has_user_mask(&out[1].2));
         let mut back = d.clone();
         back.metadata.psd_global_blocks = out;
         assert_eq!(from_global_blocks(&back), d.patterns);
+        // Saving again keeps every block as it is.
+        assert_eq!(export_global_blocks(&back), back.metadata.psd_global_blocks);
     }
 }
