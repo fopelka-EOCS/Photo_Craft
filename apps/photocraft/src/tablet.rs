@@ -56,7 +56,7 @@ pub fn right_button_service() -> Option<photocraft_ui_egui::RightButtonDownFn> {
 pub fn pen_barrel_service() -> Option<photocraft_ui_egui::PenBarrelFn> {
     Some(Box::new(|| {
         let b = photocraft_tablet::windows::take_buttons();
-        photocraft_ui_egui::pen_barrel::BarrelInput { held: b.held, pressed: b.pressed, clicked: b.clicked }
+        photocraft_ui_egui::pen_barrel::BarrelInput { held: b.held, pressed: b.pressed, clicked: b.clicked, tipless: b.tipless }
     }))
 }
 

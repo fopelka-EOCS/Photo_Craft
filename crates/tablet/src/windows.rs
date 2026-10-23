@@ -90,6 +90,9 @@ const WM_POINTERCAPTURECHANGED: u32 = 0x024C;
 /// `PEN_FLAG_BARREL` (winuser.h): the barrel button of the pen is pressed.
 pub const PEN_FLAG_BARREL: u32 = 0x00000001;
 
+/// `POINTER_FLAG_INCONTACT` (winuser.h): the pointer is in contact with the digitizer.
+pub const POINTER_FLAG_INCONTACT: u32 = 0x00000004;
+
 /// `POINTER_MESSAGE_FLAG_SECONDBUTTON` (winuser.h): the secondary action button is pressed.
 pub const POINTER_FLAG_SECONDBUTTON: u32 = 0x00000020;
 
@@ -131,7 +134,10 @@ unsafe extern "system" fn get_msg_proc(code: i32, w_param: usize, l_param: isize
                 if let Some(info) = pen {
                     let flags = pointer_message_flags | info.pointer_info.pointer_flags;
                     let is_barrel = is_barrel_pressed(Some(info.pen_flags), flags) || info.pointer_info.button_change_type == POINTER_CHANGE_SECONDBUTTON_DOWN;
-                    barrel().update(is_barrel, msg.time);
+                    let in_contact = msg.message != WM_POINTERUP && (flags & POINTER_FLAG_INCONTACT) != 0;
+                    let mut b = barrel();
+                    b.update(is_barrel, msg.time);
+                    b.contact(in_contact, info.pressure > 0);
                 }
             }
             WM_POINTERLEAVE | WM_POINTERCAPTURECHANGED => barrel().leave(),
@@ -191,7 +197,6 @@ pub fn take_buttons() -> Buttons {
 mod tests {
     use super::*;
 
-    const POINTER_FLAG_INCONTACT: u32 = 0x0004;
     const POINTER_FLAG_FIRSTBUTTON: u32 = 0x0010;
 
     #[test]

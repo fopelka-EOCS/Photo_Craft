@@ -18,6 +18,8 @@ pub struct BarrelInput {
     pub pressed: bool,
     /// Clicked since the last frame (a quick press and release: a driver's Right Click).
     pub clicked: bool,
+    /// The pen's contact is one the tip never pressed (the driver's Right Click in the air).
+    pub tipless: bool,
 }
 
 /// A pen wobbles while it taps: moves this close to a right press (in points) are held back, so
@@ -30,6 +32,9 @@ struct RightPress {
     origin: Pos2,
     /// The pen went past [`JITTER`]: a right-drag, whose moves all pass.
     dragging: bool,
+    /// Made in the air with the button alone (the tip never pressed): a click however far the pen
+    /// moves, so all its moves are held back.
+    tipless: bool,
 }
 
 /// Turns pen presses made with the barrel button into right presses (see the module docs).
@@ -51,6 +56,10 @@ impl BarrelRightClick {
             self.used = false;
         }
         let active = input.held || input.pressed;
+        // The tip pressed after all: a tap, whose moves may make a right-drag again.
+        if let Some(r) = self.press.as_mut() {
+            r.tipless &= input.tipless;
+        }
         let mut out = Vec::with_capacity(events.len() + 3);
         for e in events.drain(..) {
             match e {
@@ -59,7 +68,7 @@ impl BarrelRightClick {
                     if let Some(r) = self.press.as_mut()
                         && !r.dragging
                     {
-                        if (p - r.origin).length() <= JITTER {
+                        if r.tipless || (p - r.origin).length() <= JITTER {
                             continue;
                         }
                         r.dragging = true;
@@ -67,7 +76,7 @@ impl BarrelRightClick {
                     out.push(e);
                 }
                 Event::PointerButton { pos, button: PointerButton::Primary, pressed: true, modifiers } if active && self.press.is_none() => {
-                    self.press = Some(RightPress { origin: pos, dragging: false });
+                    self.press = Some(RightPress { origin: pos, dragging: false, tipless: input.tipless });
                     self.used = true;
                     self.last_pos = Some(pos);
                     out.push(Event::PointerButton { pos, button: PointerButton::Secondary, pressed: true, modifiers });
@@ -108,10 +117,10 @@ impl BarrelRightClick {
 mod tests {
     use super::*;
 
-    const HELD: BarrelInput = BarrelInput { held: true, pressed: true, clicked: false };
-    const STILL_HELD: BarrelInput = BarrelInput { held: true, pressed: false, clicked: false };
-    const NONE: BarrelInput = BarrelInput { held: false, pressed: false, clicked: false };
-    const CLICK: BarrelInput = BarrelInput { held: false, pressed: true, clicked: true };
+    const HELD: BarrelInput = BarrelInput { held: true, pressed: true, clicked: false, tipless: false };
+    const STILL_HELD: BarrelInput = BarrelInput { held: true, pressed: false, clicked: false, tipless: false };
+    const NONE: BarrelInput = BarrelInput { held: false, pressed: false, clicked: false, tipless: false };
+    const CLICK: BarrelInput = BarrelInput { held: false, pressed: true, clicked: true, tipless: false };
 
     fn button(x: f32, button: PointerButton, pressed: bool) -> Event {
         Event::PointerButton { pos: egui::pos2(x, 50.0), button, pressed, modifiers: Modifiers::NONE }
@@ -136,7 +145,7 @@ mod tests {
         let got = run(&mut b, STILL_HELD, vec![moved(55.0), button(55.0, PointerButton::Primary, false), Event::PointerGone]);
         assert_eq!(got, vec![button(50.0, PointerButton::Secondary, false), Event::PointerGone]);
         // Letting go of the button quickly afterwards is no second right-click.
-        assert_eq!(run(&mut b, BarrelInput { held: false, pressed: false, clicked: true }, vec![]), vec![]);
+        assert_eq!(run(&mut b, BarrelInput { held: false, pressed: false, clicked: true, tipless: false }, vec![]), vec![]);
         // The next click of the button alone is one.
         assert_eq!(run(&mut b, CLICK, vec![]).len(), 3);
     }
@@ -147,6 +156,25 @@ mod tests {
         run(&mut b, HELD, vec![button(50.0, PointerButton::Primary, true)]);
         let got = run(&mut b, STILL_HELD, vec![moved(55.0), moved(80.0), moved(90.0), button(90.0, PointerButton::Primary, false)]);
         assert_eq!(got, vec![moved(80.0), moved(90.0), button(90.0, PointerButton::Secondary, false)]);
+    }
+
+    #[test]
+    fn a_right_press_in_the_air_stays_a_click_however_far_the_pen_moves() {
+        let in_air = BarrelInput { tipless: true, ..HELD };
+        let mut b = BarrelRightClick::default();
+        let got = run(&mut b, in_air, vec![button(50.0, PointerButton::Primary, true), moved(70.0)]);
+        assert_eq!(got, vec![button(50.0, PointerButton::Secondary, true)]);
+        let got = run(&mut b, BarrelInput { pressed: false, ..in_air }, vec![moved(120.0), moved(200.0), button(200.0, PointerButton::Primary, false)]);
+        assert_eq!(got, vec![button(50.0, PointerButton::Secondary, false)], "no move passes; it lifts where it went down");
+        assert_eq!(run(&mut b, NONE, vec![moved(210.0)]), vec![moved(210.0)], "later moves pass again");
+    }
+
+    #[test]
+    fn a_right_press_whose_tip_presses_after_all_may_drag_again() {
+        let mut b = BarrelRightClick::default();
+        run(&mut b, BarrelInput { tipless: true, ..HELD }, vec![button(50.0, PointerButton::Primary, true)]);
+        let got = run(&mut b, STILL_HELD, vec![moved(55.0), moved(80.0), button(80.0, PointerButton::Primary, false)]);
+        assert_eq!(got, vec![moved(80.0), button(80.0, PointerButton::Secondary, false)]);
     }
 
     #[test]
@@ -205,6 +233,10 @@ mod tests {
             (NONE, vec![]),
             (CLICK, vec![]),
             (NONE, vec![]),
+            // The driver's Right Click in the air while the pen sweeps across.
+            (BarrelInput { tipless: true, ..HELD }, vec![moved(60.0), button(60.0, PointerButton::Primary, true)]),
+            (BarrelInput { tipless: true, ..STILL_HELD }, vec![moved(100.0), moved(150.0), button(150.0, PointerButton::Primary, false)]),
+            (NONE, vec![]),
         ];
         for (i, (input, mut events)) in frames.into_iter().enumerate() {
             b.apply(input, &mut events, Modifiers::NONE);
@@ -221,6 +253,6 @@ mod tests {
             });
             out.textures_delta.clear();
         }
-        assert_eq!((right, left), (2, 0), "the tap with the button held and the driver's click");
+        assert_eq!((right, left), (3, 0), "the tap with the button held, the driver's click and the one in the air");
     }
 }
