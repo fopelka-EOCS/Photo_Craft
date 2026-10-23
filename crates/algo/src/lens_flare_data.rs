@@ -2,6 +2,9 @@
 //! and brightness on black (1024 × 768). Distances are in flare units (1/800 of the image width);
 //! see `lens_flare.rs`. Generated; regenerate rather than edit by hand.
 
+// Measured values, not constants: some happen to lie close to π/2, 1/π, log10(e) and the like.
+#![allow(clippy::approx_constant)]
+
 use super::lens_flare::{Level, Radial, Ray, Streak};
 
 const ZOOM_10_RADIAL: &[Radial] = &[
