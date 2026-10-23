@@ -48,6 +48,26 @@ pub struct LangInfo {
     catalog: OnceLock<Catalog>,
 }
 
+/// Arabic plural rule : 0 → zero, 1 → one, 2 → two, 3–10 → few, 11–99 → many, 100+ → other.
+fn plural_arabic(n: u64) -> usize {
+    if n == 0 {
+        0
+    } else if n == 1 {
+        1
+    } else if n == 2 {
+        2
+    } else {
+        let mod100 = n % 100;
+        if (3..=10).contains(&mod100) {
+            3
+        } else if (11..=99).contains(&mod100) {
+            4
+        } else {
+            5
+        }
+    }
+}
+
 /// A script's reading direction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Dir {
@@ -214,6 +234,7 @@ pub static LANGUAGES: [LangInfo; 22] = [
     // Dutch; `nl-NL` and `nl-BE` locales both resolve here.
     LangInfo { code: "nl", name: "Nederlands", source: catalog!("nl"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new() },
     LangInfo { code: "it", name: "Italiano", source: catalog!("it"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new() },
+    LangInfo { code: "ar", name: "العربية", source: catalog!("ar"), plural: plural_arabic, complete_menus: true, catalog: OnceLock::new() },
     // Hungarian: a count takes the singular noun ("3 réteg"), so one plural form.
     LangInfo { code: "hu", name: "Magyar", source: catalog!("hu"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
     // Turkish; `tr`, `tr-TR` and `tr_TR` locales resolve here.
@@ -464,6 +485,7 @@ mod tests {
     use super::catalog::{parse_entries, placeholders};
     use super::*;
 
+    const AR: fn() -> Lang = || Lang::from_code("ar").expect("ar registered");
     const JA: fn() -> Lang = || Lang::from_code("ja").expect("ja registered");
     const ZH: fn() -> Lang = || Lang::from_code("zh-hant").expect("zh-hant registered");
     const CS: fn() -> Lang = || Lang::from_code("cs").expect("cs registered");
@@ -483,6 +505,27 @@ mod tests {
         assert_eq!(tr(HI(), "File"), "फ़ाइल");
         assert_eq!(trn(HI(), 1, "{n} layer", "{n} layers"), "1 लेयर");
         assert_eq!(trn(HI(), 3, "{n} layer", "{n} layers"), "3 लेयर्स");
+    }
+
+    #[test]
+    fn arabic_plural_rule() {
+        let forms: Vec<usize> = [0, 1, 2, 3, 5, 10, 11, 99, 100, 101, 111, 112].into_iter().map(plural_arabic).collect();
+        assert_eq!(forms, [0, 1, 2, 3, 3, 3, 4, 4, 5, 5, 4, 4]);
+    }
+
+    #[test]
+    fn arabic_resolves_locales_and_preferences() {
+        let ar = AR();
+        assert_eq!(ar.name(), "العربية");
+        assert!(ar.complete_menus());
+        for tag in ["ar", "AR", "ar-SA", "ar_EG", "ar_MA", "ar-AE"] {
+            assert_eq!(lang_from_tag(tag), Some(ar), "{tag}");
+            assert_eq!(Lang::from_pref(tag), ar, "{tag}");
+        }
+        assert_eq!(tr(ar, "File"), "ملف");
+        assert_eq!(tr(ar, "Layer"), "طبقة");
+        assert_eq!(tr(ar, "New document…"), "مستند جديد…");
+        assert_eq!(tr(ar, "No properties"), "لا خصائص");
     }
 
     #[test]

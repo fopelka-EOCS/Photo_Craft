@@ -3,6 +3,9 @@ Turkish, Hungarian, Serbian and Russian UI translation catalogs are licensed und
 Apache-2.0, at your option.
 The full license texts are in ../../../../LICENSE-MIT and ../../../../LICENSE-APACHE.
 
+Arabic translations: PhotoCraft contributors, original translations of
+PhotoCraft's English labels; no proprietary translation resources were used.
+
 Korean translations: PhotoCraft contributors, original translations of
 PhotoCraft's English labels; no proprietary translation resources were used.
 
