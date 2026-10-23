@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "apps/*", "xtask"]
+exclude = ["vendor"]
 default-members = ["crates/*", "apps/photocraft", "apps/photocraft-cli", "xtask"]
 
 [workspace.package]
@@ -71,6 +72,11 @@ unsafe_code = "forbid"
 [workspace.lints.clippy]
 dbg_macro = "warn"
 todo = "warn"
+
+# wgpu-hal 30.0.1 stretches DX12 swap-chain images in restored Windows windows.
+# Keep the presentation fix local until a released wgpu-hal includes it.
+[patch.crates-io]
+wgpu-hal = { path = "vendor/wgpu-hal" }
 
 [profile.dev.package."*"]
 opt-level = 2
