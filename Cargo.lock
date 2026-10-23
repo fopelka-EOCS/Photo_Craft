@@ -5079,6 +5079,7 @@ dependencies = [
  "tempfile",
  "toml",
  "unicode-bidi",
+ "web-sys",
  "winsafe",
 ]
 
