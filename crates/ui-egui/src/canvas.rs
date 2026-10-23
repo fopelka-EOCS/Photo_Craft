@@ -3197,7 +3197,7 @@ fn start_screen(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let stacked_h = if side_by_side { 0.0 } else { 44.0 };
     let card_height = 330.0 + recent_h + stacked_h + cloud_h;
     let card_size = egui::vec2(card_width, card_height);
-    let paint_card = |ui: &mut egui::Ui| {
+    let mut paint_card = |ui: &mut egui::Ui| {
         start_screen_home_card(
             app,
             ui,

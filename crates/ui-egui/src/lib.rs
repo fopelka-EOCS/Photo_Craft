@@ -1010,6 +1010,9 @@ pub struct PhotocraftApp {
     /// Who else is in the open document, drawn beside the account badge. Nothing is drawn while a
     /// person works alone.
     pub presence: craft_ui::presence::PresenceBar,
+    /// Files read but not opened yet: the first waits on its profile prompt, the rest behind it
+    /// (see `open_prompt`).
+    pub(crate) held_opens: std::collections::VecDeque<open_prompt::Held>,
     /// Set once the user has agreed to quit, so the resulting close request goes through.
     pub(crate) allow_close: bool,
     /// Pen pressure/tilt from the platform (see `stylus`).
@@ -1185,6 +1188,7 @@ impl PhotocraftApp {
             // Initials alone: the title bar has room for a row of them beside the account, and a
             // name each would crowd out the controls next to it.
             presence: craft_ui::presence::PresenceBar::new().badges_only(),
+            held_opens: Default::default(),
             allow_close: false,
             stylus: Default::default(),
             control_click: Default::default(),
