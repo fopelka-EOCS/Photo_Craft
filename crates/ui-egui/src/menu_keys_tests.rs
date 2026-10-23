@@ -107,6 +107,21 @@ fn alt_with_a_wheel_scroll_or_a_lost_focus_is_no_tap() {
     assert_eq!(Keys::current(&h.ctx).focus, None, "Alt that went to the desktop leaves the bar alone");
 }
 
+/// A stray Alt tap (a second, quick one after Alt+scroll) focuses the bar; Space for the hand
+/// tool then takes the keyboard off it instead of opening File, where held Space ran New….
+#[test]
+fn space_on_the_focused_bar_leaves_it_and_opens_no_menu() {
+    let mut h = bar();
+    alt_tap(&mut h);
+    assert_eq!(Keys::current(&h.ctx).focus, Some(0), "the tap focuses the bar");
+    h.key_down(egui::Key::Space);
+    h.run_steps(2);
+    assert!(!is_open(&h.ctx), "Space opens no menu");
+    assert_eq!(Keys::current(&h.ctx).focus, None, "Space takes the keyboard off the bar");
+    h.key_up(egui::Key::Space);
+    h.run_steps(3);
+}
+
 #[test]
 fn a_second_alt_or_esc_or_a_click_takes_the_keyboard_off_the_bar() {
     let mut h = bar();
