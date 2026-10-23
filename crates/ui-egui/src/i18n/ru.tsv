@@ -4608,7 +4608,6 @@ shape	Appearance	Оформление
 	Price	Цена
 	Disclaimer	Отказ от ответственности
 	Image mark	Знак изображения
-	Stretch	Растянуть
 	Size limits in pixels (0 = none)	Ограничения размера в пикселях (0 = нет)
 	Maximum size must be at least the minimum size	Максимальный размер должен быть не меньше минимального
 	Safe area	Безопасная область
@@ -4623,7 +4622,6 @@ shape	Appearance	Оформление
 	Safe Areas	Безопасные области
 	Responsive Template…	Адаптивный шаблон…
 	Text reflow	Перенос текста
-	Preserve	Сохранить
 	Rewrap	Перенос строк
 	Rewrap with auto height	Перенос строк с авто-высотой
 	Rewrap and shrink	Перенос строк и уменьшение
@@ -4638,13 +4636,11 @@ shape	Appearance	Оформление
 	Review all findings	Просмотреть все замечания
 	Filter findings	Фильтр замечаний
 	From file	Из файла
-	Manual	Вручную
 	Suggested	Предложение
 	Suggested role	Предлагаемая роль
 	Apply role to similar layers	Применить роль к похожим слоям
 	Layer name or text	Имя слоя или текст
 	Layer name	Имя слоя
-	Font size	Размер шрифта
 	Text layer	Текстовый слой
 	Covers most of artboard	Покрывает большую часть монтажной области
 	Shape layer	Слой-фигура

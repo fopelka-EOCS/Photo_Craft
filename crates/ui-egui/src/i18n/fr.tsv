@@ -4445,7 +4445,6 @@ shape	Appearance	Apparence
 	Price	Prix
 	Disclaimer	Mentions légales
 	Image mark	Marque d’image
-	Stretch	Étirer
 	Size limits in pixels (0 = none)	Limites de taille en pixels (0 = aucun)
 	Maximum size must be at least the minimum size	La taille maximale doit être au moins égale à la minimale
 	Safe area	Zone de sécurité
@@ -4460,7 +4459,6 @@ shape	Appearance	Apparence
 	Safe Areas	Zones de sécurité
 	Responsive Template…	Modèle adaptatif…
 	Text reflow	Redistribution du texte
-	Preserve	Conserver
 	Rewrap	Réorganiser
 	Rewrap with auto height	Réorganiser avec hauteur automatique
 	Rewrap and shrink	Réorganiser et réduire
@@ -4475,7 +4473,6 @@ shape	Appearance	Apparence
 	Review all findings	Examiner tous les résultats
 	Filter findings	Filtrer les résultats
 	From file	Depuis le fichier
-	Manual	Manuel
 	Suggested	Suggestion
 	Suggested role	Rôle suggéré
 	Apply role to similar layers	Appliquer le rôle aux calques similaires
