@@ -44,15 +44,46 @@ fn has_ident(text: &str, prefix: &str, ident: &str) -> bool {
     })
 }
 
-/// Production source of a file: everything before its unit-test module.
-fn production(text: &str) -> &str {
-    // Windows checkouts may use CRLF; test-only reads must stay excluded.
-    let cut = ["#[cfg(test)]\nmod ", "#[cfg(test)]\r\nmod ", "#[cfg(test)]\npub mod ", "#[cfg(test)]\r\npub mod "]
-        .into_iter()
-        .filter_map(|marker| text.find(marker))
-        .min()
-        .unwrap_or(text.len());
-    &text[..cut]
+/// Production source of a file: the file without its top-level `#[cfg(test)]` items (a
+/// `mod tests { .. }` block up to its `}` at column 0, a `mod x;`, a test-only helper), like the
+/// scorecard's prefs audit (`xtask/src/scorecard.rs`). Code after an inline test module halfway
+/// down a file (`canvas.rs`) still counts; test-only reads stay excluded.
+fn production(text: &str) -> String {
+    // Windows checkouts may use CRLF: compare lines without their line ending, keep them as is.
+    let bare = |l: &str| l.trim_end_matches(['\r', '\n']).to_string();
+    // A line's code: without a trailing `// comment`.
+    let code = |l: &str| {
+        let l = bare(l);
+        l.split_once("//").map_or(l.as_str(), |(c, _)| c).trim_end().to_string()
+    };
+    let mut out = String::with_capacity(text.len());
+    let mut lines = text.split_inclusive('\n');
+    while let Some(line) = lines.next() {
+        if code(line) != "#[cfg(test)]" {
+            out.push_str(line);
+            continue;
+        }
+        // Further attributes, blank and comment-only lines (Rust ignores them, so the attribute
+        // still applies to what follows), then the item: one line (`mod x;`) or a block up to
+        // its closing line at column 0 (`}`, a multi-line `use`'s `};`, a constant's `];`).
+        for item in lines.by_ref() {
+            let item = code(item);
+            if item.is_empty() || item.starts_with("#[") {
+                continue;
+            }
+            // `mod x;` and a one-line `mod tests {}` end on their own line.
+            if !item.ends_with([';', '}']) {
+                for l in lines.by_ref() {
+                    let l = code(l);
+                    if !l.is_empty() && l.trim_end_matches(';').chars().all(|c| matches!(c, '}' | ']' | ')')) {
+                        break;
+                    }
+                }
+            }
+            break;
+        }
+    }
+    out
 }
 
 fn rust_sources(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -96,12 +127,8 @@ fn every_preference_is_read_or_hidden() {
     let mut files = Vec::new();
     rust_sources(&root.join("crates"), &mut files);
     rust_sources(&root.join("apps"), &mut files);
-    let sources: Vec<String> = files
-        .iter()
-        .filter(|p| !p.ends_with("engine/src/prefs.rs"))
-        .filter_map(|p| std::fs::read_to_string(p).ok())
-        .map(|t| production(&t).to_string())
-        .collect();
+    let sources: Vec<String> =
+        files.iter().filter(|p| !p.ends_with("engine/src/prefs.rs")).filter_map(|p| std::fs::read_to_string(p).ok()).map(|t| production(&t)).collect();
     assert!(sources.len() > 100, "found only {} source files under {}", sources.len(), root.display());
 
     // Section key → struct name, from `pub <field>: <Type>,` in `struct Preferences`.
@@ -183,6 +210,30 @@ fn production_excludes_test_modules_with_lf_or_crlf() {
             );
             assert_eq!(production(&source), prefix, "newline={newline:?}, visibility={visibility:?}");
         }
+    }
+}
+
+#[test]
+fn production_keeps_code_after_an_inline_test_module() {
+    // `canvas.rs` has test modules halfway down; the code after them is still production code.
+    let one_line = "fn a() {}\n#[cfg(test)]\nmod tests {}\nfn b() { p.x.read }\n";
+    assert_eq!(production(one_line), "fn a() {}\nfn b() { p.x.read }\n");
+    let commented = "#[cfg(test)] // helpers\nfn t() {\n    p.x.hidden\n}\nfn b() { p.x.read }\n";
+    assert_eq!(production(commented), "fn b() { p.x.read }\n");
+    let multiline_use = "#[cfg(test)]\nuse super::{\n    a,\n    b,\n};\nfn b() { p.x.read }\n";
+    assert_eq!(production(multiline_use), "fn b() { p.x.read }\n");
+    let commented_item = "#[cfg(test)]\nmod more; // helpers\nfn b() { p.x.read }\n}\n";
+    assert_eq!(production(commented_item), "fn b() { p.x.read }\n}\n");
+    let comment_before_item = "#[cfg(test)]\n// helpers\n\nmod tests {}\nfn b() { p.x.read }\n";
+    assert_eq!(production(comment_before_item), "fn b() { p.x.read }\n");
+    let constant = "#[cfg(test)]\nconst CASES: [&str; 2] = [\n    \"p.x.hidden\",\n    \"a\",\n];\nfn b() { p.x.read }\n";
+    assert_eq!(production(constant), "fn b() { p.x.read }\n");
+    for newline in ["\n", "\r\n"] {
+        let source = format!(
+            "fn a() {{}}{newline}#[cfg(test)]{newline}#[allow(dead_code)]{newline}mod inline_tests {{{newline}    fn t() {{ p.x.hidden }}{newline}}}{newline}{newline}fn b() {{ p.x.read }}{newline}#[cfg(test)]{newline}mod more;{newline}fn c() {{}}{newline}"
+        );
+        let kept = format!("fn a() {{}}{newline}{newline}fn b() {{ p.x.read }}{newline}fn c() {{}}{newline}");
+        assert_eq!(production(&source), kept, "newline={newline:?}");
     }
 }
 
