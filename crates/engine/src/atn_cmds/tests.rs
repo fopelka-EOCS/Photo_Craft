@@ -2364,6 +2364,30 @@ fn adjustment_layer_reset_still_resets() {
     assert_eq!(steps[1].1, json!({"midtones": [10, 0, 0], "kind": "colorBalance"}));
 }
 
+/// Photoshop's Properties panel records an edit of an existing Vibrance layer with the string
+/// class `vibrance`, not the `Vbrn` code: both import as the same `layer.setAdjustment` (#8534).
+#[test]
+fn adjustment_layer_set_accepts_the_vibrance_string_class() {
+    let set = |class: &str| {
+        let t = desc(class).with("temperature", long(0.0)).with("tint", long(0.0)).with("vibrance", long(28.0)).with("Strt", long(-7.0));
+        desc("null").with("null", target_ref("AdjL")).with("T   ", D::Descriptor(t))
+    };
+    let file = AtnFile {
+        name: UnicodeString::new_nul("Vibrance"),
+        expanded: false,
+        actions: vec![AtnAction {
+            name: UnicodeString::new_nul("A"),
+            items: vec![item("set", "Set", Some(set("vibrance"))), item("set", "Set", Some(set("Vbrn")))],
+            ..Default::default()
+        }],
+        warnings: vec![],
+    };
+    let action = import(&atn::write(&file).unwrap()).unwrap().actions.remove(0);
+    assert_eq!(action.steps[0].0, "layer.setAdjustment", "{:?}", action.steps);
+    assert_eq!(action.steps[0].1, json!({"vibrance": 28, "saturation": -7, "kind": "vibrance"}));
+    assert_eq!(action.steps[0], action.steps[1]);
+}
+
 /// A Free Transform recorded against an unlinked mask or an alpha channel must not export as a
 /// layer transform that moves the layer's pixels on replay (#7195).
 #[test]
