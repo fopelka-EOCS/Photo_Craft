@@ -3997,3 +3997,14 @@ curves	Smooth	Wygładź
 
 # Print preview image (#8236)
 	Print preview image	Print preview image
+	Create Frame Animation	Utwórz animację klatek
+	Make Frames From Layers	Utwórz klatki z warstw
+	Forever	Zawsze
+	Once	Raz
+	No delay	Bez opóźnienia
+	First frame	Pierwsza klatka
+	Duplicate Selected Frame	Duplikuj zaznaczoną klatkę
+	Delete Selected Frame	Usuń zaznaczoną klatkę
+	{seconds} sec.	{seconds} s
+	{count} times	{count} razy
+	{n} frames	{n} klatek
