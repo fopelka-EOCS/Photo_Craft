@@ -116,6 +116,25 @@ impl GuideDrag {
         let at = if vertical { p[0] } else { p[1] };
         Self { vertical, index: Some(index), pos: at, press: at, over_ruler: false }
     }
+
+    /// Whether the guide is still where the pointer went down: let go there, an existing guide is
+    /// clicked (selected), not moved.
+    fn held_in_place(&self, app: &PhotocraftApp) -> bool {
+        (self.pos - self.press).abs() * f64::from(app.point_zoom().max(0.01)) < 0.5
+    }
+
+    /// An existing guide follows the pointer at document point `p`. With Shift it lands on the
+    /// nearest ruler tick, as a guide dragged out of a ruler does (#3770) and as in Photoshop; not
+    /// while it is still held in place, so a Shift-click selects the guide without moving it.
+    pub fn follow_pointer(&mut self, app: &PhotocraftApp, p: [f64; 2], shift: bool) {
+        self.pos = if self.vertical { p[0] } else { p[1] };
+        if shift
+            && !self.held_in_place(app)
+            && let Some(xf) = ViewXform::active(app)
+        {
+            self.pos = snap_to_tick(app, &xf, self.vertical, self.pos);
+        }
+    }
 }
 
 /// Canvas area left after the rulers.
@@ -294,7 +313,7 @@ pub fn finish_drag(app: &mut PhotocraftApp, d: GuideDrag) {
     // reads as a click: dragged sideways onto the left ruler, a horizontal guide never moves in y.
     if let Some(i) = d.index
         && !d.over_ruler
-        && (d.pos - d.press).abs() * f64::from(app.point_zoom().max(0.01)) < 0.5
+        && d.held_in_place(app)
     {
         crate::guide_select::select(app, d.vertical, i);
         return;
@@ -397,7 +416,7 @@ fn ruler_scale_of(app: &PhotocraftApp, doc: Option<&photocraft_doc::Document>, x
 }
 
 /// `pos` (document px) moved to the nearest tick mark the ruler draws (counted from the zero point): where a guide lands when
-/// Shift is held while dragging it out of a ruler, as in Photoshop (#3770).
+/// Shift is held while dragging it out of a ruler or moving it, as in Photoshop (#3770).
 fn snap_to_tick(app: &PhotocraftApp, xf: &ViewXform, vertical: bool, pos: f64) -> f64 {
     // A vertical guide sits at an x position, which the top ruler measures.
     let (px_per_unit, step) = ruler_scale(app, xf, !vertical);
@@ -1442,5 +1461,39 @@ mod tests {
         app.run("view.setRulerOrigin", json!({"x": 3, "y": 0})).unwrap();
         assert_eq!(snap_to_tick(&app, &xf, true, 37.0), 33.0);
         assert_eq!(snap_to_tick(&app, &xf, false, 37.0), 40.0);
+    }
+
+    /// A guide already on the canvas, Shift-dragged with the Move tool, lands on the nearest ruler
+    /// tick, as one dragged out of a ruler does (#3770); a Shift-click selects it where it is.
+    #[test]
+    fn shift_moving_a_guide_lands_on_ruler_ticks() {
+        // The guide at y = `from` (off the ticks), dragged to `to` and let go.
+        let move_guide = |from: f64, to: f32, modifiers: egui::Modifiers| {
+            let mut h = canvas_harness(false);
+            h.state_mut().run("view.moveGuide", json!({"orientation": "horizontal", "index": 0, "position": from})).unwrap();
+            h.run_steps(2);
+            let press = canvas_at(&h, 200.0, from as f32);
+            h.event_modifiers(egui::Event::PointerMoved(press), modifiers);
+            h.run_steps(1);
+            h.event_modifiers(egui::Event::PointerButton { pos: press, button: egui::PointerButton::Primary, pressed: true, modifiers }, modifiers);
+            h.run_steps(1);
+            let up = canvas_at(&h, 210.0, to);
+            for p in [canvas_at(&h, 205.0, (from as f32 + to) / 2.0), up] {
+                h.event_modifiers(egui::Event::PointerMoved(p), modifiers);
+                h.run_steps(2);
+            }
+            h.event_modifiers(egui::Event::PointerButton { pos: up, button: egui::PointerButton::Primary, pressed: false, modifiers }, modifiers);
+            h.run_steps(2);
+            let app = h.state();
+            (app.session.active().unwrap().doc.guides.horizontal[0], crate::guide_select::selected(app))
+        };
+        let (y, _) = move_guide(103.4, 123.6, egui::Modifiers::NONE);
+        assert!((y - 123.6).abs() < 0.01, "without Shift the guide lands where it's let go: {y}");
+        // Pixels at 100%: labels every 100 px, ticks every 10 px.
+        assert_eq!(move_guide(103.4, 123.6, egui::Modifiers::SHIFT).0, 120.0);
+        assert_eq!(move_guide(103.4, 146.2, egui::Modifiers::SHIFT).0, 150.0);
+        let (y, selected) = move_guide(103.4, 103.4, egui::Modifiers::SHIFT);
+        assert!((y - 103.4).abs() < 0.01, "a Shift-click doesn't move the guide: {y}");
+        assert_eq!(selected, Some((false, 0)), "it selects it");
     }
 }

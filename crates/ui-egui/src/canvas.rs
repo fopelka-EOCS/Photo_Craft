@@ -5953,15 +5953,16 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
             }
         }
         ToolEvent::Move { x, y, .. } => {
-            if let Some(d) = app.guide_drag.as_mut().filter(|d| d.index.is_some()) {
-                d.pos = if d.vertical { x } else { y };
+            if let Some(mut d) = app.guide_drag.filter(|d| d.index.is_some()) {
+                d.follow_pointer(app, [x, y], mods.shift);
+                app.guide_drag = Some(d);
                 return;
             }
         }
         ToolEvent::Up { x, y } => {
             if let Some(mut d) = app.guide_drag.filter(|d| d.index.is_some()) {
                 app.guide_drag = None;
-                d.pos = if d.vertical { x } else { y };
+                d.follow_pointer(app, [x, y], mods.shift);
                 crate::rulers::finish_drag(app, d);
                 return;
             }
