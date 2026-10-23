@@ -74,6 +74,9 @@ fn cmd_enter_while_drawing_finishes_the_path_and_loads_it() {
     assert!(app.ui.pen.is_none(), "the pen path was finished");
     assert!(app.session.active().unwrap().doc.work_path.is_some(), "into the work path");
     assert!(app.session.active().unwrap().doc.selection.is_some(), "and loaded as a selection: {}", app.ui.status);
+    // Then deselected and no longer drawn, as in Photoshop; the work path stays (#6079).
+    assert_eq!(app.ui.selected_path, None);
+    assert!(!crate::vector_ui::work_path_shown(app));
     // Plain ↩ still only finishes a path.
     let mut h = harness();
     h.state_mut().ui.tool = Tool::Pen;
@@ -82,6 +85,34 @@ fn cmd_enter_while_drawing_finishes_the_path_and_loads_it() {
     press(&mut h, Key::Enter, Modifiers::NONE);
     assert!(h.state().session.active().unwrap().doc.work_path.is_some());
     assert!(h.state().session.active().unwrap().doc.selection.is_none());
+}
+
+#[test]
+fn selecting_a_saved_path_keeps_the_hidden_work_path_hidden() {
+    // #6079 review: only selecting the Work Path in the Paths panel shows it again.
+    let mut h = harness();
+    h.state_mut().run("path.set", json!({"name": "Saved", "path": rect_path(100.0, 40.0, 60.0, 50.0)})).unwrap();
+    h.state_mut().ui.tool = Tool::Pen;
+    let p = |x: f64, y: f64| [[x, y], [x, y], [x, y]];
+    h.state_mut().ui.pen = Some(PenPath { knots: vec![p(20.0, 20.0), p(120.0, 20.0), p(120.0, 80.0)], ..Default::default() });
+    h.run_steps(2);
+    press(&mut h, Key::Enter, command());
+    assert!(!crate::vector_ui::work_path_shown(h.state()), "⌘↩ hid the work path");
+    panel(&mut h, 2);
+    let saved = h.get_by_label("Saved").rect();
+    click(&mut h, egui::pos2(saved.left() + 70.0, saved.center().y), Modifiers::NONE);
+    assert_eq!(h.state().ui.selected_path.as_deref(), Some("Saved"));
+    assert!(!crate::vector_ui::work_path_shown(h.state()), "a saved path doesn't show the Work Path");
+    // So Delete with the Pen doesn't delete the invisible work path either.
+    press(&mut h, Key::Delete, Modifiers::NONE);
+    assert!(h.state().session.active().unwrap().doc.work_path.is_some(), "the hidden work path survives Delete");
+    // Selecting the Work Path shows it; now Delete deletes it.
+    let work = h.get_by_label("Work Path").rect();
+    click(&mut h, egui::pos2(work.left() + 70.0, work.center().y), Modifiers::NONE);
+    assert_eq!(h.state().ui.selected_path.as_deref(), Some("work"));
+    assert!(crate::vector_ui::work_path_shown(h.state()), "selecting the Work Path shows it");
+    press(&mut h, Key::Delete, Modifiers::NONE);
+    assert!(h.state().session.active().unwrap().doc.work_path.is_none(), "{}", h.state().ui.status);
 }
 
 #[test]
