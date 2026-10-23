@@ -319,7 +319,7 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             color_chips(app, ui, double, full.width());
             ui.add_space(8.0);
 
-            let layout = if double { egui::Layout::left_to_right(egui::Align::Min) } else { egui::Layout::top_down(egui::Align::Min) };
+            let layout = if double { crate::direction::row().with_cross_align(egui::Align::Min) } else { egui::Layout::top_down(egui::Align::Min) };
 
             ui.with_layout(layout, |ui| {
                 let quick_mask = app.session.active().is_some_and(|s| s.doc.quick_mask.is_some());
@@ -1415,7 +1415,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         if pick_shield_color {
                             crate::crop_shield::pick_custom_color(app);
                         }
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.with_layout(crate::direction::trailing(), |ui| {
                             if icons::button(
                                 ui,
                                 "check",
